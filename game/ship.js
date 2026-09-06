@@ -170,7 +170,7 @@ export class Ship {
       }
 
       // ---- turrets slew toward aim ----
-      const slew = 0.14; // rad/s
+      const slew = this.cfg.turretSlew || 0.5; // rad/s, per-class (config.js)
       for (const t of this.turrets) {
          if (t.cd > 0) t.cd -= dt;
          // aim: slew relative bearing toward the desired relative bearing

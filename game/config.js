@@ -26,42 +26,52 @@ export const WORLD = {
 // ============ SHIP CLASSES ============
 // Every class is one mover + a weapons loadout. Player (Bismarck) is beefier than the enemy BB.
 // gunRange / torpRange are effective engagement distances (m). salvo = shells fired together.
+// turretSlew (rad/s) = how fast turrets rotate to track the aim point. This used to be a
+// single flat 0.14 rad/s (8 deg/s, ~11s for a 90 deg swing) for EVERY class -- turrets could
+// barely keep up with a target crossing your bow, so half of combat was just waiting for the
+// guns to catch up. Now per-class and much snappier: light guns swing fast, heavy guns slower
+// but still usable. maxSpeed/turnRate are also bumped across the board -- ships felt like they
+// were wading through syrup; this keeps the weight (still no arcade speedboat) but doubles down
+// on responsiveness so combat is actually about aiming and dodging, not waiting.
 export const SHIPS = {
    DD: {
       key: 'DD', name: 'Zerstörer', color: '#6f8a9c',
-      hp: 650, maxSpeed: 27, turnRate: 0.22, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
-      main: { guns: 4, caliber: 105, dmg: 70, reload: 3.0, range: 850, type: 'HE', ap: 0, vShell: 600 },
-      torp: { tubes: 6, dmg: 1200, speed: 40, range: 1000, salvo: 2, cd: 12 },
+      hp: 650, maxSpeed: 32, turnRate: 0.30, turretSlew: 1.1, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
+      main: { guns: 4, caliber: 105, dmg: 70, reload: 2.2, range: 850, type: 'HE', ap: 0, vShell: 600 },
+      torp: { tubes: 6, dmg: 1200, speed: 46, range: 1100, salvo: 2, cd: 10 },
       fire: 0.5, // smoke chance when pressured
    },
    LC: {
       key: 'LC', name: 'Kleinkreuzer', color: '#5f7f9a',
-      hp: 1500, maxSpeed: 21, turnRate: 0.16, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
-      main: { guns: 6, caliber: 152, dmg: 95, reload: 5.0, range: 1200, type: 'AP', ap: 140, vShell: 620 },
+      hp: 1500, maxSpeed: 25, turnRate: 0.22, turretSlew: 0.85, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
+      main: { guns: 6, caliber: 152, dmg: 95, reload: 3.8, range: 1200, type: 'AP', ap: 140, vShell: 620 },
       torp: null,
       fire: 0.25,
    },
    HC: {
       key: 'HC', name: 'Schwerkreuzer', color: '#4d6b86',
-      hp: 2400, maxSpeed: 18.5, turnRate: 0.13, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
-      main: { guns: 10, caliber: 203, dmg: 140, reload: 6.0, range: 1400, type: 'AP', ap: 200, vShell: 640 },
+      hp: 2400, maxSpeed: 21, turnRate: 0.18, turretSlew: 0.65, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
+      main: { guns: 10, caliber: 203, dmg: 140, reload: 4.8, range: 1400, type: 'AP', ap: 200, vShell: 640 },
       torp: null,
       fire: 0.2,
    },
    EB: {
       key: 'EB', name: 'Feindes Linienschiff', color: '#8a5a4a',
-      hp: 3800, maxSpeed: 15.5, turnRate: 0.10, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
-      main: { guns: 6, caliber: 356, dmg: 320, reload: 8.0, range: 1650, type: 'AP', ap: 300, vShell: 650 },
+      hp: 3800, maxSpeed: 18, turnRate: 0.14, turretSlew: 0.5, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
+      main: { guns: 6, caliber: 356, dmg: 320, reload: 6.5, range: 1650, type: 'AP', ap: 300, vShell: 650 },
       torp: null,
       reactionMult: 1.2, // heavier = slower to commit
    },
    Bismarck: {
       key: 'Bismarck', name: 'Bismarck', color: '#3a4a55',
-      hp: 5200, maxSpeed: 18, turnRate: 0.11, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
-      main: { guns: 8, caliber: 283, dmg: 300, reload: 7.5, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
-      sec:  { guns: 16, caliber: 105, dmg: 40, reload: 2.0, range: 1100, type: 'HE', ap: 0, vShell: 600 },
+      hp: 5200, maxSpeed: 21, turnRate: 0.16, turretSlew: 0.55, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
+      main: { guns: 8, caliber: 283, dmg: 300, reload: 6.0, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
+      sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.6, range: 1100, type: 'HE', ap: 0, vShell: 600 },
       aa:   { guns: 20, dps: 200, range: 700, reload: 0.15 },
-      torp: null, // Bismarck historically had no torpedoes; 'T' fires a special overload salvo instead
+      // A "T" alpha-strike: 3 heavy torpedoes, long cooldown. The HUD/menu always promised a
+      // torpedo salvo on T; it used to secretly fire a second gun volley instead, which meant
+      // the ammo panel showed "Torpedos 0/0" forever and the key just didn't do what it said.
+      torp: { tubes: 3, dmg: 1900, speed: 44, range: 1300, salvo: 3, cd: 38 },
       boost: { mult: 1.35, dur: 2.5, cd: 12 },
       isPlayer: true,
    },

@@ -157,7 +157,7 @@ export class World {
       const dmgMult = shooter.dmgMult || 1;
       this.torpedoes.push({
          id: ++SEQ, pos: { x: muzzle.x, y: muzzle.y },
-         vel: { x: dir.x * torp.speed, y: dir.y * torp.speed },
+         vel: { x: dir.x * torp.speed, y: dir.y * torp.speed }, speed: torp.speed,
          dir: angleOf(dir), owner: shooter.side, shooter,
          dmg: torp.dmg * dmgMult, range: torp.range, age: 0, alive: true, wake: [],
       });

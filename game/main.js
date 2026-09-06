@@ -155,18 +155,9 @@ function controlPlayer(dt) {
          audio.uiClick();
       }
    }
-   if (inp.tapped('T')) {
-      // Bismarck has no torpedoes — T fires an OVERLOAD double salvo (all turrets, long cooldown)
-      if (p.fireTimer <= 0) {
-         p.turrets.forEach(t => { t.cd = 0; });
-         p.fireMain(world, null, p.aim);
-         p.fireTimer = 0;                       // reset so the second volley isn't a no-op
-         p.turrets.forEach(t => { t.cd = 0; });
-         p.fireMain(world, null, p.aim);
-         p.fireTimer = p.cfg.main.reload * 2.2;
-         world.log(p, '💥 Überladene Salve!', 'warn');
-         audio.cannon(true);
-      }
+   if (inp.tapped('T') && p.cfg.torp && p.torpTimer <= 0) {
+      const n = p.fireTorpedo(world, null, p.aim);
+      if (n > 0) { world.log(p, '🐟 Torpedosalve!', 'warn'); audio.torpLaunch(); }
    }
    if (inp.tapped('M')) {
       // zoom toggle: overview <-> combat

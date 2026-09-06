@@ -177,7 +177,8 @@ export function resolveTorpedoes(world, dt) {
     t.wake.push({ x: t.pos.x, y: t.pos.y });
     if (t.wake.length > 40) t.wake.shift();
 
-    if (t.age * WORLD.TORP_SPEED > t.range) { world.addSplash(t.pos, false); world.torpedoes.splice(i, 1); continue; }
+    // per-torpedo speed, not a global constant -- classes now carry different torp speeds
+    if (t.age * t.speed > t.range) { world.addSplash(t.pos, false); world.torpedoes.splice(i, 1); continue; }
     if (Math.abs(t.pos.x) > WORLD.ARENA || Math.abs(t.pos.y) > WORLD.ARENA) { world.torpedoes.splice(i, 1); continue; }
     if (hitsIsland(world, t.pos)) { world.addExplosion(t.pos, false); world.torpedoes.splice(i, 1); continue; }
 
