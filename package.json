@@ -1,0 +1,17 @@
+{
+  "name": "warships-bismarck",
+  "version": "1.0.0",
+  "description": "A World of Warships-style offline naval combat game. You command the battleship Bismarck against AI bots. HTML/JS/Canvas, no build step.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/ || true",
+    "screenshots": "node tests/playwright.shots.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
