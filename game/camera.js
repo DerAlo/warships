@@ -5,8 +5,12 @@ import { clamp, lerp, lerpAngle, approach, fromAngle } from './utils.js';
 export class Camera {
    constructor() {
       this.x = 0; this.y = 0;        // world focus (center of view)
-      this.zoom = 0.42;             // pixels per meter
-      this.targetZoom = 0.42;
+      // Default zoom was 0.42 px/m -- the 251m Bismarck rendered at only ~105px on a
+      // 1440px-wide screen, so every ship read as a tiny distant speck and the whole
+      // scene felt slow no matter the real m/s numbers. 0.55 makes the ship and the
+      // combat around it read at a size where speed and impacts actually register.
+      this.zoom = 0.55;             // pixels per meter
+      this.targetZoom = 0.55;
       this.minZoom = 0.12;
       this.maxZoom = 0.9;
       this.rot = 0;                 // screen rotation (0 = north up)

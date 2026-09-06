@@ -36,43 +36,43 @@ export const WORLD = {
 export const SHIPS = {
    DD: {
       key: 'DD', name: 'Zerstörer', color: '#6f8a9c',
-      hp: 650, maxSpeed: 32, turnRate: 0.30, turretSlew: 1.1, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
-      main: { guns: 4, caliber: 105, dmg: 70, reload: 2.2, range: 850, type: 'HE', ap: 0, vShell: 600 },
-      torp: { tubes: 6, dmg: 1200, speed: 46, range: 1100, salvo: 2, cd: 10 },
+      hp: 650, maxSpeed: 36, turnRate: 0.34, turretSlew: 1.2, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
+      main: { guns: 4, caliber: 105, dmg: 70, reload: 1.8, range: 850, type: 'HE', ap: 0, vShell: 600 },
+      torp: { tubes: 6, dmg: 1200, speed: 50, range: 1150, salvo: 2, cd: 9 },
       fire: 0.5, // smoke chance when pressured
    },
    LC: {
       key: 'LC', name: 'Kleinkreuzer', color: '#5f7f9a',
-      hp: 1500, maxSpeed: 25, turnRate: 0.22, turretSlew: 0.85, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
-      main: { guns: 6, caliber: 152, dmg: 95, reload: 3.8, range: 1200, type: 'AP', ap: 140, vShell: 620 },
+      hp: 1500, maxSpeed: 28, turnRate: 0.25, turretSlew: 0.95, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
+      main: { guns: 6, caliber: 152, dmg: 95, reload: 3.1, range: 1200, type: 'AP', ap: 140, vShell: 620 },
       torp: null,
       fire: 0.25,
    },
    HC: {
       key: 'HC', name: 'Schwerkreuzer', color: '#4d6b86',
-      hp: 2400, maxSpeed: 21, turnRate: 0.18, turretSlew: 0.65, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
-      main: { guns: 10, caliber: 203, dmg: 140, reload: 4.8, range: 1400, type: 'AP', ap: 200, vShell: 640 },
+      hp: 2400, maxSpeed: 23, turnRate: 0.21, turretSlew: 0.75, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
+      main: { guns: 10, caliber: 203, dmg: 140, reload: 3.9, range: 1400, type: 'AP', ap: 200, vShell: 640 },
       torp: null,
       fire: 0.2,
    },
    EB: {
       key: 'EB', name: 'Feindes Linienschiff', color: '#8a5a4a',
-      hp: 3800, maxSpeed: 18, turnRate: 0.14, turretSlew: 0.5, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
-      main: { guns: 6, caliber: 356, dmg: 320, reload: 6.5, range: 1650, type: 'AP', ap: 300, vShell: 650 },
+      hp: 3800, maxSpeed: 19.5, turnRate: 0.16, turretSlew: 0.58, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
+      main: { guns: 6, caliber: 356, dmg: 320, reload: 5.4, range: 1650, type: 'AP', ap: 300, vShell: 650 },
       torp: null,
       reactionMult: 1.2, // heavier = slower to commit
    },
    Bismarck: {
       key: 'Bismarck', name: 'Bismarck', color: '#3a4a55',
-      hp: 5200, maxSpeed: 21, turnRate: 0.16, turretSlew: 0.55, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
-      main: { guns: 8, caliber: 283, dmg: 300, reload: 6.0, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
-      sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.6, range: 1100, type: 'HE', ap: 0, vShell: 600 },
+      hp: 5200, maxSpeed: 23, turnRate: 0.19, turretSlew: 0.62, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
+      main: { guns: 8, caliber: 283, dmg: 300, reload: 4.8, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
+      sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.3, range: 1100, type: 'HE', ap: 0, vShell: 600 },
       aa:   { guns: 20, dps: 200, range: 700, reload: 0.15 },
       // A "T" alpha-strike: 3 heavy torpedoes, long cooldown. The HUD/menu always promised a
       // torpedo salvo on T; it used to secretly fire a second gun volley instead, which meant
       // the ammo panel showed "Torpedos 0/0" forever and the key just didn't do what it said.
-      torp: { tubes: 3, dmg: 1900, speed: 44, range: 1300, salvo: 3, cd: 38 },
-      boost: { mult: 1.35, dur: 2.5, cd: 12 },
+      torp: { tubes: 3, dmg: 1900, speed: 48, range: 1350, salvo: 3, cd: 32 },
+      boost: { mult: 1.35, dur: 2.5, cd: 10 },
       isPlayer: true,
    },
 };
@@ -91,10 +91,13 @@ export const DIFFICULTY = {
 };
 
 // ============ ENCOUNTER ============
-// One wave, 5 bots. Bismarck at origin facing +x (east). Spawn ring radius 2600 m.
-// All enemies visible but out of firing reach at t=0 — you close on the duel.
+// One wave, 5 bots. Bismarck at origin facing +x (east). Spawn ring radius 2000 m (was 2600) --
+// at 1800m main-gun range that used to mean ~40s of pure sailing before the first shot was
+// even possible, which read as "slow/boring" no matter how fast the ships moved once engaged.
+// All enemies visible but out of firing reach at t=0 — you still close the first stretch,
+// just a much shorter one.
 export const ENCOUNTER = {
-   ring: 2600,
+   ring: 2000,
    bots: [
       { cls: 'EB', bearing: 0 },          // dead ahead — the duel
       { cls: 'HC', bearing: 110 * DEG },  // right flank / rear
@@ -121,7 +124,7 @@ export const OBSTACLES = [
    { kind: 'island', c: { x: -539,  y: -842 }, r: 260, irregular: true },
    { kind: 'island', c: { x: 260,   y: 966 },  r: 300, irregular: true },
    { kind: 'reef',   c: { x: 1071,  y: 307 },  r: 320 },
-   { kind: 'reef',   c: { x: -605,  y: 1478 }, r: 280 },
+   { kind: 'reef',   c: { x: -1558, y: -1418 }, r: 280 },
    { kind: 'reef',   c: { x: -6,    y: -1569 },r: 240 },
 ];
 

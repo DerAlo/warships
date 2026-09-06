@@ -60,7 +60,7 @@ const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 function startGame() {
    world = new World(difficulty);
    world.audio = audio;
-   cam.setFollow(world.player, { lookAhead: 260, zoom: 0.42 });
+   cam.setFollow(world.player, { lookAhead: 260, zoom: 0.55 });
    snd.kills = 0; snd.shotsP = 0; snd.shotsE = 0; snd.torps = 0;
    phase = 'playing';
    endTimer = 0;
@@ -161,7 +161,7 @@ function controlPlayer(dt) {
    }
    if (inp.tapped('M')) {
       // zoom toggle: overview <-> combat
-      cam.targetZoom = cam.targetZoom < 0.3 ? 0.42 : 0.18;
+      cam.targetZoom = cam.targetZoom < 0.35 ? 0.55 : 0.22;
    }
    if (inp.tapped('P')) togglePause();
 }

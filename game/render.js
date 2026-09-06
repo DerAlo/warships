@@ -416,26 +416,42 @@ export class Renderer {
    _torpedoes(ctx, world) {
       const cam = this.cam;
       for (const t of world.torpedoes) {
-         if (!cam.visible(t.pos, 100)) continue;
-         // wake trail
+         if (!cam.visible(t.pos, 150)) continue;
+         const z = cam.zoom;
+         const col = t.owner === 'player' ? '#dff2ff' : '#ffb8a8';
+         // wake trail: was a flat 1.5px screen-space line regardless of zoom or how
+         // dangerous the torpedo is -- against moving water at combat zoom it was nearly
+         // invisible. Now a soft glow underlay + a brighter core, both zoom-scaled and
+         // widening with speed, so a running torpedo actually reads as a threat.
          if (t.wake.length > 1) {
-            ctx.strokeStyle = 'rgba(220,245,255,0.5)';
-            ctx.lineWidth = 1.5;
             ctx.beginPath();
             const p0 = cam.w2s(t.wake[0]);
             ctx.moveTo(p0.x, p0.y);
-            for (let i = 1; i < t.wake.length; i += 2) {
+            for (let i = 1; i < t.wake.length; i++) {
                const p = cam.w2s(t.wake[i]);
                ctx.lineTo(p.x, p.y);
             }
+            ctx.strokeStyle = hexA(col, 0.18);
+            ctx.lineWidth = Math.max(3, 5 * z);
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.strokeStyle = hexA(col, 0.75);
+            ctx.lineWidth = Math.max(1.5, 2 * z);
             ctx.stroke();
          }
          const c = cam.w2s(t.pos);
          ctx.save();
          ctx.translate(c.x, c.y);
          ctx.rotate(t.dir);
-         ctx.fillStyle = t.owner === 'player' ? '#dff2ff' : '#ffd8d0';
-         ctx.fillRect(-5, -1.5, 10, 3);
+         // body: scale with zoom like every other object (this used to be a fixed 10x3
+         // SCREEN px regardless of zoom -- the only projectile that didn't scale with the
+         // world, which is why it vanished at any zoom level below default).
+         const len = Math.max(9, 9 * z * 4), wid = Math.max(3, 2.6 * z * 4);
+         ctx.fillStyle = col;
+         ctx.fillRect(-len / 2, -wid / 2, len, wid);
+         // small bright nose-tip highlight so direction reads at a glance
+         ctx.fillStyle = 'rgba(255,255,255,0.9)';
+         ctx.beginPath(); ctx.arc(len / 2, 0, wid * 0.35, 0, TAU); ctx.fill();
          ctx.restore();
       }
    }
@@ -476,13 +492,24 @@ export class Renderer {
       if (!p || !p.alive) return;
       const cam = this.cam;
       const c = cam.w2s(p.pos);
-      // main gun range ring
-      const R = p.cfg.main.range * cam.zoom;
-      ctx.strokeStyle = 'rgba(120,200,255,0.14)';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 8]);
-      ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, TAU); ctx.stroke();
-      ctx.setLineDash([]);
+      // Range rings: main battery, secondary, torpedo (if any), and detection radius --
+      // each a distinct color+dash so "can I shoot this?" / "am I spotted?" reads at a
+      // glance instead of guessing. Previously only the main-gun ring existed, at 14%
+      // opacity -- everything else (secondary reach, torpedo reach, own detectability)
+      // was invisible, which is exactly what "ranges aren't clear" means in practice.
+      const ring = (range, color, dash) => {
+         const R = range * cam.zoom;
+         if (R < 4 || R > Math.max(cam.w, cam.h) * 1.5) return; // skip degenerate/offscreen rings
+         ctx.strokeStyle = color;
+         ctx.lineWidth = 1.5;
+         if (dash) ctx.setLineDash(dash);
+         ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, TAU); ctx.stroke();
+         ctx.setLineDash([]);
+      };
+      ring(p.cfg.detect, 'rgba(255,90,90,0.16)', [3, 5]);           // spotting radius: enemies inside this see you
+      if (p.cfg.torp) ring(p.cfg.torp.range, 'rgba(120,255,180,0.20)', [2, 10]); // torpedo reach
+      if (p.cfg.sec) ring(p.cfg.sec.range, 'rgba(255,190,110,0.20)', [4, 6]);    // secondary reach
+      ring(p.cfg.main.range, 'rgba(120,200,255,0.26)', [8, 6]);     // main battery reach
       // aim point (mouse)
       if (world._aimPoint) {
          const a = cam.w2s(world._aimPoint);
@@ -655,6 +682,10 @@ function makeGlowSprite() {
 
 function lighten(hex, amt) { return shade(hex, amt); }
 function darken(hex, amt) { return shade(hex, -amt); }
+function hexA(hex, alpha) {
+   const n = parseInt(hex.slice(1), 16);
+   return `rgba(${n >> 16},${(n >> 8) & 0xff},${n & 0xff},${alpha})`;
+}
 function shade(hex, amt) {
    const n = parseInt(hex.slice(1), 16);
    let r = (n >> 16) + amt, g = ((n >> 8) & 0xff) + amt, b = (n & 0xff) + amt;

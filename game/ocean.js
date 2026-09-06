@@ -72,8 +72,12 @@ export class Ocean {
 
        // parallax-scroll the tile in world space. zoom is px/meter; the tile represents TILE meters.
       const ts = TILE * zoom;
-       // add a slow time-based "current" drift so the sea stays alive even when the ship holds station
-      const driftX = this.time * 6, driftY = this.time * 3.5;
+       // Slow time-based "current" drift so the sea stays alive even when the ship holds
+       // station. Must be defined in WORLD METERS/s and scaled by zoom like everything else --
+       // this used to be raw SCREEN px/s (driftX = time*6), so at the default 0.42 zoom the
+       // water visibly crept at ~14 m/s (faster than most ships!) independent of the world,
+       // and zooming out via M made it worse still. Now it's ~1.5 m/s of true current, always.
+      const driftX = this.time * 1.5 * zoom, driftY = this.time * 0.9 * zoom;
        // pattern origin sits at screen (w/2 - offx); for the tile to be world-anchored
        // its phase must be (X - w/2 + offx)/ts == worldX/TILE  =>  offx = +cx*zoom
       let offx = (cx * zoom - driftX) % ts;

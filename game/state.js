@@ -67,6 +67,18 @@ export class World {
       for (const s of this.ships) if (s.alive && s.side !== ship.side) out.push(s);
       return out;
     }
+   // Is `ship` within spotting range of any living enemy right now? Same detect/detectMult
+   // rule the AI itself uses (ai.js) and, symmetrically, own smoke hides you from spotters
+   // on the other side. Lets the HUD tell the player "you're spotted" truthfully instead of
+   // just guessing from the range rings.
+   isSpotted(ship) {
+      if (this.inSmoke(ship.pos, ship.side)) return false;
+      const mult = this.difficulty ? this.difficulty.detectMult : 1;
+      for (const e of this.enemiesOf(ship)) {
+         if (dist(ship.pos, e.pos) < e.cfg.detect * mult) return true;
+      }
+      return false;
+   }
    nearestThreat(ship) {
       let best = Infinity;
       for (const s of this.enemiesOf(ship)) {
