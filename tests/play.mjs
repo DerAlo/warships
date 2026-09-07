@@ -76,6 +76,16 @@ function controlPlayer(w, dt) {
       p.smoke.active = true; p.smoke.t = 8; p.smoke.cd = 33;
    }
 
+   // --- repair fires/floods with a human-like reaction delay (repairAll() itself has no
+   // cooldown -- a real player is limited by how fast they can notice+press R, not by game
+   // rules, so gate this the same way to avoid a superhuman instant-heal bot) ---
+   if ((p.fires.length || p.floods.length) && p._repairCd === undefined) p._repairCd = 0;
+   if (p._repairCd > 0) p._repairCd -= dt;
+   if ((p.fires.length || p.floods.length) && p._repairCd <= 0) {
+      p.repairAll();
+      p._repairCd = 2.5; // reaction + re-notice delay before the next repair press
+   }
+
    // --- fire ---
    if (bestD < p.cfg.main.range && p.fireTimer <= 0) p.fireMain(w, target, p.aim);
    if (p.cfg.sec && bestD < p.cfg.sec.range && p.secTimer <= 0) p.fireSecondary(w, target, p.aim);

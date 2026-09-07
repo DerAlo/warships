@@ -33,45 +33,49 @@ export const WORLD = {
 // but still usable. maxSpeed/turnRate are also bumped across the board -- ships felt like they
 // were wading through syrup; this keeps the weight (still no arcade speedboat) but doubles down
 // on responsiveness so combat is actually about aiming and dodging, not waiting.
+// Speed +30%, HP +50%, torpedo speed x4 across the board per direct feedback: ships still
+// felt sluggish at the previous top speeds, fights ended too fast for the new pace to be
+// felt (more HP buys back the maneuvering room), and torpedoes at 48-50 m/s were barely
+// faster than the ships firing them -- a DD outrunning its own torpedo isn't a threat.
 export const SHIPS = {
    DD: {
       key: 'DD', name: 'Zerstörer', color: '#6f8a9c',
-      hp: 650, maxSpeed: 36, turnRate: 0.34, turretSlew: 1.2, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
+      hp: 975, maxSpeed: 47, turnRate: 0.36, turretSlew: 1.2, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
       main: { guns: 4, caliber: 105, dmg: 70, reload: 1.8, range: 850, type: 'HE', ap: 0, vShell: 600 },
-      torp: { tubes: 6, dmg: 1200, speed: 50, range: 1150, salvo: 2, cd: 9 },
+      torp: { tubes: 6, dmg: 1200, speed: 200, range: 1150, salvo: 2, cd: 9 },
       fire: 0.5, // smoke chance when pressured
    },
    LC: {
       key: 'LC', name: 'Kleinkreuzer', color: '#5f7f9a',
-      hp: 1500, maxSpeed: 28, turnRate: 0.25, turretSlew: 0.95, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
+      hp: 2250, maxSpeed: 36, turnRate: 0.27, turretSlew: 0.95, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
       main: { guns: 6, caliber: 152, dmg: 95, reload: 3.1, range: 1200, type: 'AP', ap: 140, vShell: 620 },
       torp: null,
       fire: 0.25,
    },
    HC: {
       key: 'HC', name: 'Schwerkreuzer', color: '#4d6b86',
-      hp: 2400, maxSpeed: 23, turnRate: 0.21, turretSlew: 0.75, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
+      hp: 3600, maxSpeed: 30, turnRate: 0.23, turretSlew: 0.75, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
       main: { guns: 10, caliber: 203, dmg: 140, reload: 3.9, range: 1400, type: 'AP', ap: 200, vShell: 640 },
       torp: null,
       fire: 0.2,
    },
    EB: {
       key: 'EB', name: 'Feindes Linienschiff', color: '#8a5a4a',
-      hp: 3800, maxSpeed: 19.5, turnRate: 0.16, turretSlew: 0.58, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
+      hp: 5700, maxSpeed: 25, turnRate: 0.18, turretSlew: 0.58, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
       main: { guns: 6, caliber: 356, dmg: 320, reload: 5.4, range: 1650, type: 'AP', ap: 300, vShell: 650 },
       torp: null,
       reactionMult: 1.2, // heavier = slower to commit
    },
    Bismarck: {
       key: 'Bismarck', name: 'Bismarck', color: '#3a4a55',
-      hp: 5200, maxSpeed: 23, turnRate: 0.19, turretSlew: 0.62, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
+      hp: 7800, maxSpeed: 30, turnRate: 0.21, turretSlew: 0.62, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
       main: { guns: 8, caliber: 283, dmg: 300, reload: 4.8, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
       sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.3, range: 1100, type: 'HE', ap: 0, vShell: 600 },
       aa:   { guns: 20, dps: 200, range: 700, reload: 0.15 },
       // A "T" alpha-strike: 3 heavy torpedoes, long cooldown. The HUD/menu always promised a
       // torpedo salvo on T; it used to secretly fire a second gun volley instead, which meant
       // the ammo panel showed "Torpedos 0/0" forever and the key just didn't do what it said.
-      torp: { tubes: 3, dmg: 1900, speed: 48, range: 1350, salvo: 3, cd: 32 },
+      torp: { tubes: 3, dmg: 1900, speed: 192, range: 1350, salvo: 3, cd: 32 },
       boost: { mult: 1.35, dur: 2.5, cd: 10 },
       isPlayer: true,
    },
@@ -84,10 +88,15 @@ export const SHIPS = {
 // reliably on EVERY difficulty, since sigmaDeg only scales the *bots'* aim, not the
 // player's). Without compensating here the curve went nearly flat (~90/86/82% win rate).
 // botDmg/sigmaDeg pushed harder on normal/hard to restore real separation.
+// Retuned (botDmg down across the board) after the speed/HP/torpedo pass above: every ship
+// now closes distance ~30% faster, so the player spends much more of each match under fire
+// from 2+ enemies at once than before -- without this the win rate collapsed to ~30/20/3%
+// (was a healthy 77/44/25%). HP alone doesn't buy back that lost reaction time; damage had
+// to come down to compensate for the higher engagement tempo.
 export const DIFFICULTY = {
-   easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 0.6 },
-   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 1.15 },
-   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.3, detectMult: 1.15, botHP: 1.2,  botDmg: 1.6 },
+   easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 1.25 },
+   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 1.5 },
+   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.3, detectMult: 1.15, botHP: 1.2,  botDmg: 1.95 },
 };
 
 // ============ ENCOUNTER ============

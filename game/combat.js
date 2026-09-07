@@ -156,7 +156,8 @@ function resolveHit(world, ship, shell, imp) {
 
   // apply
   ship.applyImpact({ dmg, type: outcome, source: shell.kind === 'sec' ? 'secondary' : 'main',
-    firing: fires, flooding: floods, mod: Math.floor((Math.random() - 0.5) * 6 + 3) });
+    firing: fires, flooding: floods, mod: Math.floor((Math.random() - 0.5) * 6 + 3),
+    dmgMult: (shell.shooter && shell.shooter.dmgMult) || 1 });
   if (shell.shooter) { shell.shooter.shotsHit++; shell.shooter.dmgDealt += dmg; }
 
   // FX
@@ -172,6 +173,7 @@ function resolveHit(world, ship, shell, imp) {
 export function resolveTorpedoes(world, dt) {
   for (let i = world.torpedoes.length - 1; i >= 0; i--) {
     const t = world.torpedoes[i];
+    const prev = { x: t.pos.x, y: t.pos.y };
     t.age += dt;
     t.pos = add(t.pos, scaleV(t.vel, dt));
     t.wake.push({ x: t.pos.x, y: t.pos.y });
@@ -182,15 +184,19 @@ export function resolveTorpedoes(world, dt) {
     if (Math.abs(t.pos.x) > WORLD.ARENA || Math.abs(t.pos.y) > WORLD.ARENA) { world.torpedoes.splice(i, 1); continue; }
     if (hitsIsland(world, t.pos)) { world.addExplosion(t.pos, false); world.torpedoes.splice(i, 1); continue; }
 
+    // At 200 m/s a torpedo covers ~3.3m/frame -- comfortably under even a DD's ~19m beam,
+    // but the tunneling guard costs nothing and matches the same treatment shells already
+    // get (resolveShells above), so a future speed bump doesn't silently reopen this.
     for (const ship of world.ships) {
       if (!ship.alive || ship.side === t.owner) continue;
-      const imp = localImpact(ship, t.pos);
+      const imp = localImpact(ship, t.pos) || localImpact(ship, prev);
       if (imp) {
         const dim = shipDims(ship);
         const { along } = imp;
         const central = Math.abs(along) < dim.L / 6;
         const dmg = t.dmg * (central ? COMBAT.torpCentralMult : 1);
-        ship.applyImpact({ dmg, type: 'TORP', source: 'torpedo', flooding: Math.random() < 0.6, firing: false, mod: 3 });
+        ship.applyImpact({ dmg, type: 'TORP', source: 'torpedo', flooding: Math.random() < 0.6, firing: false, mod: 3,
+          dmgMult: (t.shooter && t.shooter.dmgMult) || 1 });
         if (t.shooter) t.shooter.dmgDealt += dmg;
         world.addExplosion(t.pos, true);
         world.addDamageNumber(t.pos, dmg, 'torp');

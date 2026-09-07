@@ -207,9 +207,12 @@ export class Ship {
    }
 
    _applyDoT(dt) {
+      // Fire/flood tick at a fixed HP/s (COMBAT.fire/flood.perModule) -- each module carries
+      // the difficulty dmgMult of whoever ignited/flooded it, so bot-caused DoT respects
+      // botDmg the same way direct gun/torpedo damage already does.
       let fireDmg = 0;
       for (const f of this.fires) {
-         fireDmg += COMBAT.fire.perModule * dt * (1 + 0.15 * f.heat);
+         fireDmg += COMBAT.fire.perModule * (f.dmgMult || 1) * dt * (1 + 0.15 * f.heat);
          f.heat = (f.heat || 0) + dt * 0.1;
          f.t += dt;
       }
@@ -220,12 +223,12 @@ export class Ship {
       for (const f of this.fires) {
          f.spreadT = (f.spreadT || 0) + dt;
          if (f.spreadT > COMBAT.fire.spread && this.fires.length < COMBAT.fire.max && Math.random() < COMBAT.fire.spreadP * dt * 3) {
-            this.ignite(Math.floor((Math.random() - 0.5) * 6));
+            this.ignite(Math.floor((Math.random() - 0.5) * 6), f.dmgMult);
          }
       }
       let floodDmg = 0;
       for (const fo of this.floods) {
-         floodDmg += COMBAT.flood.perModule * dt;
+         floodDmg += COMBAT.flood.perModule * (fo.dmgMult || 1) * dt;
          fo.t += dt;
       }
       if (floodDmg > 0) this._damage(floodDmg, { source: 'flood', silent: true });
@@ -238,17 +241,17 @@ export class Ship {
       }
    }
 
-   ignite(mod) {
+   ignite(mod, dmgMult = 1) {
       if (this.fires.length >= COMBAT.fire.max) return;
       const m = mod ?? Math.floor(Math.random() * 6);
       if (this.fires.some(f => f.mod === m)) return; // one fire per module
-      this.fires.push({ mod: m, heat: 0, spreadT: 0, t: 0 });
+      this.fires.push({ mod: m, heat: 0, spreadT: 0, t: 0, dmgMult });
    }
-   flood(mod) {
+   flood(mod, dmgMult = 1) {
       if (this.floods.length >= COMBAT.flood.max) return;
       const m = mod ?? Math.floor(Math.random() * 6);
       if (this.floods.some(f => f.mod === m)) return;
-      this.floods.push({ mod: m, t: 0 });
+      this.floods.push({ mod: m, t: 0, dmgMult });
    }
    repairAll() {
       this.fires = [];
@@ -373,8 +376,11 @@ export class Ship {
       if (!this.alive) return;
       const { dmg, type, source, isTorpedo, central } = impact;
       this._damage(dmg, { source: source || 'gun' });
-      if (impact.firing) this.ignite(impact.mod);
-      if (impact.flooding) this.flood(impact.mod);
+      // fire/flood DoT ticks at a fixed HP/s in _applyDoT (COMBAT.fire/flood.perModule) --
+      // that rate must carry the SHOOTER's difficulty dmgMult, or bot-caused fires burn the
+      // Bismarck at a constant rate regardless of difficulty, defeating any botDmg tuning.
+      if (impact.firing) this.ignite(impact.mod, impact.dmgMult);
+      if (impact.flooding) this.flood(impact.mod, impact.dmgMult);
    }
 
    get fireModulesCount() { return this.fires.length; }
