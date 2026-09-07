@@ -57,6 +57,9 @@
    #detect-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #ff6a5a;
       text-shadow: 0 0 8px rgba(255,90,70,.6); }
    #detect-status.hidden { display: none; }
+   #anchor-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #6ab8ff;
+      text-shadow: 0 0 8px rgba(90,170,255,.6); }
+   #anchor-status.hidden { display: none; }
 
    #minimap { right: 18px; top: 18px; width: 180px; height: 180px; padding: 0; overflow: hidden; }
    #minimap canvas { width: 100%; height: 100%; display:block; border-radius: 10px; }
@@ -123,6 +126,7 @@
          <div id="status-line">Zur See</div>
          <div id="objectives">Ziele: 0 / 0 versenkt</div>
          <div id="detect-status" class="hidden">👁 GESICHTET</div>
+         <div id="anchor-status" class="hidden">⚓ ANKER-WENDE</div>
       </div>
 
       <div id="minimap" class="hud-panel"><canvas id="minimap-canvas" width="180" height="180"></canvas></div>
@@ -166,7 +170,7 @@
             <div><span class="k">Maus</span> <span class="d">Zielrichtung / Salve abgeben (klick&halten)</span></div>
             <div><span class="k">Rechtsklick</span> <span class="d">Sekundär- & Flakfeuer</span></div>
             <div><span class="k">Q / E</span> <span class="d">Ruder (Zusatzsteuerung)</span></div>
-            <div><span class="k">Space</span> <span class="d">Not-Anker (Voll-achteraus)</span></div>
+            <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: hart bremsen + enger drehen)</span></div>
             <div><span class="k">Shift</span> <span class="d">Turbo (kurzer Schub, Cooldown)</span></div>
             <div><span class="k">F</span> <span class="d">Rauch (Tarndetekt)</span></div>
             <div><span class="k">T</span> <span class="d">Torpedosalve abfeuern</span></div>

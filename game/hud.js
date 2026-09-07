@@ -7,7 +7,7 @@ export class Hud {
    constructor() {
       this.el = {
          hud: $('hud'), log: $('log'), statusLine: $('status-line'), objectives: $('objectives'),
-         detectStatus: $('detect-status'),
+         detectStatus: $('detect-status'), anchorStatus: $('anchor-status'),
          speedReadout: $('speed-readout'), headingReadout: $('heading-readout'),
          hpFill: $('hp-fill'), hpText: $('hp-text'), speedFill: $('speed-fill'), knText: $('kn-text'),
          modFire: $('mod-fire'), modFlood: $('mod-flood'), modRepair: $('mod-repair'),
@@ -92,6 +92,7 @@ export class Hud {
       else line = `Kampf in Gange — ${aliveBots} Feind${aliveBots === 1 ? '' : 'e'} aktiv`;
       e.statusLine.textContent = line;
       e.detectStatus.classList.toggle('hidden', !(p.alive && world.isSpotted(p)));
+      e.anchorStatus.classList.toggle('hidden', !(p.alive && p.anchorOut));
 
       // siren when under fire
       const underFire = p.alive && world.nearestThreat(p) < 500;

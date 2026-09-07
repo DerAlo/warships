@@ -69,6 +69,12 @@ export class Ship {
       // control (for bots; overwritten by AI controller each tick)
       this.helm = 0;
       this.throttleIn = WORLD.MIN_THROTTLE;
+      // anchor turn: drop anchor (Space) to bite into the seabed -- hard braking AND a big
+      // turn-rate boost, so you can wrench the bow around at a radius normal rudder can't
+      // touch. The anchor takes a moment to bite and a moment to weigh again, so it's a
+      // deliberate maneuver, not a free instant-turn button.
+      this.anchorOut = false;
+      this.anchorBite = 0; // 0..1, ramps up while anchorOut, decays when weighed
       // AI
       this.state = 'STANDBY';
       this.stateTime = 0;
@@ -103,28 +109,38 @@ export class Ship {
 
    update(dt) {
       if (!this.alive) return;
+      // ---- anchor turn: bite ramps up over ~0.6s while the anchor's out, decays over
+      // ~1s once weighed. At full bite: turn rate ~3.5x and a hard drag on speed -- drop
+      // anchor, haul the rudder over, and the bow snaps around a radius normal steering
+      // can't reach, at the cost of losing most of your speed.
+      this.anchorBite = approach(this.anchorBite, this.anchorOut ? 1 : 0, dt / (this.anchorOut ? 0.6 : 1.0));
+      const anchorTurnMult = 1 + 2.5 * this.anchorBite;
+      const anchorDragRate = 2.2 * this.anchorBite; // 1/s exponential speed decay from the anchor biting
+
       // ---- movement integration (weighty) ----
       const helm = clamp(this.helm, -1, 1);
       // turn effectiveness: needs flow
       const flow = clamp(this.speed / 6, 0, 1);
-      const targetOmega = helm * this.cfg.turnRate * (0.4 + 0.6 * flow);
-      const turnAccel = 0.9; // rad/s^2-ish slew
+      const targetOmega = helm * this.cfg.turnRate * anchorTurnMult * (0.4 + 0.6 * flow);
+      const turnAccel = 0.9 * anchorTurnMult; // rad/s^2-ish slew
       this.angularVel = approach(this.angularVel, targetOmega, turnAccel * dt * (0.5 + 0.5 * flow));
       this.heading += this.angularVel * dt;
       this.heading = ((this.heading % TAU) + TAU) % TAU;
 
       // throttle: ramp toward target with inertia
-      const tTarget = clamp(this.throttleIn, -1, 1);
+      const tTarget = this.anchorOut ? 0 : clamp(this.throttleIn, -1, 1);
       const throttleAccel = tTarget >= 0 ? 0.28 : 0.45; // astern bites harder
       this.throttle = approach(this.throttle, tTarget, throttleAccel * dt);
-      if (this.throttle < 0.12 && tTarget >= 0) this.throttle = WORLD.MIN_THROTTLE; // keep way
-      // crash stop (space) handled by controller setting throttleIn=-1
+      if (this.throttle < 0.12 && tTarget >= 0 && !this.anchorOut) this.throttle = WORLD.MIN_THROTTLE; // keep way
       // Acceleration scales with each ship's OWN top speed so every class reaches flank
       // speed in roughly the same real time (~8s ahead / ~5s braking) instead of a fixed
       // 0.55 m/s^2 that made the 18 m/s Bismarck take ~33s to get moving — it was there,
       // but the helm didn't feel connected to the throttle at all.
       const spdAccel = this.maxSpeed / (this.throttle >= 0 ? 8 : 5);
       this.speed = approach(this.speed, this.throttle * this.maxSpeed, dt * spdAccel);
+      // anchor drag bites directly into current speed too, not just the throttle target --
+      // otherwise a ship at flank speed would coast for seconds before the target caught up.
+      if (anchorDragRate > 0) this.speed *= Math.exp(-anchorDragRate * dt);
 
       this.vel = fromAngle(this.heading, this.speed);
       this.pos = add(this.pos, scale(this.vel, dt));

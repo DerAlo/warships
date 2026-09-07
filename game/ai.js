@@ -39,19 +39,42 @@ function kite(target, from, side, prefRange) {
 // clamp), which is a stable near-standstill -- the bot never turns away on its own and
 // the match times out with everyone camped on the wall.
 function avoidObstacles(bot, world, steer) {
+   // Steering straight AWAY from an obstacle's center works for slow, tight-turning ships,
+   // but once turn radius (v/omega) grows large relative to the obstacle, pointing directly
+   // away means momentum keeps carrying the ship toward the obstacle while it slowly comes
+   // about -- it overshoots the repel zone, and once past the center the "away" direction
+   // flips, yanking the heading back the other way: a stable oscillation/orbit around the
+   // obstacle instead of a clean pass. The fix is TANGENTIAL steering: aim perpendicular to
+   // the obstacle (whichever side is the smaller turn from current heading), so the ship
+   // curves around it in one direction instead of fighting a flip-flopping radial target.
+   // Use maxSpeed, not current speed, for the turn-radius estimate: a ship that has just
+   // collided and stalled to ~0 would otherwise compute turnRadius~0 -> a tiny buffer ->
+   // "not near enough to avoid" -> steers straight at the obstacle again next frame -> hits
+   // it again -> stays at 0 forever. maxSpeed keeps the safety margin honest regardless of
+   // the ship's current (possibly collision-stalled) speed.
+   // Buffer scales with turn radius but is capped: with turn rates unchanged while speed
+   // tripled, turn radius alone reached 900-1400m for the big classes -- on a 3800m-radius
+   // arena with 7 obstacles that meant almost every point on the map had some obstacle
+   // "in range", so avoidance permanently overrode combat steering (bots wandering, losing
+   // their target, never actually engaging). The cap keeps avoidance a local correction near
+   // an obstacle, not a global steering override.
+   const turnRadius = bot.maxSpeed / Math.max(0.05, bot.cfg.turnRate || 0.2);
+   const speedBuf = clamp(turnRadius * 1.1, 300, 550);
    let best = null;
    for (const o of world.obstacles) {
       const d = dist(bot.pos, o.c);
-      const buf = o.r + 300;
+      const buf = o.r + speedBuf;
       if (d < buf) {
-         const repel = sub(bot.pos, o.c);
-         const dir = angleOf(repel);
+         const toObs = angleOf(sub(o.c, bot.pos));
+         const perpCW = toObs + Math.PI / 2, perpCCW = toObs - Math.PI / 2;
+         const dir = Math.abs(angleDelta(bot.heading, perpCW)) < Math.abs(angleDelta(bot.heading, perpCCW))
+            ? perpCW : perpCCW;
          const w = 1 - d / buf;
          const cand = { heading: dir, throttle: 0.7, w };
          if (!best || cand.w > best.w) best = cand;
       }
    }
-   const half = WORLD.ARENA, edgeBuf = 400;
+   const half = WORLD.ARENA, edgeBuf = clamp(turnRadius * 1.3, 400, 700);
    const edgeD = half - Math.max(Math.abs(bot.pos.x), Math.abs(bot.pos.y));
    if (edgeD < edgeBuf) {
       // steer back toward the center, weighted by how close to the wall we are

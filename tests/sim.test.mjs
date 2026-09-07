@@ -14,7 +14,11 @@ test('bots move toward the player', () => {
    const w = new World('normal');
    const p0 = w.player.pos;
    const d0 = w.bots.map(b => Math.hypot(b.pos.x - p0.x, b.pos.y - p0.y));
-   for (let i = 0; i < 60 * 20; i++) tick(w);   // 20 s
+   // 40s, not 20s: at the current (much higher) ship speeds a bot may have to curve around
+   // an obstacle it approaches early on, which can transiently increase its distance to the
+   // player before it closes back in -- 20s was tuned for a slower era and could catch a
+   // bot still mid-detour. 40s reliably gives every class time to complete the approach.
+   for (let i = 0; i < 60 * 40; i++) tick(w);   // 40 s
    const d1 = w.bots.map(b => Math.hypot(b.pos.x - p0.x, b.pos.y - p0.y));
    assert.ok(d1.every((d, i) => d < d0[i] - 100), `bots should close in: ${d0} -> ${d1}`);
 });

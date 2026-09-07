@@ -33,42 +33,44 @@ export const WORLD = {
 // but still usable. maxSpeed/turnRate are also bumped across the board -- ships felt like they
 // were wading through syrup; this keeps the weight (still no arcade speedboat) but doubles down
 // on responsiveness so combat is actually about aiming and dodging, not waiting.
-// Speed +30%, HP +50%, torpedo speed x4 across the board per direct feedback: ships still
-// felt sluggish at the previous top speeds, fights ended too fast for the new pace to be
-// felt (more HP buys back the maneuvering room), and torpedoes at 48-50 m/s were barely
-// faster than the ships firing them -- a DD outrunning its own torpedo isn't a threat.
+// Speed x3 (again) on top of the prior +30% pass, per direct feedback that ships still
+// weren't fast enough. turnRate is intentionally left alone -- linear speed tripling while
+// angular rate stays put roughly triples effective turning radius, so ships now genuinely
+// struggle to turn tightly at speed. That's what makes the anchor-turn maneuver (Space,
+// see ship.js update()) matter again: it's the deliberate answer to "I'm going too fast to
+// turn", not a redundant button.
 export const SHIPS = {
    DD: {
       key: 'DD', name: 'Zerstörer', color: '#6f8a9c',
-      hp: 975, maxSpeed: 47, turnRate: 0.36, turretSlew: 1.2, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
+      hp: 975, maxSpeed: 141, turnRate: 0.36, turretSlew: 1.2, detect: 3200, prefRange: 550, flankDeg: 60, armor: 70,
       main: { guns: 4, caliber: 105, dmg: 70, reload: 1.8, range: 850, type: 'HE', ap: 0, vShell: 600 },
       torp: { tubes: 6, dmg: 1200, speed: 200, range: 1150, salvo: 2, cd: 9 },
       fire: 0.5, // smoke chance when pressured
    },
    LC: {
       key: 'LC', name: 'Kleinkreuzer', color: '#5f7f9a',
-      hp: 2250, maxSpeed: 36, turnRate: 0.27, turretSlew: 0.95, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
+      hp: 2250, maxSpeed: 108, turnRate: 0.27, turretSlew: 0.95, detect: 2800, prefRange: 900, flankDeg: 55, armor: 120,
       main: { guns: 6, caliber: 152, dmg: 95, reload: 3.1, range: 1200, type: 'AP', ap: 140, vShell: 620 },
       torp: null,
       fire: 0.25,
    },
    HC: {
       key: 'HC', name: 'Schwerkreuzer', color: '#4d6b86',
-      hp: 3600, maxSpeed: 30, turnRate: 0.23, turretSlew: 0.75, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
+      hp: 3600, maxSpeed: 90, turnRate: 0.23, turretSlew: 0.75, detect: 2800, prefRange: 1150, flankDeg: 55, armor: 150,
       main: { guns: 10, caliber: 203, dmg: 140, reload: 3.9, range: 1400, type: 'AP', ap: 200, vShell: 640 },
       torp: null,
       fire: 0.2,
    },
    EB: {
       key: 'EB', name: 'Feindes Linienschiff', color: '#8a5a4a',
-      hp: 5700, maxSpeed: 25, turnRate: 0.18, turretSlew: 0.58, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
+      hp: 5700, maxSpeed: 75, turnRate: 0.18, turretSlew: 0.58, detect: 2900, prefRange: 1450, flankDeg: 45, armor: 240,
       main: { guns: 6, caliber: 356, dmg: 320, reload: 5.4, range: 1650, type: 'AP', ap: 300, vShell: 650 },
       torp: null,
       reactionMult: 1.2, // heavier = slower to commit
    },
    Bismarck: {
       key: 'Bismarck', name: 'Bismarck', color: '#3a4a55',
-      hp: 7800, maxSpeed: 30, turnRate: 0.21, turretSlew: 0.62, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
+      hp: 7800, maxSpeed: 90, turnRate: 0.21, turretSlew: 0.62, detect: 2600, prefRange: 0, flankDeg: 0, armor: 260,
       main: { guns: 8, caliber: 283, dmg: 300, reload: 4.8, range: 1800, type: 'AP', ap: 280, vShell: 650, salvoAssist: 3.0 },
       sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.3, range: 1100, type: 'HE', ap: 0, vShell: 600 },
       aa:   { guns: 20, dps: 200, range: 700, reload: 0.15 },
@@ -96,7 +98,7 @@ export const SHIPS = {
 export const DIFFICULTY = {
    easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 1.25 },
    normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 1.5 },
-   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.3, detectMult: 1.15, botHP: 1.2,  botDmg: 1.95 },
+   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.3, detectMult: 1.15, botHP: 1.2,  botDmg: 1.5 },
 };
 
 // ============ ENCOUNTER ============
@@ -150,9 +152,12 @@ export const COMBAT = {
    concentration: {    // when a salvo concentrates in the citadel: bonus
       minShells: 4, mult: 1.5, // up to +50% bonus for concentration
    },
-   // damage types
-   fire: { perModule: 220, max: 4, spread: 6, spreadP: 0.5 },  // 220 HP/s/module, can jump modules
-   flood: { perModule: 120, max: 3, slow: 0.06 },             // 120 HP/s, -6% top speed per flood
+   // damage types. fire/flood were dominating fights on BOTH sides (up to 4 fires x 220 =
+   // 880 HP/s was a bigger threat than the guns that started it) -- cut per-module rate
+   // roughly in half and capped max simultaneous fires at 3, so a burning ship is a real
+   // problem you must respond to, not the single deciding factor of every engagement.
+   fire: { perModule: 100, max: 3, spread: 6, spreadP: 0.5 },  // 100 HP/s/module, can jump modules
+   flood: { perModule: 55, max: 2, slow: 0.06 },              // 55 HP/s, -6% top speed per flood
    torpCentralMult: 1.30,  // central third of the hull on a torpedo
    // shell impact: a hit that bounces does 0 but splashes; a penetration that misses citadel is "grazed"
    grazeMult: 0.4,        // a penetrating non-citadel hit still does this fraction

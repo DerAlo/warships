@@ -105,9 +105,14 @@ function controlPlayer(dt) {
    const helm = inp.helmAxis();
    p.helm = clamp(helm, -1, 1);
    const thr = inp.throttleAxis();
-   if (inp.down('SPACE')) { p.throttleIn = -1; p._crash = true; }        // crash stop
-   else if (thr !== 0) { p.throttleIn = thr; p._crash = false; }
-   else if (p._crash) { p.throttleIn = WORLD.MIN_THROTTLE; p._crash = false; } // back to min way, not stuck astern
+   // Anchor turn: hold Space to drop anchor -- hard braking plus a big turn-rate boost
+   // (see ship.js update()), so hauling the rudder over while anchored snaps the bow around
+   // a radius normal steering can't touch. Release to weigh anchor and get back underway.
+   const anchorWasOut = p.anchorOut;
+   p.anchorOut = inp.down('SPACE');
+   if (thr !== 0 && !p.anchorOut) p.throttleIn = thr;
+   else if (!p.anchorOut && anchorWasOut) p.throttleIn = WORLD.MIN_THROTTLE; // back to min way after weighing anchor
+   if (inp.tapped('SPACE')) { world.log(p, '⚓ Anker fällt!', 'info'); audio.uiClick(); }
 
    // main battery: hold left mouse
    if (inp.mouse.down) {
