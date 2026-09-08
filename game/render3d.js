@@ -147,10 +147,15 @@ export class Renderer3D {
             }
             shape.closePath();
             const geo = new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: true, bevelThickness: 8, bevelSize: 6, bevelSegments: 2 });
-            geo.rotateX(Math.PI / 2);
+            // rotateX(-PI/2) makes the extrusion run UPWARD (+Y): the solid then spans
+            // y in [-8, +68] around its origin. (The old +PI/2 rotated it DOWNWARD, so with
+            // the mesh parked at y=-6 only ~2m poked above water -- below the ~6m wave
+            // amplitude -- which is why islands read as flat slivers that vanished in swells.)
+            geo.rotateX(-Math.PI / 2);
             const mat = new THREE.MeshStandardMaterial({ color: 0x3a5a3a, roughness: 0.95 });
             const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(o.c.x, -6, o.c.y);
+            // Top lands at ~+58m above the sea, base sinks to ~-18m (hidden under the water).
+            mesh.position.set(o.c.x, -10, o.c.y);
             mesh.castShadow = true; mesh.receiveShadow = true;
             this.obstacleGroup.add(mesh);
          } else {
@@ -293,8 +298,16 @@ export class Renderer3D {
             this.scene.add(mesh);
             this.shellMeshes.set(s.id, mesh);
          }
-         const h = Math.sin(Math.min(1, s.arc) * Math.PI);
-         const height = h * Math.max(30, (s.gun.range || 1400) * 0.055); // real Y-axis arc height, scales with gun range
+         // Genuine ballistic parabola (rendering-only -- the sim stays flat 2D): h(t) = 4·H·t·(1−t)
+         // crests at the flight midpoint and lands exactly on the target, like real plunging fire.
+         // The old sin() hop peaked at only ~5% of range (a 1800m shot topped out at ~99m --
+         // nearly invisible from the chase cam), which is why shells read as flat lasers.
+         // Now the crest scales with the gun's range (a 1800m shot arcs ~180m up), and a short
+         // ramp from muzzle height (~deck level) makes the shell visibly LEAVE the gun instead
+         // of popping out of the waterline.
+         const t = Math.min(1, s.arc);
+         const H = Math.max(40, (s.gun.range || 1400) * 0.10);
+         const height = 4 * H * t * (1 - t) + 18 * (1 - t);
          mesh.position.set(s.pos.x, height, s.pos.y);
       }
       for (const [id, mesh] of this.shellMeshes) if (!seen.has(id)) { this.scene.remove(mesh); this.shellMeshes.delete(id); }

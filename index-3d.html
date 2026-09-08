@@ -45,6 +45,7 @@
    .mod.disabled { opacity: .35; }
 
    #ammo-panel { right: 18px; bottom: 18px; width: 300px; }
+   #weapon-sel { font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; color: var(--gold); text-shadow: 0 0 8px rgba(255,212,121,.5); }
    .salvo-row { display:flex; align-items:center; gap:8px; margin-top: 8px; }
    .salvo-row .lbl { font-size: 10px; width: 78px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; }
    .salvo-row .bar { flex: 1; margin-top: 0; }
@@ -159,6 +160,7 @@
 
       <div id="ammo-panel" class="hud-panel">
          <div class="ship-name" style="font-size:13px">Munition</div>
+         <div id="weapon-sel">Waffe: <b>1</b> Hauptbatterie</div>
          <div class="salvo-row"><span class="lbl">Haupt-28cm</span><div class="bar"><i id="ammo-main" style="width:100%"></i></div><span class="n ready" id="ammo-main-n">READY</span></div>
          <div class="salvo-row"><span class="lbl">Sekundär</span><div class="bar"><i id="ammo-sec" style="width:100%"></i></div><span class="n" id="ammo-sec-n">—</span></div>
          <div class="salvo-row"><span class="lbl">Torpedos</span><div class="bar"><i id="ammo-torp" style="width:100%"></i></div><span class="n" id="ammo-torp-n">0/0</span></div>
@@ -178,11 +180,10 @@
          <div class="subtitle">Du bist die <b>BISMARCK</b> — versenke alle feindlichen Schiffe.</div>
          <div class="controls-grid">
             <div><span class="k">Mauszeiger</span> <span class="d">Zielen — die Türme richten sich auf den Cursor</span></div>
-            <div><span class="k">Klick (halten)</span> <span class="d">Hauptsalve abgeben, sobald Türme eingerastet sind</span></div>
-            <div><span class="k">Rechtsklick (ziehen)</span> <span class="d">Kamera frei schwenken (Free-Look) — bleibt stehen, dreht sich NICHT mit dem Ruder</span></div>
-            <div><span class="k">Rechtsklick (halten)</span> <span class="d">Sekundär- & Flakfeuer — auch während du die Kamera schwenkst</span></div>
+            <div><span class="k">1 / 2 / 3</span> <span class="d">Waffe wählen: Hauptbatterie / Sekundär / Flak</span></div>
+            <div><span class="k">Klick (halten)</span> <span class="d">Gewählte Waffe feuern (Hauptbatterie erst bei eingerasteten Türmen)</span></div>
+            <div><span class="k">Rechtsklick (ziehen)</span> <span class="d">Kamera frei schwenken (Free-Look) — bleibt stehen, dreht sich NICHT mit dem Ruder, feuert NICHTS</span></div>
             <div><span class="k">Mausrad</span> <span class="d">Kamera ein-/auszoomen</span></div>
-            <div><span class="k">X (halten)</span> <span class="d">Sekundär- & Flakfeuer (Alternative zu Rechtsklick)</span></div>
             <div><span class="k">W / S</span> <span class="d">Voll voraus / voll achteraus</span></div>
             <div><span class="k">A / D</span> <span class="d">Ruder links / rechts</span></div>
             <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: hart bremsen + enger drehen)</span></div>
@@ -201,7 +202,7 @@
             <button class="play" id="btn-play">⚓ ABFERTIGEN</button>
             <button class="play" id="btn-how" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Wie man spielt</button>
          </div>
-         <div class="hint">WoWs-Steuerung: Du <b>zielst mit dem Cursor</b> (die Chase-Cam hängt hinter dem Schiff), und die Salve löst erst, wenn die Türme wirklich eingerastet sind. Rechtsklick ziehen = Kamera schwenken (bleibt stehen), Rechtsklick halten = Sekundärfeuer, Mausrad = Zoom.</div>
+         <div class="hint">WoWs-Steuerung: Du <b>zielst mit dem Cursor</b> (die Chase-Cam hängt hinter dem Schiff), und die Salve löst erst, wenn die Türme wirklich eingerastet sind. <b>1/2/3</b> wählt die Waffe, Klick halten feuert sie, Rechtsklick ziehen = Kamera schwenken (bleibt stehen, feuert nichts), Mausrad = Zoom.</div>
       </div>
    </div>
 
@@ -211,7 +212,7 @@
          <div class="title" style="font-size:30px">Kampf-Dozierung</div>
          <div class="subtitle" style="margin:14px 0">Drei Dinge machen den Sieg: <b>Positionierung</b>, <b>Timing</b> — und jetzt <b>Turmführung</b>.</div>
          <div style="text-align:left; max-width:560px; margin:0 auto; line-height:1.7; color:var(--hud)">
-            <p>🎥 <b>Kamera & Zielen</b> — Die Kamera hängt hinter deinem Schiff (Chase-Cam). Du <b>zielst mit dem Mauszeiger</b>: die Türme richten sich auf den Punkt unter dem Cursor. Mit <b>Rechtsklick ziehen</b> schwenkst du die Kamera frei um (Free-Look) — die Perspektive bleibt dort, wo du sie lässt. <b>Während</b> du die Kamera schwenkst, feuern Sekundär- & Flak weiter (Rechtsklick halten). Das <b>Mausrad</b> zoomt.</p>
+            <p>🎥 <b>Kamera & Zielen</b> — Die Kamera hängt hinter deinem Schiff (Chase-Cam). Du <b>zielst mit dem Mauszeiger</b>: die Türme richten sich auf den Punkt unter dem Cursor. Mit <b>Rechtsklick ziehen</b> schwenkst du die Kamera frei um (Free-Look) — die Perspektive bleibt dort, wo du sie lässt, und dabei wird <b>nichts</b> abgefeuert. Waffe wählst du mit <b>1 / 2 / 3</b> (Hauptbatterie / Sekundär / Flak), <b>Klick halten</b> feuert die gewählte Waffe. Das <b>Mausrad</b> zoomt.</p>
             <p>🎯 <b>Turmschwenk</b> — Die Türme folgen deinem Cursor nur mit begrenzter Drehrate. Der Statusanzeiger zeigt „TÜRME DREHEN…" (gelb) oder „EINGERASTET" (grün) — erst dann trifft die Salve wirklich dorthin, wo du zielst. Wechsle das Ziel nicht in letzter Sekunde.</p>
             <p>🎯 <b>Citadel</b> — Der zentrale Rumpf (Motoren/Feuer) ist besonders verwundbar. Treffer dort bringen Konzentration, Feuer und Flut. Treffer am Bug/Heck „prallen" oft ab.</p>
             <p>🌫️ <b>Rauch</b> — Mit <b>F</b> legst du einen Tarndetekt; Gegner können dich darin gar nicht mehr anvisieren.</p>

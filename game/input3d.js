@@ -5,12 +5,13 @@
 //     (regardless of any button) and main3d.js raycasts it onto the sea plane -- exactly
 //     how WoWs points your guns at whatever the crosshair is over. The on-screen reticle
 //     follows the cursor, there is no fixed screen-center crosshair.
-//   • LEFT mouse (hold) fires the main battery (still gated by turret traverse in main3d).
-//   • RIGHT mouse (hold + drag) is FREE-LOOK: it orbits the chase camera around the ship.
+//   • LEFT mouse (hold) fires the SELECTED weapon (still gated by turret traverse for the
+//     main battery in main3d). Weapon selection is on the NUMBER ROW: 1 = main battery,
+//     2 = secondaries, 3 = AA -- so aiming/looking never accidentally fires anything.
+//   • RIGHT mouse (hold + drag) is PURE FREE-LOOK: it orbits the camera around the ship.
 //     The offset is PERSISTENT -- it stays where you left it (no spring-back), so you can
-//     pick your own perspective. A held right button ALSO fires secondaries + AA while you
-//     look around (X works as an alternative), like in WoWs.
-//   • MOUSE WHEEL zooms the chase camera in/out.
+//     pick your own perspective. It does NOT fire anything.
+//   • MOUSE WHEEL zooms the camera in/out.
 //   • WASD/QE only steer the ship -- they never move the camera.
 export class Input3D {
    constructor(canvas) {
@@ -31,7 +32,7 @@ export class Input3D {
          const k = this._norm(e.key, e.code);
          if (down) { if (!this.keys.has(k)) this.pressed.add(k); this.keys.add(k); }
          else this.keys.delete(k);
-         if (this.gameActive && [' ', 'w', 'a', 's', 'd', 'q', 'e', 'r', 't', 'f', 'm', 'p', 'x', 'escape', 'shift'].includes((e.key || '').toLowerCase()))
+         if (this.gameActive && [' ', 'w', 'a', 's', 'd', 'q', 'e', 'r', 't', 'f', 'm', 'p', 'x', 'escape', 'shift', '1', '2', '3'].includes((e.key || '').toLowerCase()))
             e.preventDefault();
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
@@ -98,6 +99,9 @@ export class Input3D {
          if (code === 'KeyR') return 'R';
          if (code === 'KeyM') return 'M';
          if (code === 'KeyX') return 'X';
+         if (code === 'Digit1') return '1';
+         if (code === 'Digit2') return '2';
+         if (code === 'Digit3') return '3';
          if (code === 'KeyP' || code === 'Escape') return 'P';
          if (code === 'ShiftLeft' || code === 'ShiftRight') return 'SHIFT';
          if (code === 'Space') return 'SPACE';

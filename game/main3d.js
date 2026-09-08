@@ -64,7 +64,14 @@ window.__world = () => world; // test hook (gate/shell-count assertions)
 
 const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 
+// Selected weapon: 'main' | 'sec' | 'aa'. Switched with the number row (1/2/3); LEFT mouse
+// hold fires whatever is selected. Right mouse is pure free-look and never fires -- aiming
+// around must not accidentally shoot.
+let weaponSel = 'main';
+window.__weaponSel = () => weaponSel; // test hook
+
 function startGame() {
+   weaponSel = 'main';
    world = new World(difficulty);
    world.audio = audio;
    renderer.buildObstacles(world);
@@ -142,10 +149,16 @@ function controlPlayer(dt) {
    else if (!p.anchorOut && anchorWasOut) p.throttleIn = WORLD.MIN_THROTTLE;
    if (inp.tapped('SPACE')) { world.log(p, '⚓ Anker fällt!', 'info'); audio.uiClick(); }
 
-   // main battery: hold left mouse -- BUT only actually fires once every ready turret's
-   // bearing is within TURRET_LOCK_DEG of the desired aim. This is the headline mechanic:
-   // ship.js already slews t.bearing toward aimBearing every tick at cfg.turretSlew rad/s
-   // (unchanged) -- we just gate the trigger on it instead of firing the instant you click.
+   // ---- weapon selection: number row. 1 = main battery, 2 = secondaries, 3 = AA.
+   // LEFT mouse hold fires whatever is selected; RIGHT mouse is pure free-look and never
+   // fires, so looking around can't accidentally shoot.
+   if (inp.tapped('1')) weaponSel = 'main';
+   else if (inp.tapped('2')) weaponSel = 'sec';
+   else if (inp.tapped('3')) weaponSel = 'aa';
+
+   // main-battery traverse gate: computed every frame regardless of selection so the HUD
+   // always shows the true turret state. ship.js slews t.bearing toward aimBearing each tick
+   // at cfg.turretSlew rad/s (unchanged) -- we just gate the main trigger on it.
    let anyReady = false, anyLocked = false;
    for (const t of p.turrets) {
       if (t.cd > 0) continue;
@@ -154,30 +167,30 @@ function controlPlayer(dt) {
       if (Math.abs(angleDelta(t.bearing, desiredRel)) < TURRET_LOCK_DEG) anyLocked = true;
    }
    world._turretLocked = anyReady ? anyLocked : null; // null = no turret off cooldown yet (HUD hides indicator)
-   if (inp.mouse.down && worldPt) {
-      const toAimVec = sub(worldPt, p.pos);
-      const d = Math.hypot(toAimVec.x, toAimVec.y);
-      if (d < p.cfg.main.range * 1.15 && p.fireTimer <= 0 && anyLocked) {
-         const n = p.fireMain(world, null, p.aim);
-         if (n > 0) audio.cannon(true);
-      }
-   }
 
-   // secondary + AA: hold RIGHT MOUSE (or X as an alternative). Right-mouse DRAG orbits the
-   // camera, but a held button also fires the casemate guns -- in WoWs you fire while you
-   // look around. Secondaries are fast-traversing guns: no turret-lock gate for these.
-   if (inp.mouse.right || inp.down('X')) {
-      if (p.secTimer <= 0) {
-         const n = p.fireSecondary(world, null, p.aim);
-         if (n > 0) audio.cannon(false);
-      }
-      if (p.cfg.aa && p.aaTimer <= 0) {
-         let best = null, bestD = p.cfg.aa.range;
-         for (const e of world.enemiesOf(p)) {
-            const dd = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y);
-            if (dd < bestD) { bestD = dd; best = e; }
+   if (inp.mouse.down && worldPt) {
+      if (weaponSel === 'main') {
+         const toAimVec = sub(worldPt, p.pos);
+         const d = Math.hypot(toAimVec.x, toAimVec.y);
+         if (d < p.cfg.main.range * 1.15 && p.fireTimer <= 0 && anyLocked) {
+            const n = p.fireMain(world, null, p.aim);
+            if (n > 0) audio.cannon(true);
          }
-         if (best) p.fireAA(world, best);
+      } else if (weaponSel === 'sec') {
+         // secondaries are fast-traversing casemate guns: no turret-lock gate.
+         if (p.secTimer <= 0) {
+            const n = p.fireSecondary(world, null, p.aim);
+            if (n > 0) audio.cannon(false);
+         }
+      } else if (weaponSel === 'aa' && p.cfg.aa) {
+         if (p.aaTimer <= 0) {
+            let best = null, bestD = p.cfg.aa.range;
+            for (const e of world.enemiesOf(p)) {
+               const dd = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y);
+               if (dd < bestD) { bestD = dd; best = e; }
+            }
+            if (best) p.fireAA(world, best);
+         }
       }
    }
 
@@ -227,6 +240,13 @@ function pollSounds(dt) {
    audio.updateEngine(p.speed, p.maxSpeed, phase !== 'playing');
 }
 
+// ---------- weapon-selection HUD ----------
+const weaponSelEl = $('weapon-sel');
+function updateWeaponHud() {
+   const label = weaponSel === 'main' ? '1 · Hauptbatterie' : weaponSel === 'sec' ? '2 · Sekundär' : '3 · Flak';
+   weaponSelEl.innerHTML = 'Waffe: <b>' + label + '</b>';
+}
+
 // ---------- turret-lock HUD ----------
 const turretStatusEl = $('turret-status');
 function updateTurretHud() {
@@ -266,6 +286,7 @@ function frame() {
          renderer.render(world, dt, cam3);
          hud.update(world);
          updateTurretHud();
+         updateWeaponHud();
       } else {
          renderer.render(emptyWorld(), dt, cam3);
       }

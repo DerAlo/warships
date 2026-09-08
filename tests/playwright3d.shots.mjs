@@ -98,22 +98,50 @@ if (Math.abs(camAfter - camBefore) < 0.01) { console.log('FAIL: free-look drag d
 console.log('free-look is persistent (no spring-back) ✔');
 await page.screenshot({ path: OUT + '/3d-03b-freelook.png' });
 
-// 4d) NEW WoWs control: holding RIGHT MOUSE fires secondaries + AA while you look around.
-// Hold it for ~1s (with a small drag so we're in the "looking around" state) and confirm the
-// secondary ammo readout leaves READY at least once (i.e. shots actually went off).
-const secBefore = await page.locator('#ammo-sec-n').textContent();
+// 4d) NEW WoWs control: weapons are switched with the NUMBER ROW (1/2/3), LEFT mouse hold
+// fires the selected weapon, and RIGHT mouse is PURE free-look that never fires anything.
+// Part 1: press '2' -> selection switches to secondaries (test hook + HUD label).
+await page.keyboard.down('2');
+await page.waitForTimeout(80);
+await page.keyboard.up('2');
+const selAfter2 = await page.evaluate(() => window.__weaponSel());
+const selLabel = await page.locator('#weapon-sel').textContent();
+console.log('weapon after pressing 2:', selAfter2, '| HUD label:', selLabel);
+if (selAfter2 !== 'sec') { console.log('FAIL: pressing 2 did not select secondaries'); exitCode = 1; }
+if (!selLabel.includes('Sekundär')) { console.log('FAIL: weapon HUD label does not show Sekundär'); exitCode = 1; }
+
+// Part 2: holding RIGHT MOUSE (with a small drag = "looking around") must NOT fire anything.
+const secBeforeLook = await page.locator('#ammo-sec-n').textContent();
 await page.mouse.move(700, 400);
 await page.mouse.down({ button: 'right' });
-let secFired = false;
+let firedWhileLooking = false;
 for (let i = 0; i < 10; i++) {
    await page.mouse.move(700 - i * 8, 400, { steps: 2 });
    await page.waitForTimeout(100);
    const sec = await page.locator('#ammo-sec-n').textContent();
-   if (sec !== 'READY') secFired = true;
+   if (sec !== 'READY') firedWhileLooking = true;
 }
 await page.mouse.up({ button: 'right' });
-console.log('secondary fired while holding right-mouse:', secFired, '(readout before:', secBefore + ')');
-if (!secFired) { console.log('FAIL: right-mouse hold did not fire secondaries'); exitCode = 1; }
+console.log('right-mouse free-look fired nothing:', !firedWhileLooking, '(readout before:', secBeforeLook + ')');
+if (firedWhileLooking) { console.log('FAIL: holding right-mouse fired a shot -- free-look must never fire'); exitCode = 1; }
+
+// Part 3: with secondaries selected, LEFT mouse hold fires them (readout leaves READY).
+let secFired = false;
+await page.mouse.down();
+for (let i = 0; i < 10; i++) {
+   await page.waitForTimeout(100);
+   const sec = await page.locator('#ammo-sec-n').textContent();
+   if (sec !== 'READY') secFired = true;
+}
+await page.mouse.up();
+console.log('secondaries fired via left-mouse while "2" selected:', secFired);
+if (!secFired) { console.log('FAIL: left-mouse hold did not fire the selected secondaries'); exitCode = 1; }
+
+// Back to main battery for the remaining steps.
+await page.keyboard.down('1');
+await page.waitForTimeout(80);
+await page.keyboard.up('1');
+if ((await page.evaluate(() => window.__weaponSel())) !== 'main') { console.log('FAIL: pressing 1 did not restore main battery'); exitCode = 1; }
 
 // 4e) NEW WoWs control: mouse wheel zooms the chase cam. Exercise both directions.
 for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(40); }
