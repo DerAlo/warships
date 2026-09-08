@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/ || true",
-    "screenshots": "node tests/playwright.shots.mjs"
+    "screenshots": "node tests/playwright.shots.mjs",
+    "screenshots:3d": "node tests/playwright3d.shots.mjs"
   },
   "devDependencies": {
     "playwright": "^1.62.1"

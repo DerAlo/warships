@@ -92,13 +92,22 @@ if (endVisible) {
    await page.click('#btn-play');
    await page.waitForTimeout(500);
 }
-await page.keyboard.press('p');
+// keyboard.down/up with a delay between them, not press() -- press() fires keydown+keyup
+// back-to-back within the same tick in some Chromium/Playwright versions, which can land
+// both before the next requestAnimationFrame runs (the game's edge-detected 'pressed' set
+// then sees down-then-up with no frame in between to observe the edge). A real keystroke
+// always spans at least one frame between press and release.
+await page.keyboard.down('p');
+await page.waitForTimeout(80);
+await page.keyboard.up('p');
 await page.waitForTimeout(300);
 const pauseVisible = await page.locator('#pause').isVisible();
 console.log('pause visible:', pauseVisible);
 if (!pauseVisible) { console.log('FAIL: pause overlay missing'); exitCode = 1; }
 await page.screenshot({ path: OUT + '/06-pause.png' });
-await page.keyboard.press('p');
+await page.keyboard.down('p');
+await page.waitForTimeout(80);
+await page.keyboard.up('p');
 await page.waitForTimeout(300);
 
 // 9) console error report

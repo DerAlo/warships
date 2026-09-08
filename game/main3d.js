@@ -1,0 +1,307 @@
+// game/main3d.js — 3D game entry point. Reuses the EXACT same simulation core as the 2D
+// game (World, Ship, updateBot, combat resolution) -- only rendering, input, and the
+// firing gate are different. The headline feature: turret traverse time is a real gate on
+// firing, not a loose 40deg cone (that's still used by the bot AI's _maybeFire, unchanged).
+import { sub, norm, angleOf, angleDelta, clamp, TAU, DEG } from './utils.js';
+import { WORLD } from './config.js';
+import { Input3D } from './input3d.js';
+import { Renderer3D } from './render3d.js';
+import { Hud } from './hud.js';
+import { Audio } from './audio.js';
+import { World } from './state.js';
+import { updateBot } from './ai.js';
+
+const $ = (id) => document.getElementById(id);
+const scene3d = $('scene3d');
+const fxCanvas = $('fx');
+
+// How tightly a turret must be aimed before the player can actually fire, in degrees.
+// This is the whole point of the 3D mode: WoWs-style, you wait for the rumble to stop.
+const TURRET_LOCK_DEG = 6 * DEG;
+
+const renderer = new Renderer3D(scene3d);
+renderer.setHudCanvases($('minimap-canvas'), $('compass-canvas'));
+const hud = new Hud();
+const audio = new Audio();
+const input = new Input3D(scene3d);
+
+function resize() {
+   const w = window.innerWidth, h = window.innerHeight;
+   renderer.resize(w, h);
+   const fxCtx = fxCanvas.getContext('2d');
+   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+   fxCanvas.width = Math.round(w * dpr); fxCanvas.height = Math.round(h * dpr);
+   fxCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+   const mm = $('minimap-canvas'), cp = $('compass-canvas');
+   mm.width = Math.round(180 * dpr); mm.height = Math.round(180 * dpr);
+   mm.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+   cp.width = Math.round(220 * dpr); cp.height = Math.round(84 * dpr);
+   cp.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+let world = null;
+let phase = 'menu';
+let endTimer = 0;
+let difficulty = 'normal';
+// orbit state, driven by mouse drag. Default yaw is offset slightly off dead-astern --
+// looking straight down the keel from directly behind reduces the whole ~250m hull to a
+// thin sliver; a small over-the-shoulder offset reads as an actual ship immediately.
+const cam3 = { yaw: 0.5, pitch: 0.5, zoomLevel: 'combat' };
+
+const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
+
+function startGame() {
+   world = new World(difficulty);
+   world.audio = audio;
+   renderer.buildObstacles(world);
+   cam3.yaw = 0.5; cam3.pitch = 0.5; cam3.zoomLevel = 'combat';
+   snd.kills = 0; snd.shotsP = 0; snd.shotsE = 0; snd.torps = 0;
+   phase = 'playing';
+   endTimer = 0;
+   input.gameActive = true;
+   $('menu').classList.add('hidden');
+   $('end').classList.add('hidden');
+   $('pause').classList.add('hidden');
+   hud.show(true);
+   audio.init();
+   audio.uiClick();
+}
+
+function showEnd() {
+   phase = 'ended';
+   input.gameActive = false;
+   const p = world.player;
+   const won = world.phase === 'won';
+   $('end-emoji').textContent = won ? '🏆' : '💀';
+   $('end-title').textContent = won ? 'SIEG' : 'NIEDERLAGE';
+   $('end-sub').textContent = won ? 'Alle feindlichen Schiffe versenkt.' : 'Die Bismarck ist gesunken.';
+   $('stat-kills').textContent = String(world.killCount);
+   $('stat-dmg').textContent = Math.round(p.dmgDealt).toLocaleString('de-DE');
+   const m = Math.floor(world.time / 60), s = Math.floor(world.time % 60);
+   $('stat-time').textContent = m + ':' + String(s).padStart(2, '0');
+   $('end').classList.remove('hidden');
+}
+
+// ---------- player controller ----------
+function controlPlayer(dt) {
+   const p = world.player;
+   if (!p || !p.alive) return;
+   const inp = input;
+
+   // camera orbit from mouse drag (yaw unrestricted, pitch clamped so you can't flip under the sea)
+   cam3.yaw -= inp.mouse.dx * 0.0032;
+   cam3.pitch = clamp(cam3.pitch - inp.mouse.dy * 0.0022, 0.12, 1.15);
+
+   // aim: raycast from screen center (the reticle) through the 3D scene onto the sea plane.
+   // This is what the turrets actually track toward -- same aimBearing field the 2D game
+   // uses, so ship.js's existing turret-slew integration needs no changes at all.
+   const worldPt = renderer.screenToWorld(0, 0);
+   if (worldPt) {
+      const toAim = sub(worldPt, p.pos);
+      p.aim = norm(toAim);
+      p.aimBearing = angleOf(toAim);
+      world._aimPoint = worldPt;
+   }
+
+   // helm & throttle
+   const helm = inp.helmAxis();
+   p.helm = clamp(helm, -1, 1);
+   const thr = inp.throttleAxis();
+   const anchorWasOut = p.anchorOut;
+   p.anchorOut = inp.down('SPACE');
+   if (thr !== 0 && !p.anchorOut) p.throttleIn = thr;
+   else if (!p.anchorOut && anchorWasOut) p.throttleIn = WORLD.MIN_THROTTLE;
+   if (inp.tapped('SPACE')) { world.log(p, '⚓ Anker fällt!', 'info'); audio.uiClick(); }
+
+   // main battery: hold left mouse -- BUT only actually fires once every ready turret's
+   // bearing is within TURRET_LOCK_DEG of the desired aim. This is the headline mechanic:
+   // ship.js already slews t.bearing toward aimBearing every tick at cfg.turretSlew rad/s
+   // (unchanged) -- we just gate the trigger on it instead of firing the instant you click.
+   let anyReady = false, anyLocked = false;
+   for (const t of p.turrets) {
+      if (t.cd > 0) continue;
+      anyReady = true;
+      const desiredRel = angleDelta(p.heading, p.aimBearing);
+      if (Math.abs(angleDelta(t.bearing, desiredRel)) < TURRET_LOCK_DEG) anyLocked = true;
+   }
+   world._turretLocked = anyReady ? anyLocked : null; // null = no turret off cooldown yet (HUD hides indicator)
+   if (inp.mouse.down && worldPt) {
+      const toAimVec = sub(worldPt, p.pos);
+      const d = Math.hypot(toAimVec.x, toAimVec.y);
+      if (d < p.cfg.main.range * 1.15 && p.fireTimer <= 0 && anyLocked) {
+         const n = p.fireMain(world, null, p.aim);
+         if (n > 0) audio.cannon(true);
+      }
+   }
+
+   // secondary + AA: hold right mouse (secondaries are fast-traversing casemate guns in
+   // real WoWs -- no lock gate for these, matches the 2D game's behavior)
+   if (inp.mouse.right) {
+      if (p.secTimer <= 0) {
+         const n = p.fireSecondary(world, null, p.aim);
+         if (n > 0) audio.cannon(false);
+      }
+      if (p.cfg.aa && p.aaTimer <= 0) {
+         let best = null, bestD = p.cfg.aa.range;
+         for (const e of world.enemiesOf(p)) {
+            const dd = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y);
+            if (dd < bestD) { bestD = dd; best = e; }
+         }
+         if (best) p.fireAA(world, best);
+      }
+   }
+
+   if (inp.tapped('F') && p.smoke.cd <= 0 && !p.smoke.active) {
+      p.smoke.active = true; p.smoke.t = WORLD.SMOKE_DURATION; p.smoke.cd = WORLD.SMOKE_CD + WORLD.SMOKE_DURATION;
+      world.log(p, 'Rauchvorhang gelegt', 'info');
+   }
+   if (inp.tapped('SHIFT') && p.cfg.boost && !p.boost.active && p.boost.cd <= 0) {
+      p.boost.active = true; p.boost.t = p.cfg.boost.dur; p.boost.cd = p.cfg.boost.cd;
+      world.log(p, '⚡ Turbo!', 'info');
+   }
+   if (inp.tapped('R')) {
+      if (p.fires.length || p.floods.length) { p.repairAll(); world.log(p, '🔧 Schäden behoben', 'info'); audio.uiClick(); }
+   }
+   if (inp.tapped('T') && p.cfg.torp && p.torpTimer <= 0) {
+      const n = p.fireTorpedo(world, null, p.aim);
+      if (n > 0) { world.log(p, '🐟 Torpedosalve!', 'warn'); audio.torpLaunch(); }
+   }
+   if (inp.tapped('M')) cam3.zoomLevel = cam3.zoomLevel === 'combat' ? 'overview' : 'combat';
+   if (inp.tapped('P')) togglePause();
+}
+
+function togglePause() {
+   if (phase === 'playing') { phase = 'paused'; input.gameActive = false; $('pause').classList.remove('hidden'); }
+   else if (phase === 'paused') { phase = 'playing'; input.gameActive = true; $('pause').classList.add('hidden'); }
+}
+
+function pollSounds(dt) {
+   const p = world.player;
+   snd.hitCd = Math.max(0, snd.hitCd - dt);
+   if (p.shotsFired > snd.shotsP) snd.shotsP = p.shotsFired;
+   let eShots = 0;
+   for (const b of world.bots) eShots += b.shotsFired;
+   if (eShots > snd.shotsE) { snd.shotsE = eShots; audio.cannon(false); }
+   if (world.torpedoes.length > snd.torps) audio.torpLaunch();
+   snd.torps = world.torpedoes.length;
+   if (world.killCount > snd.kills) { snd.kills = world.killCount; audio.sink(); }
+   for (const e of world.effects) {
+      if (e.age < dt * 1.5) {
+         if (e.kind === 'explosion') audio.explosion(e.big);
+         else if (e.kind === 'splash') audio.splash();
+         else if (e.kind === 'fire') audio.fireStart();
+      }
+   }
+   // camera shake is driven by world._shake (set in combat.js on hits) -- render3d.js
+   // reads it directly each frame, same convention as the 2D camera.
+   if (p.alive && p.hitFlash > 0.9 && snd.hitCd <= 0) { audio.hit(); snd.hitCd = 0.4; }
+   audio.updateEngine(p.speed, p.maxSpeed, phase !== 'playing');
+}
+
+// ---------- turret-lock HUD ----------
+const turretStatusEl = $('turret-status');
+function updateTurretHud() {
+   if (!world || !world.player || !world.player.alive) { turretStatusEl.classList.add('hidden'); return; }
+   const locked = world._turretLocked;
+   if (locked === null || locked === undefined) { turretStatusEl.classList.add('hidden'); return; }
+   turretStatusEl.classList.remove('hidden');
+   turretStatusEl.classList.toggle('locked', locked);
+   turretStatusEl.classList.toggle('slewing', !locked);
+   turretStatusEl.textContent = locked ? '🎯 EINGERASTET' : '🎯 TÜRME DREHEN…';
+}
+
+// ---------- main loop ----------
+let lastT = performance.now() / 1000;
+let acc = 0;
+
+function frame() {
+   requestAnimationFrame(frame);
+   const nowT = performance.now() / 1000;
+   let dt = nowT - lastT;
+   lastT = nowT;
+   if (dt > 0.25) dt = 0.25;
+
+   try {
+      if (phase === 'playing' && world) {
+         acc += dt;
+         let steps = 0;
+         while (acc >= WORLD.SIM_DT && steps < 5) { step(WORLD.SIM_DT); acc -= WORLD.SIM_DT; steps++; }
+         if (steps === 5) acc = 0;
+         pollSounds(WORLD.SIM_DT);
+         if ((world.phase === 'won' || world.phase === 'lost') && phase === 'playing') {
+            endTimer += dt;
+            if (endTimer > 1.6) showEnd();
+         }
+      }
+      if (world) {
+         renderer.render(world, dt, cam3);
+         hud.update(world);
+         updateTurretHud();
+      } else {
+         renderer.render(emptyWorld(), dt, cam3);
+      }
+   } catch (err) {
+      console.error('[warships-3d] frame error:', err);
+      if (!frame._errShown) {
+         frame._errShown = true;
+         const el = document.createElement('div');
+         el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99;background:#3a1414;color:#ffb4a8;padding:8px 14px;border-radius:6px;font:13px monospace';
+         el.textContent = '⚠ Fehler im Spiel-Loop: ' + err.message;
+         document.body.appendChild(el);
+      }
+   }
+   input.endFrame();
+}
+
+function emptyWorld() {
+   if (!emptyWorld._w) {
+      emptyWorld._w = {
+         time: 0, ships: [], shells: [], torpedoes: [], aaTracers: [], particles: [],
+         effects: [], smokeClouds: [], damageNumbers: [], obstacles: [], logLines: [],
+         player: null, bots: [], _shake: 0, _aimPoint: null,
+      };
+   }
+   emptyWorld._w.time += 1 / 60;
+   return emptyWorld._w;
+}
+
+function step(dt) {
+   controlPlayer(dt);
+   for (const b of world.bots) updateBot(b, world, dt);
+   world.update(dt);
+}
+
+// ---------- UI wiring ----------
+$('btn-play').addEventListener('click', startGame);
+$('btn-how').addEventListener('click', () => { $('howto').classList.remove('hidden'); audio.uiClick(); });
+$('btn-how-close').addEventListener('click', () => { $('howto').classList.add('hidden'); audio.uiClick(); });
+$('btn-again').addEventListener('click', startGame);
+$('btn-menu').addEventListener('click', () => {
+   $('end').classList.add('hidden'); $('menu').classList.remove('hidden'); hud.show(false); phase = 'menu';
+});
+$('btn-resume').addEventListener('click', togglePause);
+
+document.querySelectorAll('.chip[data-diff]').forEach(ch => {
+   ch.addEventListener('click', () => {
+      document.querySelectorAll('.chip[data-diff]').forEach(c => c.classList.remove('sel'));
+      ch.classList.add('sel');
+      difficulty = ch.dataset.diff;
+      audio.uiClick();
+   });
+});
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) audio.resume(); });
+
+window.addEventListener('error', (e) => {
+   console.error('[warships-3d] uncaught:', e.error || e.message);
+   const el = document.createElement('div');
+   el.style.cssText = 'position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:99;background:#3a1414;color:#ffb4a8;padding:6px 12px;border-radius:6px;font:12px monospace';
+   el.textContent = '⚠ ' + (e.message || 'Unbekannter Fehler');
+   document.body.appendChild(el);
+});
+
+$('loading').remove();
+$('menu').classList.remove('hidden');
+requestAnimationFrame(frame);
