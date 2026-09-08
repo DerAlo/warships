@@ -31,7 +31,7 @@ export class Renderer3D {
       // already hides anything past ~6-7km, so the camera was depth-testing/rendering a
       // sky sphere and sea plane sized for a view distance nothing in the game reaches.
       this.camera = new THREE.PerspectiveCamera(58, 1, 4, 7000);
-      this.camYaw = 0;      // camera bearing offset from ship heading (free-look, set by main3d)
+      this.camYaw = 0;      // world-space camera bearing (free-look, set by main3d) -- NOT tied to ship heading
       this.camPitch = 0.42; // radians above horizon
       this.camDist = 420;   // camera distance from the ship (wheel zoom, set by main3d)
 
@@ -328,9 +328,11 @@ export class Renderer3D {
       this.camDist = dist;
    }
 
-   // Third-person chase camera: follows the player ship at a fixed offset (camYaw/camPitch/
-   // camDist set via setCameraPose), always looking roughly at the ship. The base pose is
-   // locked to the heading; free-look offsets are applied by main3d.js on top of it.
+   // Third-person orbit camera: follows the player ship's POSITION at a fixed offset
+   // (camYaw/camPitch/camDist set via setCameraPose), always looking at the ship. The
+   // orientation is a WORLD-SPACE pose owned entirely by the player (right-mouse drag in
+   // main3d.js) -- it deliberately does NOT track the ship's heading, so steering with
+   // A/D moves the ship under a stable view instead of spinning the whole screen.
    _syncCamera(world, dt, camState) {
       const p = world.player;
       // world._shake is set by combat.js on hits/explosions (same convention the 2D
@@ -345,7 +347,9 @@ export class Renderer3D {
       // Height scales with distance so the framing stays roughly constant as you zoom out --
       // a fixed height would make the ship shrink to a dot in overview range.
       const height = 60 + dist * 0.4;
-      const yaw = -p.heading + this.camYaw;
+      // World-space bearing -- deliberately NOT derived from p.heading, so rudder input
+      // never rotates the view. The ship turns under a stable camera instead.
+      const yaw = this.camYaw;
       const cx = p.pos.x - Math.cos(yaw) * dist * Math.cos(this.camPitch);
       const cz = p.pos.y - Math.sin(yaw) * dist * Math.cos(this.camPitch);
       const cy = height + Math.sin(this.camPitch) * dist;

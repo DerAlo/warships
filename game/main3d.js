@@ -59,6 +59,8 @@ let difficulty = 'normal';
 // straight down the keel from directly behind reduces the ~250m hull to a sliver.
 const cam3 = { zoom: 420, yawOff: 0, pitchOff: 0 };
 window.__cam3 = cam3; // test hook (tests/playwright3d.shots.mjs reads this)
+window.__shipHdg = () => (world && world.player) ? world.player.heading : null; // test hook
+window.__world = () => world; // test hook (gate/shell-count assertions)
 
 const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 
@@ -66,7 +68,10 @@ function startGame() {
    world = new World(difficulty);
    world.audio = audio;
    renderer.buildObstacles(world);
-   cam3.zoom = 420; cam3.yawOff = 0; cam3.pitchOff = 0;
+   // Camera is now a world-space orbit pose (not heading-locked). Seed its yaw from the
+   // spawn heading so the opening frame still sits behind the ship -- then it STAYS there
+   // as you steer, instead of spinning with every rudder input.
+   cam3.zoom = 420; cam3.yawOff = -world.player.heading; cam3.pitchOff = 0;
    snd.kills = 0; snd.shotsP = 0; snd.shotsE = 0; snd.torps = 0;
    phase = 'playing';
    endTimer = 0;
