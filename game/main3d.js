@@ -42,7 +42,10 @@ function resize() {
    const mm = $('minimap-canvas'), cp = $('compass-canvas');
    mm.width = Math.round(180 * dpr); mm.height = Math.round(180 * dpr);
    mm.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
-   cp.width = Math.round(220 * dpr); cp.height = Math.round(84 * dpr);
+   // The compass canvas is a 220x42 CSS box (see index-3d.html) and _compass() draws into a
+   // 220x42 logical space -- the backing store must match that or the content gets squashed
+   // into the top half with a blank bottom half. (It was 84*dpr before: double height.)
+   cp.width = Math.round(220 * dpr); cp.height = Math.round(42 * dpr);
    cp.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener('resize', resize);
@@ -209,7 +212,8 @@ function controlPlayer(dt) {
       const n = p.fireTorpedo(world, null, p.aim);
       if (n > 0) { world.log(p, '🐟 Torpedosalve!', 'warn'); audio.torpLaunch(); }
    }
-   if (inp.tapped('P')) togglePause();
+   // NOTE: P (pause/resume) is handled in frame(), NOT here -- while paused the sim-step
+   // block is skipped entirely, so a tap handled only inside step() could never RESUME.
 }
 
 function togglePause() {
@@ -271,10 +275,21 @@ function frame() {
    if (dt > 0.25) dt = 0.25;
 
    try {
+      // P toggles pause/resume every frame regardless of phase -- while paused the sim-step
+      // block below is skipped entirely, so a tap handled only inside step() could never
+      // RESUME the game. Consuming it here makes both directions work identically.
+      if (world && input.tapped('P')) togglePause();
       if (phase === 'playing' && world) {
          acc += dt;
          let steps = 0;
-         while (acc >= WORLD.SIM_DT && steps < 5) { step(WORLD.SIM_DT); acc -= WORLD.SIM_DT; steps++; }
+         while (acc >= WORLD.SIM_DT && steps < 5) {
+            step(WORLD.SIM_DT);
+            acc -= WORLD.SIM_DT; steps++;
+            // Consume edge-triggered taps once per sim step: a key pressed this frame fires
+            // exactly once, not once per step of a multi-step frame (the old bug where P
+            // double-toggled and SPACE logged "Anker fällt!" twice on a 2-step frame).
+            input.consumeTaps();
+         }
          if (steps === 5) acc = 0;
          pollSounds(WORLD.SIM_DT);
          if ((world.phase === 'won' || world.phase === 'lost') && phase === 'playing') {

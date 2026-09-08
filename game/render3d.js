@@ -37,7 +37,6 @@ export class Renderer3D {
 
       this._buildLights();
       this._buildSea();
-      this._buildSky();
 
       this.shipMeshes = new Map();   // ship.id -> {group, turrets:[{mesh, turretRef}], hull}
       this.shellMeshes = new Map();  // shell.id -> mesh
@@ -47,6 +46,8 @@ export class Renderer3D {
 
       this.minimapCtx = null;
       this.compassCtx = null;
+      // Reused every frame by screenToWorld() (aim raycast) -- no per-call allocation.
+      this._ray = new THREE.Raycaster();
 
       this._shakeT = 0;
       this._shakeMag = 0;
@@ -119,13 +120,6 @@ export class Renderer3D {
       this._seaTime = 0;
    }
 
-   _buildSky() {
-      const geo = new THREE.SphereGeometry(9000, 24, 16);
-      const mat = new THREE.MeshBasicMaterial({ color: 0x0a1830, side: THREE.BackSide, fog: false });
-      this.sky = new THREE.Mesh(geo, mat);
-      this.scene.add(this.sky);
-   }
-
    _updateSea(dt) {
       this._seaTime += dt;
       // Displacement + normals happen in the vertex shader (see _buildSea) -- this is now
@@ -135,6 +129,16 @@ export class Renderer3D {
 
    // ================= OBSTACLES =================
    buildObstacles(world) {
+      // startGame() calls this on EVERY restart -- without removing the previous group each
+      // restart leaked a full set of island/reef meshes (verified: +7 meshes incl. +4
+      // shadow-casting islands per restart, growing linearly). Remove + dispose the old one.
+      if (this.obstacleGroup) {
+         this.scene.remove(this.obstacleGroup);
+         this.obstacleGroup.traverse((o) => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose());
+         });
+      }
       this.obstacleGroup = new THREE.Group();
       this.scene.add(this.obstacleGroup);
       for (const o of world.obstacles) {
@@ -146,23 +150,29 @@ export class Renderer3D {
                i === 0 ? shape.moveTo(x, z) : shape.lineTo(x, z);
             }
             shape.closePath();
-            const geo = new THREE.ExtrudeGeometry(shape, { depth: 60, bevelEnabled: true, bevelThickness: 8, bevelSize: 6, bevelSegments: 2 });
+            // Height scales with the island's footprint (was a fixed 60m depth for ALL islands,
+            // so a 900m-wide island rose only ~58m and read as a flat blade from the chase cam).
+            // Now ~12% of the radius: the 450m island tops out around +44m, the 260m one ~+21m.
+            const depth = Math.max(40, o.r * 0.12);
+            const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 8, bevelSize: 6, bevelSegments: 2 });
             // rotateX(-PI/2) makes the extrusion run UPWARD (+Y): the solid then spans
-            // y in [-8, +68] around its origin. (The old +PI/2 rotated it DOWNWARD, so with
+            // y in [-8, +depth+8] around its origin. (The old +PI/2 rotated it DOWNWARD, so with
             // the mesh parked at y=-6 only ~2m poked above water -- below the ~6m wave
             // amplitude -- which is why islands read as flat slivers that vanished in swells.)
             geo.rotateX(-Math.PI / 2);
             const mat = new THREE.MeshStandardMaterial({ color: 0x3a5a3a, roughness: 0.95 });
             const mesh = new THREE.Mesh(geo, mat);
-            // Top lands at ~+58m above the sea, base sinks to ~-18m (hidden under the water).
+            // Base sinks to ~-18m (hidden under the water), top rises to ~depth-2m above sea.
             mesh.position.set(o.c.x, -10, o.c.y);
             mesh.castShadow = true; mesh.receiveShadow = true;
             this.obstacleGroup.add(mesh);
          } else {
-            // reef: a flat translucent shallow-water disc, no solid geometry
+            // reef: a flat translucent shallow-water disc, no solid geometry. Kept faint --
+            // at chase-cam distance a big disc seen near edge-on reads as a solid teal blade
+            // (it looked like a floating object, not shallow water). 0.18 reads as a water tint.
             const geo = new THREE.CircleGeometry(o.r, 32);
             geo.rotateX(-Math.PI / 2);
-            const mat = new THREE.MeshBasicMaterial({ color: 0x5ac6aa, transparent: true, opacity: 0.28 });
+            const mat = new THREE.MeshBasicMaterial({ color: 0x5ac6aa, transparent: true, opacity: 0.18 });
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.set(o.c.x, 0.5, o.c.y);
             this.obstacleGroup.add(mesh);
@@ -280,7 +290,8 @@ export class Renderer3D {
          // mapping (worldY -> 3D Z); negate to match sim's CCW-positive convention.
          rec.group.rotation.y = -s.heading;
          for (const t of rec.turrets) t.mesh.rotation.y = -t.ref.bearing; // relative to hull, sim bearing is hull-relative too
-         rec.hullMat.emissive = new THREE.Color(s.hitFlash > 0 ? 0xffffff : 0x000000);
+         // setHex instead of `= new THREE.Color(...)` -- no per-ship-per-frame allocation.
+         rec.hullMat.emissive.setHex(s.hitFlash > 0 ? 0xffffff : 0x000000);
          rec.hullMat.emissiveIntensity = Math.max(0, s.hitFlash) * 0.6;
       }
       for (const [id, rec] of this.shipMeshes) if (!seen.has(id)) { this.scene.remove(rec.group); this.shipMeshes.delete(id); }
@@ -375,14 +386,14 @@ export class Renderer3D {
 
    // raycast helper for input3d.js: screen (nx,ny in [-1,1]) -> world point on sea plane
    screenToWorld(nx, ny) {
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera({ x: nx, y: ny }, this.camera);
+      // Reuse the instance Raycaster (set up in the constructor) -- no per-call allocation.
+      this._ray.setFromCamera({ x: nx, y: ny }, this.camera);
       const planeY = 0;
-      const dirY = ray.ray.direction.y;
+      const dirY = this._ray.ray.direction.y;
       if (Math.abs(dirY) < 1e-6) return null;
-      const t = (planeY - ray.ray.origin.y) / dirY;
+      const t = (planeY - this._ray.ray.origin.y) / dirY;
       if (t < 0) return null;
-      const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
+      const p = this._ray.ray.origin.clone().addScaledVector(this._ray.ray.direction, t);
       return { x: p.x, y: p.z };
    }
 

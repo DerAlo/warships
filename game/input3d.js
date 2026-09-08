@@ -37,7 +37,7 @@ export class Input3D {
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
       window.addEventListener('keyup', (e) => onKey(e, false));
-      window.addEventListener('blur', () => { this.keys.clear(); this.mouse.down = false; this.mouse.right = false; });
+      window.addEventListener('blur', () => { this.keys.clear(); this.pressed.clear(); this.mouse.down = false; this.mouse.right = false; });
 
       this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -112,6 +112,12 @@ export class Input3D {
       }
       return key.toUpperCase();
    }
+
+   // Clear ONLY the edge-triggered tap set. main3d.js calls this after EACH fixed sim step so
+   // a key pressed once fires exactly once per step instead of re-firing on every step of a
+   // multi-step frame (the old bug: P double-toggled, SPACE logged "Anker fällt!" twice).
+   // endFrame() still clears dx/dy/wheel once per animation frame as before.
+   consumeTaps() { this.pressed.clear(); }
 
    endFrame() { this.pressed.clear(); this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0; }
 

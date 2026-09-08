@@ -89,7 +89,7 @@ export class Hud {
       else if (p.hp < p.maxHP * 0.4) line = '🔴 Rumpf kritisch — absetzen & reparieren';
       else if (aliveBots === 0) line = '🏆 Sieg!';
       else if (world.time < 20) line = 'Feindliche Flotte voraus — Position beziehen';
-      else line = `Kampf in Gange — ${aliveBots} Feind${aliveBots === 1 ? '' : 'e'} aktiv`;
+      else line = `Der Kampf ist im Gange — ${aliveBots} Feind${aliveBots === 1 ? '' : 'e'} aktiv`;
       e.statusLine.textContent = line;
       e.detectStatus.classList.toggle('hidden', !(p.alive && world.isSpotted(p)));
       e.anchorStatus.classList.toggle('hidden', !(p.alive && p.anchorOut));

@@ -64,10 +64,14 @@ let sawSlewing = false, badCombo = false;
 for (let i = 0; i < 15; i++) {
    await page.mouse.move(700 - i * 25, 400, { steps: 3 });
    await page.waitForTimeout(60);
-   const [status, ammo] = await Promise.all([
-      page.locator('#turret-status').textContent(),
-      page.locator('#ammo-main-n').textContent(),
-   ]);
+   // ATOMIC snapshot: both readouts in ONE evaluate. Two separate textContent() round-trips
+   // left a window where the sim could finish the slew AND fire between the reads -- that
+   // produced false "slewing + fired" positives even though the in-game gate (main3d.js)
+   // checks anyLocked in the same frame as the fire call.
+   const { status, ammo } = await page.evaluate(() => ({
+      status: document.getElementById('turret-status').textContent,
+      ammo: document.getElementById('ammo-main-n').textContent,
+   }));
    if (status.includes('DREHEN')) { sawSlewing = true; if (ammo !== 'READY') badCombo = true; }
 }
 await page.mouse.up();
@@ -177,6 +181,19 @@ const pauseVisible = await page.locator('#pause').isVisible();
 console.log('pause visible:', pauseVisible);
 if (!pauseVisible) { console.log('FAIL: pause overlay missing'); exitCode = 1; }
 await page.screenshot({ path: OUT + '/3d-05-pause.png' });
+
+// 6b) THE core fix: P must RESUME, not just pause. The old bug handled the P tap only inside
+// the sim-step block, which is skipped while paused -- so a second P could never unpause.
+// Now frame() consumes the tap every frame regardless of phase. Press P again -> overlay gone.
+if (pauseVisible) {
+   await page.keyboard.down('p');
+   await page.waitForTimeout(80);
+   await page.keyboard.up('p');
+   await page.waitForTimeout(300);
+   const resumed = !(await page.locator('#pause').isVisible());
+   console.log('resume via second P press works:', resumed);
+   if (!resumed) { console.log('FAIL: second P press did not resume from pause'); exitCode = 1; }
+}
 
 // 7) console/shader error report
 if (errors.length) {
