@@ -1,7 +1,7 @@
 // game/ship.js — the shared ship integrator (player + bots) plus the Bismarck weapon model.
 // Movement has weight/inertia so it feels like a 45,000-ton warship, not an arcade car.
 import { add, sub, scale, fromAngle, angleOf, angleDelta, clamp, approach, fromAngle as pol,
-   clamp01, smoothstep, TAU, DEG } from './utils.js';
+   clamp01, smoothstep, dist, TAU, DEG } from './utils.js';
 import { WORLD, SHIPS, COMBAT } from './config.js';
 
 // Build the turret layout for a ship. Bismarck: 4 turrets x 2 guns (A,B forward; X,Y aft).
@@ -307,10 +307,11 @@ export class Ship {
          const rel = t.bearing;
          const muzzle = this._muzzle(t, rel);
          const gCount = Math.max(1, Math.round(t.guns * mult));
+         const estRange = target ? dist(muzzle, target.pos) : null;
          for (let g = 0; g < gCount; g++) {
             const spread = this._fireSpread(world, target);
             const dir = fromAngle(this.aimBearing + spread + (Math.random() - 0.5) * 0.02);
-            world.spawnShell(this, muzzle, dir, this.cfg.main, 'main');
+            world.spawnShell(this, muzzle, dir, this.cfg.main, 'main', estRange);
             n++;
          }
          this.shotsFired += gCount;
@@ -330,9 +331,10 @@ export class Ship {
          const side = i % 2 ? 1 : -1;
          const off = { x: (Math.random() - 0.5) * 60, y: side * 10 };
          const muzzle = add(this.pos, rotate(off, this.heading));
+         const estRange = target ? dist(muzzle, target.pos) : null;
          const spread = this._fireSpread(world, target, 1.6);
          const dir = fromAngle(this.aimBearing + spread + (Math.random() - 0.5) * 0.05);
-         world.spawnShell(this, muzzle, dir, this.cfg.sec, 'sec');
+         world.spawnShell(this, muzzle, dir, this.cfg.sec, 'sec', estRange);
          n++;
       }
       this.world.addMuzzleFlash(this, this.aimBearing);

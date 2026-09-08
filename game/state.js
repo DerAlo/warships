@@ -146,12 +146,22 @@ export class World {
    }
 
    // ---- dispatch: projectiles ----
-   spawnShell(shooter, muzzle, dir, gun, kind = 'main') {
+   // estRange: real muzzle-to-target distance, used to size the ballistic arc so it spans
+   // the WHOLE flight (crests at the midpoint, descends to the target) instead of a fixed
+   // ~1.2s hop. Optional -- callers that can't estimate a target fall back to a guess.
+   spawnShell(shooter, muzzle, dir, gun, kind = 'main', estRange = null) {
       if (this.shells.length > TUNE.maxProjectiles) return;
       const dmgMult = shooter.dmgMult || 1;
+      const vShell = gun.vShell || 650;
+      // Previously this used dist(muzzle, shooter.pos) -- the turret's offset from the
+      // ship's OWN center (a few meters) -- instead of the distance to the target. That
+      // capped the visible arc at ~1.2s no matter the shot: the shell hopped once right
+      // after firing, then flew dead flat and laser-straight for the rest of a long-range
+      // shot. Real WoWs-style plunging fire arcs across the entire flight.
+      const range = Math.max(estRange || gun.range || 800, 150);
       this.shells.push({
          id: ++SEQ, pos: { x: muzzle.x, y: muzzle.y },
-         vel: { x: dir.x * (gun.vShell || 650), y: dir.y * (gun.vShell || 650) },
+         vel: { x: dir.x * vShell, y: dir.y * vShell },
          dir: angleOf(dir),
          owner: shooter.side,
          shooter, gun, kind,
@@ -159,8 +169,8 @@ export class World {
          ap: gun.ap || 0,
          type: gun.type || 'AP',
          age: 0,
-         arc: 0,           // for visual parabola
-         arcDur: Math.hypot(dir.x, dir.y) > 0 ? (dist(muzzle, shooter.pos) / (gun.vShell || 650)) + 1.2 : 1.2,
+         arc: 0,           // 0..1 flight-phase fraction; drives visual height (render.js)
+         arcDur: range / vShell,
          alive: true,
       });
    }

@@ -80,7 +80,18 @@ console.log('hp:', hpText, 'speed:', speedText, 'log lines:', logLines);
 // ship must have moved (speed readout non-zero at some point) — check heading changed via compass canvas pixels? Simpler: hp/speed strings exist
 if (!hpText || !speedText) { console.log('FAIL: HUD readouts empty'); exitCode = 1; }
 
-// 8) pause / resume
+// 8) pause / resume -- combat is fast now, so the Bismarck may already have sunk (or won)
+// by this point; the end screen legitimately blocks pause (P only works mid-match), so
+// restart a fresh easy match here rather than treat that as a bug in the pause feature.
+const endVisible = await page.locator('#end').isVisible();
+if (endVisible) {
+   console.log('match already ended before pause check (fast combat) -- starting a fresh easy match');
+   await page.click('#btn-again');
+   await page.waitForTimeout(300);
+   await page.click('.chip[data-diff="easy"]');
+   await page.click('#btn-play');
+   await page.waitForTimeout(500);
+}
 await page.keyboard.press('p');
 await page.waitForTimeout(300);
 const pauseVisible = await page.locator('#pause').isVisible();

@@ -287,6 +287,13 @@ export function updateBot(bot, world, dt) {
 Ship.prototype._maybeFire = function (world, target, dt) {
    // fireTimer is already decremented in ship.js update() — don't double it here.
    if (this.fireTimer > 0) return;
+   // Smoke used to only intercept shells already in flight (combat.js) -- it never stopped
+   // a shooter from acquiring/tracking a smoked target in the first place, so bots kept
+   // firing dead-accurate lead shots at a ship that was supposed to be invisible. Real
+   // smoke breaks targeting outright: a target sitting in a cloud that isn't its own side's
+   // cannot be fired on at all -- this is what makes ducking into smoke actually work as an
+   // escape, instead of merely giving incoming shells a random chance to be intercepted.
+   if (world.inSmoke(target.pos, target.side)) return;
    const d = dist(this.pos, target.pos);
    const bearing = angleOf(sub(target.pos, this.pos));
    // the TURRET must face the target (hull may kite at 90°); any ready turret in cone suffices
