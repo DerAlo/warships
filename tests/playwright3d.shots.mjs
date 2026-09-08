@@ -41,12 +41,23 @@ console.log('hud visible:', hudVisible);
 if (!hudVisible) { console.log('FAIL: hud not visible after start'); exitCode = 1; }
 await page.screenshot({ path: OUT + '/3d-02-battle.png' });
 
-// 4) THE core mechanic: turret-lock gates firing. Hold the trigger throughout a moderate
-// camera/aim swing (real intermediate mousemove events, not a teleport) and sample the
-// turret-status + ammo readout together at each step -- across the whole swing, we must
-// NEVER observe "still slewing" together with a fired shot (ammo != READY). This doesn't
-// require catching an exact slewing instant to pass; it just must never see the forbidden
-// combination, across however many samples actually land mid-slew.
+// 4a) NEW WoWs control: the reticle follows the live cursor. Move the pointer and confirm
+// the on-screen reticle (#reticle3d) tracks it (its left/top move with the cursor).
+await page.mouse.move(400, 300);
+await page.waitForTimeout(120);
+const r1 = await page.locator('#reticle3d').evaluate(el => ({ l: el.style.left, t: el.style.top }));
+await page.mouse.move(900, 500);
+await page.waitForTimeout(120);
+const r2 = await page.locator('#reticle3d').evaluate(el => ({ l: el.style.left, t: el.style.top }));
+const reticleFollows = r1.l !== r2.l && r1.t !== r2.t;
+console.log('reticle follows cursor:', reticleFollows, JSON.stringify(r1), '->', JSON.stringify(r2));
+if (!reticleFollows) { console.log('FAIL: reticle did not track the cursor'); exitCode = 1; }
+
+// 4b) THE core mechanic: turret-lock gates firing. Aim is now driven by the CURSOR position
+// (raycast onto the sea plane). Hold the trigger while sweeping the cursor across the screen
+// (real intermediate mousemove events, not a teleport) and sample the turret-status + ammo
+// readout together at each step -- across the whole sweep we must NEVER observe "still
+// slewing" together with a fired shot (ammo != READY).
 await page.mouse.move(700, 400);
 await page.mouse.down();
 let sawSlewing = false, badCombo = false;
@@ -60,9 +71,9 @@ for (let i = 0; i < 15; i++) {
    if (status.includes('DREHEN')) { sawSlewing = true; if (ammo !== 'READY') badCombo = true; }
 }
 await page.mouse.up();
-console.log('observed a slewing sample during the swing:', sawSlewing, '| forbidden (slewing+fired) combo seen:', badCombo);
+console.log('observed a slewing sample during the sweep:', sawSlewing, '| forbidden (slewing+fired) combo seen:', badCombo);
 if (badCombo) { console.log('FAIL: main battery fired while turrets were still slewing'); exitCode = 1; }
-if (!sawSlewing) console.log('NOTE: swing never caught the turrets mid-slew this run -- gate untested but not failed');
+if (!sawSlewing) console.log('NOTE: sweep never caught the turrets mid-slew this run -- gate untested but not failed');
 await page.waitForTimeout(3500);
 await page.mouse.down();
 await page.waitForTimeout(300);
@@ -70,6 +81,23 @@ const ammoAfterLock = await page.locator('#ammo-main-n').textContent();
 await page.mouse.up();
 console.log('ammo main after letting turrets settle + firing (cooldown expected if a target was in range):', ammoAfterLock);
 await page.screenshot({ path: OUT + '/3d-03-turretlock.png' });
+
+// 4c) NEW WoWs control: right-mouse DRAG is free-look (orbits the chase cam) and springs
+// back on release. Exercise it and confirm no errors are thrown by the drag path.
+await page.mouse.move(720, 405);
+await page.mouse.down({ button: 'right' });
+for (let i = 0; i < 8; i++) { await page.mouse.move(720 - i * 20, 405 - i * 6, { steps: 2 }); await page.waitForTimeout(30); }
+await page.mouse.up({ button: 'right' });
+await page.waitForTimeout(400); // let the spring-back ease out
+console.log('free-look drag exercised (no error thrown)');
+await page.screenshot({ path: OUT + '/3d-03b-freelook.png' });
+
+// 4d) NEW WoWs control: mouse wheel zooms the chase cam. Exercise both directions.
+for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(40); }
+await page.waitForTimeout(200);
+for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, -120); await page.waitForTimeout(40); }
+await page.waitForTimeout(200);
+console.log('wheel zoom exercised (no error thrown)');
 
 // 5) basic drive + HUD sanity
 await page.keyboard.down('w');

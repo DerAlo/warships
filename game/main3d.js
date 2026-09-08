@@ -14,10 +14,17 @@ import { updateBot } from './ai.js';
 const $ = (id) => document.getElementById(id);
 const scene3d = $('scene3d');
 const fxCanvas = $('fx');
+const reticleEl = $('reticle3d');
 
 // How tightly a turret must be aimed before the player can actually fire, in degrees.
 // This is the whole point of the 3D mode: WoWs-style, you wait for the rumble to stop.
 const TURRET_LOCK_DEG = 6 * DEG;
+
+// Chase-camera zoom range (meters). WoWs uses a scroll wheel to dolly in/out; we map the
+// wheel to a continuous distance between these bounds instead of two discrete levels.
+const ZOOM_MIN = 260, ZOOM_MAX = 1500;
+// Neutral over-the-shoulder pose (the camera rests here when no free-look offset is applied).
+const CAM_BASE_YAW = 0.5, CAM_BASE_PITCH = 0.5;
 
 const renderer = new Renderer3D(scene3d);
 renderer.setHudCanvases($('minimap-canvas'), $('compass-canvas'));
@@ -45,10 +52,12 @@ let world = null;
 let phase = 'menu';
 let endTimer = 0;
 let difficulty = 'normal';
-// orbit state, driven by mouse drag. Default yaw is offset slightly off dead-astern --
-// looking straight down the keel from directly behind reduces the whole ~250m hull to a
-// thin sliver; a small over-the-shoulder offset reads as an actual ship immediately.
-const cam3 = { yaw: 0.5, pitch: 0.5, zoomLevel: 'combat' };
+// Chase-camera state. `zoom` is the continuous camera distance (wheel-driven). `yawOff`/
+// `pitchOff` are FREE-LOOK offsets applied on top of the neutral over-the-shoulder pose and
+// spring back to 0 when right-mouse is released -- so the default view (and the cursor->world
+// aim mapping) stays stable while you aim. The base pose is offset slightly off dead-astern:
+// looking straight down the keel from directly behind reduces the ~250m hull to a sliver.
+const cam3 = { zoom: 420, yawOff: 0, pitchOff: 0 };
 
 const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 
@@ -56,7 +65,7 @@ function startGame() {
    world = new World(difficulty);
    world.audio = audio;
    renderer.buildObstacles(world);
-   cam3.yaw = 0.5; cam3.pitch = 0.5; cam3.zoomLevel = 'combat';
+   cam3.zoom = 420; cam3.yawOff = 0; cam3.pitchOff = 0;
    snd.kills = 0; snd.shotsP = 0; snd.shotsE = 0; snd.torps = 0;
    phase = 'playing';
    endTimer = 0;
@@ -90,20 +99,39 @@ function controlPlayer(dt) {
    if (!p || !p.alive) return;
    const inp = input;
 
-   // camera orbit from mouse drag (yaw unrestricted, pitch clamped so you can't flip under the sea)
-   cam3.yaw -= inp.mouse.dx * 0.0032;
-   cam3.pitch = clamp(cam3.pitch - inp.mouse.dy * 0.0022, 0.12, 1.15);
+   // ---- chase camera (WoWs-style) ----
+   // Wheel dollies the camera in/out. Right-mouse DRAG is free-look: it adds a yaw/pitch
+   // offset on top of the neutral over-the-shoulder pose. On release the offset springs
+   // back to zero, so the resting view -- and therefore the cursor->world aim mapping --
+   // is always the same predictable pose. Pitch is clamped so you can't dip under the sea.
+   cam3.zoom = clamp(cam3.zoom * Math.pow(1.08, inp.mouse.wheel), ZOOM_MIN, ZOOM_MAX);
+   if (inp.mouse.right) {
+      cam3.yawOff -= inp.mouse.dx * 0.0032;
+      cam3.pitchOff = clamp(cam3.pitchOff - inp.mouse.dy * 0.0022, -0.4, 0.75);
+   } else {
+      // spring back to the neutral pose (exponential ease, frame-rate independent)
+      const k = 1 - Math.exp(-dt / 0.18);
+      cam3.yawOff *= (1 - k);
+      cam3.pitchOff *= (1 - k);
+      if (Math.abs(cam3.yawOff) < 0.002) cam3.yawOff = 0;
+      if (Math.abs(cam3.pitchOff) < 0.002) cam3.pitchOff = 0;
+   }
+   renderer.setCameraPose(CAM_BASE_YAW + cam3.yawOff, CAM_BASE_PITCH + cam3.pitchOff, cam3.zoom);
 
-   // aim: raycast from screen center (the reticle) through the 3D scene onto the sea plane.
-   // This is what the turrets actually track toward -- same aimBearing field the 2D game
-   // uses, so ship.js's existing turret-slew integration needs no changes at all.
-   const worldPt = renderer.screenToWorld(0, 0);
+   // ---- aim: raycast from the CURSOR through the scene onto the sea plane ----
+   // This is what the turrets track toward -- same aimBearing field the 2D game uses, so
+   // ship.js's existing turret-slew integration needs no changes at all. The reticle under
+   // the cursor marks exactly this point.
+   const worldPt = renderer.screenToWorld(inp.mouse.x, inp.mouse.y);
    if (worldPt) {
       const toAim = sub(worldPt, p.pos);
       p.aim = norm(toAim);
       p.aimBearing = angleOf(toAim);
       world._aimPoint = worldPt;
    }
+   // park the on-screen reticle under the live cursor
+   reticleEl.style.left = inp.mouse.mx + 'px';
+   reticleEl.style.top = inp.mouse.my + 'px';
 
    // helm & throttle
    const helm = inp.helmAxis();
@@ -136,9 +164,9 @@ function controlPlayer(dt) {
       }
    }
 
-   // secondary + AA: hold right mouse (secondaries are fast-traversing casemate guns in
-   // real WoWs -- no lock gate for these, matches the 2D game's behavior)
-   if (inp.mouse.right) {
+   // secondary + AA: hold X (right mouse is now free-look). Secondaries are fast-traversing
+   // casemate guns in real WoWs -- no lock gate for these, matches the 2D game's behavior.
+   if (inp.down('X')) {
       if (p.secTimer <= 0) {
          const n = p.fireSecondary(world, null, p.aim);
          if (n > 0) audio.cannon(false);
@@ -168,7 +196,6 @@ function controlPlayer(dt) {
       const n = p.fireTorpedo(world, null, p.aim);
       if (n > 0) { world.log(p, '🐟 Torpedosalve!', 'warn'); audio.torpLaunch(); }
    }
-   if (inp.tapped('M')) cam3.zoomLevel = cam3.zoomLevel === 'combat' ? 'overview' : 'combat';
    if (inp.tapped('P')) togglePause();
 }
 

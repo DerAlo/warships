@@ -31,8 +31,9 @@ export class Renderer3D {
       // already hides anything past ~6-7km, so the camera was depth-testing/rendering a
       // sky sphere and sea plane sized for a view distance nothing in the game reaches.
       this.camera = new THREE.PerspectiveCamera(58, 1, 4, 7000);
-      this.camYaw = 0;      // camera bearing offset from ship heading (mouse-driven orbit)
+      this.camYaw = 0;      // camera bearing offset from ship heading (free-look, set by main3d)
       this.camPitch = 0.42; // radians above horizon
+      this.camDist = 420;   // camera distance from the ship (wheel zoom, set by main3d)
 
       this._buildLights();
       this._buildSea();
@@ -318,9 +319,18 @@ export class Renderer3D {
       for (const [id, mesh] of this.torpMeshes) if (!seen.has(id)) { this.scene.remove(mesh); this.torpMeshes.delete(id); }
    }
 
-   // Third-person chase camera: follows the player ship, orbit offset from mouse (camYaw/
-   // camPitch), always looking roughly at the ship. camState carries {yawInput, pitchInput,
-   // zoomLevel} set by input3d.js.
+   // Set by main3d.js each frame with the resolved chase-camera pose (base over-the-shoulder
+   // pose + free-look offsets + wheel zoom). Stored here so _syncCamera can consume it and so
+   // screenToWorld() raycasts against the exact camera the player is looking through.
+   setCameraPose(yaw, pitch, dist) {
+      this.camYaw = yaw;
+      this.camPitch = pitch;
+      this.camDist = dist;
+   }
+
+   // Third-person chase camera: follows the player ship at a fixed offset (camYaw/camPitch/
+   // camDist set via setCameraPose), always looking roughly at the ship. The base pose is
+   // locked to the heading; free-look offsets are applied by main3d.js on top of it.
    _syncCamera(world, dt, camState) {
       const p = world.player;
       // world._shake is set by combat.js on hits/explosions (same convention the 2D
@@ -331,10 +341,10 @@ export class Renderer3D {
          this.camera.lookAt(0, 0, 0);
          return;
       }
-      const dist = camState.zoomLevel === 'overview' ? 1400 : 420;
-      const height = camState.zoomLevel === 'overview' ? 1100 : 170;
-      this.camYaw = camState.yaw;
-      this.camPitch = camState.pitch;
+      const dist = this.camDist || 420;
+      // Height scales with distance so the framing stays roughly constant as you zoom out --
+      // a fixed height would make the ship shrink to a dot in overview range.
+      const height = 60 + dist * 0.4;
       const yaw = -p.heading + this.camYaw;
       const cx = p.pos.x - Math.cos(yaw) * dist * Math.cos(this.camPitch);
       const cz = p.pos.y - Math.sin(yaw) * dist * Math.cos(this.camPitch);
