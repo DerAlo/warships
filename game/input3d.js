@@ -7,11 +7,11 @@
 //     follows the cursor, there is no fixed screen-center crosshair.
 //   • LEFT mouse (hold) fires the main battery (still gated by turret traverse in main3d).
 //   • RIGHT mouse (hold + drag) is FREE-LOOK: it orbits the chase camera around the ship.
-//     The offset springs back to the neutral over-the-shoulder pose on release, so the
-//     default view -- and therefore the cursor->world mapping -- stays stable and
-//     predictable while you aim.
+//     The offset is PERSISTENT -- it stays where you left it (no spring-back), so you can
+//     pick your own perspective. A held right button ALSO fires secondaries + AA while you
+//     look around (X works as an alternative), like in WoWs.
 //   • MOUSE WHEEL zooms the chase camera in/out.
-//   • X fires secondaries + AA (moved off right-mouse, which is now free-look).
+//   • WASD/QE only steer the ship -- they never move the camera.
 export class Input3D {
    constructor(canvas) {
       this.canvas = canvas;

@@ -82,17 +82,40 @@ await page.mouse.up();
 console.log('ammo main after letting turrets settle + firing (cooldown expected if a target was in range):', ammoAfterLock);
 await page.screenshot({ path: OUT + '/3d-03-turretlock.png' });
 
-// 4c) NEW WoWs control: right-mouse DRAG is free-look (orbits the chase cam) and springs
-// back on release. Exercise it and confirm no errors are thrown by the drag path.
+// 4c) NEW WoWs control: right-mouse DRAG is free-look (orbits the chase cam) and the
+// perspective is PERSISTENT -- it stays where you left it, no spring-back. Drag, release,
+// wait well past any hypothetical easing time, and confirm the yaw offset is still there.
 await page.mouse.move(720, 405);
+const camBefore = await page.evaluate(() => window.__cam3.yawOff);
 await page.mouse.down({ button: 'right' });
 for (let i = 0; i < 8; i++) { await page.mouse.move(720 - i * 20, 405 - i * 6, { steps: 2 }); await page.waitForTimeout(30); }
 await page.mouse.up({ button: 'right' });
-await page.waitForTimeout(400); // let the spring-back ease out
-console.log('free-look drag exercised (no error thrown)');
+await page.waitForTimeout(1500); // long past any spring-back easing (old rate was 0.18s)
+const camAfter = await page.evaluate(() => window.__cam3.yawOff);
+console.log('free-look yaw offset before drag:', camBefore.toFixed(4), '| after release + 1.5s:', camAfter.toFixed(4));
+if (Math.abs(camAfter) < 0.05) { console.log('FAIL: free-look offset did not persist after release'); exitCode = 1; }
+if (Math.abs(camAfter - camBefore) < 0.01) { console.log('FAIL: free-look drag did not move the camera'); exitCode = 1; }
+console.log('free-look is persistent (no spring-back) ✔');
 await page.screenshot({ path: OUT + '/3d-03b-freelook.png' });
 
-// 4d) NEW WoWs control: mouse wheel zooms the chase cam. Exercise both directions.
+// 4d) NEW WoWs control: holding RIGHT MOUSE fires secondaries + AA while you look around.
+// Hold it for ~1s (with a small drag so we're in the "looking around" state) and confirm the
+// secondary ammo readout leaves READY at least once (i.e. shots actually went off).
+const secBefore = await page.locator('#ammo-sec-n').textContent();
+await page.mouse.move(700, 400);
+await page.mouse.down({ button: 'right' });
+let secFired = false;
+for (let i = 0; i < 10; i++) {
+   await page.mouse.move(700 - i * 8, 400, { steps: 2 });
+   await page.waitForTimeout(100);
+   const sec = await page.locator('#ammo-sec-n').textContent();
+   if (sec !== 'READY') secFired = true;
+}
+await page.mouse.up({ button: 'right' });
+console.log('secondary fired while holding right-mouse:', secFired, '(readout before:', secBefore + ')');
+if (!secFired) { console.log('FAIL: right-mouse hold did not fire secondaries'); exitCode = 1; }
+
+// 4e) NEW WoWs control: mouse wheel zooms the chase cam. Exercise both directions.
 for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(40); }
 await page.waitForTimeout(200);
 for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, -120); await page.waitForTimeout(40); }
