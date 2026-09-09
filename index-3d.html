@@ -82,14 +82,32 @@
    #log .l.dmg { color:#ffcf6b; } #log .l.kill { color:#7CFF9A; font-weight:700; }
    #log .l.warn { color:#ff6a5a; }
 
-   /* ---- crosshair (follows the live cursor; main3d.js sets left/top each frame) ---- */
-   #reticle3d { position: fixed; left: 0; top: 0; width: 22px; height: 22px;
+   /* ---- crosshair: fixed dead-centre now (WoWs-style -- the mouse turns the camera/turrets,
+      it no longer moves a cursor around the screen, so there's nothing for it to follow). ---- */
+   #reticle3d { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
       transform: translate(-50%,-50%); pointer-events: none; z-index: 5; }
-   /* native cursor is hidden over the play field -- the reticle IS the cursor now */
+   /* native cursor is hidden over the play field -- mouse-look has no on-screen cursor */
    #scene3d { cursor: none; }
    #reticle3d::before, #reticle3d::after { content: ''; position: absolute; background: rgba(255,212,121,.9); }
    #reticle3d::before { left: 0; right: 0; top: 50%; height: 1.5px; transform: translateY(-50%); }
    #reticle3d::after { top: 0; bottom: 0; left: 50%; width: 1.5px; transform: translateX(-50%); }
+
+   /* ---- sniper scope overlay: engaged when the wheel zooms all the way in (render3d.js /
+      main3d.js decide the threshold; this class is toggled by main3d.js each frame). A dark
+      vignette + a ranging reticle + a distance readout sell "looking through the rangefinder"
+      instead of just a tighter FOV. ---- */
+   #scope-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0; transition: opacity .18s; }
+   #scope-overlay.on { opacity: 1; }
+   #scope-overlay .vignette { position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 50%, transparent 32%, rgba(0,0,0,.92) 62%); }
+   #scope-overlay .ring { position: absolute; left: 50%; top: 50%; width: 62vh; height: 62vh;
+      transform: translate(-50%,-50%); border-radius: 50%; border: 1px solid rgba(200,225,255,.35); }
+   #scope-overlay .tick { position: absolute; left: 50%; top: 50%; background: rgba(200,225,255,.55); }
+   #scope-overlay .tick.h { width: 40vh; height: 1px; transform: translate(-50%,-50%); }
+   #scope-overlay .tick.v { width: 1px; height: 40vh; transform: translate(-50%,-50%); }
+   #scope-range { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
+      font-family: var(--mono); font-size: 15px; font-weight: 700; color: #cfe8ff;
+      text-shadow: 0 0 10px rgba(120,180,255,.6); letter-spacing: 1px; }
 
    /* ---- Overlays (menu / end) ---- */
    .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -128,6 +146,13 @@
    <canvas id="scene3d"></canvas>
    <canvas id="fx"></canvas>
    <div id="reticle3d"></div>
+   <div id="scope-overlay">
+      <div class="vignette"></div>
+      <div class="ring"></div>
+      <div class="tick h"></div>
+      <div class="tick v"></div>
+      <div id="scope-range">—</div>
+   </div>
 
    <div id="siren"></div>
 
@@ -179,11 +204,10 @@
          <div class="title">WARSCHIFFE 3D</div>
          <div class="subtitle">Du bist die <b>BISMARCK</b> — versenke alle feindlichen Schiffe.</div>
          <div class="controls-grid">
-            <div><span class="k">Mauszeiger</span> <span class="d">Zielen — die Türme richten sich auf den Cursor</span></div>
+            <div><span class="k">Maus bewegen</span> <span class="d">Kamera & Türme drehen — das Fadenkreuz sitzt fest in der Bildmitte</span></div>
             <div><span class="k">1 / 2 / 3</span> <span class="d">Waffe wählen: Hauptbatterie / Sekundär / Flak</span></div>
             <div><span class="k">Klick (halten)</span> <span class="d">Gewählte Waffe feuern (Hauptbatterie erst bei eingerasteten Türmen)</span></div>
-            <div><span class="k">Rechtsklick (ziehen)</span> <span class="d">Kamera frei schwenken (Free-Look) — bleibt stehen, dreht sich NICHT mit dem Ruder, feuert NICHTS</span></div>
-            <div><span class="k">Mausrad</span> <span class="d">Kamera ein-/auszoomen</span></div>
+            <div><span class="k">Mausrad</span> <span class="d">Ein-/auszoomen — ganz rein = Zielfernrohr</span></div>
             <div><span class="k">W / S</span> <span class="d">Voll voraus / voll achteraus</span></div>
             <div><span class="k">A / D</span> <span class="d">Ruder links / rechts</span></div>
             <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: hart bremsen + enger drehen)</span></div>
@@ -202,7 +226,7 @@
             <button class="play" id="btn-play">⚓ ABFERTIGEN</button>
             <button class="play" id="btn-how" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Wie man spielt</button>
          </div>
-         <div class="hint">WoWs-Steuerung: Du <b>zielst mit dem Cursor</b> (die Chase-Cam hängt hinter dem Schiff), und die Salve löst erst, wenn die Türme wirklich eingerastet sind. <b>1/2/3</b> wählt die Waffe, Klick halten feuert sie, Rechtsklick ziehen = Kamera schwenken (bleibt stehen, feuert nichts), Mausrad = Zoom.</div>
+         <div class="hint">WoWs-Steuerung: Die <b>Maus dreht die Kamera</b> (Fadenkreuz fest in der Mitte), die Türme zielen dorthin, und die Salve löst erst, wenn sie wirklich eingerastet sind. <b>1/2/3</b> wählt die Waffe, Klick halten feuert sie, Mausrad ganz rein = Zielfernrohr.</div>
       </div>
    </div>
 
@@ -212,8 +236,8 @@
          <div class="title" style="font-size:30px">So kämpfst du</div>
          <div class="subtitle" style="margin:14px 0">Drei Dinge machen den Sieg: <b>Positionierung</b>, <b>Timing</b> — und jetzt <b>Turmführung</b>.</div>
          <div style="text-align:left; max-width:560px; margin:0 auto; line-height:1.7; color:var(--hud)">
-            <p>🎥 <b>Kamera & Zielen</b> — Die Kamera hängt hinter deinem Schiff (Chase-Cam). Du <b>zielst mit dem Mauszeiger</b>: die Türme richten sich auf den Punkt unter dem Cursor. Mit <b>Rechtsklick ziehen</b> schwenkst du die Kamera frei um (Free-Look) — die Perspektive bleibt dort, wo du sie lässt, und dabei wird <b>nichts</b> abgefeuert. Waffe wählst du mit <b>1 / 2 / 3</b> (Hauptbatterie / Sekundär / Flak), <b>Klick halten</b> feuert die gewählte Waffe. Das <b>Mausrad</b> zoomt.</p>
-            <p>🎯 <b>Turmschwenk</b> — Die Türme folgen deinem Cursor nur mit begrenzter Drehrate. Der Statusanzeiger zeigt „TÜRME DREHEN…" (gelb) oder „EINGERASTET" (grün) — erst dann trifft die Salve wirklich dorthin, wo du zielst. Wechsle das Ziel nicht in letzter Sekunde.</p>
+            <p>🎥 <b>Kamera & Zielen</b> — Die Maus dreht die Kamera (und mit ihr die Türme) frei um dein Schiff — das Fadenkreuz sitzt fest in der Bildmitte, du zielst also, indem du die Kamera dorthin drehst. Waffe wählst du mit <b>1 / 2 / 3</b> (Hauptbatterie / Sekundär / Flak), <b>Klick halten</b> feuert die gewählte Waffe. Das <b>Mausrad</b> zoomt — ganz reingezoomt wechselst du ins <b>Zielfernrohr</b>: enges Sichtfeld, Entfernungsmesser, wie am Richtschützenstand.</p>
+            <p>🎯 <b>Turmschwenk</b> — Die Türme folgen deinem Fadenkreuz nur mit begrenzter Drehrate. Der Statusanzeiger zeigt „TÜRME DREHEN…" (gelb) oder „EINGERASTET" (grün) — erst dann trifft die Salve wirklich dorthin, wo du zielst. Wechsle das Ziel nicht in letzter Sekunde.</p>
             <p>🎯 <b>Citadel</b> — Der zentrale Rumpf (Motoren/Feuer) ist besonders verwundbar. Treffer dort bringen Konzentration, Feuer und Flut. Treffer am Bug/Heck „prallen" oft ab.</p>
             <p>🌫️ <b>Rauch</b> — Mit <b>F</b> legst du einen Tarndetektor; Gegner können dich darin gar nicht mehr anvisieren.</p>
             <p>🔥 <b>Brände & Flut</b> — Mit <b>R</b> kannst du Module löschen und Flut bekämpfen; ignoriere sie und der Rumpf versagt.</p>

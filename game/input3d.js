@@ -1,17 +1,20 @@
 // game/input3d.js — keyboard identical to the 2D game (game/input.js), but the mouse now
 // works like World of Warships instead of a drag-to-orbit scheme:
 //
-//   • The CURSOR POSITION is the aim. We track the raw pointer in NDC (-1..1) every move
-//     (regardless of any button) and main3d.js raycasts it onto the sea plane -- exactly
-//     how WoWs points your guns at whatever the crosshair is over. The on-screen reticle
-//     follows the cursor, there is no fixed screen-center crosshair.
+//   • The mouse ALWAYS steers the camera/turrets, no button held -- exactly like WoWs: the
+//     reticle sits fixed at screen centre, moving the mouse turns the view (and the guns
+//     track wherever the reticle points), and the ship keeps sailing under that view. We
+//     accumulate raw `movementX/Y` deltas every frame (works with or without Pointer Lock)
+//     instead of tracking absolute cursor position, so the look never runs out of screen.
+//   • Pointer Lock is requested on the first click so the OS cursor disappears and the deltas
+//     stay unbounded (no clamping at the screen edge). It's opportunistic: browsers reject it
+//     without a preceding user gesture, and headless test runners don't grant it at all --
+//     both are silently ignored (movementX/Y still arrive from plain mousemove either way).
 //   • LEFT mouse (hold) fires the SELECTED weapon (still gated by turret traverse for the
 //     main battery in main3d). Weapon selection is on the NUMBER ROW: 1 = main battery,
 //     2 = secondaries, 3 = AA -- so aiming/looking never accidentally fires anything.
-//   • RIGHT mouse (hold + drag) is PURE FREE-LOOK: it orbits the camera around the ship.
-//     The offset is PERSISTENT -- it stays where you left it (no spring-back), so you can
-//     pick your own perspective. It does NOT fire anything.
-//   • MOUSE WHEEL zooms the camera in/out.
+//   • MOUSE WHEEL zooms the camera in/out; scrolled all the way in it engages the sniper
+//     scope (main3d.js decides the threshold -- this module only reports the raw zoom axis).
 //   • WASD/QE only steer the ship -- they never move the camera.
 export class Input3D {
    constructor(canvas) {
@@ -19,11 +22,12 @@ export class Input3D {
       this.gameActive = false;
       this.keys = new Set();
       this.pressed = new Set();
-      // x/y are the live cursor in NDC space (the aim point); mx/my are the same point in
-      // raw pixels (so main3d.js can park the on-screen reticle under the cursor);
-      // down/right are button states; dx/dy are free-look deltas (only meaningful while
-      // `right` is held); wheel is a per-frame zoom accumulator consumed by main3d.js.
-      this.mouse = { x: 0, y: 0, mx: 0, my: 0, down: false, right: false, dx: 0, dy: 0, wheel: 0 };
+      // dx/dy: raw look deltas accumulated since the last endFrame() (movementX/Y sum, NOT
+      // cursor position -- there is no meaningful "cursor position" once the look is
+      // unbounded and the aim is always screen-centre, see main3d.js). down: left mouse
+      // (fire). wheel: per-frame zoom accumulator.
+      this.mouse = { dx: 0, dy: 0, down: false, wheel: 0 };
+      this._locked = false;
       this._bind();
    }
 
@@ -37,35 +41,29 @@ export class Input3D {
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
       window.addEventListener('keyup', (e) => onKey(e, false));
-      window.addEventListener('blur', () => { this.keys.clear(); this.pressed.clear(); this.mouse.down = false; this.mouse.right = false; });
+      window.addEventListener('blur', () => { this.keys.clear(); this.pressed.clear(); this.mouse.down = false; });
 
       this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-      // Cursor position -> NDC, updated on EVERY move (this is the aim signal).
-      const setNdc = (clientX, clientY) => {
-         const w = window.innerWidth || 1, h = window.innerHeight || 1;
-         this.mouse.x = (clientX / w) * 2 - 1;
-         this.mouse.y = -((clientY / h) * 2 - 1);
-         this.mouse.mx = clientX; this.mouse.my = clientY;
+      const requestLockSafe = () => {
+         if (!this.gameActive || document.pointerLockElement === this.canvas) return;
+         try {
+            const ret = this.canvas.requestPointerLock({ unadjustedMovement: true });
+            if (ret && typeof ret.catch === 'function') ret.catch(() => {}); // rejected without a user gesture -- fine, deltas still flow
+         } catch (e) { /* older browsers throw synchronously instead of rejecting -- same story */ }
       };
+      document.addEventListener('pointerlockchange', () => { this._locked = document.pointerLockElement === this.canvas; });
+      document.addEventListener('pointerlockerror', () => {});
 
-      // Right-mouse free-look: only accumulate orbit deltas while the button is held.
-      let lastX = 0, lastY = 0;
       this.canvas.addEventListener('mousedown', (e) => {
-         if (e.button === 0) this.mouse.down = true;
-         if (e.button === 2) { this.mouse.right = true; lastX = e.clientX; lastY = e.clientY; }
+         if (e.button === 0) { this.mouse.down = true; requestLockSafe(); }
       });
       window.addEventListener('mousemove', (e) => {
-         setNdc(e.clientX, e.clientY);
-         if (this.mouse.right) {
-            this.mouse.dx += e.clientX - lastX;
-            this.mouse.dy += e.clientY - lastY;
-            lastX = e.clientX; lastY = e.clientY;
-         }
+         this.mouse.dx += e.movementX || 0;
+         this.mouse.dy += e.movementY || 0;
       });
       window.addEventListener('mouseup', (e) => {
          if (e.button === 0) this.mouse.down = false;
-         if (e.button === 2) this.mouse.right = false;
       });
       // Wheel zoom: sign of deltaY, consumed each frame by main3d.js.
       this.canvas.addEventListener('wheel', (e) => {
@@ -73,16 +71,10 @@ export class Input3D {
          this.mouse.wheel += Math.sign(e.deltaY);
       }, { passive: false });
 
-      // Touch: single finger aims + fires (sets cursor NDC + left-down). No free-look.
-      this.canvas.addEventListener('touchstart', (e) => {
-         const t = e.touches[0];
-         setNdc(t.clientX, t.clientY);
-         this.mouse.down = true;
-      }, { passive: true });
-      this.canvas.addEventListener('touchmove', (e) => {
-         const t = e.touches[0];
-         setNdc(t.clientX, t.clientY);
-      }, { passive: true });
+      // Touch: single finger fires (no look-around on touch -- there's no analogue for
+      // relative mouse deltas without a drag gesture, and drag is reserved for nothing here
+      // since look no longer needs a held button. Touch users get tap-to-fire only.)
+      this.canvas.addEventListener('touchstart', () => { this.mouse.down = true; }, { passive: true });
       this.canvas.addEventListener('touchend', () => { this.mouse.down = false; });
    }
 

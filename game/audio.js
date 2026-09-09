@@ -84,10 +84,17 @@ export class Audio {
    }
 
    // ---- one-shots ----
-   cannon(big = false) {
-      // deep boom: noise burst + sub thump
-      this._noiseHit(big ? 0.9 : 0.5, big ? 300 : 500, big ? 0.8 : 0.45);
-      this._tone(big ? 55 : 70, big ? 0.7 : 0.4, big ? 0.5 : 0.3, 'sine', 30);
+   // count = how many barrels/shells fired in this salvo. A single shot and a full broadside
+   // both used to sound identical -- layering a few slightly-staggered extra booms (and a
+   // louder first hit) sells "many guns firing at once" without needing per-shot audio nodes.
+   cannon(big = false, count = 1) {
+      const weight = 0.7 + 0.3 * Math.min(count, 4);
+      this._noiseHit(big ? 0.9 : 0.5, big ? 300 : 500, (big ? 0.8 : 0.45) * weight);
+      this._tone(big ? 55 : 70, big ? 0.7 : 0.4, (big ? 0.5 : 0.3) * weight, 'sine', 30);
+      for (let i = 1; i < Math.min(count, 4); i++) {
+         const delay = i * 35 + Math.random() * 25;
+         setTimeout(() => this._noiseHit(big ? 0.7 : 0.35, (big ? 300 : 500) * (0.9 + Math.random() * 0.2), big ? 0.55 : 0.3), delay);
+      }
    }
    splash() { this._noiseHit(0.45, 900, 0.22, 'bandpass'); }
    bounce() { this._noiseHit(0.3, 1400, 0.3, 'highpass'); this._tone(220, 0.15, 0.12, 'triangle', 120); }

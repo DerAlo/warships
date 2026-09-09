@@ -300,7 +300,7 @@ export class Ship {
       // Difficulty scales how many guns of each turret actually join the salvo
       // (easy bots limp along with a partial battery, hard ones bring everything).
       const mult = (this.side === 'enemy' && world.difficulty) ? world.difficulty.salvoMult : 1;
-      let n = 0;
+      let n = 0, turretsFired = 0;
       for (const t of this.turrets) {
          if (t.cd > 0) continue;
          t.cd = this.cfg.main.reload;
@@ -314,10 +314,16 @@ export class Ship {
             world.spawnShell(this, muzzle, dir, this.cfg.main, 'main', estRange);
             n++;
          }
+         // One flash per firing turret, at ITS muzzle -- a broadside then visibly lights up
+         // along the whole hull instead of a single flash at the ship's centre.
+         this.world.addMuzzleFlash(this, this.aimBearing, muzzle);
          this.shotsFired += gCount;
+         turretsFired++;
       }
+      // Recoil punch scales with how many turrets actually fired -- a full 4-turret broadside
+      // should shove the camera noticeably harder than a single turret catching up late.
+      if (turretsFired > 0) this.world.shakeAdd(3 + turretsFired * 2.5);
       if (this.cfg.boost && this.side === 'player') this.world.shakeAdd(6);
-      this.world.addMuzzleFlash(this, this.aimBearing);
       return n;
    }
 
@@ -335,9 +341,10 @@ export class Ship {
          const spread = this._fireSpread(world, target, 1.6);
          const dir = fromAngle(this.aimBearing + spread + (Math.random() - 0.5) * 0.05);
          world.spawnShell(this, muzzle, dir, this.cfg.sec, 'sec', estRange);
+         this.world.addMuzzleFlash(this, this.aimBearing, muzzle);
          n++;
       }
-      this.world.addMuzzleFlash(this, this.aimBearing);
+      this.world.shakeAdd(2);
       return n;
    }
 

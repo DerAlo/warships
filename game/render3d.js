@@ -13,6 +13,20 @@ const DIMS = {
 const dimsOf = (cls) => DIMS[cls] || { L: 180, beam: 20, deckH: 14 };
 const HULL_COLORS = { player: 0x3a4a55, enemy: 0x5a4a44 };
 
+// ---- sniper scope (WoWs-style rangefinder view) ----
+// Scrolling the wheel all the way in (main3d.js clamps zoom/orbit-distance to [ZOOM_MIN,
+// ZOOM_MAX]) blends smoothly into a fixed bridge-anchored view with a narrow FOV, instead of
+// just dollying the chase cam closer to the hull (which at low `dist` looked straight into
+// your own ship's geometry -- not remotely a rangefinder view). Below SCOPE_ENTER_DIST the
+// EFFECTIVE orbit distance and FOV both blend toward the scoped values as zoom keeps
+// decreasing to ZOOM_MIN, so there's no mode switch/state machine, just a continuous blend.
+const SCOPE_ENTER_DIST = 260, SCOPE_FULL_DIST = 140; // matches main3d.js's ZOOM_MIN
+const SCOPE_CAM_DIST = 22;   // effective orbit distance once fully scoped (bridge-close)
+const SCOPE_LOOK_Y = 34;     // look-target height when scoped (bridge/conning-tower level)
+const BASE_FOV = 58, SCOPE_FOV = 9;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+
 function v3(p, y = 0) { return new THREE.Vector3(p.x, y, p.y); }
 
 export class Renderer3D {
@@ -55,6 +69,15 @@ export class Renderer3D {
 
       this._shakeT = 0;
       this._shakeMag = 0;
+
+      // Muzzle flashes / explosions / splashes were entirely unrendered in 3D (world.effects
+      // was read by the 2D canvas renderer only) -- a broadside fired in total silence with
+      // zero visual punch. Pool a handful of reusable sprite meshes for each kind instead of
+      // allocating one per shot; world.effects already prunes itself (game/state.js), we just
+      // mirror which ids are alive each frame.
+      this._fxMeshes = new Map(); // effect object identity -> mesh (Map key = the effect itself)
+      this._flashLight = new THREE.PointLight(0xffcf8a, 0, 260, 2);
+      this.scene.add(this._flashLight);
    }
 
    setHudCanvases(minimap, compass) {
@@ -275,6 +298,7 @@ export class Renderer3D {
       this._syncShips(world);
       this._syncShells(world);
       this._syncTorpedoes(world);
+      this._syncEffects(world, dt);
       this._syncCamera(world, dt, camState);
       this.renderer.render(this.scene, this.camera);
       this._minimap(world);
@@ -349,6 +373,58 @@ export class Renderer3D {
       for (const [id, mesh] of this.torpMeshes) if (!seen.has(id)) { this.scene.remove(mesh); this.torpMeshes.delete(id); }
    }
 
+   // world.effects (muzzle flashes, explosions, splashes -- game/state.js) fed the 2D canvas
+   // renderer only; in 3D they were spawned every shot and simply never drawn, so firing had
+   // no visual punch at all beyond the shell itself. Each effect gets a simple additive-blend
+   // billboard sprite sized/faded by its age fraction, plus a brief point-light flash for
+   // muzzle fire (that's the "bombastic broadside" cue -- a shot should visibly light the hull).
+   _syncEffects(world, dt) {
+      const seen = new Set();
+      let flashLumen = 0, flashPos = null;
+      for (const e of world.effects) {
+         if (e.kind !== 'muzzle' && e.kind !== 'explosion' && e.kind !== 'splash') continue;
+         seen.add(e);
+         let mesh = this._fxMeshes.get(e);
+         if (!mesh) {
+            const mat = new THREE.SpriteMaterial({ color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+            mesh = new THREE.Sprite(mat);
+            this.scene.add(mesh);
+            this._fxMeshes.set(e, mesh);
+         }
+         const t = Math.max(0, Math.min(1, e.age / e.life));
+         if (e.kind === 'muzzle') {
+            const r = (e.big ? 34 : 20) * (1 - t * 0.4);
+            mesh.material.color.setHex(0xffd48a);
+            mesh.material.opacity = 1 - t;
+            mesh.scale.set(r, r, 1);
+            mesh.position.set(e.pos.x, 18, e.pos.y);
+            flashLumen = Math.max(flashLumen, (1 - t) * (e.big ? 3.2 : 2.2));
+            flashPos = e.pos;
+         } else if (e.kind === 'explosion') {
+            const r = (e.big ? 90 : 45) * (0.3 + t * 1.1);
+            mesh.material.color.setHex(0xff7a2d);
+            mesh.material.opacity = 0.85 * (1 - t);
+            mesh.scale.set(r, r, 1);
+            mesh.position.set(e.pos.x, 12, e.pos.y);
+         } else { // splash
+            const r = (e.big ? 55 : 26) * (0.4 + t * 0.8);
+            mesh.material.color.setHex(0xbfe3ff);
+            mesh.material.opacity = 0.6 * (1 - t);
+            mesh.scale.set(r, r, 1);
+            mesh.position.set(e.pos.x, 6, e.pos.y);
+         }
+      }
+      for (const [e, mesh] of this._fxMeshes) if (!seen.has(e)) { this.scene.remove(mesh); mesh.material.dispose(); this._fxMeshes.delete(e); }
+      // Point light decays fast (muzzle flashes are ~0.08s) -- snap up on a fresh flash, ease
+      // down otherwise so overlapping shots in a broadside don't visibly strobe/flicker.
+      if (flashPos) {
+         this._flashLight.position.set(flashPos.x, 30, flashPos.y);
+         this._flashLight.intensity = Math.max(this._flashLight.intensity, flashLumen);
+      } else {
+         this._flashLight.intensity = Math.max(0, this._flashLight.intensity - dt * 12);
+      }
+   }
+
    // Set by main3d.js each frame with the resolved chase-camera pose (base over-the-shoulder
    // pose + free-look offsets + wheel zoom). Stored here so _syncCamera can consume it and so
    // screenToWorld() raycasts against the exact camera the player is looking through.
@@ -374,7 +450,16 @@ export class Renderer3D {
          return;
       }
       const dist = this.camDist || 420;
-      // PURE ORBIT: the camera sits on a sphere of radius `dist` around a look-target a few
+      // Sniper scope: a continuous blend, not a mode switch. Scrolling in past
+      // SCOPE_ENTER_DIST (260m) ramps scopeT from 0->1 as dist keeps shrinking to
+      // SCOPE_FULL_DIST (140m, = main3d.js's ZOOM_MIN) -- both the effective orbit distance
+      // and the FOV blend toward their scoped values over that same range, so it reads as
+      // "leaning into the rangefinder" rather than a jarring cut.
+      this.scopeT = clamp01((SCOPE_ENTER_DIST - dist) / (SCOPE_ENTER_DIST - SCOPE_FULL_DIST));
+      const effDist = lerp(dist, SCOPE_CAM_DIST, this.scopeT);
+      const fov = lerp(BASE_FOV, SCOPE_FOV, this.scopeT);
+      if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+      // PURE ORBIT: the camera sits on a sphere of radius `effDist` around a look-target a few
       // metres above the deck, so PITCH ALONE sets the look-down angle. The old code added a
       // fixed base height (`60 + dist*0.4`) on top of the pitch term -- that kept the view
       // steep (~31 deg down at zoom 420) even at minimum pitch, so the sea plane at the
@@ -385,11 +470,16 @@ export class Renderer3D {
       // never rotates the view. The ship turns under a stable camera instead.
       const yaw = this.camYaw;
       const pitch = this.camPitch;
-      const tx = p.pos.x, ty = 20, tz = p.pos.y; // look target: a few m above the deck
-      const cx = tx - Math.cos(yaw) * Math.cos(pitch) * dist;
-      const cz = tz - Math.sin(yaw) * Math.cos(pitch) * dist;
-      const cy = ty + Math.sin(pitch) * dist;
-      const shakeX = (Math.random() - 0.5) * this._shakeMag, shakeY = (Math.random() - 0.5) * this._shakeMag;
+      const tx = p.pos.x, tz = p.pos.y;
+      const ty = lerp(20, SCOPE_LOOK_Y, this.scopeT); // look target rises toward bridge level when scoped
+      const cx = tx - Math.cos(yaw) * Math.cos(pitch) * effDist;
+      const cz = tz - Math.sin(yaw) * Math.cos(pitch) * effDist;
+      const cy = ty + Math.sin(pitch) * effDist;
+      // Recoil shake reads as camera SWAY in the chase view, but a scope is bolted to the
+      // ship's optics -- full sway there would be nauseating at a 9deg FOV. Dampen it instead
+      // of zeroing it: the player should still feel the guns firing, just less violently.
+      const shakeMag = this._shakeMag * lerp(1, 0.3, this.scopeT);
+      const shakeX = (Math.random() - 0.5) * shakeMag, shakeY = (Math.random() - 0.5) * shakeMag;
       // Clamp just above the waterline (sea is at y=0) so a below-horizon pitch can't dip
       // the camera under the waves.
       this.camera.position.set(cx + shakeX, Math.max(8, cy), cz + shakeY);

@@ -196,8 +196,11 @@ export class World {
        }
    }
 
-   addMuzzleFlash(ship, bearing) {
-      this.effects.push({ kind: 'muzzle', pos: { x: ship.pos.x, y: ship.pos.y }, bearing, age: 0, life: 0.08, big: ship.cls === 'Bismarck' || ship.cls === 'EB' });
+   // pos: optional world point to flash at (a turret's muzzle) instead of the ship's centre --
+   // the 3D renderer spawns one flash per firing turret so a broadside visibly lights up
+   // along its whole length instead of one flash at the hull's origin. 2D callers omit it.
+   addMuzzleFlash(ship, bearing, pos = null) {
+      this.effects.push({ kind: 'muzzle', pos: pos ? { x: pos.x, y: pos.y } : { x: ship.pos.x, y: ship.pos.y }, bearing, age: 0, life: 0.08, big: ship.cls === 'Bismarck' || ship.cls === 'EB' });
    }
 
    emitSmokePuff(ship, dt) {

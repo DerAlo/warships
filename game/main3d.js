@@ -14,17 +14,23 @@ import { updateBot } from './ai.js';
 const $ = (id) => document.getElementById(id);
 const scene3d = $('scene3d');
 const fxCanvas = $('fx');
-const reticleEl = $('reticle3d');
+const scopeOverlayEl = $('scope-overlay');
+const scopeRangeEl = $('scope-range');
 
 // How tightly a turret must be aimed before the player can actually fire, in degrees.
 // This is the whole point of the 3D mode: WoWs-style, you wait for the rumble to stop.
 const TURRET_LOCK_DEG = 6 * DEG;
 
-// Chase-camera zoom range (meters). WoWs uses a scroll wheel to dolly in/out; we map the
-// wheel to a continuous distance between these bounds instead of two discrete levels.
-const ZOOM_MIN = 260, ZOOM_MAX = 1500;
-// Neutral over-the-shoulder pose (the starting camera position before any free-look).
+// Chase-camera zoom range (meters, = orbit distance from the ship). Scrolling all the way in
+// (past render3d.js's SCOPE_ENTER_DIST) blends into the sniper-scope view -- see render3d.js.
+// ZOOM_MIN used to be 260 (no scope existed); it's now the "standing at the guns" extreme.
+const ZOOM_MIN = 140, ZOOM_MAX = 1500;
+// Neutral over-the-shoulder pose (the starting camera facing before any mouse-look).
 const CAM_BASE_YAW = 0.5, CAM_BASE_PITCH = 0.5;
+// Mouse-look sensitivity: the mouse ALWAYS turns the camera now (no button gate, WoWs-style --
+// the reticle is fixed at screen centre and the world turns under it). Tuned for raw
+// movementX/Y deltas (roughly one pixel per screen-pixel of physical mouse movement).
+const LOOK_YAW_SENS = 0.0026, LOOK_PITCH_SENS = 0.0022;
 
 const renderer = new Renderer3D(scene3d);
 renderer.setHudCanvases($('minimap-canvas'), $('compass-canvas'));
@@ -70,6 +76,7 @@ window.__world = () => world; // test hook (gate/shell-count assertions)
 // then start slewing toward a moving cursor before the next poll samples the DOM), so this
 // records the gate state at the exact instant of the fire call instead.
 window.__badFireCount = 0;
+window.__scopeT = () => renderer.scopeT || 0; // test hook: sniper-scope blend factor (0..1)
 
 const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 
@@ -122,36 +129,46 @@ function controlPlayer(dt) {
    const inp = input;
 
    // ---- chase camera (WoWs-style) ----
-   // Wheel dollies the camera in/out. Right-mouse DRAG orbits the camera around the ship
-   // (free-look): the yaw/pitch offsets are PERSISTENT -- they stay where you left them,
-   // they do not spring back. That's the player's chosen perspective. Pitch is clamped so
-   // you can't dip under the sea. WASD never touches the camera -- it only steers the ship.
+   // The mouse ALWAYS turns the camera now -- no button held, exactly like WoWs: the reticle
+   // is fixed at screen centre and moving the mouse turns the view (the ship keeps sailing
+   // under it). Offsets are PERSISTENT -- they stay where you left them, they do not spring
+   // back. Pitch is clamped so you can't dip under the sea. WASD never touches the camera --
+   // it only steers the ship. Wheel dollies the camera in/out; scrolled all the way in it
+   // blends into the sniper scope (see render3d.js SCOPE_ENTER_DIST).
    cam3.zoom = clamp(cam3.zoom * Math.pow(1.08, inp.mouse.wheel), ZOOM_MIN, ZOOM_MAX);
-   if (inp.mouse.right) {
-      cam3.yawOff -= inp.mouse.dx * 0.0032;
-      // Pitch floor widened from -0.4 to -0.55: with CAM_BASE_PITCH 0.5 that lets the total
-      // pitch reach ~-0.05 rad -- just below the horizon. Combined with the pure-orbit camera
-      // in render3d.js (no fixed base height), that puts the camera near the waterline so the
-      // sea plane at the screen bottom reaches out to full gun range. Long-range aiming was
-      // impossible before because the flattest view still looked down ~31 deg.
-      cam3.pitchOff = clamp(cam3.pitchOff - inp.mouse.dy * 0.0022, -0.55, 0.75);
-   }
+   cam3.yawOff -= inp.mouse.dx * LOOK_YAW_SENS;
+   // Pitch floor -0.55: with CAM_BASE_PITCH 0.5 that lets the total pitch reach ~-0.05 rad --
+   // just below the horizon. Combined with the pure-orbit camera in render3d.js (no fixed
+   // base height), that puts the camera near the waterline so the sea plane at the screen
+   // bottom reaches out to full gun range. Long-range aiming was impossible before because
+   // the flattest view still looked down ~31 deg.
+   cam3.pitchOff = clamp(cam3.pitchOff - inp.mouse.dy * LOOK_PITCH_SENS, -0.55, 0.75);
    renderer.setCameraPose(CAM_BASE_YAW + cam3.yawOff, CAM_BASE_PITCH + cam3.pitchOff, cam3.zoom);
 
-   // ---- aim: raycast from the CURSOR through the scene onto the sea plane ----
-   // This is what the turrets track toward -- same aimBearing field the 2D game uses, so
-   // ship.js's existing turret-slew integration needs no changes at all. The reticle under
-   // the cursor marks exactly this point.
-   const worldPt = renderer.screenToWorld(inp.mouse.x, inp.mouse.y);
+   // ---- aim: raycast from SCREEN CENTRE (the fixed reticle) through the scene onto the sea
+   // plane. This is what the turrets track toward -- same aimBearing field the 2D game uses,
+   // so ship.js's existing turret-slew integration needs no changes at all. The reticle no
+   // longer follows the cursor (there is no meaningful cursor position once mouse-look is
+   // unbounded) -- it sits dead centre and the camera/world move to put the target under it,
+   // exactly like WoWs.
+   const worldPt = renderer.screenToWorld(0, 0);
    if (worldPt) {
       const toAim = sub(worldPt, p.pos);
       p.aim = norm(toAim);
       p.aimBearing = angleOf(toAim);
       world._aimPoint = worldPt;
    }
-   // park the on-screen reticle under the live cursor
-   reticleEl.style.left = inp.mouse.mx + 'px';
-   reticleEl.style.top = inp.mouse.my + 'px';
+   // The reticle is fixed at screen centre by CSS now (index-3d.html) -- no per-frame
+   // positioning needed, since the aim point is always dead centre.
+
+   // ---- sniper scope overlay: renderer.scopeT (0..1) tracks how far the wheel-zoom blend
+   // has moved into the scope (render3d.js _syncCamera). Toggle the vignette/reticle once
+   // meaningfully engaged, and show the live target range while it's up.
+   const scopeT = renderer.scopeT || 0;
+   scopeOverlayEl.classList.toggle('on', scopeT > 0.35);
+   if (scopeT > 0.05 && worldPt) {
+      scopeRangeEl.textContent = Math.round(Math.hypot(worldPt.x - p.pos.x, worldPt.y - p.pos.y)) + ' m';
+   }
 
    // helm & throttle
    const helm = inp.helmAxis();
@@ -192,7 +209,7 @@ function controlPlayer(dt) {
             // of always planning a full gun.range parabola (the "flugbahn nicht korrekt" bug).
             // Signature unchanged -- 2D callers still pass their real Ship targets.
             const n = p.fireMain(world, { pos: worldPt }, p.aim);
-            if (n > 0) audio.cannon(true);
+            if (n > 0) audio.cannon(true, n);
             // Live invariant check for the turret-lock gate test: this call site is the ONLY
             // place that fires the main battery, and it's reached only when anyLocked is true
             // -- so record when a shot actually leaves the barrels while UNLOCKED, which
@@ -204,7 +221,7 @@ function controlPlayer(dt) {
          // secondaries are fast-traversing casemate guns: no turret-lock gate.
          if (p.secTimer <= 0) {
             const n = p.fireSecondary(world, { pos: worldPt }, p.aim);
-            if (n > 0) audio.cannon(false);
+            if (n > 0) audio.cannon(false, n);
          }
       } else if (weaponSel === 'aa' && p.cfg.aa) {
          if (p.aaTimer <= 0) {
