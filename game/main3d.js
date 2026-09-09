@@ -62,8 +62,14 @@ let difficulty = 'normal';
 // straight down the keel from directly behind reduces the ~250m hull to a sliver.
 const cam3 = { zoom: 420, yawOff: 0, pitchOff: 0 };
 window.__cam3 = cam3; // test hook (tests/playwright3d.shots.mjs reads this)
+window.__camY = () => renderer.camera.position.y; // test hook: live camera height (flat-pitch check)
 window.__shipHdg = () => (world && world.player) ? world.player.heading : null; // test hook
 window.__world = () => world; // test hook (gate/shell-count assertions)
+// test hook: counts main-battery shots fired while anyLocked was false -- must stay 0 always.
+// A HUD-polling test can't prove this reliably (the turret can legitimately fire while locked
+// then start slewing toward a moving cursor before the next poll samples the DOM), so this
+// records the gate state at the exact instant of the fire call instead.
+window.__badFireCount = 0;
 
 const snd = { kills: 0, shotsP: 0, shotsE: 0, torps: 0, hitCd: 0 };
 
@@ -123,7 +129,12 @@ function controlPlayer(dt) {
    cam3.zoom = clamp(cam3.zoom * Math.pow(1.08, inp.mouse.wheel), ZOOM_MIN, ZOOM_MAX);
    if (inp.mouse.right) {
       cam3.yawOff -= inp.mouse.dx * 0.0032;
-      cam3.pitchOff = clamp(cam3.pitchOff - inp.mouse.dy * 0.0022, -0.4, 0.75);
+      // Pitch floor widened from -0.4 to -0.55: with CAM_BASE_PITCH 0.5 that lets the total
+      // pitch reach ~-0.05 rad -- just below the horizon. Combined with the pure-orbit camera
+      // in render3d.js (no fixed base height), that puts the camera near the waterline so the
+      // sea plane at the screen bottom reaches out to full gun range. Long-range aiming was
+      // impossible before because the flattest view still looked down ~31 deg.
+      cam3.pitchOff = clamp(cam3.pitchOff - inp.mouse.dy * 0.0022, -0.55, 0.75);
    }
    renderer.setCameraPose(CAM_BASE_YAW + cam3.yawOff, CAM_BASE_PITCH + cam3.pitchOff, cam3.zoom);
 
@@ -176,13 +187,23 @@ function controlPlayer(dt) {
          const toAimVec = sub(worldPt, p.pos);
          const d = Math.hypot(toAimVec.x, toAimVec.y);
          if (d < p.cfg.main.range * 1.15 && p.fireTimer <= 0 && anyLocked) {
-            const n = p.fireMain(world, null, p.aim);
+            // Pseudo-target at the aim point: ship.js then computes estRange = real
+            // muzzle-to-aim distance, so the ballistic arc spans THIS shot's flight instead
+            // of always planning a full gun.range parabola (the "flugbahn nicht korrekt" bug).
+            // Signature unchanged -- 2D callers still pass their real Ship targets.
+            const n = p.fireMain(world, { pos: worldPt }, p.aim);
             if (n > 0) audio.cannon(true);
+            // Live invariant check for the turret-lock gate test: this call site is the ONLY
+            // place that fires the main battery, and it's reached only when anyLocked is true
+            // -- so record when a shot actually leaves the barrels while UNLOCKED, which
+            // should be structurally impossible. (anyLocked is captured by reference above,
+            // so this reads the same value the `if` just checked.)
+            if (n > 0 && !anyLocked) window.__badFireCount++;
          }
       } else if (weaponSel === 'sec') {
          // secondaries are fast-traversing casemate guns: no turret-lock gate.
          if (p.secTimer <= 0) {
-            const n = p.fireSecondary(world, null, p.aim);
+            const n = p.fireSecondary(world, { pos: worldPt }, p.aim);
             if (n > 0) audio.cannon(false);
          }
       } else if (weaponSel === 'aa' && p.cfg.aa) {

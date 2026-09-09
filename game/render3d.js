@@ -25,7 +25,11 @@ export class Renderer3D {
 
       this.scene = new THREE.Scene();
       this.scene.background = new THREE.Color(0x0a1830);
-      this.scene.fog = new THREE.FogExp2(0x18314a, 0.00028);
+      // Density lowered from 0.00028: with the new flat-capable chase camera the player
+      // regularly looks out to full gun range (1800 m) along the horizon, where the old fog
+      // had already eaten ~40% of the contrast -- distant targets washed out exactly when
+      // you needed to see them to aim.
+      this.scene.fog = new THREE.FogExp2(0x18314a, 0.0002);
 
       // far=12000 was massive overkill: the whole arena is only 3800m half-extent, and fog
       // already hides anything past ~6-7km, so the camera was depth-testing/rendering a
@@ -311,13 +315,15 @@ export class Renderer3D {
          }
          // Genuine ballistic parabola (rendering-only -- the sim stays flat 2D): h(t) = 4·H·t·(1−t)
          // crests at the flight midpoint and lands exactly on the target, like real plunging fire.
-         // The old sin() hop peaked at only ~5% of range (a 1800m shot topped out at ~99m --
-         // nearly invisible from the chase cam), which is why shells read as flat lasers.
-         // Now the crest scales with the gun's range (a 1800m shot arcs ~180m up), and a short
-         // ramp from muzzle height (~deck level) makes the shell visibly LEAVE the gun instead
-         // of popping out of the waterline.
+         // The crest scales with the ACTUAL planned range of this shot (arcDur * vShell = the
+         // muzzle-to-target distance the sim was told), NOT the gun's max range -- before this,
+         // every player shot drew a full 1800 m parabola (~180 m crest) even at point-blank,
+         // which is why the flight path read as "not correct". A 300 m shot now crests ~30 m,
+         // a 1800 m shot ~180 m. A short ramp from muzzle height (~deck level) makes the shell
+         // visibly LEAVE the gun instead of popping out of the waterline.
          const t = Math.min(1, s.arc);
-         const H = Math.max(40, (s.gun.range || 1400) * 0.10);
+         const R = s.arcDur * (s.gun.vShell || 650);
+         const H = Math.max(25, R * 0.10);
          const height = 4 * H * t * (1 - t) + 18 * (1 - t);
          mesh.position.set(s.pos.x, height, s.pos.y);
       }
@@ -368,18 +374,26 @@ export class Renderer3D {
          return;
       }
       const dist = this.camDist || 420;
-      // Height scales with distance so the framing stays roughly constant as you zoom out --
-      // a fixed height would make the ship shrink to a dot in overview range.
-      const height = 60 + dist * 0.4;
+      // PURE ORBIT: the camera sits on a sphere of radius `dist` around a look-target a few
+      // metres above the deck, so PITCH ALONE sets the look-down angle. The old code added a
+      // fixed base height (`60 + dist*0.4`) on top of the pitch term -- that kept the view
+      // steep (~31 deg down at zoom 420) even at minimum pitch, so the sea plane at the
+      // bottom of the screen only reached a few hundred metres out and 1800 m shots were
+      // physically unaimable. Removing the base lets a flat pitch put the camera near the
+      // waterline with the horizon in frame, which is what long-range aiming needs.
       // World-space bearing -- deliberately NOT derived from p.heading, so rudder input
       // never rotates the view. The ship turns under a stable camera instead.
       const yaw = this.camYaw;
-      const cx = p.pos.x - Math.cos(yaw) * dist * Math.cos(this.camPitch);
-      const cz = p.pos.y - Math.sin(yaw) * dist * Math.cos(this.camPitch);
-      const cy = height + Math.sin(this.camPitch) * dist;
+      const pitch = this.camPitch;
+      const tx = p.pos.x, ty = 20, tz = p.pos.y; // look target: a few m above the deck
+      const cx = tx - Math.cos(yaw) * Math.cos(pitch) * dist;
+      const cz = tz - Math.sin(yaw) * Math.cos(pitch) * dist;
+      const cy = ty + Math.sin(pitch) * dist;
       const shakeX = (Math.random() - 0.5) * this._shakeMag, shakeY = (Math.random() - 0.5) * this._shakeMag;
-      this.camera.position.set(cx + shakeX, Math.max(35, cy), cz + shakeY);
-      this.camera.lookAt(p.pos.x, 20, p.pos.y);
+      // Clamp just above the waterline (sea is at y=0) so a below-horizon pitch can't dip
+      // the camera under the waves.
+      this.camera.position.set(cx + shakeX, Math.max(8, cy), cz + shakeY);
+      this.camera.lookAt(tx, ty, tz);
       this.sun.target.position.set(p.pos.x, 0, p.pos.y);
       this.sun.target.updateMatrixWorld();
    }

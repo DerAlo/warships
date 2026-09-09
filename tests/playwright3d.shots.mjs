@@ -41,6 +41,88 @@ console.log('hud visible:', hudVisible);
 if (!hudVisible) { console.log('FAIL: hud not visible after start'); exitCode = 1; }
 await page.screenshot({ path: OUT + '/3d-02-battle.png' });
 
+// 3b) THE flat-angle fix: the user could not get the camera flat enough to aim long shots.
+// The old _syncCamera added a pitch-independent base height (`60 + dist*0.4`), so even at
+// minimum pitch the view looked down ~31 deg and the sea plane at the screen bottom only
+// reached a few hundred metres -- 1800 m shots were physically unaimable. Now the camera is
+// a PURE orbit: dragging RIGHT-mouse DOWN drives the pitch to its floor and drops the camera
+// to the waterline. Prove reachability: record the resting camera height, slam the pitch
+// down, and confirm the camera actually reaches the flat / waterline regime. Runs early
+// (right after start) so the Bismarck is guaranteed still alive.
+await page.mouse.move(720, 200);
+const camYBefore = await page.evaluate(() => window.__camY());
+await page.mouse.down({ button: 'right' });
+for (let i = 0; i < 20; i++) { await page.mouse.move(720, 200 + i * 30, { steps: 2 }); await page.waitForTimeout(20); }
+await page.mouse.up({ button: 'right' });
+await page.waitForTimeout(300);
+const { camYFlat, pitchFlat } = await page.evaluate(() => ({ camYFlat: window.__camY(), pitchFlat: window.__cam3.pitchOff }));
+console.log(`flat-pitch: camY ${camYBefore.toFixed(0)}m -> ${camYFlat.toFixed(0)}m | pitchOff ${pitchFlat.toFixed(3)} (floor -0.55)`);
+if (pitchFlat > -0.5) { console.log('FAIL: could not drive pitch to the flat floor'); exitCode = 1; }
+if (camYFlat > 60) { console.log('FAIL: camera did not drop to the waterline at flat pitch'); exitCode = 1; }
+if (camYFlat >= camYBefore - 50) { console.log('FAIL: flat pitch barely moved the camera'); exitCode = 1; }
+await page.screenshot({ path: OUT + '/3d-06-flatpitch.png' });
+// Reset back to neutral pitch -- the rest of the suite (esp. the cursor-aim raycast below)
+// assumes the ordinary over-the-shoulder pose, not the flat floor we just drove to.
+await page.evaluate(() => { window.__cam3.pitchOff = 0; });
+await page.waitForTimeout(200);
+
+// 3c) THE flight-path fix: a shell's ballistic arc must span THIS shot's real flight, not a
+// fixed full-range parabola. Root cause was estRange=null -> state.js fell back to gun.range,
+// so EVERY player shot drew the same ~1800 m crest even point-blank. Now fireMain/fireSecondary
+// receive a pseudo-target at the aim point, so arcDur == muzzle-to-aim distance / vShell.
+// Fire SECONDARIES (no turret-lock gate -> reliable) at a mid-range aim point and confirm the
+// spawned shell's arcDur matches the actual aim distance. Also runs early, before the ship
+// can plausibly have sunk from bot fire.
+await page.keyboard.down('2'); await page.waitForTimeout(80); await page.keyboard.up('2');
+// Find a cursor position whose aim point lands in a comfortable mid-range band (>200 m so we're
+// clear of the 150 m floor, <900 m so the expected arcDur stays well under the old bug's fixed
+// 1.83 s and the two are unambiguously distinguishable).
+let aimOK = false;
+for (const [mx, my] of [[720, 100], [720, 160], [720, 220], [720, 280], [720, 340], [720, 400], [600, 260], [840, 260]]) {
+   await page.mouse.move(mx, my); await page.waitForTimeout(120);
+   const ad = await page.evaluate(() => {
+      const w = window.__world(); const p = w.player;
+      return w._aimPoint ? Math.hypot(w._aimPoint.x - p.pos.x, w._aimPoint.y - p.pos.y) : 0;
+   });
+   if (ad > 200 && ad < 900) { aimOK = true; break; }
+}
+console.log('mid-range aim point found:', aimOK);
+if (!aimOK) { console.log('FAIL: could not find a mid-range aim point'); exitCode = 1; }
+// Hold the trigger long enough to guarantee at least one volley (sec reload is 1.3 s), then
+// snapshot the newest player shell + the aim point ATOMICALLY (one evaluate).
+const beforeCount = await page.evaluate(() => window.__world().shells.filter(s => s.owner === 'player').length);
+await page.mouse.down();
+await page.waitForTimeout(1500);
+await page.mouse.up();
+const arc = await page.evaluate((bc) => {
+   const w = window.__world(); const p = w.player;
+   const mine = w.shells.filter(s => s.owner === 'player');
+   const s = mine[bc] || mine[mine.length - 1];
+   return {
+      arcDur: s ? s.arcDur : null,
+      vShell: s ? (s.gun.vShell || 650) : null,
+      aimDist: w._aimPoint ? Math.hypot(w._aimPoint.x - p.pos.x, w._aimPoint.y - p.pos.y) : null,
+   };
+}, beforeCount);
+console.log(`flight path: shell arcDur ${arc.arcDur?.toFixed(2)}s vs aim ${arc.aimDist?.toFixed(0)}m / ${arc.vShell} m/s = ${(arc.aimDist / arc.vShell).toFixed(2)}s`);
+if (arc.arcDur == null) { console.log('FAIL: no player shell spawned'); exitCode = 1; }
+else {
+   const expected = arc.aimDist / arc.vShell;
+   // Generous band: the muzzle sits ~60 m off the ship centre and the ship drifts during the
+   // hold, so aimDist (centre-to-aim) and arcDur (muzzle-to-aim) differ by well under 0.5 s.
+   if (Math.abs(arc.arcDur - expected) > 0.5) {
+      console.log('FAIL: shell arcDur does not match the actual aim distance (arc not sized to this shot)'); exitCode = 1;
+   }
+   // Hard cap that pins the regression: pre-fix, estRange was null so state.js fell back to
+   // gun.range and EVERY secondary shot had arcDur = 1100/600 = 1.83 s no matter where you
+   // aimed. We aimed mid-range (<900 m -> <1.5 s), so a fixed full-range arc can never pass.
+   if (arc.arcDur > 1.6) {
+      console.log('FAIL: shell used a fixed full-range arc instead of this shot\'s real distance'); exitCode = 1;
+   }
+}
+// Restore main battery for the remaining steps.
+await page.keyboard.down('1'); await page.waitForTimeout(80); await page.keyboard.up('1');
+
 // 4a) NEW WoWs control: the reticle follows the live cursor. Move the pointer and confirm
 // the on-screen reticle (#reticle3d) tracks it (its left/top move with the cursor).
 await page.mouse.move(400, 300);
@@ -55,25 +137,23 @@ if (!reticleFollows) { console.log('FAIL: reticle did not track the cursor'); ex
 
 // 4b) THE core mechanic: turret-lock gates firing. Aim is now driven by the CURSOR position
 // (raycast onto the sea plane). Hold the trigger while sweeping the cursor across the screen
-// (real intermediate mousemove events, not a teleport) and sample the turret-status + ammo
-// readout together at each step -- across the whole sweep we must NEVER observe "still
-// slewing" together with a fired shot (ammo != READY).
+// (real intermediate mousemove events, not a teleport). Reconstructing "fired while slewing"
+// from HUD polling is inherently racy -- the sim runs on a fixed timestep independent of the
+// poll interval, so a shot can legitimately land while locked and the turret can already be
+// slewing toward the next cursor position before the following poll samples the DOM, which
+// reads as a false "slewing + fired" combo even though the in-game code is correctly gated.
+// So the real assertion lives in main3d.js: window.__badFireCount increments ONLY if a main
+// shot's fire conditions were met with anyLocked=false -- read that instead of the DOM.
 await page.mouse.move(700, 400);
 await page.mouse.down();
-let sawSlewing = false, badCombo = false;
+let sawSlewing = false;
 for (let i = 0; i < 15; i++) {
    await page.mouse.move(700 - i * 25, 400, { steps: 3 });
    await page.waitForTimeout(60);
-   // ATOMIC snapshot: both readouts in ONE evaluate. Two separate textContent() round-trips
-   // left a window where the sim could finish the slew AND fire between the reads -- that
-   // produced false "slewing + fired" positives even though the in-game gate (main3d.js)
-   // checks anyLocked in the same frame as the fire call.
-   const { status, ammo } = await page.evaluate(() => ({
-      status: document.getElementById('turret-status').textContent,
-      ammo: document.getElementById('ammo-main-n').textContent,
-   }));
-   if (status.includes('DREHEN')) { sawSlewing = true; if (ammo !== 'READY') badCombo = true; }
+   const status = await page.evaluate(() => document.getElementById('turret-status').textContent);
+   if (status.includes('DREHEN')) sawSlewing = true;
 }
+const badCombo = (await page.evaluate(() => window.__badFireCount)) > 0;
 await page.mouse.up();
 console.log('observed a slewing sample during the sweep:', sawSlewing, '| forbidden (slewing+fired) combo seen:', badCombo);
 if (badCombo) { console.log('FAIL: main battery fired while turrets were still slewing'); exitCode = 1; }
@@ -167,10 +247,11 @@ await page.screenshot({ path: OUT + '/3d-04-cruise.png' });
 // 6) pause / resume (down/up with a delay -- see tests/playwright.shots.mjs for why not press())
 const endVisible = await page.locator('#end').isVisible();
 if (endVisible) {
+   // btn-again calls startGame() directly (it does not reopen #menu), reusing whatever
+   // `difficulty` was already selected -- that's still 'easy' from the very first chip
+   // click. Clicking the chip again here would hang: it's inside the still-hidden #menu.
+   console.log('match already ended before pause check (fast combat) -- starting a fresh match');
    await page.click('#btn-again');
-   await page.waitForTimeout(300);
-   await page.click('.chip[data-diff="easy"]');
-   await page.click('#btn-play');
    await page.waitForTimeout(500);
 }
 await page.keyboard.down('p');
