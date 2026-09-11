@@ -80,3 +80,51 @@ test('smoke blocks line of fire (shell intercepted)', () => {
    for (let i = 0; i < 60 * 3; i++) tick(w);
    assert.ok(w.player.hp === w.player.maxHP, 'no damage through smoke');
 });
+
+test('RETREAT->REPAIR gate: damaged bot repairs once out of danger', () => {
+   const w = new World('normal');
+   const eb = w.bots.find(b => b.cls === 'EB');
+   // park it in a far corner at 30% HP, mid-retreat — the realistic entry point, since
+   // bots only enter RETREAT below 40%. Pre-fix, the RETREAT->REPAIR gate required
+   // hp > 50%, which a retreating bot can never satisfy: the state was unreachable and
+   // bots limped back into fights permanently damaged. Post-fix it flips within seconds.
+   eb.pos = { x: -3000, y: -3000 };
+   eb.hp = eb.maxHP * 0.3;
+   eb.state = 'RETREAT'; eb.stateTime = 0;
+   let sawRepair = false;
+   for (let i = 0; i < 60 * 10; i++) { tick(w); if (eb.state === 'REPAIR') { sawRepair = true; break; } }
+   assert.ok(sawRepair, 'bot should enter REPAIR shortly after retreating out of danger');
+});
+
+test('passive self-repair: hurt bot left alone heals its hull back up', () => {
+   const w = new World('normal');
+   const eb = w.bots.find(b => b.cls === 'EB');
+   // Drive ship.update() directly (no AI ticks) so nothing wanders into danger and there
+   // are no modules ticking DoT — this isolates the passive hull-heal path, which is fully
+   // deterministic (REPAIR_RATE * 0.35 fraction/s while nearestThreat >= 600).
+   eb.pos = { x: -3000, y: -3000 };
+   eb.hp = eb.maxHP * 0.4;
+   for (let i = 0; i < 60 * 60; i++) eb.update(1 / 60);
+   assert.ok(eb.hp > eb.maxHP * 0.85, `bot should heal back up, got ${(eb.hp / eb.maxHP).toFixed(2)} of max`);
+});
+
+test('passive self-repair: damage control clears fires and floods while safe', async () => {
+   const w = new World('normal');
+   const eb = w.bots.find(b => b.cls === 'EB');
+   // Seed one fire + one flood and let the ship sit safely out of range. Damage control
+   // clears each module at ~12%/s, so both are gone long before 120s (P(still present)
+   // ~1e-7). Fire spread is disabled so the seeded fire can't cascade into more modules.
+   const { COMBAT } = await import('../game/config.js');
+   const savedSpreadP = COMBAT.fire.spreadP;
+   COMBAT.fire.spreadP = 0;
+   try {
+      eb.pos = { x: -3000, y: -3000 };
+      eb.fires.push({ mod: 1, heat: 0, spreadT: 0, t: 0, dmgMult: 1 });
+      eb.floods.push({ mod: 2, t: 0, dmgMult: 1 });
+      for (let i = 0; i < 60 * 120; i++) eb.update(1 / 60);
+   } finally {
+      COMBAT.fire.spreadP = savedSpreadP;
+   }
+   assert.strictEqual(eb.fires.length, 0, 'fires should be cleared while safe');
+   assert.strictEqual(eb.floods.length, 0, 'floods should be pumped out while safe');
+});

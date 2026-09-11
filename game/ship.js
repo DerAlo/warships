@@ -218,6 +218,18 @@ export class Ship {
       if (this.repairT > 0) this.repairT -= dt;
       if (this.side === 'enemy' && this.state === 'REPAIR') this.repairTimer += dt;
 
+      // Enemy ships patch themselves up passively while out of danger — a slow trickle
+      // of hull healing plus fires/floods that burn out on their own. Without this a bot
+      // that retreats at 40% HP comes back to the fight still limping forever; with it,
+      // a disengaged ship is combat-ready again after a minute or two of safety. The
+      // player keeps the manual R-key model and does NOT get this passive heal.
+      if (this.side === 'enemy' && this.hp < this.maxHP && this.world.nearestThreat(this) >= 600) {
+         this.hp = Math.min(this.maxHP, this.hp + WORLD.REPAIR_RATE * 0.35 * dt * this.maxHP);
+         // damage control crews work through fires/floods over time instead of instantly
+         if (this.fires.length && Math.random() < 0.12 * dt) this.fires.shift();
+         if (this.floods.length && Math.random() < 0.12 * dt) this.floods.shift();
+      }
+
       // ---- death ----
       if (this.hp <= 0 && this.alive) this._sink();
    }

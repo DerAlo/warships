@@ -233,7 +233,11 @@ export function updateBot(bot, world, dt) {
          }
          steer = flee(threat || bot.pos, bot.pos);
          bot.repairTimer += dt;
-         if (bot.repairTimer > 3 && bot.hp > bot.maxHP * 0.5) {
+         // A bot only ever ENTERS RETREAT while lowHP (<40%), so the old "hp > 50%" gate
+         // here was unreachable — the REPAIR state never fired and bots limped back into
+         // fights permanently damaged. Repair once you've been running a moment AND are
+         // still hurt; the REPAIR state itself re-checks danger before sitting down.
+         if (bot.repairTimer > 3 && bot.hp < bot.maxHP * 0.85) {
             bot.state = 'REPAIR'; bot.stateTime = 0;
          }
          break;
@@ -241,6 +245,7 @@ export function updateBot(bot, world, dt) {
       case 'REPAIR': {
          // don't sit still while being hunted — re-engage or keep running
          if (underFire || world.nearestThreat(bot) < 900) {
+            bot.repairTimer = 0; // don't instantly re-enter REPAIR next frame
             bot.state = lowHP ? 'RETREAT' : 'ENGAGE'; bot.stateTime = 0; break;
          }
          const safe = world.safeZone(bot);
