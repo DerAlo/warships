@@ -459,19 +459,16 @@ export class Renderer3D {
       const effDist = lerp(dist, SCOPE_CAM_DIST, this.scopeT);
       const fov = lerp(BASE_FOV, SCOPE_FOV, this.scopeT);
       if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
-      // PURE ORBIT: the camera sits on a sphere of radius `effDist` around a look-target a few
-      // metres above the deck, so PITCH ALONE sets the look-down angle. The old code added a
-      // fixed base height (`60 + dist*0.4`) on top of the pitch term -- that kept the view
-      // steep (~31 deg down at zoom 420) even at minimum pitch, so the sea plane at the
-      // bottom of the screen only reached a few hundred metres out and 1800 m shots were
-      // physically unaimable. Removing the base lets a flat pitch put the camera near the
-      // waterline with the horizon in frame, which is what long-range aiming needs.
-      // World-space bearing -- deliberately NOT derived from p.heading, so rudder input
-      // never rotates the view. The ship turns under a stable camera instead.
+      // PURE ORBIT for POSITION: the camera sits on a sphere of radius `effDist` around a
+      // look-target a few metres above the deck, so pitch alone sets how high the camera
+      // rises as you look down (steeper pitch = higher camera, like leaning back to look
+      // down at your own ship). World-space bearing -- deliberately NOT derived from
+      // p.heading, so rudder input never rotates the view. The ship turns under a stable
+      // camera instead.
       const yaw = this.camYaw;
       const pitch = this.camPitch;
       const tx = p.pos.x, tz = p.pos.y;
-      const ty = lerp(20, SCOPE_LOOK_Y, this.scopeT); // look target rises toward bridge level when scoped
+      const ty = lerp(20, SCOPE_LOOK_Y, this.scopeT); // orbit-centre height rises toward bridge level when scoped
       const cx = tx - Math.cos(yaw) * Math.cos(pitch) * effDist;
       const cz = tz - Math.sin(yaw) * Math.cos(pitch) * effDist;
       const cy = ty + Math.sin(pitch) * effDist;
@@ -482,8 +479,33 @@ export class Renderer3D {
       const shakeX = (Math.random() - 0.5) * shakeMag, shakeY = (Math.random() - 0.5) * shakeMag;
       // Clamp just above the waterline (sea is at y=0) so a below-horizon pitch can't dip
       // the camera under the waves.
-      this.camera.position.set(cx + shakeX, Math.max(8, cy), cz + shakeY);
-      this.camera.lookAt(tx, ty, tz);
+      const camX = cx + shakeX, camY = Math.max(8, cy), camZ = cz + shakeY;
+      this.camera.position.set(camX, camY, camZ);
+      // ORIENTATION: aim at a point whose DISTANCE is an explicitly designed function of
+      // pitch, not derived from the orbit-position geometry above. The previous code did
+      // `camera.lookAt(tx, ty, tz)` -- always the fixed point 20m above the ship -- which
+      // made the screen-centre aim raycast land at EXACTLY ty/tan(pitch) from the ship no
+      // matter how far the camera was zoomed (the zoom term cancels out of that ratio
+      // entirely -- verified numerically: aim distance was ~36m at every zoom level tested
+      // from 140 to 1500 at the default pitch). That squeezed the whole 200-1800m useful
+      // firing range into roughly 6 degrees of pitch out of ~130 degrees of slider travel,
+      // which is why long shots felt "impossible" even once the camera itself could go flat.
+      // A first attempt pointed the camera along the raw orbit yaw/pitch direction instead of
+      // at the fixed point -- but that direction is BY CONSTRUCTION the reverse of the vector
+      // from camera to the same fixed orbit target, so it produced the identical curve.
+      // Instead, design the mapping directly: pitch linearly controls aim distance across the
+      // pitch slider's full travel (PITCH_MIN/MAX mirror main3d.js's pitchOff clamp of
+      // [-0.55, 0.75] plus CAM_BASE_PITCH 0.5), flattest pitch -> AIM_DIST_MAX, steepest pitch
+      // -> AIM_DIST_MIN, and aim the camera at that exact point on the sea. This deliberately
+      // avoids trig blow-up (no tan() anywhere) so every part of the slider is usable, and it
+      // guarantees the visual crosshair always lands exactly where the sim's aim point is,
+      // since both are the same computed point.
+      const AIM_DIST_MIN = 150, AIM_DIST_MAX = 2000;
+      const PITCH_MIN = -0.05, PITCH_MAX = 1.25; // CAM_BASE_PITCH(0.5) + pitchOff range [-0.55,0.75]
+      const aimT = clamp01((PITCH_MAX - pitch) / (PITCH_MAX - PITCH_MIN));
+      const aimDist = lerp(AIM_DIST_MIN, AIM_DIST_MAX, aimT);
+      const aimX = tx + Math.cos(yaw) * aimDist, aimZ = tz + Math.sin(yaw) * aimDist;
+      this.camera.lookAt(aimX, 0, aimZ);
       this.sun.target.position.set(p.pos.x, 0, p.pos.y);
       this.sun.target.updateMatrixWorld();
    }

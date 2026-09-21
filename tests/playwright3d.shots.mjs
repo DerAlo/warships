@@ -106,11 +106,15 @@ await settle(100);
 // spawned shell's arcDur matches the actual aim distance. Also runs early, before the ship
 // can plausibly have sunk from bot fire. The aim point is ALWAYS screen centre (the fixed
 // reticle) -- steer the aim distance by turning the camera (pitch) with small incremental
-// mouse moves, sweeping continuously with look() (synthetic movementY deltas, never a real cursor move).
+// mouse moves, sweeping continuously with look() (synthetic movementY deltas, never a real
+// cursor move). The default pose (pitchOff=0) already sits at ~1200m aim distance (see
+// render3d.js's linear pitch->distance mapping), so moving the mouse UP (negative dy)
+// increases pitchOff/pitch, which DECREASES aim distance toward the 200-900m band -- moving
+// down would push it further away, past the 2000m ceiling.
 await page.keyboard.down('2'); await page.waitForTimeout(80); await page.keyboard.up('2');
 let aimOK = false;
 for (let i = 0; i < 60 && !aimOK; i++) {
-   await look(0, 10, 1);
+   await look(0, -10, 1);
    await settle(20);
    const ad = await page.evaluate(() => {
       const w = window.__world(); const p = w.player;
