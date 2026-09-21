@@ -21,8 +21,17 @@ const HULL_COLORS = { player: 0x3a4a55, enemy: 0x5a4a44 };
 // EFFECTIVE orbit distance and FOV both blend toward the scoped values as zoom keeps
 // decreasing to ZOOM_MIN, so there's no mode switch/state machine, just a continuous blend.
 const SCOPE_ENTER_DIST = 260, SCOPE_FULL_DIST = 140; // matches main3d.js's ZOOM_MIN
-const SCOPE_CAM_DIST = 22;   // effective orbit distance once fully scoped (bridge-close)
-const SCOPE_LOOK_Y = 34;     // look-target height when scoped (bridge/conning-tower level)
+// SCOPE_CAM_DIST used to be 22 -- well INSIDE the Bismarck's own superstructure footprint
+// (the bridge/funnel/deckhouse blocks span roughly [-32, +12] metres along the hull's long
+// axis, centred on the ship). Looking fore or aft while scoped put the camera physically
+// inside that geometry, filling the whole screen with the ship's own hull colour -- exactly
+// the "sieht man nur seine eigenen Schornsteine" complaint. 85m clears the funnel/bridge/
+// superstructure horizontally from any yaw, so the scope now always looks OUT past the ship
+// instead of through it. SCOPE_LOOK_Y raised from 34 to 46 (just above the highest
+// superstructure point, the bridge top) for the same reason -- the old height sat inside the
+// bridge block vertically too.
+const SCOPE_CAM_DIST = 85;   // effective orbit distance once fully scoped -- clears the ship's own superstructure
+const SCOPE_LOOK_Y = 46;     // look-target height when scoped -- above the bridge roofline
 const BASE_FOV = 58, SCOPE_FOV = 9;
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;

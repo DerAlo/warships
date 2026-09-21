@@ -16,6 +16,7 @@ const scene3d = $('scene3d');
 const fxCanvas = $('fx');
 const scopeOverlayEl = $('scope-overlay');
 const scopeRangeEl = $('scope-range');
+const rangeReadoutEl = $('range-readout');
 
 // How tightly a turret must be aimed before the player can actually fire, in degrees.
 // This is the whole point of the 3D mode: WoWs-style, you wait for the rumble to stop.
@@ -136,7 +137,14 @@ function controlPlayer(dt) {
    // it only steers the ship. Wheel dollies the camera in/out; scrolled all the way in it
    // blends into the sniper scope (see render3d.js SCOPE_ENTER_DIST).
    cam3.zoom = clamp(cam3.zoom * Math.pow(1.08, inp.mouse.wheel), ZOOM_MIN, ZOOM_MAX);
-   cam3.yawOff -= inp.mouse.dx * LOOK_YAW_SENS;
+   // += (not -=): with render3d.js's aim-point formula (aimX = tx + cos(yaw)*dist, aimZ =
+   // tz + sin(yaw)*dist), increasing yaw rotates the look direction clockwise in the sim's
+   // x-east/y-south plane -- i.e. turns the view to the RIGHT. So mouse-right (positive dx)
+   // must INCREASE yawOff. The previous `-=` had this backwards: moving the mouse right
+   // rotated the view left, and vice versa -- confirmed visually (an island that started left
+   // of screen-centre ended up dead-centre after a rightward mouse sweep, the opposite of
+   // what should happen).
+   cam3.yawOff += inp.mouse.dx * LOOK_YAW_SENS;
    // Pitch floor -0.55: with CAM_BASE_PITCH 0.5 that lets the total pitch reach ~-0.05 rad --
    // just below the horizon. Combined with the pure-orbit camera in render3d.js (no fixed
    // base height), that puts the camera near the waterline so the sea plane at the screen
@@ -161,13 +169,25 @@ function controlPlayer(dt) {
    // The reticle is fixed at screen centre by CSS now (index-3d.html) -- no per-frame
    // positioning needed, since the aim point is always dead centre.
 
-   // ---- sniper scope overlay: renderer.scopeT (0..1) tracks how far the wheel-zoom blend
-   // has moved into the scope (render3d.js _syncCamera). Toggle the vignette/reticle once
-   // meaningfully engaged, and show the live target range while it's up.
+   // ---- ALWAYS-ON range readout: judging shot distance from the camera angle alone was
+   // the actual reason aiming felt impossible -- there was no numeric feedback at all
+   // outside the sniper scope, which only shows once zoomed almost all the way in. Now the
+   // aim distance is shown under the reticle at all times, turning red past main-battery
+   // range (a shot fired there just splashes short -- see the `d < p.cfg.main.range * 1.15`
+   // gate below). Hidden while the scope's own (larger, more prominent) readout is up so
+   // the two don't visually stack.
    const scopeT = renderer.scopeT || 0;
    scopeOverlayEl.classList.toggle('on', scopeT > 0.35);
-   if (scopeT > 0.05 && worldPt) {
-      scopeRangeEl.textContent = Math.round(Math.hypot(worldPt.x - p.pos.x, worldPt.y - p.pos.y)) + ' m';
+   if (worldPt) {
+      const rangeM = Math.hypot(worldPt.x - p.pos.x, worldPt.y - p.pos.y);
+      if (scopeT > 0.05) {
+         scopeRangeEl.textContent = Math.round(rangeM) + ' m';
+         rangeReadoutEl.style.display = 'none';
+      } else {
+         rangeReadoutEl.style.display = '';
+         rangeReadoutEl.textContent = Math.round(rangeM) + ' m';
+         rangeReadoutEl.classList.toggle('out-of-range', rangeM > p.cfg.main.range);
+      }
    }
 
    // helm & throttle
