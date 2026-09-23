@@ -581,7 +581,7 @@ export class ShipModels {
          ship, d, S, root, body, hull, mat, turrets: trs, smoke,
          heave: 0, pitch: 0, roll: 0, heel: 0, lastHeading: ship.heading || 0,
          opacity: ship.spotted === false ? 0 : 1, deadT: 0, sinkStarted: false,
-         sinkRoll: (rnd() < 0.5 ? -1 : 1) * (0.25 + rnd() * 0.35), sinkPitch: (rnd() < 0.5 ? -1 : 1) * (0.05 + rnd() * 0.1),
+         sinkRoll: (rnd() < 0.5 ? -1 : 1) * (0.25 + rnd() * 0.35), sinkPitch: (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.16),
          lastAmmo: ship.ammo, gone: false, rnd,
          fireSpots: Array.from({ length: 8 }, () => ({ x: (rnd() - 0.5) * d.L * 0.75, z: (rnd() - 0.5) * d.B * 0.5 })),
       };
@@ -617,7 +617,7 @@ export class ShipModels {
       let sinkT = 0;
       if (!alive) {
          r.deadT += dt;
-         sinkT = Number.isFinite(s.sinkT) ? clamp(s.sinkT, 0, 1) : clamp(r.deadT / 14, 0, 1);
+         sinkT = Number.isFinite(s.sinkT) ? clamp(s.sinkT, 0, 1) : clamp(r.deadT / 18, 0, 1);
          if (!r.sinkStarted) {
             r.sinkStarted = true;
             this.fx?.sinkBurst(s.pos.x, s.pos.y, d.L, d.B, s.heading || 0);
@@ -686,6 +686,9 @@ export class ShipModels {
       const fl = r.flashT / 0.22;
       r.mat.emissive.setRGB(1.0, 0.42, 0.15);
       r.mat.emissiveIntensity = fl * fl * 0.35;
+      // wrecks char quickly: a sinking hull in parade paint looks untouched
+      const burnt = 1 - 0.62 * smoothstep(0, 0.3, sinkT);
+      if (r.mat.color.r !== burnt) r.mat.color.setScalar(burnt);
 
       // ---- turrets ----
       const ammoChanged = s.ammo !== r.lastAmmo;
@@ -757,7 +760,7 @@ export class ShipModels {
 
    clear() {
       for (const [s, r] of this.recs) this._remove(s, r);
-      for (const g of this.geoCache.values()) g.dispose();
+      for (const g of this.geoCache.values()) (g.isBufferGeometry ? g : g.geo).dispose();   // turret houses cache {geo, h}
       this.geoCache.clear();
    }
 

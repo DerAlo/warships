@@ -206,6 +206,15 @@ export class Renderer3D {
       return out;
    }
 
+   // Full teardown (page-level restarts may create a fresh renderer on the same canvas).
+   dispose() {
+      this.fx.dispose(); this.ships.dispose(); this.terrain.dispose();
+      this.ocean.dispose(); this.sky.dispose(); this.post.dispose();
+      this.scene.environment = null;
+      this.renderer.dispose();
+      if (window.__renderer3d === this) window.__renderer3d = null;
+   }
+
    // ================= CAMERA (delegated to camera3d.js) =================
    setCameraPose(yaw, pitch, dist) { this.cam.setCameraPose(yaw, pitch, dist); }
    screenToWorld(nx, ny) { return this.cam.screenToWorld(nx, ny); }

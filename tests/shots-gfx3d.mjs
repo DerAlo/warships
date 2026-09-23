@@ -72,6 +72,15 @@ const views = {
    fire: `const p = w.player; let best = null, bd = 1e9; for (const s of w.ships) { if (s === p || !s.alive) continue; const dd = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y); if (dd < bd) { bd = dd; best = s; } }
       if (!best) return null; best.fires = [{ t: 0 }, { t: 0 }, { t: 0 }]; window.__fxSim = 9; const h = best.heading; const d = 260;
       return { pos: [best.pos.x + Math.cos(h + 1.4) * d, 40, best.pos.y + Math.sin(h + 1.4) * d], look: [best.pos.x, 30, best.pos.y], fov: 50 };`,
+   caps: `const p = w.player, h = p.heading; const at = (a, d) => ({ x: p.pos.x + Math.cos(h + a) * d, y: p.pos.y + Math.sin(h + a) * d });
+      w.caps = [{ id: 'A', pos: at(0, 900), r: 260, owner: null, capper: 'player', progress: 0.45 }, { id: 'B', pos: at(0.7, 1500), r: 300, owner: 'enemy', contested: true }, { id: 'C', pos: at(-0.6, 1300), r: 240, owner: 'player' }];
+      return { pos: [p.pos.x - Math.cos(h) * 300, 260, p.pos.y - Math.sin(h) * 300], look: [p.pos.x + Math.cos(h) * 900, 0, p.pos.y + Math.sin(h) * 900], fov: 55 };`,
+   sink0: `const p = w.player, R = window.__renderer3d; let best = null, bd = 1e9; for (const s of w.ships) { if (s === p || s.side !== 'enemy') continue; const dd = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y); if (dd < bd) { bd = dd; best = s; } }
+      if (!best) return null; best.alive = false; best.fires = [{ t: 0 }, { t: 0 }]; best.sinkT = 0.06; R.ships.sync(w, 0.05, R.time, R.camera); window.__fxSim = 1.0; const h = best.heading;
+      return { pos: [best.pos.x + Math.cos(h + 1.3) * 380, 60, best.pos.y + Math.sin(h + 1.3) * 380], look: [best.pos.x, 25, best.pos.y], fov: 50 };`,
+   sink: `const p = w.player, R = window.__renderer3d; let best = null, bd = 1e9; for (const s of w.ships) { if (s === p || s.side !== 'enemy') continue; const dd = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y); if (dd < bd) { bd = dd; best = s; } }
+      if (!best) return null; best.alive = false; best.fires = [{ t: 0 }, { t: 0 }]; best.sinkT = 0.55; R.ships.sync(w, 0.05, R.time, R.camera); window.__fxSim = 7; const h = best.heading;
+      return { pos: [best.pos.x + Math.cos(h + 1.3) * 380, 60, best.pos.y + Math.sin(h + 1.3) * 380], look: [best.pos.x, 25, best.pos.y], fov: 50 };`,
    wake0: `window.__renderer3d.fx.wakes.mesh.visible = false; const p = w.player; const h = p.heading;
       return { pos: [p.pos.x - Math.cos(h) * 320 + Math.cos(h + 1.57) * 90, 110, p.pos.y - Math.sin(h) * 320 + Math.sin(h + 1.57) * 90], look: [p.pos.x - Math.cos(h) * 60, 0, p.pos.y - Math.sin(h) * 60], fov: 55 };`,
    wake: `window.__renderer3d.fx.wakes.mesh.visible = true; if (w.smokeClouds) w.smokeClouds.length = 0; const p = w.player; const h = p.heading; const R = window.__renderer3d, rec = R.ships.list.find(x => x.ship === p);

@@ -598,7 +598,71 @@ class Wakes {
    dispose() { this.geometry.dispose(); this.material.dispose(); }
 }
 
+// ---------------- rain: world-anchored streaks wrapped in a box around the camera ----------------
+// All motion is in the vertex shader, so rain costs one static draw call and zero CPU.
+const RAIN_VERT = /* glsl */`
+attribute vec2 aK;   // 0 = streak head / 1 = tail, speed variation
+uniform float uTime;
+uniform float uBox;
+uniform vec3 uWindV;
+varying float vA;
+void main() {
+   vec3 vel = vec3(uWindV.x, -uWindV.y * aK.y, uWindV.z);
+   vec3 hb = vec3(uBox * 0.5, uBox * 0.35, uBox * 0.5);
+   vec3 size = hb * 2.0;
+   vec3 rel = mod(position * size + vel * uTime - cameraPosition + hb, size) - hb;
+   vec3 wp = cameraPosition + rel - normalize(vel) * aK.x * (1.1 + aK.y * 0.6);
+   float d = length(rel);
+   vA = smoothstep(1.5, 5.0, d) * (1.0 - smoothstep(uBox * 0.3, uBox * 0.5, d));
+   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+}`;
+const RAIN_FRAG = /* glsl */`
+uniform vec3 uCol;
+uniform float uAlpha;
+varying float vA;
+void main() {
+   float a = vA * uAlpha;
+   if (a < 0.003) discard;
+   gl_FragColor = vec4(uCol, a);
+}`;
+
+class Rain {
+   constructor(n = 5000) {
+      const rnd = mulberry32(4242);
+      const pos = new Float32Array(n * 6), k = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) {
+         const x = rnd(), y = rnd(), z = rnd(), s = 0.8 + rnd() * 0.4;
+         pos.set([x, y, z, x, y, z], i * 6);
+         k.set([0, s, 1, s], i * 4);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('aK', new THREE.BufferAttribute(k, 2));
+      this.uniforms = {
+         uTime: { value: 0 }, uBox: { value: 70 }, uWindV: { value: new THREE.Vector3(2, 11, 1) },
+         uCol: { value: new THREE.Color(0.6, 0.65, 0.7) }, uAlpha: { value: 0 },
+      };
+      this.material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: RAIN_VERT, fragmentShader: RAIN_FRAG, transparent: true, depthWrite: false });
+      this.geometry = g;
+      this.mesh = new THREE.LineSegments(g, this.material);
+      this.mesh.frustumCulled = false;
+      this.mesh.renderOrder = 40;
+      this.mesh.visible = false;
+   }
+   setEnv(rain, amb) {
+      this.mesh.visible = rain > 0.01;
+      this.uniforms.uAlpha.value = 0.28 * rain;
+      this.uniforms.uCol.value.copy(amb).multiplyScalar(0.9);
+   }
+   update(time, wx, wz) {
+      this.uniforms.uTime.value = time;
+      this.uniforms.uWindV.value.set(wx * 1.6, 11, wz * 1.6);
+   }
+   dispose() { this.geometry.dispose(); this.material.dispose(); }
+}
+
 // ---------------- capture zones: ring on the water + letter marker ----------------
+const capSide = (v) => v === 'player' || v === 'friendly' || v === 'ally' ? 'player' : v === 'enemy' ? 'enemy' : null;
 const CAP_VERT = /* glsl */`
 ${SURF_GLSL}
 uniform vec2 uC;
@@ -708,12 +772,12 @@ class CapMarkers {
             let r = this.recs.get(id);
             if (!r) { r = this._make(cap); this.recs.set(id, r); }
             const R = Number(cap.r) || 250;
-            const owner = cap.owner === 'player' || cap.owner === 'enemy' ? cap.owner : null;
+            const owner = capSide(cap.owner);
             const U = r.mat.uniforms;
             U.uC.value.set(cap.pos.x, cap.pos.y);
             U.uR.value = R; U.uW.value = clamp(R * 0.025, 4, 14);
             U.uCol.value.setRGB(...CAP_COL[owner || 'neutral']);
-            const capper = cap.capper === 'player' || cap.capper === 'enemy' ? cap.capper : null;
+            const capper = capSide(cap.capper);
             U.uProgCol.value.setRGB(...CAP_COL[capper || owner || 'neutral']);
             U.uProg.value = capper ? clamp(Number(cap.progress) || 0, 0, 1) : 0;
             U.uDash.value = owner ? 0 : 1;
@@ -756,7 +820,8 @@ export class FX {
       this.decals = new DecalPool(512, this.noise, bindAtm(Object.assign(surf(), { uFoamCol: this.uFoamCol })));
       this.wakes = new Wakes(this.noise, bindAtm(Object.assign(surf(), { uFoamCol: this.uFoamCol, uTime: this.uTime })));
       this.caps = new CapMarkers(scene, bindAtm(Object.assign(surf(), { uTime: this.uTime })));
-      scene.add(this.wakes.mesh, this.decals.mesh, this.puff.mesh, this.glow.mesh);
+      this.rain = new Rain();
+      scene.add(this.wakes.mesh, this.decals.mesh, this.puff.mesh, this.glow.mesh, this.rain.mesh);
       // flash lights: a constant count so no material ever recompiles
       this.lights = [];
       for (let i = 0; i < 4; i++) {
@@ -795,6 +860,7 @@ export class FX {
       this.windX = Math.cos(wd) * ws; this.windZ = Math.sin(wd) * ws;
       this.night = !!env.night;
       this.foamK = this.uFoamCol.value.r;
+      this.rain.setEnv(Number(env.rain) || 0, this.uAmb.value);
    }
 
    // ---------- public spawners (also used by ships3d) ----------
@@ -998,6 +1064,7 @@ export class FX {
       this.shipsRef = ships;
       dt *= this.timeScale;   // test hook: 0 freezes every effect in place
       this.uTime.value = time;
+      this.rain.update(time, this.windX, this.windZ);
       const cam = camera.position;
       this.nImp = 0;
       this.citMarks.length = 0;
@@ -1385,9 +1452,9 @@ export class FX {
 
    dispose() {
       this.clear();
-      this.scene.remove(this.glow.mesh, this.puff.mesh, this.decals.mesh, this.wakes.mesh);
+      this.scene.remove(this.glow.mesh, this.puff.mesh, this.decals.mesh, this.wakes.mesh, this.rain.mesh);
       for (const l of this.lights) this.scene.remove(l);
-      this.glow.dispose(); this.puff.dispose(); this.decals.dispose(); this.wakes.dispose(); this.caps.dispose();
+      this.glow.dispose(); this.puff.dispose(); this.decals.dispose(); this.wakes.dispose(); this.caps.dispose(); this.rain.dispose();
       this.noise.dispose();
    }
 }
