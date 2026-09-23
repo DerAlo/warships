@@ -108,7 +108,7 @@ function makeReefField(o, idx) {
          const s = Math.hypot(u, v) * (1 + 0.18 * fbm(n2, u * 2 + 3, v * 2 + 3, 3));
          const n = fbm(n1, u * 3.5, v * 3.5, 4);
          const core = 1 - smoothstep(0.35, 1.2, s);
-         return Math.max(DEEP, -11 + core * (9.3 + 3.4 * n) - smoothstep(1.0, 1.45, s) * 8);
+         return Math.max(DEEP, -11 + core * (9.3 + 3.4 * n) - smoothstep(0.9, 1.45, s) * 26);
       },
    };
 }
@@ -482,7 +482,12 @@ export class Terrain {
             for (let i = i0; i <= i1; i++) {
                const x = minX + (i + 0.5) * texel;
                const h = gridH(g, x, z);
-               const d = clamp(-h / 50, 0, 1);
+               // fade to deep water before the grid border, otherwise every island sits in a
+               // visible square of shallow tint (the seabed is still ~10 m deep at the edge)
+               // radial (not per-edge) so shoals read as round banks, not soft rectangles
+               const rr = Math.hypot(x - (g.x0 + gx1) * 0.5, z - (g.z0 + gz1) * 0.5) / ((gx1 - g.x0) * 0.5);
+               const w = 1 - smoothstep(0.72, 0.99, rr);
+               const d = 1 - (1 - clamp(-h / 50, 0, 1)) * w;
                const v = Math.round(d * 255);
                const q = j * R + i;
                if (v < data[q]) data[q] = v;

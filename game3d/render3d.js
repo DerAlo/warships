@@ -12,6 +12,7 @@ import { Ocean } from './water3d.js';
 import { Terrain } from './terrain3d.js';
 import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
+import { FX } from './fx3d.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
 
@@ -41,7 +42,7 @@ export class Renderer3D {
       this.scene.add(this.ocean.mesh);
       this.terrain = new Terrain();
       this.scene.add(this.terrain.group);
-      this.fx = null;
+      this.fx = new FX(this.scene, this.ocean, this.terrain);
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.post = new Post(r, { samples: 4, bloomLevels: 5 });
 
@@ -51,12 +52,6 @@ export class Renderer3D {
       this._envKey = '';
       this._applyEnv(resolveEnv(null));
 
-      // legacy transient effects (replaced by fx3d.js)
-      this.shellMeshes = new Map();
-      this.torpMeshes = new Map();
-      this._fxMeshes = new Map();
-      this._shellGeo = new THREE.SphereGeometry(1, 8, 6);
-      this._torpGeo = new THREE.CapsuleGeometry(1.1, 8, 4, 8).rotateZ(Math.PI / 2);
       this.debugView = null;   // test hook: { pos:[x,y,z], look:[x,y,z], fov }
       window.__renderer3d = this;
    }
@@ -102,6 +97,7 @@ export class Renderer3D {
       this.hemi.color.setRGB(zn[0] + hz[0], zn[1] + hz[1], zn[2] + hz[2]).multiplyScalar(0.5);
       this.hemi.groundColor.setRGB(0.02, 0.06, 0.08);
       this.hemi.intensity = env.night ? 0.35 : 0.22;
+      this.fx.setEnv(env);
       this._envKey = env.key;
    }
 
@@ -123,7 +119,7 @@ export class Renderer3D {
       const res = this.terrain.build(world.obstacles || [], this.env, arena);
       this.ocean.setDepthMap(res.depthTex, res.rect);
       this.ships.clear();
-      this._clearLegacyFx();
+      this.fx.clear();
       this.arena = arena;
    }
    buildObstacles(world) { this.buildWorld(world); }
@@ -143,9 +139,7 @@ export class Renderer3D {
       this.ships.sync(world, dt, this.time, this.camera);
       this.ocean.setHulls(this.ships.hulls);
       this._updateShadow(world);
-      this._syncShells(world);
-      this._syncTorpedoes(world);
-      this._syncEffects(world, dt);
+      this.fx.update(world, dt, this.time, this.camera, this.ships);
 
       const env = this.env;
       this.post.render(this.scene, this.camera, {
@@ -198,77 +192,6 @@ export class Renderer3D {
       this.sun.position.copy(_v).addScaledVector(L, 4500);
       this.sun.target.updateMatrixWorld();
       this.sun.updateMatrixWorld();
-   }
-
-   // ================= LEGACY FX (step 1; replaced by fx3d.js) =================
-   _clearLegacyFx() {
-      for (const m of this.shellMeshes.values()) { this.scene.remove(m); m.material.dispose(); }
-      for (const m of this.torpMeshes.values()) { this.scene.remove(m); m.material.dispose(); }
-      for (const m of this._fxMeshes.values()) { this.scene.remove(m); m.material.dispose(); }
-      this.shellMeshes.clear(); this.torpMeshes.clear(); this._fxMeshes.clear();
-   }
-
-   _syncShells(world) {
-      const seen = new Set();
-      for (const s of world.shells || []) {
-         seen.add(s.id);
-         let mesh = this.shellMeshes.get(s.id);
-         if (!mesh) {
-            const side = s.side || s.owner;
-            mesh = new THREE.Mesh(this._shellGeo, new THREE.MeshBasicMaterial({ color: side === 'player' ? new THREE.Color(8, 6, 3) : new THREE.Color(8, 3, 2) }));
-            mesh.scale.setScalar(2.2);
-            this.scene.add(mesh);
-            this.shellMeshes.set(s.id, mesh);
-         }
-         let h;
-         if (Number.isFinite(s.alt)) h = s.alt;
-         else {
-            const t = Math.min(1, s.arc || 0);
-            const R = (s.arcDur || 1) * (s.gun?.vShell || 650);
-            const H = Math.max(25, R * 0.10);
-            h = 4 * H * t * (1 - t) + 18 * (1 - t);
-         }
-         mesh.position.set(s.pos.x, h, s.pos.y);
-      }
-      for (const [id, mesh] of this.shellMeshes) if (!seen.has(id)) { this.scene.remove(mesh); mesh.material.dispose(); this.shellMeshes.delete(id); }
-   }
-
-   _syncTorpedoes(world) {
-      const seen = new Set();
-      for (const t of world.torpedoes || []) {
-         seen.add(t.id);
-         let mesh = this.torpMeshes.get(t.id);
-         if (!mesh) {
-            mesh = new THREE.Mesh(this._torpGeo, new THREE.MeshBasicMaterial({ color: 0xdff2ff }));
-            this.scene.add(mesh);
-            this.torpMeshes.set(t.id, mesh);
-         }
-         mesh.position.set(t.pos.x, -1.5, t.pos.y);
-         mesh.rotation.y = -(Number.isFinite(t.heading) ? t.heading : t.dir || 0);
-      }
-      for (const [id, mesh] of this.torpMeshes) if (!seen.has(id)) { this.scene.remove(mesh); mesh.material.dispose(); this.torpMeshes.delete(id); }
-   }
-
-   _syncEffects(world) {
-      const seen = new Set();
-      for (const e of world.effects || []) {
-         if (e.kind !== 'muzzle' && e.kind !== 'explosion' && e.kind !== 'splash') continue;
-         seen.add(e);
-         let mesh = this._fxMeshes.get(e);
-         if (!mesh) {
-            mesh = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-            this.scene.add(mesh);
-            this._fxMeshes.set(e, mesh);
-         }
-         const t = clamp((e.age || 0) / (e.life + (e.age || 0) || 1), 0, 1);
-         let r;
-         if (e.kind === 'muzzle') { r = (e.big ? 34 : 20) * (1 - t * 0.4); mesh.material.color.setRGB(6, 4, 1.5); mesh.position.set(e.pos.x, 18, e.pos.y); }
-         else if (e.kind === 'explosion') { r = (e.big ? 90 : 45) * (0.3 + t * 1.1); mesh.material.color.setRGB(5, 1.8, 0.5); mesh.position.set(e.pos.x, 12, e.pos.y); }
-         else { r = (e.big ? 55 : 26) * (0.4 + t * 0.8); mesh.material.color.setRGB(1.2, 1.4, 1.6); mesh.position.set(e.pos.x, 6, e.pos.y); }
-         mesh.material.opacity = 1 - t;
-         mesh.scale.set(r, r, 1);
-      }
-      for (const [e, mesh] of this._fxMeshes) if (!seen.has(e)) { this.scene.remove(mesh); mesh.material.dispose(); this._fxMeshes.delete(e); }
    }
 
    // ================= HUD helpers =================

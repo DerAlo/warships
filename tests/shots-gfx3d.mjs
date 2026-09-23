@@ -58,6 +58,27 @@ const views = {
    horizon2: `const p = w.player; const L = window.__renderer3d.env.sunDir; const a = Math.atan2(L.z, L.x) + Math.PI;
       return { pos: [p.pos.x, 24, p.pos.y], look: [p.pos.x + Math.cos(a) * 3000, 60, p.pos.y + Math.sin(a) * 3000], fov: 60 };`,
    top: `const p = w.player; return { pos: [p.pos.x - 1800, 1500, p.pos.y + 1800], look: [p.pos.x + 300, 0, p.pos.y - 300], fov: 55 };`,
+   // scripted effects so FX can be judged without waiting for the AI to open fire
+   fx: `if (w.smokeClouds) w.smokeClouds.length = 0; const p = w.player, h = p.heading, fx = window.__renderer3d.fx; const a = h + 1.5;
+      const cx = p.pos.x + Math.cos(a) * 520, cz = p.pos.y + Math.sin(a) * 520, sx = -Math.sin(a), sz = Math.cos(a);
+      fx._splash(cx, cz, 380); fx._splash(cx + sx * 90, cz + sz * 90, 203); fx._splash(cx - sx * 80, cz - sz * 80, 127);
+      fx._splash(cx + sx * 190 + Math.cos(a) * 60, cz + sz * 190 + Math.sin(a) * 60, 460, true);
+      fx._explosion(cx - sx * 200, 12, cz - sz * 200, 380, true);
+      window.__fxSim = 0.6;
+      return { pos: [p.pos.x + Math.cos(a) * 60, 26, p.pos.y + Math.sin(a) * 60], look: [cx, 30, cz], fov: 50 };`,
+   muzzle: `const p = w.player, h = p.heading, fx = window.__renderer3d.fx; const V = window.__renderer3d.camera.position.constructor;
+      window.__fxSim = 0.03; for (let i = 0; i < 3; i++) fx.muzzle(new V(p.pos.x + Math.cos(h) * (40 - i * 12), 16, p.pos.y + Math.sin(h) * (40 - i * 12)), new V(Math.cos(h + 1.2), 0.08, Math.sin(h + 1.2)), 380, i * 0.02);
+      return { pos: [p.pos.x + Math.cos(h - 0.9) * 170, 30, p.pos.y + Math.sin(h - 0.9) * 170], look: [p.pos.x + Math.cos(h + 1.2) * 40, 14, p.pos.y + Math.sin(h + 1.2) * 40], fov: 55 };`,
+   fire: `const p = w.player; let best = null, bd = 1e9; for (const s of w.ships) { if (s === p || !s.alive) continue; const dd = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y); if (dd < bd) { bd = dd; best = s; } }
+      if (!best) return null; best.fires = [{ t: 0 }, { t: 0 }, { t: 0 }]; window.__fxSim = 9; const h = best.heading; const d = 260;
+      return { pos: [best.pos.x + Math.cos(h + 1.4) * d, 40, best.pos.y + Math.sin(h + 1.4) * d], look: [best.pos.x, 30, best.pos.y], fov: 50 };`,
+   wake0: `window.__renderer3d.fx.wakes.mesh.visible = false; const p = w.player; const h = p.heading;
+      return { pos: [p.pos.x - Math.cos(h) * 320 + Math.cos(h + 1.57) * 90, 110, p.pos.y - Math.sin(h) * 320 + Math.sin(h + 1.57) * 90], look: [p.pos.x - Math.cos(h) * 60, 0, p.pos.y - Math.sin(h) * 60], fov: 55 };`,
+   wake: `window.__renderer3d.fx.wakes.mesh.visible = true; if (w.smokeClouds) w.smokeClouds.length = 0; const p = w.player; const h = p.heading; const R = window.__renderer3d, rec = R.ships.list.find(x => x.ship === p);
+      if (rec) { R.fx.wakes.trails.delete(p); const sx = p.pos.x - Math.cos(h) * rec.d.L * 0.47, sz = p.pos.y - Math.sin(h) * rec.d.L * 0.47, sp = 14;
+         for (let a = 25; a >= 0; a -= 0.5) { const d = sp * a, o = 0.0005 * d * d; R.fx.wakes.feed(p, 0, sx - Math.cos(h) * d + Math.cos(h + 1.57) * o, sz - Math.sin(h) * d + Math.sin(h + 1.57) * o, sp, rec.d.B, 1, R.time - a); }
+         const tk = {}; for (let a = 8; a >= 0; a -= 0.25) R.fx.wakes.feed(tk, 1, sx - Math.cos(h - 0.5) * (60 + 30 * a), sz - Math.sin(h - 0.5) * (60 + 30 * a), 30, 2, 1, R.time - a); }
+      return { pos: [p.pos.x - Math.cos(h) * 320 + Math.cos(h + 1.57) * 90, 110, p.pos.y - Math.sin(h) * 320 + Math.sin(h + 1.57) * 90], look: [p.pos.x - Math.cos(h) * 60, 0, p.pos.y - Math.sin(h) * 60], fov: 55 };`,
    water: `const p = w.player; const h = p.heading; return { pos: [p.pos.x - Math.cos(h) * 60, 9, p.pos.y - Math.sin(h) * 60 + 40], look: [p.pos.x - Math.cos(h) * 400, 0, p.pos.y - Math.sin(h) * 400 + 80], fov: 60 };`,
 };
 
@@ -69,6 +90,11 @@ for (const name of wanted) {
       if (!code) { r.debugView = null; return true; }
       const v = new Function('w', code)(w);
       r.debugView = v;
+      const n = Math.round((window.__fxSim || 0) * 20); window.__fxSim = 0;
+      if (v) { r._applyDebugView(); r.camera.updateMatrixWorld(); }
+      r.fx.timeScale = 1;
+      for (let i = 0; i < n; i++) { r.time += 0.05; r.fx.update(w, 0.05, r.time, r.camera, r.ships); }
+      r.fx.timeScale = n > 0 ? 0 : 1;   // freeze the scripted effects for the shot
       return !!v;
    }, code);
    if (!ok) { console.log('skip', name); continue; }

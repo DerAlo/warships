@@ -677,9 +677,15 @@ export class ShipModels {
       r.body.rotation.set(rx, 0, rz, 'YXZ');
 
       // ---- hit flash ----
-      const fl = clamp(s.hitFlash || 0, 0, 1);
-      r.mat.emissive.setRGB(1.0 * fl, 0.45 * fl, 0.2 * fl);
-      r.mat.emissiveIntensity = fl * 1.5;
+      // only a rising edge flashes: fire/flood DoT re-arms sim hitFlash every frame and a
+      // permanently glowing hull reads as a lighting bug
+      const hf = clamp(s.hitFlash || 0, 0, 1);
+      if (hf > (r.lastHF || 0) + 0.3) r.flashT = 0.22;
+      r.lastHF = hf;
+      r.flashT = Math.max(0, (r.flashT || 0) - dt);
+      const fl = r.flashT / 0.22;
+      r.mat.emissive.setRGB(1.0, 0.42, 0.15);
+      r.mat.emissiveIntensity = fl * fl * 0.35;
 
       // ---- turrets ----
       const ammoChanged = s.ammo !== r.lastAmmo;
