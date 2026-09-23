@@ -190,8 +190,8 @@ export function obstacleRadiusAt(o, a) {
 export function obstacleT(o, p) {
    const dx = p.x - o.c.x, dy = p.y - o.c.y;
    const d = Math.hypot(dx, dy);
-   const rMax = o.rMax || o.r * 1.6;
-   if (d > rMax * 1.05) return d / rMax;
+   // no d/rMax shortcut: on elongated islands rMax is far larger than the radius at most
+   // angles, which made safe water up to ~1.3 rMax look like coast (spawns and AI got pulled in)
    return d / obstacleRadiusAt(o, Math.atan2(dy, dx));
 }
 // Terrain height (m) of an island at p (0 at the coastline); see islandReliefAt below.

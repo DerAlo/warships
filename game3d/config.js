@@ -367,9 +367,9 @@ export const SHIPS = {
 export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23'];
 
 export const DIFFICULTY = {
-   easy: { key: 'easy', label: 'Leicht', botHP: 0.8, botDmg: 0.7, aimErr: 0.022, lead: 0.62, reaction: 2.6, dodge: 0.25, smarts: 0.5, rewardMult: 0.8 },
-   normal: { key: 'normal', label: 'Normal', botHP: 1, botDmg: 1, aimErr: 0.013, lead: 0.82, reaction: 1.5, dodge: 0.55, smarts: 0.8, rewardMult: 1 },
-   hard: { key: 'hard', label: 'Schwer', botHP: 1.15, botDmg: 1.2, aimErr: 0.007, lead: 0.93, reaction: 0.8, dodge: 0.85, smarts: 1, rewardMult: 1.3 },
+   easy: { key: 'easy', label: 'Leicht', botHP: 0.8, botDmg: 0.7, aimErr: 0.022, lead: 0.62, reaction: 2.6, dodge: 0.25, smarts: 0.5, rewardMult: 0.8, vsPlayer: 1.5 },
+   normal: { key: 'normal', label: 'Normal', botHP: 1, botDmg: 1, aimErr: 0.013, lead: 0.82, reaction: 1.5, dodge: 0.55, smarts: 0.8, rewardMult: 1, vsPlayer: 1.25 },
+   hard: { key: 'hard', label: 'Schwer', botHP: 1.15, botDmg: 1.2, aimErr: 0.007, lead: 0.93, reaction: 0.8, dodge: 0.85, smarts: 1, rewardMult: 1.3, vsPlayer: 1 },
 };
 
 export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 60 };

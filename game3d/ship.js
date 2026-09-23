@@ -324,7 +324,10 @@ export class Ship {
       const smoked = world.inSmoke(this.pos);
       this.inSmoke = smoked;
       this.blooming = blooming;
-      this.detectRange = smoked ? (blooming ? d.smokeFire : 0) : (blooming ? d.fire : d.surface) * vis;
+      // muzzle flash is not dimmed by weather or night and reaches at least the gun range, so a
+      // ship can never shoot from beyond its own bloom outside smoke (as in WoWs)
+      const bloom = Math.max(d.fire, this.cfg.main ? this.cfg.main.range : 0);
+      this.detectRange = Math.min(env.spotCap ?? Infinity, smoked ? (blooming ? d.smokeFire : 0) : blooming ? bloom : d.surface * vis);
    }
 
    _move(dt, world) {

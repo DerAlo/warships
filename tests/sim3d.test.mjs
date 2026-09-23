@@ -7,6 +7,7 @@ import { World } from '../game3d/state.js';
 import { MISSIONS, MISSION_IDS, getMission } from '../game3d/missions.js';
 import { SHIPS, WORLD } from '../game3d/config.js';
 import { flightTime, makeShell, resolveShells, resolveHit } from '../game3d/combat.js';
+import { obstacleT } from '../game3d/utils.js';
 
 const DT = 1 / 60;
 
@@ -191,11 +192,13 @@ test('win/lose triggers: annihilation, player sunk, convoy, raid and timeout', (
    w.player.takeDamage(w.player.hp + 1, foe, 'citadel');
    assert.strictEqual(w.phase, 'lost');
    assert.strictEqual(w.result.victory, false);
-   // convoy: three freighters lost -> loss
+   // convoy: five freighters, three losses are survivable, the fourth fails the mission
    w = new World('normal', { mission: 'convoy', seed: 1 });
    const frs = w.ships.filter(s => s.side === 'player' && s.type === 'TR');
-   assert.strictEqual(frs.length, 4);
+   assert.strictEqual(frs.length, 5);
    for (const f of frs.slice(0, 3)) f.takeDamage(f.hp + 1, w.enemiesOf(w.player)[0], 'torp');
+   assert.strictEqual(w.phase, 'playing');
+   frs[3].takeDamage(frs[3].hp + 1, w.enemiesOf(w.player)[0], 'torp');
    assert.strictEqual(w.phase, 'lost');
    // raid: four freighters sunk -> win
    w = new World('normal', { mission: 'raid', seed: 1 });
@@ -293,4 +296,24 @@ test('controls API: ammo, main battery, torpedoes, consumables', () => {
    assert.ok(dd.useConsumable(w, 'smoke'));
    for (let i = 0; i < 60 * 3; i++) dd.update(DT, w);
    assert.ok(w.smokeClouds.length > 0, 'smoke generator lays clouds');
+});
+
+test('detection: gun bloom reaches gun range, storms cap spotting, long islands keep open water open', () => {
+   const w = blank();
+   const bb = w.spawn('Bismarck', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });
+   w.setEnv({ time: 'night', weather: 'clear' });
+   bb.update(DT, w);
+   const dark = bb.detectRange;
+   assert.ok(dark < bb.cfg.detect.surface * 0.7, 'night shortens visual detection');
+   bb.lastMainFire = w.time;
+   bb.update(DT, w);
+   assert.ok(bb.detectRange >= bb.cfg.main.range, 'muzzle flash gives the shooter away at night');
+   w.setEnv({ time: 'day', weather: 'storm' });
+   bb.update(DT, w);
+   assert.ok(bb.detectRange <= 8000, `storm cap ${bb.detectRange}`);
+   // elongated island: water ~1.3x its long radius away is plainly open sea
+   w.addIsland({ c: { x: 0, y: 0 }, r: 2600, height: 300, seed: 201, lobes: 7, elong: 2.6, rot: 0 });
+   const isl = w.obstacles[w.obstacles.length - 1];
+   assert.ok(obstacleT(isl, { x: 0, y: isl.rMax * 1.1 }) > 2, 'broadside of a long island is open water');
+   assert.ok(obstacleT(isl, { x: 0, y: 0 }) < 1);
 });

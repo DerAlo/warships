@@ -163,7 +163,7 @@ const DEFS = [
          'sie liegen 9 bis 12 km östlich. Bringen Sie Ihr Schiff auf Fahrt, richten Sie die Türme aus und versenken Sie die Ziele. ' +
          'Achten Sie auf die Flugzeit Ihrer Granaten und halten Sie entsprechend vor. Gerüchten zufolge operieren feindliche Zerstörer in der Nähe.',
       env: { time: 'day', weather: 'clear' }, type: 'training', playableShips: null, recommendedShip: 'Hipper',
-      arena: 9000, timeLimit: 15 * 60,
+      arena: 9000, timeLimit: 15 * 60, stars: 1,
       setup(w, shipKey) {
          islands(w, [
             { c: P(0, 8300), r: 2300, height: 180, seed: 5, lobes: 6, elong: 3, rot: 0, rough: 0.4, name: 'Hela' },
@@ -215,7 +215,7 @@ const DEFS = [
          'drei Kreuzern und zwei Zerstörern stellt ihn zwischen den Schären. Vernichten Sie alle feindlichen Schiffe. ' +
          'Nutzen Sie die Inseln als Deckung und bleiben Sie in der Nähe Ihrer Verbündeten.',
       env: { time: 'day', weather: 'overcast' }, type: 'annihilation', playableShips: null, recommendedShip: 'Bismarck',
-      arena: 12000, timeLimit: 20 * 60,
+      arena: 12000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
             { c: P(0, 0), r: 1300, height: 240, seed: 11, lobes: 6, rough: 0.6, peaks: [{ x: -250, y: 150, h: 330, r: 600 }] },
@@ -244,7 +244,7 @@ const DEFS = [
          'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
          'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
       env: { time: 'day', weather: 'clear' }, type: 'domination', playableShips: null, recommendedShip: 'Z23',
-      arena: 11000, timeLimit: 20 * 60,
+      arena: 11000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
             { c: P(-1900, -2400), r: 900, height: 210, seed: 101, lobes: 5, elong: 1.5, rot: 0.9 },
@@ -293,11 +293,11 @@ const DEFS = [
    // ------------------------------------------------------------ 4. convoy escort
    {
       id: 'convoy', name: 'Geleitzug', subtitle: 'Skagerrak-Enge · Geleitschutz',
-      briefing: 'Vier Frachter mit Nachschub für Norwegen müssen die Skagerrak-Enge passieren. Britische Kreuzer und ' +
+      briefing: 'Fünf Frachter mit Nachschub für Norwegen müssen die Skagerrak-Enge passieren. Britische Kreuzer und ' +
          'Zerstörer lauern im Osten und werden in Wellen angreifen. Schützen Sie den Geleitzug, bis mindestens zwei Frachter ' +
-         'den Ausgang im Osten erreichen. Gehen drei Frachter verloren, ist die Mission gescheitert. Rechnen Sie mit Torpedoangriffen.',
+         'den Ausgang im Osten erreichen. Gehen vier Frachter verloren, ist die Mission gescheitert. Rechnen Sie mit Torpedoangriffen.',
       env: { time: 'dusk', weather: 'overcast' }, type: 'escort', playableShips: null, recommendedShip: 'Hipper',
-      arena: 12000, timeLimit: 16 * 60,
+      arena: 12000, timeLimit: 16 * 60, stars: 3,
       setup(w, shipKey) {
          islands(w, [
             { c: P(-300, -8700), r: 2600, height: 420, seed: 201, lobes: 7, elong: 2.6, rot: 0.08, rough: 0.7, peaks: [{ x: -1200, y: 400, h: 480, r: 900 }] },
@@ -308,21 +308,21 @@ const DEFS = [
             { c: P(-7200, -3700), r: 850, height: 170, seed: 217, lobes: 4 },
             { c: P(6200, -4600), r: 700, height: 140, seed: 219, lobes: 4 },
          ]);
-         const route = [P(-4000, 1500), P(0, 0), P(4800, -1000), P(11000, -700)];
+         const route = [P(-4000, 1500), P(0, 0), P(4800, -1000), P(9800, -700)];
          const S = w._script;
-         S.exit = { x: 10200, y: -700, r: 1300 };
+         S.exit = { x: 8800, y: -700, r: 1400 };
          S.transports = [];
-         for (let i = 0; i < 4; i++) {
-            const t = add(w, 'Transport', 'player', P(-10500 - i * 650, 1100 + (i % 2) * 220), 0,
-               { telegraph: 4, speedKn: 12, nation: 'de', hpMult: 1.6, ai: { route, routeIdx: 0, passive: true, convoy: true } });
+         for (let i = 0; i < 5; i++) {
+            const t = add(w, 'Transport', 'player', P(-8000 - i * 600, 850 + (i % 2) * 550), 0,
+               { telegraph: 4, speedKn: 14, nation: 'de', hpMult: 2.5, ai: { route, routeIdx: 0, passive: true, convoy: true } });
             S.transports.push(t);
          }
-         add(w, shipKey, 'player', P(-9300, 2300), 0, { isPlayer: true });
-         add(w, 'Z23', 'player', P(-9000, -300), 0, { ai: { escortId: S.transports[0].id } });
-         add(w, 'Z23', 'player', P(-11800, 2300), 0, { ai: { escortId: S.transports[3].id } });
-         add(w, 'Nuernberg', 'player', P(-10200, -700), 0, { ai: { escortId: S.transports[1].id } });
+         add(w, shipKey, 'player', P(-6800, 2300), 0, { isPlayer: true });
+         add(w, 'Z23', 'player', P(-6500, -300), 0, { ai: { escortId: S.transports[0].id } });
+         add(w, 'Z23', 'player', P(-9800, 2300), 0, { ai: { escortId: S.transports[3].id } });
+         add(w, 'Nuernberg', 'player', P(-7700, -700), 0, { ai: { escortId: S.transports[1].id } });
          // wave 1 waits in the east
-         add(w, 'Fiji', 'enemy', P(8500, 2500), Math.PI, { ai: { huntId: S.transports[0].id } });
+         add(w, 'Jervis', 'enemy', P(8500, 2500), Math.PI, { ai: { huntId: S.transports[0].id } });
          add(w, 'Jervis', 'enemy', P(9200, 4200), Math.PI, { ai: { huntId: S.transports[1].id } });
          later(S, 150, () => {
             w.message('Zweite Angriffswelle aus Nordosten gemeldet!', 'warn');
@@ -330,12 +330,11 @@ const DEFS = [
             add(w, 'Jervis', 'enemy', P(11000, -4000), Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[3].id } });
          });
          later(S, 330, () => {
-            w.message('Dritte Welle: Kreuzer aus Südosten!', 'warn');
+            w.message('Dritte Welle: Kreuzer Fiji aus Südosten!', 'warn');
             add(w, 'Fiji', 'enemy', P(10800, 5200), -Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[2].id } });
-            add(w, 'Jervis', 'enemy', P(11200, 6400), -Math.PI * 0.85, { minDist: 11000 });
          });
          objective(w, 'arrive', 'Mindestens 2 Frachter erreichen den Ausgang (0/2)');
-         objective(w, 'lose', 'Nicht mehr als 2 Frachter verlieren (0 verloren)');
+         objective(w, 'lose', 'Nicht mehr als 3 Frachter verlieren (0 verloren)');
          w.score = { kind: 'convoy', player: 0, enemy: 0, target: 2 };
          S.arrived = 0; S.lost = 0;
          w.message('Geleitzug läuft aus. Halten Sie sich nahe bei den Frachtern.');
@@ -358,8 +357,8 @@ const DEFS = [
          if (ship.type === 'TR' && ship.side === 'player') {
             S.lost++;
             w.score.enemy = S.lost;
-            objText(w, 'lose', `Nicht mehr als 2 Frachter verlieren (${S.lost} verloren)`);
-            if (S.lost >= 3) { setObj(w, 'lose', 'failed'); w.end(false, 'Der Geleitzug wurde aufgerieben.'); return; }
+            objText(w, 'lose', `Nicht mehr als 3 Frachter verlieren (${S.lost} verloren)`);
+            if (S.lost >= 4) { setObj(w, 'lose', 'failed'); w.end(false, 'Der Geleitzug wurde aufgerieben.'); return; }
             if (S.arrived + S.transports.filter(t => t.alive).length < 2) { w.end(false, 'Zu wenige Frachter übrig.'); return; }
          }
          if (S.arrived >= 2 && !S.transports.some(t => t.alive)) w.end(true, `${S.arrived} Frachter sicher durchgebracht.`);
@@ -378,7 +377,7 @@ const DEFS = [
          'gepanzert. Versenken Sie die Hood und versenken oder vertreiben Sie die Prince of Wales. Die Schweren Kreuzer ' +
          'Norfolk und Suffolk folgen Ihnen seit Stunden und werden bald eingreifen.',
       env: { time: 'dawn', weather: 'overcast' }, type: 'historic', playableShips: ['Bismarck'], recommendedShip: 'Bismarck',
-      arena: 13000, timeLimit: 20 * 60,
+      arena: 13000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
             { c: P(-5500, -11300), r: 3000, height: 620, seed: 301, lobes: 8, elong: 3, rot: 0.15, rough: 0.8, snow: true, name: 'Grönland' },
@@ -425,9 +424,9 @@ const DEFS = [
       id: 'laststand', name: 'Letztes Gefecht', subtitle: 'Nordatlantik · 27. Mai 1941',
       briefing: 'Ein Torpedotreffer hat das Ruder der Bismarck bei 12° Backbord verklemmt – Ihr Schiff zieht Kreise. ' +
          'Im Sturm nähern sich King George V und Rodney, begleitet von Kreuzern und Zerstörern. Lassen Sie Ihre Schadensbekämpfung ' +
-         'das Ruder freibekommen und halten Sie zwölf Minuten durch, bis der Home Fleet der Treibstoff ausgeht – oder versenken Sie beide Schlachtschiffe.',
+         'das Ruder freibekommen und halten Sie zehn Minuten durch, bis der Home Fleet der Treibstoff ausgeht – oder versenken Sie beide Schlachtschiffe.',
       env: { time: 'day', weather: 'storm' }, type: 'survival', playableShips: ['Bismarck'], recommendedShip: 'Bismarck',
-      arena: 11000, timeLimit: 12 * 60,
+      arena: 11000, timeLimit: 10 * 60, stars: 3,
       setup(w, shipKey) {
          islands(w, [
             { c: P(-6500, 6500), r: 700, height: 110, seed: 401, lobes: 4, rough: 0.8 },
@@ -441,7 +440,10 @@ const DEFS = [
          p.rudder = -0.55; p.rudderCmd = -1;
          S.kgv = add(w, 'KGV', 'enemy', P(-9000, -9500), 0.9, { name: 'King George V', telegraph: 4 });
          S.rodney = add(w, 'Rodney', 'enemy', P(-10200, -7600), 0.8, { name: 'HMS Rodney', telegraph: 4 });
-         add(w, 'Jervis', 'enemy', P(7200, 2500), Math.PI, { name: 'HMS Cossack' });
+         later(S, 45, () => {
+            w.message('Zerstörer Cossack läuft zum Torpedoangriff an!', 'warn');
+            add(w, 'Jervis', 'enemy', P(9500, 2500), Math.PI, { name: 'HMS Cossack', minDist: 10000 });
+         });
          later(S, 120, () => {
             w.message('Kreuzer Norfolk und Dorsetshire greifen ein!', 'warn');
             add(w, 'Norfolk', 'enemy', P(1500, -10500), 1.6, { name: 'HMS Norfolk', minDist: 12000 });
@@ -452,7 +454,7 @@ const DEFS = [
             add(w, 'Jervis', 'enemy', P(10500, 4000), Math.PI, { name: 'HMS Maori', minDist: 11000 });
             add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Zulu', minDist: 11000 });
          });
-         objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (12:00)');
+         objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (10:00)');
          objective(w, 'bbs', 'Oder: Versenken Sie King George V und Rodney (0/2)');
          objective(w, 'rudder', 'Ruder freibekommen (Schadensbekämpfung)', { optional: true });
          w.score = { kind: 'kills', player: 0, enemy: 0, target: 2 };
@@ -482,7 +484,7 @@ const DEFS = [
          'einzudringen. Bei Nacht sieht man Schiffe erst auf kurze Distanz – das Mündungsfeuer verrät jedoch jeden Schützen. ' +
          'Nutzen Sie Inseln, Nebel und Torpedos. Vernichten Sie den Feind.',
       env: { time: 'night', weather: 'clear' }, type: 'annihilation', playableShips: null, recommendedShip: 'Z23',
-      arena: 10000, timeLimit: 15 * 60,
+      arena: 10000, timeLimit: 15 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
             { c: P(0, -8600), r: 2400, height: 450, seed: 501, lobes: 8, elong: 2.8, rot: 0, rough: 0.8, peaks: [{ x: 800, y: 300, h: 520, r: 900 }] },
@@ -508,7 +510,7 @@ const DEFS = [
          'Gemeinsam mit der Gneisenau sollen Sie mindestens vier Frachter versenken, bevor sie den Schutz der Küste erreichen. ' +
          'Vorsicht: Die Funkaufklärung meldet ein britisches Schlachtschiff, das dem Geleitzug zu Hilfe eilt.',
       env: { time: 'day', weather: 'rain' }, type: 'raid', playableShips: null, recommendedShip: 'Hipper',
-      arena: 12500, timeLimit: 18 * 60,
+      arena: 12500, timeLimit: 18 * 60, stars: 3,
       setup(w, shipKey) {
          islands(w, [
             { c: P(11200, -9000), r: 2600, height: 360, seed: 601, lobes: 7, elong: 2, rot: 0.9, rough: 0.7, name: 'Küste' },
@@ -596,7 +598,7 @@ const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
 export const MISSIONS = DEFS.map(d => ({
    id: d.id, name: d.name, subtitle: d.subtitle, briefing: d.briefing, env: { ...d.env }, type: d.type,
    playableShips: d.playableShips ? [...d.playableShips] : [...PLAYABLE], recommendedShip: d.recommendedShip,
-   timeLimit: d.timeLimit, arena: d.arena,
+   timeLimit: d.timeLimit, arena: d.arena, stars: d.stars || 2,   // stars = difficulty 1..3 for the menu
 }));
 export const MISSION_IDS = DEFS.map(d => d.id);
 export function getMission(id) { return MISSIONS.find(m => m.id === id) || null; }

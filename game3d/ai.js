@@ -91,12 +91,18 @@ function pickTarget(b, w) {
       if (e.type === 'TR' && b.ai.huntId != null) s *= 1.5;
       if (b.ai.role === 'dd' && e.type === 'DD') s *= 1.3;
       if (e === cur) s *= 1.3;                          // hysteresis
+      // spread fire: a target already engaged by team-mates is less attractive, so the player
+      // (usually the closest ship) doesn't get dog-piled by the whole enemy line
+      let n = 0;
+      for (const o of w.ships) if (o !== b && o.alive && o.side === b.side && o.ai && o.ai.target === e) n++;
+      s /= 1 + 0.3 * n;
       if (s > bestS) { bestS = s; best = e; }
    }
    return best;
 }
 function newAimError(b, w) {
-   const e = w.difficulty.aimErr * (b.ai.salvoCount > 1 ? 0.75 : 1.2);   // first salvos are ranging shots
+   let e = w.difficulty.aimErr * (b.ai.salvoCount > 1 ? 0.75 : 1.2);   // first salvos are ranging shots
+   if (b.ai.target && b.ai.target === w.player && !w.autoPlayer) e *= w.difficulty.vsPlayer || 1;
    b.ai.aimErr = { r: gaussR(w.rng) * e, l: gaussR(w.rng) * e * 0.5 };
 }
 
@@ -115,6 +121,11 @@ function decide(b, w, d) {
    ai.rudderOverride = null;
    if ((b.grounded || (Math.abs(b.speed) < 1.5 && b.telegraph > 0)) && w.time > 5) ai.stuckT += DECIDE_DT;
    else ai.stuckT = Math.max(0, ai.stuckT - DECIDE_DT);
+   // no net progress for 10 s while ordered ahead (rubbing along a coast / pinned in a pocket)
+   if (!ai.progPos || w.time - ai.progT > 10) {
+      if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12) ai.stuckT = 99;
+      ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
+   }
    if (ai.stuckT > 3) { ai.stuckT = 0; ai.reverseT = 6; ai.revRudder = w.rng() < 0.5 ? 2 : -2; return; }
 
    // mission retreat (permanent) or generic break-off to repair
@@ -157,7 +168,7 @@ function decide(b, w, d) {
          const dd = Math.sqrt(dist2(b.pos, pt));
          want = dd > 400 ? Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x) : esc.heading;
          tel = dd > 1500 ? 4 : dd > 500 ? 3 : Math.max(1, esc.telegraph);
-      } else if (cap && (!tgt || ai.role === 'dd' || dist2(b.pos, tgt.pos) > ai.pref[1] ** 2)) {
+      } else if (cap && !(ai.role === 'dd' && exposed(b, w)) && (!tgt || ai.role === 'dd' || dist2(b.pos, tgt.pos) > ai.pref[1] ** 2)) {
          const dd = Math.sqrt(dist2(b.pos, cap.pos));
          want = dd > cap.r * 0.5 ? Math.atan2(cap.pos.y - b.pos.y, cap.pos.x - b.pos.x) : b.heading + 0.6 * ai.angSide;
          tel = dd > cap.r ? 4 : 2;
@@ -206,15 +217,37 @@ function engage(b, w, tgt, d) {
    return { want: brg + s * ang, tel: ai.role === 'bb' ? 3 : 4 };
 }
 
+// Spotted with several enemy guns in range: a destroyer should break contact, not cap.
+function exposed(b, w) {
+   if (!b.detected) return false;
+   let n = 0;
+   for (const e of w.ships) {
+      if (!e.alive || e.side === b.side || e.type === 'TR' || !w.canSee(b.side, e)) continue;
+      if (dist2(b.pos, e.pos) < Math.min(e.cfg.main.range, 11000) ** 2) n++;
+   }
+   return n >= 2;
+}
+
 function capGoal(b, w) {
    if (!w.caps.length) return null;
    const ai = b.ai;
+   // a cap swarming with visible enemies (and few friends) is a death trap, not an objective
+   const hot = (c) => {
+      let foe = 0, own = 0;
+      for (const s of w.ships) {
+         if (!s.alive || s.type === 'TR' || s === b || dist2(s.pos, c.pos) > 6500 * 6500) continue;
+         if (s.side === b.side) own++; else if (w.canSee(b.side, s)) foe++;
+      }
+      return foe >= own + 2;
+   };
    let cap = ai.capId ? w.caps.find(c => c.id === ai.capId) : null;
    if (cap && cap.owner === b.side && !cap.contested && cap.capper == null) cap = null;
+   if (cap && hot(cap)) cap = null;
    if (!cap && (ai.role === 'dd' || ai.role === 'cl' || !ai.target)) {
       let bd = Infinity;
       for (const c of w.caps) {
          if (c.owner === b.side && !c.contested) continue;
+         if (hot(c)) continue;
          const dd = dist2(b.pos, c.pos);
          if (dd < bd) { bd = dd; cap = c; }
       }
@@ -277,10 +310,10 @@ function avoidTerrain(b, w, want) {
    const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
    const lim = w.arena - 700;
    const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
-   const clear = (h) => {
+   const clear = (h, L) => {
       const c = Math.cos(h), s = Math.sin(h);
       for (let k = 1; k <= 6; k++) {
-         const f = (k / 6) * look;
+         const f = (k / 6) * L;
          const p = { x: b.pos.x + c * f, y: b.pos.y + s * f };
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
             // allow heading back inwards when already outside the limit
@@ -291,7 +324,9 @@ function avoidTerrain(b, w, want) {
       }
       return true;
    };
-   for (const c of CANDIDATES) if (clear(want + c)) return want + c;
+   // narrow channels: when nothing is clear at full look-ahead, accept shorter clear runs
+   // before falling back (otherwise ships oscillate between two islands at crawl speed)
+   for (const f of [1, 0.55, 0.3]) for (const c of CANDIDATES) if (clear(want + c, look * f)) return want + c;
    // boxed in: turn away from the closest island centre
    let best = null, bd = Infinity;
    for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }

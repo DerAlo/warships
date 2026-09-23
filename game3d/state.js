@@ -68,6 +68,8 @@ export class World {
          visibility: e.visibility ?? (ENV_VIS[weather] ?? 1) * (time === 'night' ? 0.6 : time === 'day' ? 1 : 0.9),
          sunAzimuth: e.sunAzimuth ?? az, sunElevation: e.sunElevation ?? el,
          wind: e.wind ?? (weather === 'storm' ? 1 : weather === 'rain' ? 0.6 : 0.3),
+         // hard ceiling on visual detection (m), gun bloom included -- WoWs "cyclone" rule
+         spotCap: e.spotCap ?? (weather === 'storm' ? 8000 : Infinity),
       };
       return this.env;
    }
