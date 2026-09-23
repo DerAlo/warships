@@ -3,243 +3,324 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>WARSCHIFFE 3D — Bismarck</title>
+<title>WARSCHIFFE 3D</title>
 <style>
    :root {
-      --hud: #cfe8ff;
-      --hud-dim: #7fa6c8;
-      --panel: rgba(6, 16, 26, 0.72);
-      --panel-edge: rgba(120, 170, 220, 0.35);
-      --danger: #ff5a4d;
-      --good: #7CFF9A;
+      --hud: #e6f0fa;
+      --hud-dim: #9db4c8;
+      --panel: rgba(8, 16, 24, 0.62);
+      --panel-solid: rgba(8, 16, 24, 0.86);
+      --panel-edge: rgba(170, 200, 230, 0.22);
+      --ally: #5dff8c;
+      --enemy: #ff5a4d;
       --gold: #ffd479;
       --font: "Segoe UI", "Trebuchet MS", system-ui, sans-serif;
-      --mono: "SF Mono", "JetBrains Mono", "Consolas", monospace;
+      --mono: "Consolas", "SF Mono", "JetBrains Mono", monospace;
    }
    * { box-sizing: border-box; margin: 0; padding: 0; }
    html, body { width: 100%; height: 100%; overflow: hidden; background: #04070d; color: var(--hud); font-family: var(--font); }
    #app { position: fixed; inset: 0; }
-   canvas#scene3d { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+   canvas#scene3d { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: none; }
    canvas#fx { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+   .hidden { display: none !important; }
 
-   /* ---- HUD (shared look with the 2D game) ---- */
-   #hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--mono); }
-   #hud.hidden { display: none; }
-   .hud-panel { position: absolute; background: var(--panel); border: 1px solid var(--panel-edge);
-      border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(3px); box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+   /* ================= HUD ================= */
+   #hud { position: absolute; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.9); user-select: none; }
+   .panel { background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; backdrop-filter: blur(2px); }
+   .cls { vertical-align: -1px; flex: none; }
 
-   #ship-panel { left: 18px; bottom: 18px; width: 340px; }
-   .ship-name { font-family: var(--font); font-size: 20px; font-weight: 800; letter-spacing: 1px; color: #fff; text-shadow: 0 2px 8px #000; }
-   .ship-class { font-size: 11px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 2px; }
-   .bar { height: 12px; border-radius: 7px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.12); overflow: hidden; position: relative; margin-top: 4px; }
-   .bar > i { display: block; height: 100%; width: 100%; transition: width .12s linear; }
-   .bar.hp > i { background: linear-gradient(90deg,#ff5a4d,#ffb03a,#7CFF9A); }
-   .bar.speed > i { background: linear-gradient(90deg,#3aa0ff,#8fdcff); }
-   .bar.repair > i { background: linear-gradient(90deg,#6cf,#fff); }
-   .bar-label { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 8px; display:flex; justify-content: space-between;}
-   .mods { display: flex; gap: 6px; margin-top: 8px; }
-   .mod { flex:1; text-align:center; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; padding: 3px; border-radius: 5px;
-      background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.1); color: var(--hud-dim); }
-   .mod.fire { color: #ffb24d; border-color: #ff7a2d; background: rgba(120,30,0,.35); }
-   .mod.flood { color: #7fd8ff; border-color: #3aa0ff; background: rgba(0,40,90,.4); }
-   .mod.disabled { opacity: .35; }
+   /* --- top: rosters, score, timer, caps --- */
+   #topbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: flex-start; }
+   .roster { width: 220px; display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: 11.5px; padding-top: 4px; }
+   #roster-ally { justify-content: flex-end; }
+   .roster .r { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+   .roster .r.ally { color: #bff7cf; } .roster .r.ally .cls { color: var(--ally); }
+   .roster .r.enemy { color: #ffcdc7; } .roster .r.enemy .cls { color: var(--enemy); }
+   .roster .r.me span { font-weight: 700; color: #fff; }
+   .roster .r.hid { opacity: .5; }
+   .roster .r.dead { opacity: .45; } .roster .r.dead span { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+   .roster .r.dead .cls { color: #888 !important; }
+   #scorebox { width: 300px; padding: 5px 12px 7px; text-align: center; }
+   #mission-name { font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim); }
+   .score-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+   .score-row b { font: 700 19px var(--mono); width: 44px; }
+   #score-ally { color: var(--ally); text-align: right; } #score-enemy { color: var(--enemy); text-align: left; }
+   #score-bar { flex: 1; height: 7px; background: rgba(255,255,255,.1); border-radius: 4px; position: relative; overflow: hidden; }
+   #score-bar i { position: absolute; top: 0; bottom: 0; transition: width .3s; }
+   #score-fill-ally { left: 0; background: var(--ally); } #score-fill-enemy { right: 0; background: var(--enemy); }
+   #score-bar::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,.5); }
+   #timer { font: 700 15px var(--mono); margin-top: 2px; letter-spacing: 1px; }
+   #caps-row { display: flex; justify-content: center; gap: 6px; margin-top: 4px; }
+   #caps-row:empty { display: none; }
+   .cap { width: 24px; height: 24px; border-radius: 50%; font: 700 12px var(--font); display: flex; align-items: center; justify-content: center;
+      border: 2px solid #d8e6f2; background: rgba(0,0,0,.4); }
+   .cap.own-a { border-color: var(--ally); color: var(--ally); } .cap.own-e { border-color: var(--enemy); color: var(--enemy); }
+   .cap.cap-a { background: conic-gradient(rgba(93,255,140,.55) var(--prog), rgba(0,0,0,.4) 0); }
+   .cap.cap-e { background: conic-gradient(rgba(255,90,77,.55) var(--prog), rgba(0,0,0,.4) 0); }
 
-   #ammo-panel { right: 18px; bottom: 18px; width: 300px; }
-   #weapon-sel { font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; color: var(--gold); text-shadow: 0 0 8px rgba(255,212,121,.5); }
-   .salvo-row { display:flex; align-items:center; gap:8px; margin-top: 8px; }
-   .salvo-row .lbl { font-size: 10px; width: 78px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; }
-   .salvo-row .bar { flex: 1; margin-top: 0; }
-   .salvo-row .n { font-size: 11px; width: 62px; text-align: right; color:#fff; }
-   .ready { color: var(--good); } .cool { color: var(--hud-dim); }
+   #objectives { position: absolute; top: 10px; left: 16px; width: 250px; font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+   .obj { padding-left: 16px; position: relative; color: var(--hud); }
+   .obj::before { content: ''; position: absolute; left: 2px; top: 4px; width: 7px; height: 7px; border: 1.5px solid var(--gold); transform: rotate(45deg); }
+   .obj.done { color: #9ff5b4; } .obj.done::before { background: var(--ally); border-color: var(--ally); }
+   .obj.failed { color: #ff9c90; text-decoration: line-through; } .obj.failed::before { border-color: var(--enemy); }
+   #hint-line { position: absolute; top: 10px; right: 16px; font-size: 11px; color: var(--hud-dim); }
+   #hint-line b { color: var(--gold); font-family: var(--mono); }
 
-   #status-panel { left: 50%; transform: translateX(-50%); top: 14px; text-align:center; min-width: 220px; }
-   #status-line { font-family: var(--font); font-weight: 700; font-size: 15px; letter-spacing: 1px; }
-   #objectives { font-size: 11px; color: var(--hud-dim); margin-top: 4px; }
-   #detect-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #ff6a5a;
-      text-shadow: 0 0 8px rgba(255,90,70,.6); }
-   #detect-status.hidden { display: none; }
-   #anchor-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #6ab8ff;
-      text-shadow: 0 0 8px rgba(90,170,255,.6); }
-   #anchor-status.hidden { display: none; }
-   #turret-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; }
-   #turret-status.hidden { display: none; }
-   #turret-status.locked { color: var(--good); text-shadow: 0 0 8px rgba(124,255,154,.6); }
-   #turret-status.slewing { color: var(--gold); text-shadow: 0 0 8px rgba(255,212,121,.6); }
+   /* --- lock panel, messages, alerts --- */
+   #lock-panel { position: absolute; top: 104px; left: 50%; transform: translateX(-50%); width: 250px; padding: 6px 10px; border-color: rgba(255,120,100,.45); }
+   .lk-head { display: flex; align-items: center; gap: 6px; color: var(--enemy); }
+   .lk-name { font-weight: 700; color: #fff; font-size: 13px; }
+   .lk-type { margin-left: auto; font-size: 11px; color: var(--hud-dim); }
+   .lk-bar { height: 4px; background: rgba(255,255,255,.12); margin: 5px 0 4px; border-radius: 2px; overflow: hidden; }
+   .lk-bar i { display: block; height: 100%; background: var(--enemy); }
+   .lk-row { display: flex; justify-content: space-between; font: 11.5px var(--mono); color: #ffe0dc; }
+   #msgs { position: absolute; top: 21%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+   .msg { font-size: 14px; font-weight: 600; letter-spacing: .5px; padding: 3px 14px; border-radius: 4px; background: rgba(0,0,0,.35); transition: opacity .5s; }
+   .msg.warn { color: #ffb0a4; } .msg.good { color: #aef7c2; } .msg.info { color: #e6f0fa; }
+   .msg.fade { opacity: 0; }
+   #torp-alert { position: absolute; top: calc(50% - 128px); left: 50%; transform: translateX(-50%); font: 800 15px var(--font); letter-spacing: 3px;
+      color: #ff5a44; animation: blink .6s infinite alternate; }
+   @keyframes blink { from { opacity: 1; } to { opacity: .35; } }
+   #free-look { position: absolute; top: 150px; left: 50%; transform: translateX(-50%); font-size: 12px; letter-spacing: 2px; color: var(--gold); }
 
-   #minimap { right: 18px; top: 18px; width: 180px; height: 180px; padding: 0; overflow: hidden; }
-   #minimap canvas { width: 100%; height: 100%; display:block; border-radius: 10px; }
+   /* --- kill feed --- */
+   #killfeed { position: absolute; right: 16px; bottom: 300px; width: 330px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 12px; }
+   .kf { display: flex; gap: 6px; align-items: center; background: rgba(0,0,0,.35); padding: 2px 8px; border-radius: 3px; transition: opacity 1s; }
+   .kf.old { opacity: .35; }
+   .kf .ally { color: #aef7c2; } .kf .ally .cls { color: var(--ally); }
+   .kf .enemy { color: #ffc2ba; } .kf .enemy .cls { color: var(--enemy); }
+   .kf .kx { color: var(--hud-dim); font-size: 11px; }
 
-   #compass { left: 50%; transform: translateX(-50%); bottom: 14px; width: 220px; text-align:center; }
-   #compass canvas { width: 100%; height: 42px; display:block; }
+   /* --- bottom-left: consumables + ship card --- */
+   #bottom-left { position: absolute; left: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; }
+   #cons { display: flex; gap: 6px; }
+   .cslot { width: 50px; height: 50px; position: relative; border-radius: 6px; background: var(--panel); border: 1px solid var(--panel-edge); overflow: hidden; color: #eaf3fb; }
+   .cicon { position: absolute; inset: 9px; } .cicon svg { width: 100%; height: 100%; }
+   .ccd { position: absolute; inset: 0; background: conic-gradient(rgba(0,0,0,.62) var(--cd, 0%), transparent 0); }
+   .cslot.active { border-color: var(--ally); box-shadow: inset 0 0 12px rgba(93,255,140,.35); color: var(--ally); }
+   .cslot.active .ccd { background: conic-gradient(rgba(93,255,140,.22) var(--cd, 0%), transparent 0); }
+   .cslot.cooling { color: #8aa0b4; }
+   .cslot.empty { opacity: .4; }
+   .ckey { position: absolute; left: 3px; top: 1px; font: 700 11px var(--mono); color: var(--gold); }
+   .cchg { position: absolute; right: 4px; bottom: 1px; font: 700 11px var(--mono); }
+   .ctime { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 14px var(--mono); color: #fff; }
+   #ship-card { width: 300px; padding: 7px 10px 8px; }
+   .sc-head { display: flex; align-items: baseline; gap: 8px; }
+   #ship-name { font-weight: 800; font-size: 15px; letter-spacing: 1.5px; color: #fff; }
+   #ship-type { font-size: 11px; color: var(--hud-dim); letter-spacing: 1px; }
+   #silhouette { display: block; width: 100%; height: 54px; margin-top: 2px; }
+   .hp-bar { height: 8px; border-radius: 2px; background: rgba(0,0,0,.5); position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,.12); }
+   .hp-bar i { position: absolute; left: 0; top: 0; bottom: 0; }
+   #hp-lag { background: rgba(255,255,255,.55); } #hp-fill { background: #7cf29a; }
+   #hp-text { font: 700 13px var(--mono); margin-top: 3px; display: flex; justify-content: space-between; }
 
-   #siren { position:absolute; inset:0; pointer-events:none; opacity:0;
-      box-shadow: inset 0 0 200px 40px rgba(255,40,40,.55); transition: opacity .25s; }
-   #siren.on { opacity: 1; animation: sirenPulse 1s infinite; }
-   @keyframes sirenPulse { 0%,100%{opacity:.15} 50%{opacity:.6} }
+   /* --- bottom-centre: ribbons, damage, eye, weapons --- */
+   #bottom-center { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+   #ribbons { display: flex; flex-wrap: wrap-reverse; justify-content: center; gap: 4px; max-width: 560px; }
+   .ribbon { display: flex; gap: 5px; align-items: center; padding: 2px 8px 2px 6px; font-size: 11.5px; font-weight: 600; border-radius: 3px;
+      background: linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.3)); border-left: 3px solid var(--rc); color: #f2f6fa; }
+   .ribbon .rcount { font-family: var(--mono); color: var(--rc); }
+   .ribbon.pop { animation: pop .35s ease-out; }
+   @keyframes pop { 0% { transform: scale(1.18); filter: brightness(1.8); } 100% { transform: scale(1); filter: none; } }
+   #dmg-counter { font: 700 14px var(--mono); color: #fff; } #dmg-counter span { font: 600 10.5px var(--font); letter-spacing: 1.5px; color: var(--hud-dim); text-transform: uppercase; margin-right: 4px; }
+   .wrow { display: flex; align-items: center; gap: 8px; }
+   #spot-eye { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--panel); border: 1px solid var(--panel-edge); color: #5d6f80; transition: color .2s, border-color .2s; }
+   #spot-eye svg { width: 24px; height: 24px; }
+   #spot-eye.on { color: #ffcb3a; border-color: #ffcb3a; box-shadow: 0 0 14px rgba(255,203,58,.45); }
+   #weapons { display: flex; gap: 6px; }
+   .wslot { width: 132px; height: 50px; position: relative; padding: 5px 8px 0 32px; border-radius: 6px; background: var(--panel); border: 1px solid var(--panel-edge); opacity: .72; }
+   .wslot.sel { opacity: 1; border-color: var(--gold); box-shadow: inset 0 0 10px rgba(255,212,121,.2); }
+   .wslot.loaded { border-color: var(--ally); }
+   .wslot.none { opacity: .3; }
+   .wkey { position: absolute; left: 4px; top: 2px; font: 700 11px var(--mono); color: var(--gold); }
+   .wicon { position: absolute; left: 6px; top: 16px; width: 22px; height: 22px; } .wicon svg { width: 100%; height: 100%; }
+   .wname { font-size: 12.5px; font-weight: 700; } .wstat { font: 11px var(--mono); color: var(--hud-dim); white-space: nowrap; }
+   .wslot.sel .wstat { color: #fff; }
+   .wbar { position: absolute; left: 32px; right: 8px; bottom: 5px; height: 3px; background: rgba(255,255,255,.12); }
+   .wbar i { display: block; height: 100%; width: 0; background: var(--gold); }
+   .wslot.loaded .wbar i { background: var(--ally); }
 
-   #log { left: 18px; top: 18px; width: 260px; max-height: 150px; overflow: hidden; font-size: 11px; display:flex; flex-direction: column; gap:2px; justify-content: flex-end; }
-   #log .l { opacity:.9; text-shadow: 0 1px 3px #000; }
-   #log .l.dmg { color:#ffcf6b; } #log .l.kill { color:#7CFF9A; font-weight:700; }
-   #log .l.warn { color:#ff6a5a; }
+   /* --- bottom-right: telegraph + rudder, minimap --- */
+   #bottom-right { position: absolute; right: 16px; bottom: 16px; display: flex; align-items: flex-end; gap: 8px; }
+   #nav { width: 104px; padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+   #speed-kn { font: 700 18px var(--mono); text-align: center; color: #fff; }
+   .nav-lbl { font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--hud-dim); text-align: center; }
+   #telegraph { display: flex; flex-direction: column; gap: 2px; }
+   .tele-step { font: 600 11px var(--mono); text-align: center; padding: 1px 0; border-radius: 2px; color: #7f93a6; background: rgba(255,255,255,.04); }
+   .tele-step.on { color: #0b1620; background: var(--gold); font-weight: 800; text-shadow: none; }
+   #tele-name, #rudder-name { font: 600 11px var(--font); text-align: center; color: var(--gold); }
+   #rudder-bar { position: relative; height: 16px; margin: 2px 4px 0; }
+   #rudder-bar::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: rgba(255,255,255,.2); }
+   #rudder-bar .notch { position: absolute; top: 3px; width: 1px; height: 10px; background: rgba(255,255,255,.35); }
+   #rudder-cmd { position: absolute; top: -2px; width: 0; height: 0; margin-left: -5px; border: 5px solid transparent; border-top: 7px solid var(--gold); transition: left .15s; }
+   #rudder-act { position: absolute; top: 4px; width: 3px; height: 8px; margin-left: -1.5px; background: #fff; border-radius: 1px; }
+   #minimap-wrap { width: 220px; height: 220px; padding: 0; overflow: hidden; border-radius: 4px; }
+   #minimap-canvas { width: 220px; height: 220px; display: block; }
 
-   /* ---- crosshair: fixed dead-centre now (WoWs-style -- the mouse turns the camera/turrets,
-      it no longer moves a cursor around the screen, so there's nothing for it to follow). ---- */
-   #reticle3d { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px;
-      transform: translate(-50%,-50%); pointer-events: none; z-index: 5; }
-   /* native cursor is hidden over the play field -- mouse-look has no on-screen cursor */
-   #scene3d { cursor: none; }
-   #reticle3d::before, #reticle3d::after { content: ''; position: absolute; background: rgba(255,212,121,.9); }
-   #reticle3d::before { left: 0; right: 0; top: 50%; height: 1.5px; transform: translateY(-50%); }
-   #reticle3d::after { top: 0; bottom: 0; left: 50%; width: 1.5px; transform: translateX(-50%); }
+   /* --- scoreboard (Tab) + help (H) --- */
+   #scoreboard, #help-panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel-solid); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 14px 18px; }
+   #scoreboard { width: min(820px, 94vw); }
+   .sb-title { font-size: 16px; font-weight: 800; letter-spacing: 1.5px; display: flex; justify-content: space-between; margin-bottom: 10px; }
+   .sb-title span { font-family: var(--mono); color: var(--hud-dim); }
+   .sb-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+   .sb-h { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+   .sb-h.ally { color: var(--ally); } .sb-h.enemy { color: var(--enemy); }
+   #scoreboard table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+   #scoreboard td { padding: 3px 4px; border-bottom: 1px solid rgba(255,255,255,.06); }
+   #scoreboard td.ic.ally { color: var(--ally); } #scoreboard td.ic.enemy { color: var(--enemy); }
+   #scoreboard td.ty { color: var(--hud-dim); font-size: 11px; }
+   #scoreboard td.hp { font-family: var(--mono); text-align: right; width: 120px; }
+   .sb-bar { display: inline-block; width: 50px; height: 4px; background: rgba(255,255,255,.1); margin-right: 6px; vertical-align: middle; }
+   .sb-bar i { display: block; height: 100%; background: currentColor; }
+   #scoreboard tr.dead td { opacity: .45; text-decoration: line-through; }
+   #scoreboard tr.me td { color: #fff; font-weight: 700; }
+   .sb-stats { display: flex; justify-content: space-around; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); }
+   .sb-stats div { display: flex; flex-direction: column; align-items: center; }
+   .sb-stats b { font: 700 18px var(--mono); } .sb-stats span { font-size: 10.5px; color: var(--hud-dim); letter-spacing: 1px; text-transform: uppercase; }
+   #help-panel { width: min(680px, 94vw); }
 
-   /* ---- ALWAYS-ON range readout under the reticle -- not just in the sniper scope. Judging
-      shot distance from the camera angle alone was the whole problem ("Schussweite zu
-      bestimmen ein Ding der Unmöglichkeit"): there was no numeric feedback at all outside the
-      scope, which only engages at max zoom. This sits just below the crosshair at all times
-      and turns red once the aim point is past the main battery's range, since a shot fired
-      there just splashes short. ---- */
-   #range-readout { position: fixed; left: 50%; top: calc(50% + 26px); transform: translateX(-50%);
-      font-family: var(--mono); font-size: 13px; font-weight: 700; color: rgba(255,212,121,.9);
-      text-shadow: 0 1px 4px rgba(0,0,0,.8); letter-spacing: .5px; pointer-events: none; z-index: 5;
-      white-space: nowrap; }
-   #range-readout.out-of-range { color: #ff6a5a; }
-
-   /* ---- sniper scope overlay: engaged when the wheel zooms all the way in (render3d.js /
-      main3d.js decide the threshold; this class is toggled by main3d.js each frame). A dark
-      vignette + a ranging reticle + a distance readout sell "looking through the rangefinder"
-      instead of just a tighter FOV. ---- */
-   #scope-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0; transition: opacity .18s; }
-   #scope-overlay.on { opacity: 1; }
-   #scope-overlay .vignette { position: absolute; inset: 0;
-      background: radial-gradient(circle at 50% 50%, transparent 32%, rgba(0,0,0,.92) 62%); }
-   #scope-overlay .ring { position: absolute; left: 50%; top: 50%; width: 62vh; height: 62vh;
-      transform: translate(-50%,-50%); border-radius: 50%; border: 1px solid rgba(200,225,255,.35); }
-   #scope-overlay .tick { position: absolute; left: 50%; top: 50%; background: rgba(200,225,255,.55); }
-   #scope-overlay .tick.h { width: 40vh; height: 1px; transform: translate(-50%,-50%); }
-   #scope-overlay .tick.v { width: 1px; height: 40vh; transform: translate(-50%,-50%); }
-   #scope-range { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
-      font-family: var(--mono); font-size: 15px; font-weight: 700; color: #cfe8ff;
-      text-shadow: 0 0 10px rgba(120,180,255,.6); letter-spacing: 1px; }
-
-   /* ---- Overlays (menu / end) ---- */
-   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(120% 120% at 50% 30%, rgba(10,26,44,.55), rgba(2,6,12,.92)); z-index: 20; }
-   .overlay.hidden { display: none; }
-   .card { width: min(760px, 92vw); background: var(--panel); border: 1px solid var(--panel-edge);
-      border-radius: 16px; padding: 34px 38px; box-shadow: 0 20px 80px rgba(0,0,0,.6); backdrop-filter: blur(8px); text-align:center; }
-   .title { font-family: var(--font); font-size: 46px; font-weight: 900; letter-spacing: 3px;
-      background: linear-gradient(180deg,#fff, #8fb6de); -webkit-background-clip: text; background-clip: text; color: transparent;
-      text-shadow: 0 2px 30px rgba(120,180,255,.25); }
-   .subtitle { color: var(--hud-dim); margin-top: 6px; font-size: 14px; letter-spacing: 1px; }
-   .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 26px; margin: 26px auto; max-width: 560px; text-align: left; font-size: 13px; }
-   .controls-grid .k { color: var(--gold); font-family: var(--mono); font-weight: 700; }
+   /* ================= overlays (menu / end / pause) ================= */
+   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 20;
+      background: radial-gradient(120% 120% at 50% 30%, rgba(10,26,44,.45), rgba(2,6,12,.9)); }
+   .card { width: min(820px, 94vw); max-height: 94vh; overflow: auto; background: var(--panel-solid); border: 1px solid var(--panel-edge);
+      border-radius: 14px; padding: 28px 34px; box-shadow: 0 20px 80px rgba(0,0,0,.6); text-align: center; }
+   .title { font-size: 44px; font-weight: 900; letter-spacing: 4px; background: linear-gradient(180deg, #fff, #8fb6de); -webkit-background-clip: text; background-clip: text; color: transparent; }
+   .subtitle { color: var(--hud-dim); margin-top: 6px; font-size: 14px; letter-spacing: .5px; }
+   .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; margin: 18px auto 6px; max-width: 700px; text-align: left; font-size: 13px; }
+   .controls-grid div { display: flex; gap: 10px; }
+   .controls-grid .k { color: var(--gold); font-family: var(--mono); font-weight: 700; min-width: 92px; flex: none; }
    .controls-grid .d { color: var(--hud); }
-   .btn-row { display: flex; gap: 14px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
-   button.play { pointer-events: auto; font-family: var(--font); font-weight: 800; letter-spacing: 1px; font-size: 16px;
-      padding: 14px 30px; border-radius: 10px; border: 1px solid var(--panel-edge); cursor: pointer;
-      background: linear-gradient(180deg,#2b5f8f,#173a5c); color: #eaf6ff; transition: transform .08s, box-shadow .15s; }
+   .btn-row { display: flex; gap: 14px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+   button.play { pointer-events: auto; font-family: var(--font); font-weight: 800; letter-spacing: 1px; font-size: 16px; padding: 13px 30px; border-radius: 8px;
+      border: 1px solid var(--panel-edge); cursor: pointer; background: linear-gradient(180deg, #2b5f8f, #173a5c); color: #eaf6ff; transition: transform .08s, box-shadow .15s; }
    button.play:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(50,140,220,.4); }
-   button.play:active { transform: translateY(0); }
-   .diff-row { display:flex; gap: 10px; justify-content:center; margin-top: 14px; }
-   .chip { pointer-events:auto; padding: 8px 16px; border-radius: 20px; border: 1px solid var(--panel-edge);
-      background: rgba(0,0,0,.3); color: var(--hud-dim); cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .5px; }
+   button.play.alt { background: linear-gradient(180deg, #3a3f4a, #22262e); }
+   .diff-row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+   .chip { pointer-events: auto; padding: 7px 16px; border-radius: 20px; border: 1px solid var(--panel-edge); background: rgba(0,0,0,.3); color: var(--hud-dim); cursor: pointer; font-size: 13px; font-weight: 700; }
    .chip.sel { color: #fff; background: rgba(60,150,230,.35); border-color: #5aa0e0; box-shadow: 0 0 16px rgba(70,150,230,.4); }
-   .result-emoji { font-size: 60px; margin-bottom: 6px; }
-   .stats-grid { display:grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 22px auto; max-width: 520px; }
-   .stat { background: rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px; }
-   .stat .v { font-size: 24px; font-weight: 900; color:#fff; }
-   .stat .l { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing:1px; margin-top: 3px; }
-   .hint { color: var(--hud-dim); font-size: 12px; margin-top: 16px; }
-   #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#04070d; z-index:30; color:var(--hud-dim); font-family:var(--mono); }
+   .result-emoji { font-size: 56px; margin-bottom: 4px; }
+   .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px auto; max-width: 560px; }
+   .stat { background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 10px; }
+   .stat .v { font-size: 22px; font-weight: 900; color: #fff; }
+   .stat .l { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
+   .hint { color: var(--hud-dim); font-size: 12px; margin-top: 14px; line-height: 1.5; }
+   .howto-body { text-align: left; max-width: 640px; margin: 10px auto 0; line-height: 1.6; font-size: 14px; }
+   .howto-body p { margin-top: 8px; } .howto-body b { color: var(--gold); }
+   #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #04070d; z-index: 30; color: var(--hud-dim); font-family: var(--mono); }
 </style>
 </head>
 <body>
 <div id="app">
    <canvas id="scene3d"></canvas>
    <canvas id="fx"></canvas>
-   <div id="reticle3d"></div>
-   <div id="range-readout"></div>
-   <div id="scope-overlay">
-      <div class="vignette"></div>
-      <div class="ring"></div>
-      <div class="tick h"></div>
-      <div class="tick v"></div>
-      <div id="scope-range">—</div>
-   </div>
-
-   <div id="siren"></div>
 
    <div id="hud" class="hidden">
-      <div id="log" class="hud-panel"></div>
+      <div id="objectives"></div>
+      <div id="hint-line"><b>H</b> Steuerung · <b>M</b> Karte · <b>Tab</b> Übersicht</div>
 
-      <div id="status-panel" class="hud-panel">
-         <div id="status-line">Zur See</div>
-         <div id="objectives">Ziele: 0 / 0 versenkt</div>
-         <div id="detect-status" class="hidden">👁 GESICHTET</div>
-         <div id="anchor-status" class="hidden">⚓ ANKER-WENDE</div>
-         <div id="turret-status" class="hidden">🎯 TÜRME DREHEN…</div>
+      <div id="topbar">
+         <div id="roster-ally" class="roster"></div>
+         <div id="scorebox" class="panel">
+            <div id="mission-name">Gefecht</div>
+            <div class="score-row"><b id="score-ally">0</b><div id="score-bar"><i id="score-fill-ally"></i><i id="score-fill-enemy"></i></div><b id="score-enemy">0</b></div>
+            <div id="timer">0:00</div>
+            <div id="caps-row"></div>
+         </div>
+         <div id="roster-enemy" class="roster"></div>
       </div>
 
-      <div id="minimap" class="hud-panel"><canvas id="minimap-canvas" width="180" height="180"></canvas></div>
+      <div id="lock-panel" class="panel hidden"></div>
+      <div id="msgs"></div>
+      <div id="torp-alert" class="hidden">TORPEDOS!</div>
+      <div id="free-look" class="hidden">FREIE KAMERA · GESCHÜTZE HALTEN DAS ZIEL</div>
+      <div id="killfeed"></div>
 
-      <div id="ship-panel" class="hud-panel">
-         <div class="ship-name">BISMARCK</div>
-         <div class="ship-class">Linienschiff · <span id="speed-readout">0 kn</span> · <span id="heading-readout">0°</span></div>
-         <div class="bar hp"><i id="hp-fill" style="width:100%"></i></div>
-         <div class="bar-label"><span>Hull</span><span id="hp-text">100%</span></div>
-         <div class="bar speed"><i id="speed-fill" style="width:50%"></i></div>
-         <div class="bar-label"><span>Speed</span><span id="kn-text">0 kn</span></div>
-         <div class="mods">
-            <div class="mod" id="mod-fire">🔥 Fire</div>
-            <div class="mod" id="mod-flood">💧 Flood</div>
-            <div class="mod" id="mod-repair">🔧 Repair</div>
+      <div id="bottom-left">
+         <div id="cons"></div>
+         <div id="ship-card" class="panel">
+            <div class="sc-head"><span id="ship-name">SCHIFF</span><span id="ship-type"></span></div>
+            <canvas id="silhouette"></canvas>
+            <div class="hp-bar"><i id="hp-lag"></i><i id="hp-fill"></i></div>
+            <div id="hp-text">0 / 0</div>
          </div>
       </div>
 
-      <div id="ammo-panel" class="hud-panel">
-         <div class="ship-name" style="font-size:13px">Munition</div>
-         <div id="weapon-sel">Waffe: <b>1</b> Hauptbatterie</div>
-         <div class="salvo-row"><span class="lbl">Haupt-28cm</span><div class="bar"><i id="ammo-main" style="width:100%"></i></div><span class="n ready" id="ammo-main-n">READY</span></div>
-         <div class="salvo-row"><span class="lbl">Sekundär</span><div class="bar"><i id="ammo-sec" style="width:100%"></i></div><span class="n" id="ammo-sec-n">—</span></div>
-         <div class="salvo-row"><span class="lbl">Torpedos</span><div class="bar"><i id="ammo-torp" style="width:100%"></i></div><span class="n" id="ammo-torp-n">0/0</span></div>
-         <div class="salvo-row"><span class="lbl">Turbo</span><div class="bar"><i id="ammo-turbo" style="width:100%"></i></div><span class="n" id="ammo-turbo-n">READY</span></div>
+      <div id="bottom-center">
+         <div id="ribbons"></div>
+         <div id="dmg-counter"></div>
+         <div class="wrow">
+            <div id="spot-eye" title="Entdeckt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/></svg></div>
+            <div id="weapons"></div>
+         </div>
       </div>
 
-      <div id="compass" class="hud-panel"><canvas id="compass-canvas" width="440" height="84"></canvas></div>
+      <div id="bottom-right">
+         <div id="nav" class="panel">
+            <div id="speed-kn">0 kn</div>
+            <div class="nav-lbl">Maschine</div>
+            <div id="telegraph"></div>
+            <div class="nav-lbl" style="margin-top:4px">Ruder</div>
+            <div id="rudder-bar"><i class="notch" style="left:0"></i><i class="notch" style="left:25%"></i><i class="notch" style="left:50%"></i><i class="notch" style="left:75%"></i><i class="notch" style="left:100%"></i><i id="rudder-cmd" style="left:50%"></i><i id="rudder-act" style="left:50%"></i></div>
+            <div id="rudder-name">mittschiffs</div>
+         </div>
+         <div id="minimap-wrap" class="panel"><canvas id="minimap-canvas" width="220" height="220"></canvas></div>
+      </div>
+
+      <div id="scoreboard" class="hidden"></div>
+      <div id="help-panel" class="hidden">
+         <div class="sb-title">Steuerung <span>H schließt</span></div>
+         <div class="controls-grid" style="margin:0">
+            <div><span class="k">W / S</span><span class="d">Maschinentelegraf eine Stufe hoch / runter</span></div>
+            <div><span class="k">A / D</span><span class="d">Ruder eine Stufe Backbord / Steuerbord</span></div>
+            <div><span class="k">Q</span><span class="d">Ruder mittschiffs</span></div>
+            <div><span class="k">Maus</span><span class="d">Peilung (seitlich) und Entfernung (hoch/runter)</span></div>
+            <div><span class="k">Linksklick</span><span class="d">Feuern (nur geladene, ausgerichtete Türme)</span></div>
+            <div><span class="k">Shift</span><span class="d">Fernglas an/aus · Mausrad = 2×/4×/8×/16×</span></div>
+            <div><span class="k">Mausrad</span><span class="d">Kameraabstand</span></div>
+            <div><span class="k">C / Rechtsklick</span><span class="d">Freie Kamera (Türme halten das Ziel)</span></div>
+            <div><span class="k">1 / 2</span><span class="d">Sprenggranaten (HE) / Panzergranaten (AP)</span></div>
+            <div><span class="k">3</span><span class="d">Torpedos · nochmals 3: Fächer eng/weit</span></div>
+            <div><span class="k">X</span><span class="d">Ziel erfassen / lösen</span></div>
+            <div><span class="k">L</span><span class="d">Vorhaltemarker an/aus</span></div>
+            <div><span class="k">R / T</span><span class="d">Schadensbekämpfung / Reparaturtrupp</span></div>
+            <div><span class="k">Y / U</span><span class="d">Spezial-Verbrauchsgüter (Boost, Nebel …)</span></div>
+            <div><span class="k">M / Tab</span><span class="d">Taktische Karte / Übersicht</span></div>
+            <div><span class="k">P / Esc</span><span class="d">Pause</span></div>
+         </div>
+      </div>
    </div>
 
-   <!-- Loading -->
    <div id="loading">Lade 3D-Ozean…</div>
 
    <!-- Main menu -->
    <div id="menu" class="overlay hidden">
       <div class="card">
          <div class="title">WARSCHIFFE 3D</div>
-         <div class="subtitle">Du bist die <b>BISMARCK</b> — versenke alle feindlichen Schiffe.</div>
+         <div class="subtitle">Übernimm das Kommando — versenke die feindliche Flotte.</div>
+         <!-- A mission/ship picker (menu3d.js) can mount here and start a match via window.startGame3D({ difficulty, mission, ship }). -->
+         <div id="menu-picker"></div>
          <div class="controls-grid">
-            <div><span class="k">Maus bewegen</span> <span class="d">Kamera & Türme drehen — das Fadenkreuz sitzt fest in der Bildmitte</span></div>
-            <div><span class="k">1 / 2 / 3</span> <span class="d">Waffe wählen: Hauptbatterie / Sekundär / Flak</span></div>
-            <div><span class="k">Klick (halten)</span> <span class="d">Gewählte Waffe feuern (Hauptbatterie erst bei eingerasteten Türmen)</span></div>
-            <div><span class="k">Mausrad</span> <span class="d">Ein-/auszoomen — ganz rein = Zielfernrohr</span></div>
-            <div><span class="k">W / S</span> <span class="d">Voll voraus / voll achteraus</span></div>
-            <div><span class="k">A / D</span> <span class="d">Ruder links / rechts</span></div>
-            <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: hart bremsen + enger drehen)</span></div>
-            <div><span class="k">Shift</span> <span class="d">Turbo (kurzer Schub, Cooldown)</span></div>
-            <div><span class="k">F</span> <span class="d">Rauch (Tarndetekt)</span></div>
-            <div><span class="k">T</span> <span class="d">Torpedosalve abfeuern</span></div>
-            <div><span class="k">R</span> <span class="d">Reparatur (Feuer/Flut löschen)</span></div>
-            <div><span class="k">P / Esc</span> <span class="d">Pause</span></div>
+            <div><span class="k">W / S</span><span class="d">Maschinentelegraf: Rückwärts · Stopp · 1/4 · 1/2 · 3/4 · Voll</span></div>
+            <div><span class="k">A / D</span><span class="d">Ruder in Stufen: hart/halb Backbord · mittschiffs · halb/hart Steuerbord</span></div>
+            <div><span class="k">Maus</span><span class="d">Seitlich = Peilung, hoch/runter = Schussentfernung</span></div>
+            <div><span class="k">Linksklick</span><span class="d">Salve aus allen bereiten Türmen</span></div>
+            <div><span class="k">Shift</span><span class="d">Fernglas (Mausrad: 2× – 16×)</span></div>
+            <div><span class="k">C</span><span class="d">Freie Kamera, Türme halten das Ziel</span></div>
+            <div><span class="k">1 / 2 / 3</span><span class="d">HE · AP · Torpedos</span></div>
+            <div><span class="k">X / L</span><span class="d">Ziel erfassen · Vorhaltemarker</span></div>
+            <div><span class="k">R / T / Y / U</span><span class="d">Verbrauchsgüter</span></div>
+            <div><span class="k">M / Tab / H</span><span class="d">Karte · Übersicht · Hilfe</span></div>
          </div>
          <div class="diff-row">
-            <div class="chip sel" data-diff="easy">Einfach</div>
-            <div class="chip" data-diff="normal">Normal</div>
+            <div class="chip" data-diff="easy">Einfach</div>
+            <div class="chip sel" data-diff="normal">Normal</div>
             <div class="chip" data-diff="hard">Schwer</div>
          </div>
          <div class="btn-row">
-            <button class="play" id="btn-play">⚓ ABFERTIGEN</button>
-            <button class="play" id="btn-how" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Wie man spielt</button>
+            <button class="play" id="btn-play">⚓ IN DIE SCHLACHT</button>
+            <button class="play alt" id="btn-how">So kämpfst du</button>
          </div>
-         <div class="hint">WoWs-Steuerung: Die <b>Maus dreht die Kamera</b> (Fadenkreuz fest in der Mitte), die Türme zielen dorthin, und die Salve löst erst, wenn sie wirklich eingerastet sind. <b>1/2/3</b> wählt die Waffe, Klick halten feuert sie, Mausrad ganz rein = Zielfernrohr.</div>
+         <div class="hint">Klick ins Bild fängt die Maus ein · Esc gibt sie frei und pausiert.</div>
       </div>
    </div>
 
@@ -247,13 +328,13 @@
    <div id="howto" class="overlay hidden">
       <div class="card">
          <div class="title" style="font-size:30px">So kämpfst du</div>
-         <div class="subtitle" style="margin:14px 0">Drei Dinge machen den Sieg: <b>Positionierung</b>, <b>Timing</b> — und jetzt <b>Turmführung</b>.</div>
-         <div style="text-align:left; max-width:560px; margin:0 auto; line-height:1.7; color:var(--hud)">
-            <p>🎥 <b>Kamera & Zielen</b> — Die Maus dreht die Kamera (und mit ihr die Türme) frei um dein Schiff — das Fadenkreuz sitzt fest in der Bildmitte, du zielst also, indem du die Kamera dorthin drehst. Waffe wählst du mit <b>1 / 2 / 3</b> (Hauptbatterie / Sekundär / Flak), <b>Klick halten</b> feuert die gewählte Waffe. Das <b>Mausrad</b> zoomt — ganz reingezoomt wechselst du ins <b>Zielfernrohr</b>: enges Sichtfeld, Entfernungsmesser, wie am Richtschützenstand.</p>
-            <p>🎯 <b>Turmschwenk</b> — Die Türme folgen deinem Fadenkreuz nur mit begrenzter Drehrate. Der Statusanzeiger zeigt „TÜRME DREHEN…" (gelb) oder „EINGERASTET" (grün) — erst dann trifft die Salve wirklich dorthin, wo du zielst. Wechsle das Ziel nicht in letzter Sekunde.</p>
-            <p>🎯 <b>Citadel</b> — Der zentrale Rumpf (Motoren/Feuer) ist besonders verwundbar. Treffer dort bringen Konzentration, Feuer und Flut. Treffer am Bug/Heck „prallen" oft ab.</p>
-            <p>🌫️ <b>Rauch</b> — Mit <b>F</b> legst du einen Tarndetektor; Gegner können dich darin gar nicht mehr anvisieren.</p>
-            <p>🔥 <b>Brände & Flut</b> — Mit <b>R</b> kannst du Module löschen und Flut bekämpfen; ignoriere sie und der Rumpf versagt.</p>
+         <div class="howto-body">
+            <p><b>Zielen wie im Original.</b> Das Fadenkreuz sitzt fest in der Bildmitte und liegt immer genau auf dem Zielpunkt. Maus seitlich dreht die Peilung, Maus hoch/runter verschiebt die Entfernung — die Anzeige rechts neben dem Fadenkreuz zeigt Distanz und Flugzeit der Granaten.</p>
+            <p><b>Vorhalt.</b> Die Striche auf dem Fadenkreuz sind ein Vorhaltelineal: „Strich ≈ 4 kn" heißt, ein Strich Vorhalt pro 4 Knoten Quergeschwindigkeit des Ziels. Der rote Geistmarker (L) zeigt, wo das Ziel beim Einschlag sein wird.</p>
+            <p><b>Türme.</b> Unter dem Fadenkreuz siehst du dein Schiff mit allen Türmen: <span style="color:#6dff8e">grün</span> = bereit und ausgerichtet, <span style="color:#ffd24a">gelb</span> = schwenkt, <span style="color:#ff6a5a">rot</span> = lädt oder kann nicht wirken. Ein Klick feuert nur die grünen.</p>
+            <p><b>Fernglas.</b> Shift schaltet auf das Fernglas, das Mausrad wählt 2× bis 16×. Die Maus wird mit dem Zoom feiner.</p>
+            <p><b>Fahren.</b> Telegraf und Ruder bleiben stehen, wo du sie hinstellst — rechts unten neben der Minikarte siehst du beides. Große Schiffe reagieren träge: früh einlenken!</p>
+            <p><b>Überleben.</b> R löscht Brände und Wassereinbrüche, T repariert Rumpfschaden. Das Auge unten zeigt, ob du entdeckt bist. Rote Pfeile um das Fadenkreuz warnen vor Torpedos.</p>
          </div>
          <div class="btn-row"><button class="play" id="btn-how-close">Verstanden</button></div>
       </div>
@@ -269,19 +350,26 @@
             <div class="stat"><div class="v" id="stat-kills">0</div><div class="l">Versenkt</div></div>
             <div class="stat"><div class="v" id="stat-dmg">0</div><div class="l">Schaden</div></div>
             <div class="stat"><div class="v" id="stat-time">0:00</div><div class="l">Zeit</div></div>
+            <div class="stat"><div class="v" id="stat-hits">—</div><div class="l">Treffer / Schüsse</div></div>
+            <div class="stat"><div class="v" id="stat-cit">0</div><div class="l">Zitadellen</div></div>
+            <div class="stat"><div class="v" id="stat-xp">0</div><div class="l">Erfahrung</div></div>
          </div>
          <div class="btn-row">
             <button class="play" id="btn-again">⚔️ Erneut</button>
-            <button class="play" id="btn-menu" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Menü</button>
+            <button class="play alt" id="btn-menu">Menü</button>
          </div>
       </div>
    </div>
 
    <!-- Pause -->
    <div id="pause" class="overlay hidden">
-      <div class="card">
+      <div class="card" style="width:min(420px,92vw)">
          <div class="title" style="font-size:34px">PAUSE</div>
-         <div class="btn-row"><button class="play" id="btn-resume">Fortsetzen</button></div>
+         <div class="btn-row">
+            <button class="play" id="btn-resume">Fortsetzen</button>
+            <button class="play alt" id="btn-quit">Hauptmenü</button>
+         </div>
+         <div class="hint">P oder Esc setzt fort.</div>
       </div>
    </div>
 </div>
