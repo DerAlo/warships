@@ -1,4 +1,4 @@
-// game/utils.js — math, RNG, geometry helpers. Spec-independent foundation.
+// game3d/utils.js — math, RNG, geometry helpers (3D-mode fork: adds island/hull geometry).
 // All world units: meters, radians, m/s, seconds.
 
 export const TAU = Math.PI * 2;
@@ -140,4 +140,88 @@ export class Pool {
       if (i >= 0) { this.active.splice(i, 1); this.reset(o); this.free.push(o); }
    }
    clear() { for (const o of this.active) this.reset(o); this.free.push(...this.active); this.active.length = 0; }
+}
+
+// ---------- 3D-mode geometry (islands, hulls, ballistics) ----------
+// Truncated gaussian in [-1, 1]: WoWs-style dispersion draws N(0,1) truncated at +-sigma and
+// scales that window onto the max dispersion radius -- higher sigma = tighter centre grouping.
+export function truncGauss(rng, sigma) {
+   for (let i = 0; i < 8; i++) {
+      let u = 0, w = 0;
+      while (u === 0) u = rng();
+      while (w === 0) w = rng();
+      const g = Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * w);
+      if (Math.abs(g) <= sigma) return g / sigma;
+   }
+   return 0;
+}
+
+// Irregular island outline: `lobes` is an array of {a, r} sampled at equal angles (absolute
+// metres). Renderer and sim both use obstacleRadiusAt so the visible coast = the collision coast.
+// o.lobes (number) = how many harmonic bumps, o.elong/o.rot stretch it into a long island.
+export function makeLobes(o, n = 64) {
+   const rng = makeRng((o.seed || 1) * 7919 + 13);
+   const bumps = Math.max(2, (typeof o.lobes === 'number' ? o.lobes : 5) | 0);
+   const terms = [];
+   for (let k = 0; k < bumps; k++) {
+      terms.push({ f: 2 + Math.floor(rng() * (k + 3)), amp: (0.2 / (1 + k * 0.6)) * (0.5 + rng()), ph: rng() * TAU });
+   }
+   const el = o.elong || 1, rot = o.rot || 0;
+   const out = [];
+   for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU;
+      let m = 1;
+      for (const t of terms) m += t.amp * Math.sin(a * t.f + t.ph);
+      // elongation: ellipse radius in the island's rotated frame
+      const ca = Math.cos(a - rot), sa = Math.sin(a - rot);
+      const ell = el === 1 ? 1 : el / Math.sqrt(ca * ca + el * el * sa * sa);
+      out.push({ a, r: Math.max(o.r * 0.35, o.r * m * ell) });
+   }
+   return out;
+}
+export function obstacleRadiusAt(o, a) {
+   const L = o.lobes;
+   if (!L || !L.length || typeof L === 'number') return o.r;
+   const t = ((((a % TAU) + TAU) % TAU) / TAU) * L.length;
+   const i = Math.floor(t) % L.length, j = (i + 1) % L.length, f = t - Math.floor(t);
+   return L[i].r * (1 - f) + L[j].r * f;
+}
+// Normalised distance from the island centre: < 1 inside the coastline.
+export function obstacleT(o, p) {
+   const dx = p.x - o.c.x, dy = p.y - o.c.y;
+   const d = Math.hypot(dx, dy);
+   const rMax = o.rMax || o.r * 1.6;
+   if (d > rMax * 1.05) return d / rMax;
+   return d / obstacleRadiusAt(o, Math.atan2(dy, dx));
+}
+// Terrain height (m) of an island at p: smooth dome that reaches 0 exactly at the coastline.
+export function islandHeightAt(o, p) {
+   if (o.kind !== 'island') return 0;
+   const t = obstacleT(o, p);
+   if (t >= 1) return 0;
+   return (o.height || 150) * Math.pow(1 - t * t, 0.8);
+}
+
+// Ship-local frame: +x = bow, +y = starboard (sim +y side when heading east).
+export function toLocal(ship, p) {
+   const dx = p.x - ship.pos.x, dy = p.y - ship.pos.y;
+   const c = Math.cos(ship.heading), s = Math.sin(ship.heading);
+   return { x: dx * c + dy * s, y: -dx * s + dy * c };
+}
+export function toWorld(ship, off) {
+   const c = Math.cos(ship.heading), s = Math.sin(ship.heading);
+   return { x: ship.pos.x + off.x * c - off.y * s, y: ship.pos.y + off.x * s + off.y * c };
+}
+// Half-beam of a hull at local x: parallel midbody, tapering to a narrow bow / fuller stern.
+export function halfBeamAt(hull, lx) {
+   const u = Math.abs(lx) / (hull.L / 2);
+   if (u >= 1) return 0;
+   const b = hull.beam / 2;
+   if (u < 0.4) return b;
+   const k = (u - 0.4) / 0.6;
+   return b * (1 - (lx > 0 ? 0.85 : 0.6) * Math.pow(k, 1.6));
+}
+export function insideHull(hull, lp, margin = 0) {
+   if (Math.abs(lp.x) > hull.L / 2 + margin) return false;
+   return Math.abs(lp.y) <= halfBeamAt(hull, lp.x) + margin;
 }
