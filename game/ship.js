@@ -110,10 +110,23 @@ export class Ship {
       this.hitFlash = 0;
       this.aimBearing = heading; // desired absolute turret bearing
       this.alive = true;
+      // campaign
+      this.human = false;             // the ship the player steers (World sets it)
+      this.tag = null;
+      this.static = !!this.cfg.static; // coastal battery: never moves
+      this.speedMult = 1;
+      if (this.cfg.sub) {
+         // depth: 0 surfaced, 1 periscope, 2 deep. Starts deep: the first contact is a surprise.
+         this.depth = 1.6;
+         this.depthTarget = 1.6;
+         this.air = this.cfg.sub.air;
+      }
+      if (this.cfg.air) { this.hangar = this.cfg.air.hangar; this.launchT = this.cfg.air.first; }
    }
 
    get maxSpeed() {
-      let s = this.cfg.maxSpeed;
+      let s = this.cfg.maxSpeed * this.speedMult;
+      if (this.depth > 1) s *= this.cfg.sub.deepSpeed;
       if (this.boost.active) s *= this.boost.cfg.mult || 1.3;
       s *= (1 - Math.min(0.5, this.floods.length * COMBAT.flood.slow));
       return s;
@@ -136,6 +149,8 @@ export class Ship {
 
    update(dt) {
       if (!this.alive) return;
+      if (this.cfg.sub) this._updateDepth(dt);
+      if (this.static) { this.speed = 0; this.vel = { x: 0, y: 0 }; this._updateCombat(dt); return; }
       this.anchorBite = approach(this.anchorBite, this.anchorOut ? 1 : 0, dt / (this.anchorOut ? 0.6 : 1.0));
       const anchorTurnMult = 1 + 2.5 * this.anchorBite;
       const anchorDragRate = 2.2 * this.anchorBite;
@@ -193,12 +208,25 @@ export class Ship {
             if (dd < o.r) this.speed = Math.min(this.speed, this.maxSpeed * WORLD.REEF_SPEED_CAP);
          }
       }
+      this._updateCombat(dt);
+   }
 
+   // Submarine dive cycle: depth eases toward depthTarget; air drains while submerged and a boat
+   // out of air has to come up (the window where it can be found and killed).
+   _updateDepth(dt) {
+      const S = this.cfg.sub;
+      if (this.air <= 0) this.depthTarget = 0;
+      this.depth = approach(this.depth, this.depthTarget, (2 / S.diveTime) * dt);
+      if (this.depth >= 0.5) this.air = Math.max(0, this.air - dt);
+      else this.air = Math.min(S.air, this.air + (S.air / S.recharge) * dt);
+   }
+
+   _updateCombat(dt) {
       // ---- turrets: reload + traverse inside each mount's arc ----
       const slew = this.cfg.turretSlew || 0.5;
       const desiredRel = angleDelta(this.heading, this.aimBearing);
-      const tol = this.side === 'player' ? HANDLING.alignTolPlayer : HANDLING.alignTolBot;
-      const ARC = HANDLING.turretArc;
+      const tol = this.human ? HANDLING.alignTolPlayer : HANDLING.alignTolBot;
+      const ARC = this.cfg.turretArc || HANDLING.turretArc;
       let reloaded = false;
       for (const t of this.turrets) {
          if (t.cd > 0) { t.cd -= dt; if (t.cd <= 0) reloaded = true; }
@@ -211,10 +239,10 @@ export class Ship {
          t.blocked = Math.abs(want) > ARC;
          t.aligned = !t.blocked && Math.abs(want - next) < tol;
       }
-      if (reloaded && this.side === 'player') this.world.emit({ kind: 'reloaded', ship: this });
+      if (reloaded && this.human) this.world.emit({ kind: 'reloaded', ship: this });
       for (const l of this.launchers) if (l.cd > 0) {
          l.cd -= dt;
-         if (l.cd <= 0 && this.side === 'player') this.world.emit({ kind: 'torpReady', ship: this, launcher: l });
+         if (l.cd <= 0 && this.human) this.world.emit({ kind: 'torpReady', ship: this, launcher: l });
       }
       if (this.bloomT > 0) this.bloomT -= dt;
 
@@ -238,11 +266,11 @@ export class Ship {
       this._applyDoT(dt);
 
       if (this.repairT > 0) this.repairT -= dt;
-      if (this.side === 'enemy' && this.state === 'REPAIR') this.repairTimer += dt;
+      if (!this.human && this.state === 'REPAIR') this.repairTimer += dt;
 
-      // Enemy ships patch themselves up passively while out of danger, so a bot that retreated
+      // Bots patch themselves up passively while out of danger, so a bot that retreated
       // comes back combat-ready instead of limping forever. The player uses consumables instead.
-      if (this.side === 'enemy' && this.hp < this.maxHP && this.world.nearestThreat(this) >= 600) {
+      if (!this.human && !this.cfg.noRepair && this.hp < this.maxHP && this.world.nearestThreat(this) >= 600) {
          this.hp = Math.min(this.maxHP, this.hp + WORLD.REPAIR_RATE * 0.35 * dt * this.maxHP);
          if (this.fires.length && Math.random() < 0.12 * dt) this.fires.shift();
          if (this.floods.length && Math.random() < 0.12 * dt) this.floods.shift();
@@ -321,7 +349,7 @@ export class Ship {
       return 'ready';
    }
    canUse(key) { return this.alive && this.consState(key) === 'ready'; }
-   useConsumable(key) {
+   useConsumable(key, arg = null) {
       if (!this.canUse(key)) return false;
       if (key === 'repair' && (this.healable < 1 || this.hp >= this.maxHP)) return false;
       const c = this.cons[key];
@@ -330,6 +358,8 @@ export class Ship {
       c.charges -= 1; // Infinity stays Infinity
       if (key === 'dc') { this.fires = []; this.floods = []; }
       if (key === 'smoke') this._smokeAccum = 1; // first puff immediately
+      if (key === 'dcharge') this.world.dropDepthCharges(this);
+      if (key === 'flare') this.world.launchFlare(this, arg || this.world._aimPoint || add(this.pos, fromAngle(this.heading, 1500)));
       this.world.emit({ kind: 'cons', ship: this, key });
       return true;
    }
@@ -375,7 +405,7 @@ export class Ship {
    turretCanFire(t, rel, tol) {
       if (t.cd > 0) return false;
       const want = angleDelta(t.home, rel);
-      if (Math.abs(want) > HANDLING.turretArc) return false;
+      if (Math.abs(want) > (this.cfg.turretArc || HANDLING.turretArc)) return false;
       return Math.abs(angleDelta(t.bearing, t.home + want)) <= tol;
    }
 
@@ -388,13 +418,13 @@ export class Ship {
       this.aimBearing = angleOf(aimDir);
       const gun = this.mainShell();
       const rel = angleDelta(this.heading, this.aimBearing);
-      const tol = this.side === 'player' ? HANDLING.alignTolPlayer : HANDLING.alignTolBot;
+      const tol = this.human ? HANDLING.alignTolPlayer : HANDLING.alignTolBot;
       const aimPoint = opts.aimPoint || (target ? target.pos : null);
       const max = opts.maxTurrets || Infinity;
       const spreadMult = opts.spreadMult || 1;
       const salvoMult = (this.side === 'enemy' && world.difficulty) ? world.difficulty.salvoMult : 1;
       const reload = gun.reload * (opts.reloadMult || 1);
-      const rangeSigma = HANDLING.rangeSigma * this._aimScale(world) * spreadMult;
+      const rangeSigma = HANDLING.rangeSigma * this._aimScale(world) * spreadMult * ((world.env && world.env.dispersion) || 1);
       let fired = 0, n = 0;
       for (const t of this.turrets) {
          if (fired >= max) break;
@@ -419,7 +449,7 @@ export class Ship {
          this.bloomT = VISION.bloomTime;
          if (opts.blind) this.blindShots += n;
          world.emit({ kind: 'salvo', ship: this, turrets: fired, guns: n, ammo: gun.type });
-         if (this.side === 'player') world.shakeAdd(2 + fired * 1.5);
+         if (this.human) world.shakeAdd(2 + fired * 1.5);
       }
       return n;
    }
@@ -436,11 +466,21 @@ export class Ship {
          let bd = S.range;
          for (const e of this.world.enemiesOf(this)) {
             if (!e.visible) continue;
+            if (e.depth >= 1.5) continue;
             const d = dist(e.pos, this.pos);
             if (d < bd) { bd = d; tgt = e; }
          }
       }
-      this.secTarget = tgt;
+      // nothing to shoot at: the player's secondaries sweep spotted mines instead
+      if (!tgt && this.human && this.world.mines.length) {
+         let bd = S.range;
+         for (const m of this.world.mines) {
+            if (!m.seen || m.side === this.side || m.armT > 0) continue;
+            const d = dist(m.pos, this.pos);
+            if (d < bd) { bd = d; tgt = { pos: m.pos, vel: { x: 0, y: 0 }, mine: true }; }
+         }
+      }
+      this.secTarget = tgt && tgt.mine ? null : tgt;
       if (!tgt) return;
       // fire discipline: automatic batteries don't give away a ship hiding in smoke; a manual
       // focus order (RMB) overrides that and blooms like the main guns
@@ -484,8 +524,13 @@ export class Ship {
       }
       if (tgt) {
          tgt.hp -= A.dps * A.reload;
-         if (tgt.hp <= 0) { tgt.alive = false; this.world.emit({ kind: 'aircraftDown', ship: this, aircraft: tgt }); }
+         if (tgt.hp <= 0) {
+            tgt.alive = false;
+            if (this.side === 'player') this.world.stats.planesDown++;
+            this.world.emit({ kind: 'aircraftDown', ship: this, aircraft: tgt });
+         }
       } else {
+         if (!A.vsShip) return;
          if (this.inSmokeNow && !this.visible) return;
          for (const e of this.world.enemiesOf(this)) {
             if (!e.visible) continue;
@@ -514,7 +559,7 @@ export class Ship {
    torpFan(bearing) {
       const T = this.cfg.torp;
       if (!T) return [];
-      const gap = this.side === 'player' ? HANDLING.torpSpread[this.torpSpread] : (T.spread || 3 * DEG);
+      const gap = this.human ? HANDLING.torpSpread[this.torpSpread] : (T.spread || 3 * DEG);
       const out = [];
       for (let i = 0; i < T.salvo; i++) out.push(bearing + (i - (T.salvo - 1) / 2) * gap);
       return out;
@@ -546,7 +591,7 @@ export class Ship {
 
    // Lateral dispersion (rad, uniform +-base) grows with range; bots scale by difficulty.
    _fireSpread(world, range, mult = 1) {
-      const base = (0.01 + 0.028 * clamp(range / 2000, 0, 1)) * this._aimScale(world);
+      const base = (0.01 + 0.028 * clamp(range / 2000, 0, 1)) * this._aimScale(world) * ((world.env && world.env.dispersion) || 1);
       return (Math.random() - 0.5) * 2 * base * mult;
    }
 

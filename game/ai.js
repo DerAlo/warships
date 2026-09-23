@@ -3,8 +3,9 @@
 // Bots only know what their side has spotted (ship.visible / ship.lastKnown, see state.js):
 // a hidden target can't be locked, only area-fired at its dead-reckoned position or hunted.
 import { sub, add, fromAngle, angleOf, angleDelta, dist, clamp, approachAngle, randn, TAU, DEG } from './utils.js';
-import { WORLD, VISION, COMBAT } from './config.js';
+import { WORLD, VISION, COMBAT, FLARE } from './config.js';
 import { beltIncidence } from './combat.js';
+import { launchSquadron } from './air.js';
 
 const NO_AI = {};
 
@@ -80,11 +81,16 @@ export function perceive(world, t) {
 
 function pickTarget(bot, world) {
    let best = null, bestD = Infinity;
+   const role = (bot.cfg.ai || NO_AI).role;
+   const raider = role === 'torpedo' || role === 'sub';
    for (const e of world.enemiesOf(bot)) {
+      if (e.depth >= 0.5) continue; // a dived submarine is not a gun target (ASW: see aswLogic)
       const k = perceive(world, e);
       if (!k) continue;
       // a spotted ship is always a better target than a ghost
-      const d = dist(bot.pos, k.pos) + (k.seen ? 0 : 1500);
+      let d = dist(bot.pos, k.pos) + (k.seen ? 0 : 1500);
+      // torpedo boats and U-boats go for the merchantmen first
+      if (raider && e.cfg.ai && e.cfg.ai.role === 'transport') d -= 900;
       if (d < bestD) { bestD = d; best = k; }
    }
    return best;
@@ -119,6 +125,8 @@ export function updateBot(bot, world, dt) {
    bot.stateTime += dt;
    const diff = world.difficulty;
    const ai = bot.cfg.ai || NO_AI;
+   const special = ROLES[ai.role];
+   if (special) { special(bot, world, dt, ai); return; }
 
    const k = pickTarget(bot, world);
    const kd = k ? dist(bot.pos, k.pos) : Infinity;
@@ -126,8 +134,8 @@ export function updateBot(bot, world, dt) {
    const contact = k && (k.seen || k.age < VISION.searchAfter + VISION.blindWindow);
    const threat = nearestThreatShell(bot, world);
    const underFire = !!threat;
-   const lowHP = bot.hp < bot.maxHP * WORLD.LOW_HP;
-   const critHP = bot.hp < bot.maxHP * WORLD.CRIT_HP;
+   const lowHP = !ai.noRetreat && bot.hp < bot.maxHP * WORLD.LOW_HP;
+   const critHP = !ai.noRetreat && bot.hp < bot.maxHP * WORLD.CRIT_HP;
    bot.reactionTimer = Math.max(0, bot.reactionTimer - dt);
    if (bot.state !== 'RETREAT') bot.retreatTime = 0;
    if (k) bot.target = k.ship;
@@ -143,6 +151,8 @@ export function updateBot(bot, world, dt) {
    }
 
    consumableLogic(bot, world, ai, k, underFire, dt);
+   if (ai.boss) bossLogic(bot, world, k, dt);
+   if (world.env.night && ai.role === 'cruiser') nightFlares(bot, world, k, dt);
 
    let steer = { heading: bot.heading, throttle: 0.6 };
    switch (bot.state) {
@@ -150,9 +160,11 @@ export function updateBot(bot, world, dt) {
          bot.patrolTimer = (bot.patrolTimer || 0) + dt;
          if (bot.patrolTimer > 8) {
             bot.patrolTimer = 0;
-            const a = Math.random() * TAU, r = 900 + Math.random() * 500;
-            bot.patrolPoint = { x: clamp(bot.pos.x + Math.cos(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200),
-               y: clamp(bot.pos.y + Math.sin(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200) };
+            // allies screen the player instead of wandering off
+            const c = bot.side === 'player' && world.player.alive ? world.player.pos : bot.pos;
+            const a = Math.random() * TAU, r = bot.side === 'player' ? 350 + Math.random() * 400 : 900 + Math.random() * 500;
+            bot.patrolPoint = { x: clamp(c.x + Math.cos(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200),
+               y: clamp(c.y + Math.sin(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200) };
          }
          steer = seek(bot.patrolPoint, bot.pos);
          if (contact) {
@@ -263,10 +275,11 @@ export function updateBot(bot, world, dt) {
       }
    }
 
+   if (bot.asw) steer = aswLogic(bot, world, steer, dt);
    steer = avoidObstacles(bot, world, steer);
 
-   // loose formation on the squad's battleship
-   if (ai.role !== 'battleship') {
+   // loose formation on the squad's battleship (swarms hunt on their own)
+   if (ai.role !== 'battleship' && !ai.swarm) {
       const lead = world.enemyLeader(bot);
       if (lead && bot.state !== 'DODGE' && bot.state !== 'RETREAT' && bot.state !== 'SMOKE') {
          const d = dist(lead.pos, bot.pos);
@@ -348,6 +361,233 @@ function sideTowardOpenSpace(bot, world, k) {
    const d2 = dist(add(k.pos, fromAngle(bearing - 90 * DEG, r)), leader.pos);
    return d1 >= d2 ? 1 : -1;
 }
+
+// shared tail of the special roles: obstacle avoidance, separation, helm + throttle
+function drive(bot, world, steer) {
+   steer = avoidObstacles(bot, world, steer);
+   steer = applySeparation(bot, world, steer);
+   bot.helm = clamp(angleDelta(bot.heading, steer.heading) * 2.2, -1, 1);
+   bot.throttleIn = clamp(steer.throttle, -1, 1);
+}
+
+// guns only at a spotted target inside range (support roles don't area-fire)
+function lightGuns(bot, world, k, ai, dt) {
+   if (!k) { bot.aimBearing = bot.heading; return; }
+   bot.aimBearing = angleOf(sub(k.pos, bot.pos));
+   if (k.seen && dist(bot.pos, k.pos) < bot.cfg.main.range) weapons(bot, world, k, ai, dt);
+}
+
+// follow `path` waypoints (optionally looping), then head for the exit zone
+function pathGoal(bot) {
+   if (bot.path && bot.pathIdx < bot.path.length) {
+      const wp = bot.path[bot.pathIdx];
+      if (dist(bot.pos, wp) < 220) {
+         bot.pathIdx++;
+         if (bot.pathIdx >= bot.path.length && bot.loop) bot.pathIdx = 0;
+      }
+      if (bot.pathIdx < bot.path.length) return bot.path[bot.pathIdx];
+   }
+   return bot.exit || null;
+}
+
+function nearestSub(bot, world, range) {
+   let best = null, bd = range;
+   for (const e of world.enemiesOf(bot)) {
+      if (!e.cfg.sub) continue;
+      const d = dist(e.pos, bot.pos);
+      if (d < bd) { bd = d; best = e; }
+   }
+   return best;
+}
+
+// escort destroyer: its hydrophone finds submarines nearby; run over them and roll depth charges
+function aswLogic(bot, world, steer, dt) {
+   bot._dcT = Math.max(0, (bot._dcT || 0) - dt);
+   const s = nearestSub(bot, world, 1100);
+   if (!s || (s.depth < 0.5 && s.visible)) return steer; // surfaced: the guns handle it
+   const goal = add(s.pos, { x: s.vel.x * 1.5, y: s.vel.y * 1.5 });
+   if (dist(bot.pos, goal) < 140 && bot._dcT <= 0) { world.dropDepthCharges(bot); bot._dcT = 7; }
+   return { heading: angleOf(sub(goal, bot.pos)), throttle: 1 };
+}
+
+// Boss: every so often a telegraphed heavy salvo -- red rings on the water, then impact.
+// Below half health it enrages: shorter interval, more rings.
+function bossLogic(bot, world, k, dt) {
+   const B = bot.cfg.barrage;
+   if (!B) return;
+   const p2 = bot.hp < bot.maxHP * 0.5;
+   if (p2 && !bot.enraged) {
+      bot.enraged = true;
+      if (world.director) world.director.say(`⚠ ${bot.name} wütet — schwere Salven in schneller Folge!`, 'warn', 6);
+   }
+   bot.barrageT = (bot.barrageT ?? B.every * 0.5) - dt;
+   if (bot.barrageT > 0 || !k || !k.seen || dist(bot.pos, k.pos) > bot.cfg.main.range) return;
+   bot.barrageT = p2 ? B.everyP2 : B.every;
+   // aimed where the target will be when the shells land, so holding course is fatal
+   const at = { x: k.pos.x + k.vel.x * B.delay * 0.8, y: k.pos.y + k.vel.y * B.delay * 0.8 };
+   world.addBarrage(bot, at, B, p2 ? B.countP2 : B.count);
+}
+
+// cruisers at night light up a lost contact with star shells
+function nightFlares(bot, world, k, dt) {
+   bot._flareT = (bot._flareT ?? 6 + Math.random() * 8) - dt;
+   if (bot._flareT > 0 || !k || k.seen || k.age > 20) return;
+   if (dist(bot.pos, k.pos) > FLARE.range) return;
+   bot._flareT = 22 + Math.random() * 8;
+   world.launchFlare(bot, k.pos);
+}
+
+const ROLES = {
+   // coastal battery: no movement, just traverse and fire
+   static(bot, world, dt, ai) {
+      const k = pickTarget(bot, world);
+      bot.state = k && k.seen ? 'ENGAGE' : 'STANDBY';
+      bot.helm = 0; bot.throttleIn = 0;
+      if (k && (k.seen || k.age < VISION.blindWindow)) weapons(bot, world, k, ai, dt);
+      else bot.aimBearing = k ? angleOf(sub(k.pos, bot.pos)) : bot.aimBearing;
+   },
+
+   // merchantman: sail the route, zigzag and pile on speed when threatened
+   transport(bot, world, dt, ai) {
+      const k = pickTarget(bot, world);
+      const threatened = world.nearestThreat(bot) < 1600;
+      const goal = pathGoal(bot);
+      let steer;
+      if (goal) steer = seek(goal, bot.pos);
+      else {
+         bot.patrolTimer = (bot.patrolTimer || 0) + dt;
+         if (bot.patrolTimer > 12) { bot.patrolTimer = 0; bot.patrolPoint = add(bot.pos, fromAngle(Math.random() * TAU, 900)); }
+         steer = seek(bot.patrolPoint, bot.pos);
+      }
+      steer.throttle = threatened ? 1 : 0.75;
+      if (threatened) steer.heading += Math.sin(world.time * 0.45 + bot.id * 1.7) * 0.4;
+      // an escorted convoy waits for its escort instead of sailing off alone
+      if (bot.side === 'player' && world.player.alive && dist(bot.pos, world.player.pos) > 2000) steer.throttle = 0.4;
+      bot.state = threatened ? 'DODGE' : 'STANDBY';
+      drive(bot, world, steer);
+      lightGuns(bot, world, k, ai, dt);
+   },
+
+   // U-boat: stalk deep, come up to periscope depth to fire a spread, go deep again and slip away.
+   // Out of air (or badly hurt) it has to surface -- that is the moment to kill it.
+   sub(bot, world, dt, ai) {
+      const k = pickTarget(bot, world);
+      const S = bot.cfg.sub, T = bot.cfg.torp;
+      bot.subState = bot.subState || 'approach';
+      bot.subT = (bot.subT || 0) + dt;
+      const set = (s) => { bot.subState = s; bot.subT = 0; };
+      if (bot.hp < bot.maxHP * 0.35 && bot.subState !== 'surface') set('surface');
+      else if (bot.air < 8 && bot.subState !== 'surface') set('surface');
+      let steer = { heading: bot.heading, throttle: 0.8 };
+      switch (bot.subState) {
+         case 'approach': {
+            bot.depthTarget = 1.6;
+            if (!k) {
+               bot.patrolTimer = (bot.patrolTimer || 0) + dt;
+               if (bot.patrolTimer > 10) { bot.patrolTimer = 0; bot.patrolPoint = add(bot.pos, fromAngle(Math.random() * TAU, 700)); }
+               steer = seek(bot.patrolPoint, bot.pos);
+               break;
+            }
+            // set up ahead of the target's track
+            const ahead = add(k.pos, { x: k.vel.x * 8, y: k.vel.y * 8 });
+            steer = flank(ahead, bot.pos, bot.cfg.flankDeg, bot.flankSign, bot.cfg.prefRange * 0.8);
+            if (dist(bot.pos, k.pos) < T.range * 0.8 && bot.torpTimer <= 0) set('attack');
+            break;
+         }
+         case 'attack': {
+            bot.depthTarget = 1.0;
+            if (!k) { set('evade'); break; }
+            steer = { heading: angleOf(sub(k.pos, bot.pos)), throttle: 0.5 };
+            if (bot.depth <= 1.15 && bot.subT > 1.2) {
+               const q = world.difficulty ? world.difficulty.leadQuality : 0.7;
+               const tAim = leadPoint(bot.pos, k.pos, k.vel, T.speed, q);
+               if (bot.fireTorpedo(world, k.ship, fromAngle(angleOf(sub(tAim, bot.pos))))) { set('evade'); break; }
+            }
+            if (bot.subT > 9) set('evade');
+            break;
+         }
+         case 'evade': {
+            bot.depthTarget = 1.6;
+            const from = k ? k.pos : bot.pos;
+            steer = { heading: angleOf(sub(bot.pos, from)) + bot.flankSign * 0.9, throttle: 1 };
+            if (bot.subT > 11) { bot.flankSign *= -1; set('approach'); }
+            break;
+         }
+         case 'surface': {
+            bot.depthTarget = 0;
+            steer = k ? { heading: angleOf(sub(bot.pos, k.pos)) + bot.flankSign * 0.6, throttle: 1 } : steer;
+            // back down once the tanks are full again (a crippled boat stays up)
+            if (bot.air >= S.air * 0.9 && bot.hp >= bot.maxHP * 0.35) set('approach');
+            break;
+         }
+      }
+      bot.state = bot.subState === 'attack' ? 'ENGAGE' : bot.subState === 'surface' ? 'RETREAT' : 'FLANK';
+      drive(bot, world, steer);
+      if (bot.depth < 0.3) lightGuns(bot, world, k, { ...ai, role: 'sub' }, dt);
+      else bot.aimBearing = bot.heading;
+   },
+
+   // carrier: keep far back and send squadrons, torpedo and dive bombers in turn
+   carrier(bot, world, dt, ai) {
+      const k = pickTarget(bot, world);
+      const A = bot.cfg.air;
+      let steer;
+      const foe = k || (world.player.alive ? { pos: world.player.pos, vel: world.player.vel, ship: world.player, seen: false } : null);
+      if (foe) {
+         const d = dist(bot.pos, foe.pos);
+         steer = d < bot.cfg.prefRange * 0.75 ? flee(foe.pos, bot.pos) : kite(foe.pos, bot.pos, bot.flankSign, bot.cfg.prefRange);
+      } else steer = { heading: bot.heading, throttle: 0.5 };
+      bot.launchT -= dt;
+      const up = world.squadrons.filter(s => s.carrier === bot).length;
+      if (bot.launchT <= 0 && up < 2 && bot.hangar >= 2 && foe) {
+         const n = Math.min(A.squad, bot.hangar);
+         bot.hangar -= n;
+         bot.sqType = bot.sqType === 'torp' ? 'dive' : 'torp';
+         launchSquadron(world, bot, foe.ship, bot.sqType, n);
+         bot.launchT = A.launchEvery;
+         if (world.director && bot.side === 'enemy') {
+            world.director.say(bot.sqType === 'torp' ? '✈ Torpedobomber im Anflug!' : '✈ Sturzkampfbomber im Anflug!', 'warn', 4);
+         }
+      }
+      bot.state = 'ENGAGE';
+      consumableLogic(bot, world, ai, k, false, dt);
+      drive(bot, world, steer);
+      lightGuns(bot, world, k, ai, dt);
+   },
+
+   // minelayer: patrols its route; when hunted it runs and sows mines in its wake
+   minelayer(bot, world, dt, ai) {
+      const k = pickTarget(bot, world);
+      const M = bot.cfg.mines;
+      const hunted = k && dist(bot.pos, k.pos) < 2600;
+      let steer;
+      if (hunted) {
+         steer = flee(k.pos, bot.pos);
+         steer.heading += Math.sin(world.time * 0.35 + bot.id) * 0.5;
+         bot.mineT = (bot.mineT ?? 1) - dt;
+         bot.minesLaid = bot.minesLaid || 0;
+         if (bot.mineT <= 0 && bot.minesLaid < M.max) {
+            bot.mineT = M.every;
+            bot.minesLaid++;
+            world.addMine(add(bot.pos, fromAngle(bot.heading + Math.PI, bot.cfg.L * 0.5 + 25)), bot.side, false, bot);
+         }
+         if (bot.visible && dist(bot.pos, k.pos) < 1500 && bot.canUse('smoke')) bot.useConsumable('smoke');
+         bot.state = 'RETREAT';
+      } else {
+         const goal = pathGoal(bot);
+         if (goal) steer = seek(goal, bot.pos);
+         else {
+            bot.patrolTimer = (bot.patrolTimer || 0) + dt;
+            if (bot.patrolTimer > 10) { bot.patrolTimer = 0; bot.patrolPoint = add(bot.pos, fromAngle(Math.random() * TAU, 800)); }
+            steer = seek(bot.patrolPoint, bot.pos);
+         }
+         steer.throttle = 0.6;
+         bot.state = 'STANDBY';
+      }
+      drive(bot, world, steer);
+      lightGuns(bot, world, k, ai, dt);
+   },
+};
 
 function applySeparation(bot, world, steer) {
    let sx = 0, sy = 0;

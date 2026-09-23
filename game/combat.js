@@ -1,8 +1,8 @@
 // game/combat.js — projectile motion + the WoWs-style damage model (ricochet / citadel / overpen /
 // HE / fire / flood). Smoke is deliberately absent here: it blocks sight (state.js), not shells.
 // Convention: ship local coords  +X = bow (forward), +Y = starboard.
-import { add, dist2, fromAngle, norm, clamp, clamp01 } from './utils.js';
-import { WORLD, COMBAT, TUNE, HANDLING } from './config.js';
+import { add, dist, dist2, fromAngle, norm, clamp, clamp01 } from './utils.js';
+import { WORLD, COMBAT, TUNE, HANDLING, MINES, DCHARGE } from './config.js';
 
 // Small margin so a shell skimming the deck edge still counts as a hit.
 const HIT_MARGIN = 6;
@@ -38,21 +38,25 @@ export function resolveShells(world, dt) {
       }
       if (s.age < s.arcDur * (1 - HANDLING.hitWindow)) continue; // still high overhead
 
+      // hulls first: a ship moored against a shore (coastal battery) must still be hittable
+      // test the previous position too: ~11 m/frame could tunnel through a 13 m destroyer beam
+      let hit = false;
+      for (const ship of ships) {
+         if (!ship.alive || ship.side === s.owner) continue;
+         // a submarine at periscope depth only takes quick-firing secondaries; deep it takes nothing
+         if (ship.depth >= 1.5 || (ship.depth >= 0.5 && s.kind !== 'sec')) continue;
+         const imp = localImpact(ship, s.pos) || localImpact(ship, prev);
+         if (imp) { resolveHit(world, ship, s, imp); hit = true; break; }
+      }
+      if (hit) { world.shells.splice(i, 1); continue; }
       if (hitsIsland(world, s.pos)) {
          world.addExplosion(s.pos, false);
          world.shells.splice(i, 1);
          continue;
       }
-      // test the previous position too: ~11 m/frame could tunnel through a 13 m destroyer beam
-      let hit = false;
-      for (const ship of ships) {
-         if (!ship.alive || ship.side === s.owner) continue;
-         const imp = localImpact(ship, s.pos) || localImpact(ship, prev);
-         if (imp) { resolveHit(world, ship, s, imp); hit = true; break; }
-      }
-      if (hit) { world.shells.splice(i, 1); continue; }
       if (s.age >= s.arcDur * (1 + HANDLING.overshoot)) {
          world.addSplash(s.pos, s.kind === 'main' && s.caliber >= 250);
+         if (world.mines.length) detonateMinesNear(world, s.pos, 40, s.shooter);
          world.shells.splice(i, 1);
       }
    }
@@ -149,9 +153,10 @@ export function resolveTorpedoes(world, dt) {
       if (hitsIsland(world, t.pos)) { world.addExplosion(t.pos, false); world.torpedoes.splice(i, 1); continue; }
 
       for (const ship of world.ships) {
-         if (!ship.alive || ship.side === t.owner) continue;
+         if (!ship.alive || ship.side === t.owner || ship.depth >= 0.5) continue; // runs above a dived sub
          const imp = localImpact(ship, t.pos) || localImpact(ship, prev);
          if (!imp) continue;
+         if (ship.human) world.stats.torpHitsTaken++;
          const central = Math.abs(imp.along) < ship.cfg.L / 6;
          const dmg = t.dmg * (central ? COMBAT.torpCentralMult : 1);
          const res = ship.applyImpact({ dmg, source: 'torpedo', flooding: Math.random() < COMBAT.torpFlood, firing: false,
@@ -175,4 +180,116 @@ export function resolveAA(world, dt) {
       if (a.age > a.life) world.aaTracers.splice(i, 1);
    }
    // AA damage is applied at fire time (ship._autoAA) — tracers here are visual.
+}
+
+// ---------- MINES ----------
+// Moored contact mines: armed after MINES.arm s, seen by the other side only up close, triggered by
+// any surface hull of the other side (subs pass under them).
+export function resolveMines(world, dt) {
+   for (const m of world.mines) {
+      if (!m.alive) continue;
+      if (m.armT > 0) { m.armT -= dt; continue; }
+      m.seen = false;
+      for (const s of world.ships) {
+         if (!s.alive || s.side === m.side) continue;
+         const d = dist(s.pos, m.pos);
+         if (d < MINES.reveal) m.seen = true;
+         if (s.depth >= 0.5 || d > s.cfg.L) continue;
+         if (!localImpact(s, m.pos, MINES.trigger)) continue;
+         m.alive = false;
+         const dmg = MINES.dmg * (m.dmgMult || 1);
+         const res = s.applyImpact({ dmg, source: 'torpedo', flooding: Math.random() < MINES.flood, firing: false, mod: 3,
+            dmgMult: m.dmgMult || 1, by: m.owner });
+         world.addExplosion(m.pos, true);
+         world.addSplash(m.pos, true);
+         world.addDamageNumber(m.pos, dmg, 'torp');
+         if (s.human) { world.stats.mineHits++; world.shakeAdd(9); }
+         world.emit({ kind: 'hit', shooter: m.owner, target: s, outcome: 'MINE', dmg, pos: { ...m.pos }, shell: 'mine', flood: res.flood });
+         break;
+      }
+   }
+   if (world.mines.some(m => !m.alive)) world.mines = world.mines.filter(m => m.alive);
+}
+
+// a shell splash close enough sets a mine off harmlessly (secondaries can sweep a lane)
+function detonateMinesNear(world, pos, r, by) {
+   for (const m of world.mines) {
+      if (!m.alive || m.armT > 0 || (by && by.side === m.side)) continue;
+      if (dist2(pos, m.pos) < r * r) {
+         m.alive = false;
+         world.addExplosion(m.pos, true);
+         world.addSplash(m.pos, true);
+         world.emit({ kind: 'mineCleared', pos: { ...m.pos }, by });
+      }
+   }
+}
+
+// ---------- DEPTH CHARGES ----------
+// Only submarines care: full damage at the centre, linear falloff to DCHARGE.radius.
+export function resolveDepthCharges(world, dt) {
+   for (const c of world.depthCharges) {
+      c.t -= dt;
+      if (c.t > 0) continue;
+      world.addSplash(c.pos, true);
+      world.effects.push({ kind: 'dcharge', pos: { ...c.pos }, age: 0, life: 1.2 });
+      for (const s of world.ships) {
+         if (!s.alive || s.side === c.side || !s.cfg.sub) continue;
+         const d = dist(s.pos, c.pos);
+         if (d > DCHARGE.radius) continue;
+         const dmg = DCHARGE.dmg * (1 - 0.6 * d / DCHARGE.radius) * ((c.owner && c.owner.dmgMult) || 1);
+         s.applyImpact({ dmg, source: 'torpedo', flooding: Math.random() < 0.3, firing: false, mod: 3, dmgMult: 1, by: c.owner });
+         world.addDamageNumber(s.pos, dmg, 'torp');
+         // a close shake-up forces the boat up
+         if (s.alive && s.depthTarget != null && d < DCHARGE.radius * 0.5) s.depthTarget = Math.min(s.depthTarget, 0.8);
+         world.emit({ kind: 'hit', shooter: c.owner, target: s, outcome: 'DC', dmg, pos: { ...c.pos }, shell: 'dc' });
+      }
+   }
+   world.depthCharges = world.depthCharges.filter(c => c.t > 0);
+}
+
+// ---------- BOMBS ----------
+export function resolveBombs(world, dt) {
+   for (const b of world.bombs) {
+      b.t -= dt;
+      if (b.t > 0) continue;
+      let hitShip = null;
+      for (const s of world.ships) {
+         if (!s.alive || s.side === b.side || s.depth >= 0.5) continue;
+         const imp = localImpact(s, b.pos, 10);
+         if (!imp) continue;
+         hitShip = s;
+         const res = s.applyImpact({ dmg: b.dmg, source: 'main', firing: Math.random() < b.fire, flooding: false,
+            mod: Math.floor(Math.random() * 6), dmgMult: 1, by: b.shooter });
+         world.addExplosion(b.pos, true);
+         world.addDamageNumber(b.pos, b.dmg, res.fire ? 'fire' : 'dmg');
+         if (res.fire) world.effects.push({ kind: 'fire', pos: { x: s.pos.x + imp.along * 0.3, y: s.pos.y + imp.across * 0.3 }, age: 0, life: 4, big: false });
+         if (s.human) world.shakeAdd(5);
+         world.emit({ kind: 'hit', shooter: b.shooter, target: s, outcome: 'BOMB', dmg: b.dmg, pos: { ...b.pos }, shell: 'bomb', fire: res.fire });
+         break;
+      }
+      if (!hitShip) world.addSplash(b.pos, true);
+   }
+   world.bombs = world.bombs.filter(b => b.t > 0);
+}
+
+// ---------- BARRAGES (boss special salvo) ----------
+export function resolveBarrages(world, dt) {
+   for (const z of world.barrages) {
+      z.t -= dt;
+      if (z.t > 0) continue;
+      world.addExplosion(z.pos, true);
+      world.addSplash(z.pos, true);
+      for (const s of world.ships) {
+         if (!s.alive || s.side === z.side || s.depth >= 0.5) continue;
+         const d = dist(s.pos, z.pos) - s.cfg.beam * 0.5;
+         if (d > z.r) continue;
+         const dmg = z.dmg * (1 - 0.55 * clamp01(d / z.r));
+         const res = s.applyImpact({ dmg, source: 'citadel', firing: Math.random() < 0.4, flooding: false,
+            mod: Math.floor(Math.random() * 6), dmgMult: 1, by: z.shooter });
+         world.addDamageNumber(s.pos, dmg, 'cit');
+         if (s.human) world.shakeAdd(10);
+         world.emit({ kind: 'hit', shooter: z.shooter, target: s, outcome: 'BARRAGE', dmg, pos: { ...z.pos }, shell: 'main', fire: res.fire });
+      }
+   }
+   world.barrages = world.barrages.filter(z => z.t > 0);
 }

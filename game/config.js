@@ -50,6 +50,7 @@ export const SHIPS = {
       // a launch every ~25 s with a 3-fish fan: a real threat, but one a moving target can dodge
       torp: { tubes: 3, dmg: 900, speed: 200, range: 1150, salvo: 3, cd: 25, spread: 4 * DEG },
       cons: { smoke: { charges: 2, dur: 8, cd: 30 }, dc: { charges: 2, dur: 5, cd: 40 } },
+      aa: { guns: 4, dps: 70, vsShip: 0, range: 700, reload: 0.2 },
       ai: { role: 'torpedo', commitTime: 130, smokeChance: 0.5, smokeHP: 0.75, huntHidden: true, torpSmoke: true },
    },
    LC: {
@@ -60,6 +61,7 @@ export const SHIPS = {
       turrets: [ { x: 50, guns: 2 }, { x: 32, guns: 2 }, { x: -48, guns: 2 } ],
       torp: null,
       cons: { smoke: { charges: 1, dur: 8, cd: 40 }, dc: { charges: 2, dur: 5, cd: 40 } },
+      aa: { guns: 8, dps: 110, vsShip: 0, range: 800, reload: 0.2 },
       ai: { role: 'cruiser', commitTime: 150, smokeChance: 0.25, smokeHP: 0.6, smokeFire: true, reposition: true },
    },
    HC: {
@@ -70,6 +72,7 @@ export const SHIPS = {
       turrets: [ { x: 64, guns: 2 }, { x: 44, guns: 2 }, { x: -38, guns: 2 }, { x: -56, guns: 2 }, { x: -76, guns: 2 } ],
       torp: null,
       cons: { dc: { charges: 2, dur: 5, cd: 40 } },
+      aa: { guns: 10, dps: 120, vsShip: 0, range: 850, reload: 0.2 },
       ai: { role: 'cruiser', commitTime: 170, reposition: true },
    },
    EB: {
@@ -81,6 +84,83 @@ export const SHIPS = {
       cons: { dc: { charges: 3, dur: 6, cd: 40 } },
       reactionMult: 1.2, // heavier = slower to commit
       ai: { role: 'battleship', commitTime: 200, holdThrottle: 0.55 },
+   },
+   // ---- campaign classes (missions.js) ----
+   // Torpedo boat: tiny, very fast, paper-thin. Comes in swarms; the danger is the combined fans.
+   TB: {
+      key: 'TB', name: 'Torpedoboot', color: '#72848e', L: 50, beam: 7, draw: 'tb',
+      hp: 380, maxSpeed: 178, turnRate: 0.55, turretSlew: 2.2, detect: 950, prefRange: 650, flankDeg: 70, armor: 12,
+      main: { guns: 1, caliber: 40, dmg: 16, reload: 0.9, range: 650, type: 'HE', ap: 0, vShell: 560, fire: 0.02 },
+      turrets: [ { x: 12, guns: 1 } ],
+      torp: { tubes: 2, dmg: 650, speed: 190, range: 1000, salvo: 2, cd: 20, spread: 5 * DEG },
+      ai: { role: 'torpedo', swarm: true, commitTime: 90, huntHidden: true },
+   },
+   // Submarine: deep = invisible and immune; periscope depth = revealed only up close and only
+   // secondaries/depth charges reach it; surfaced = an ordinary (fragile) target. `air` forces it up.
+   SUB: {
+      key: 'SUB', name: 'U-Boot', color: '#46565a', L: 72, beam: 7, draw: 'sub',
+      hp: 950, maxSpeed: 78, turnRate: 0.32, turretSlew: 1.4, detect: 1000, prefRange: 1100, flankDeg: 60, armor: 20,
+      main: { guns: 1, caliber: 88, dmg: 40, reload: 2.5, range: 700, type: 'HE', ap: 0, vShell: 600, fire: 0.04 },
+      turrets: [ { x: 14, guns: 1 } ],
+      torp: { tubes: 4, dmg: 1050, speed: 150, range: 1500, salvo: 4, cd: 26, spread: 3.2 * DEG },
+      sub: { diveTime: 2.6, deepSpeed: 0.55, air: 55, recharge: 7, reveal: 560 },
+      ai: { role: 'sub', commitTime: 1e9 }, noRepair: true,
+   },
+   // Transport: slow, unarmoured, one pop-gun. Mission cargo (convoy hunt / escort).
+   TR: {
+      key: 'TR', name: 'Transporter', color: '#6b6250', L: 150, beam: 21, draw: 'tr',
+      hp: 1900, maxSpeed: 58, turnRate: 0.16, turretSlew: 0.8, detect: 2100, prefRange: 0, flankDeg: 0, armor: 25,
+      main: { guns: 1, caliber: 76, dmg: 22, reload: 2.2, range: 750, type: 'HE', ap: 0, vShell: 580, fire: 0.03 },
+      turrets: [ { x: -58, guns: 1 } ],
+      torp: null,
+      ai: { role: 'transport', commitTime: 1e9 }, noRepair: true,
+   },
+   // Carrier: weak guns, keeps its distance and sends torpedo / dive-bomber squadrons (air.js).
+   CV: {
+      key: 'CV', name: 'Flugzeugträger', color: '#596068', L: 236, beam: 32, draw: 'cv',
+      hp: 5200, maxSpeed: 72, turnRate: 0.17, turretSlew: 0.9, detect: 2300, prefRange: 2800, flankDeg: 0, armor: 150,
+      main: { guns: 4, caliber: 127, dmg: 55, reload: 3.0, range: 1000, type: 'HE', ap: 0, vShell: 620, fire: 0.06 },
+      turrets: [ { x: 92, guns: 2 }, { x: -92, guns: 2 } ],
+      torp: null,
+      aa: { guns: 12, dps: 0, vsShip: 0, range: 600, reload: 0.3 },
+      air: { hangar: 28, squad: 4, launchEvery: 30, first: 9 },
+      cons: { dc: { charges: 3, dur: 6, cd: 40 } },
+      ai: { role: 'carrier', commitTime: 1e9, noRetreat: true },
+   },
+   // Coastal battery: static fort on an island. Long range, slow heavy guns, full traverse.
+   CB: {
+      key: 'CB', name: 'Küstenbatterie', color: '#6d6a60', L: 66, beam: 44, draw: 'cb', static: true,
+      hp: 3600, maxSpeed: 0, turnRate: 0, turretSlew: 0.4, detect: 2700, sight: 3000, prefRange: 0, flankDeg: 0, armor: 160,
+      turretArc: Math.PI,
+      main: { guns: 4, caliber: 305, dmg: 250, reload: 9.5, range: 2300, type: 'AP', ap: 300, vShell: 620 },
+      turrets: [ { x: 16, guns: 2 }, { x: -16, guns: 2 } ],
+      torp: null,
+      ai: { role: 'static', commitTime: 1e9, noRetreat: true }, noRepair: true,
+   },
+   // Minelayer: lays a trail of contact mines and runs -- chasing it means sailing into them.
+   ML: {
+      key: 'ML', name: 'Minenleger', color: '#667a6c', L: 96, beam: 12, draw: 'ml',
+      hp: 1150, maxSpeed: 112, turnRate: 0.34, turretSlew: 1.2, detect: 1300, prefRange: 0, flankDeg: 0, armor: 30,
+      main: { guns: 1, caliber: 88, dmg: 38, reload: 2.2, range: 800, type: 'HE', ap: 0, vShell: 600, fire: 0.04 },
+      turrets: [ { x: 32, guns: 1 } ],
+      torp: null,
+      mines: { every: 3.2, max: 16 },
+      cons: { smoke: { charges: 1, dur: 8, cd: 40 } },
+      ai: { role: 'minelayer', commitTime: 1e9, noRetreat: true },
+   },
+   // Boss: the super-battleship. Three triple turrets, secondaries, and a telegraphed barrage
+   // (red target rings, then heavy shells land there -- get out of them).
+   BOSS: {
+      key: 'BOSS', name: 'Leviathan', color: '#5d3b36', L: 330, beam: 48, draw: 'boss',
+      hp: 16000, maxSpeed: 64, turnRate: 0.13, turretSlew: 0.45, detect: 2900, prefRange: 1500, flankDeg: 40, armor: 255,
+      main: { guns: 9, caliber: 460, dmg: 360, reload: 7.5, range: 2100, type: 'AP', ap: 360, vShell: 660 },
+      turrets: [ { x: 108, guns: 3 }, { x: 76, guns: 3 }, { x: -100, guns: 3 } ],
+      sec: { guns: 12, caliber: 150, dmg: 45, reload: 1.8, range: 1100, type: 'HE', ap: 0, vShell: 600, fire: 0.04, burst: 4 },
+      torp: null,
+      barrage: { every: 26, everyP2: 17, count: 5, countP2: 7, radius: 170, delay: 3.6, dmg: 1500, spread: 360 },
+      cons: { dc: { charges: 5, dur: 6, cd: 35 } },
+      reactionMult: 1.1,
+      ai: { role: 'battleship', commitTime: 1e9, holdThrottle: 0.5, noRetreat: true, boss: true }, noRepair: true,
    },
    Bismarck: {
       key: 'Bismarck', name: 'Bismarck', color: '#3a4a55', L: 251, beam: 36,
@@ -96,7 +176,9 @@ export const SHIPS = {
          } },
       turrets: [ { x: 78, guns: 2 }, { x: 56, guns: 2 }, { x: -52, guns: 2 }, { x: -74, guns: 2 } ],
       sec:  { guns: 16, caliber: 105, dmg: 40, reload: 1.3, range: 1100, type: 'HE', ap: 0, vShell: 600, fire: 0.03, burst: 4 },
-      aa:   { guns: 20, dps: 200, vsShip: 10, range: 700, reload: 0.15 },
+      aa:   { guns: 20, dps: 190, vsShip: 10, range: 950, reload: 0.15 },
+      // hydrophone: submerged submarines inside this range show up as ping contacts (render.js)
+      sonar: { range: 1150, every: 4 },
       // Port + starboard launchers with independent reloads. A launcher only fires into its own
       // beam arc, so a torpedo attack means presenting a side to the target.
       torp: { tubes: 3, dmg: 1900, speed: 192, range: 1350, salvo: 3, cd: 30,
@@ -110,6 +192,8 @@ export const SHIPS = {
          dc:     { charges: Infinity, dur: 8, cd: 35 },         // extinguish/pump out + immunity
          smoke:  { charges: 3, dur: 8, cd: 40 },
          boost:  { charges: Infinity, dur: 4, cd: 16, mult: 1.3 },
+         dcharge: { charges: 8, dur: 1, cd: 9 },   // depth charges off the stern (anti-sub)
+         flare:  { charges: 6, dur: 1, cd: 12 },   // star shell at the cursor (lights up the night)
       },
       isPlayer: true,
    },
@@ -132,6 +216,28 @@ export const VISION = {
    blindReloadMult: 2.2,  // blind fire cadence: reload x this
    blindMaxExtrap: 2.0,   // s of dead reckoning from the last seen course
    searchAfter: 10,       // s after losing contact before hunters move in on the smoke
+};
+
+// ============ CAMPAIGN SYSTEMS ============
+// Aircraft (air.js): carrier squadrons fly attack runs; ship AA (ship._autoAA) shoots planes down.
+export const AIR = {
+   speed: 175, turn: 1.1, hp: 200,
+   torp: { dmg: 950, speed: 150, range: 1000 }, torpDrop: 760,   // torpedo bombers release here
+   bomb: { dmg: 700, fire: 0.35, sigma: 55, fall: 1.1 }, diveStart: 950, diveDrop: 160,
+   egress: 5,                    // s flying away after the attack before turning home
+};
+// Contact mines: armed after `arm` s, seen only inside `reveal` of an enemy ship.
+export const MINES = { trigger: 24, dmg: 1500, reveal: 480, arm: 2.5, flood: 0.6 };
+// Depth charges roll off the stern and go off after `fuse` s; only submarines take damage.
+export const DCHARGE = { count: 4, fuse: 1.8, radius: 170, dmg: 760 };
+// Star shells: a flare that lights a circle for `life` s -- everything inside is spotted.
+export const FLARE = { r: 760, life: 14, flight: 1.5, range: 2400 };
+// Mission conditions (missions.js env). visionMult scales every detect radius; dispersion scales
+// every gun's spread (heavy seas).
+export const ENV = {
+   clear: { visionMult: 1, dispersion: 1 },
+   night: { visionMult: 0.5, dispersion: 1.1, night: true },
+   storm: { visionMult: 0.8, dispersion: 1.5, storm: true },
 };
 
 // ============ WEAPON HANDLING ============
