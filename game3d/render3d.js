@@ -4,6 +4,8 @@
 // World convention: X+ = east, Y+ = south (2D sim). Here: worldX -> 3D X, worldY -> 3D Z,
 // height -> 3D Y. So a sim point {x,y} maps to Three.Vector3(x, 0, y).
 import * as THREE from '../vendor/three/three.module.min.js';
+import { ChaseCamera } from './camera3d.js';
+import { HudCanvases3D } from './minimap3d.js';
 
 const DIMS = {
    DD: { L: 120, beam: 13, deckH: 10 }, LC: { L: 170, beam: 18, deckH: 13 },
@@ -13,26 +15,6 @@ const DIMS = {
 const dimsOf = (cls) => DIMS[cls] || { L: 180, beam: 20, deckH: 14 };
 const HULL_COLORS = { player: 0x3a4a55, enemy: 0x5a4a44 };
 
-// ---- sniper scope (WoWs-style rangefinder view) ----
-// Scrolling the wheel all the way in (main3d.js clamps zoom/orbit-distance to [ZOOM_MIN,
-// ZOOM_MAX]) blends smoothly into a fixed bridge-anchored view with a narrow FOV, instead of
-// just dollying the chase cam closer to the hull (which at low `dist` looked straight into
-// your own ship's geometry -- not remotely a rangefinder view). Below SCOPE_ENTER_DIST the
-// EFFECTIVE orbit distance and FOV both blend toward the scoped values as zoom keeps
-// decreasing to ZOOM_MIN, so there's no mode switch/state machine, just a continuous blend.
-const SCOPE_ENTER_DIST = 260, SCOPE_FULL_DIST = 140; // matches main3d.js's ZOOM_MIN
-// SCOPE_CAM_DIST used to be 22 -- well INSIDE the Bismarck's own superstructure footprint
-// (the bridge/funnel/deckhouse blocks span roughly [-32, +12] metres along the hull's long
-// axis, centred on the ship). Looking fore or aft while scoped put the camera physically
-// inside that geometry, filling the whole screen with the ship's own hull colour -- exactly
-// the "sieht man nur seine eigenen Schornsteine" complaint. 85m clears the funnel/bridge/
-// superstructure horizontally from any yaw, so the scope now always looks OUT past the ship
-// instead of through it. SCOPE_LOOK_Y raised from 34 to 46 (just above the highest
-// superstructure point, the bridge top) for the same reason -- the old height sat inside the
-// bridge block vertically too.
-const SCOPE_CAM_DIST = 85;   // effective orbit distance once fully scoped -- clears the ship's own superstructure
-const SCOPE_LOOK_Y = 46;     // look-target height when scoped -- above the bridge roofline
-const BASE_FOV = 58, SCOPE_FOV = 9;
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 
@@ -58,11 +40,9 @@ export class Renderer3D {
       // already hides anything past ~6-7km, so the camera was depth-testing/rendering a
       // sky sphere and sea plane sized for a view distance nothing in the game reaches.
       this.camera = new THREE.PerspectiveCamera(58, 1, 4, 7000);
-      this.camYaw = 0;      // world-space camera bearing (free-look, set by main3d) -- NOT tied to ship heading
-      this.camPitch = 0.42; // radians above horizon
-      this.camDist = 420;   // camera distance from the ship (wheel zoom, set by main3d)
 
       this._buildLights();
+      this.cam = new ChaseCamera(this.camera, this.sun); // orbit/scope rig -- see camera3d.js
       this._buildSea();
 
       this.shipMeshes = new Map();   // ship.id -> {group, turrets:[{mesh, turretRef}], hull}
@@ -71,13 +51,8 @@ export class Renderer3D {
       this.splashPool = [];
       this._explosions = [];
 
-      this.minimapCtx = null;
-      this.compassCtx = null;
-      // Reused every frame by screenToWorld() (aim raycast) -- no per-call allocation.
-      this._ray = new THREE.Raycaster();
+      this.hudCanvases = new HudCanvases3D();
 
-      this._shakeT = 0;
-      this._shakeMag = 0;
 
       // Muzzle flashes / explosions / splashes were entirely unrendered in 3D (world.effects
       // was read by the 2D canvas renderer only) -- a broadside fired in total silence with
@@ -90,8 +65,7 @@ export class Renderer3D {
    }
 
    setHudCanvases(minimap, compass) {
-      this.minimapCtx = minimap ? minimap.getContext('2d') : null;
-      this.compassCtx = compass ? compass.getContext('2d') : null;
+      this.hudCanvases.setCanvases(minimap, compass);
    }
 
    resize(w, h) {
@@ -308,10 +282,9 @@ export class Renderer3D {
       this._syncShells(world);
       this._syncTorpedoes(world);
       this._syncEffects(world, dt);
-      this._syncCamera(world, dt, camState);
+      this.cam.update(world, dt, camState);
       this.renderer.render(this.scene, this.camera);
-      this._minimap(world);
-      this._compass(world);
+      this.hudCanvases.draw(world);
    }
 
    _syncShips(world) {
@@ -434,163 +407,8 @@ export class Renderer3D {
       }
    }
 
-   // Set by main3d.js each frame with the resolved chase-camera pose (base over-the-shoulder
-   // pose + free-look offsets + wheel zoom). Stored here so _syncCamera can consume it and so
-   // screenToWorld() raycasts against the exact camera the player is looking through.
-   setCameraPose(yaw, pitch, dist) {
-      this.camYaw = yaw;
-      this.camPitch = pitch;
-      this.camDist = dist;
-   }
-
-   // Third-person orbit camera: follows the player ship's POSITION at a fixed offset
-   // (camYaw/camPitch/camDist set via setCameraPose), always looking at the ship. The
-   // orientation is a WORLD-SPACE pose owned entirely by the player (right-mouse drag in
-   // main3d.js) -- it deliberately does NOT track the ship's heading, so steering with
-   // A/D moves the ship under a stable view instead of spinning the whole screen.
-   _syncCamera(world, dt, camState) {
-      const p = world.player;
-      // world._shake is set by combat.js on hits/explosions (same convention the 2D
-      // renderer's camera consumes) -- pick it up directly instead of a separate API.
-      this._shakeMag = Math.max(this._shakeMag * Math.exp(-dt / 0.15), world._shake || 0);
-      if (!p || !p.alive) {
-         this.camera.position.set(0, 900, 1400);
-         this.camera.lookAt(0, 0, 0);
-         return;
-      }
-      const dist = this.camDist || 420;
-      // Sniper scope: a continuous blend, not a mode switch. Scrolling in past
-      // SCOPE_ENTER_DIST (260m) ramps scopeT from 0->1 as dist keeps shrinking to
-      // SCOPE_FULL_DIST (140m, = main3d.js's ZOOM_MIN) -- both the effective orbit distance
-      // and the FOV blend toward their scoped values over that same range, so it reads as
-      // "leaning into the rangefinder" rather than a jarring cut.
-      this.scopeT = clamp01((SCOPE_ENTER_DIST - dist) / (SCOPE_ENTER_DIST - SCOPE_FULL_DIST));
-      const effDist = lerp(dist, SCOPE_CAM_DIST, this.scopeT);
-      const fov = lerp(BASE_FOV, SCOPE_FOV, this.scopeT);
-      if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
-      // PURE ORBIT for POSITION: the camera sits on a sphere of radius `effDist` around a
-      // look-target a few metres above the deck, so pitch alone sets how high the camera
-      // rises as you look down (steeper pitch = higher camera, like leaning back to look
-      // down at your own ship). World-space bearing -- deliberately NOT derived from
-      // p.heading, so rudder input never rotates the view. The ship turns under a stable
-      // camera instead.
-      const yaw = this.camYaw;
-      const pitch = this.camPitch;
-      const tx = p.pos.x, tz = p.pos.y;
-      const ty = lerp(20, SCOPE_LOOK_Y, this.scopeT); // orbit-centre height rises toward bridge level when scoped
-      const cx = tx - Math.cos(yaw) * Math.cos(pitch) * effDist;
-      const cz = tz - Math.sin(yaw) * Math.cos(pitch) * effDist;
-      const cy = ty + Math.sin(pitch) * effDist;
-      // Recoil shake reads as camera SWAY in the chase view, but a scope is bolted to the
-      // ship's optics -- full sway there would be nauseating at a 9deg FOV. Dampen it instead
-      // of zeroing it: the player should still feel the guns firing, just less violently.
-      const shakeMag = this._shakeMag * lerp(1, 0.3, this.scopeT);
-      const shakeX = (Math.random() - 0.5) * shakeMag, shakeY = (Math.random() - 0.5) * shakeMag;
-      // Clamp just above the waterline (sea is at y=0) so a below-horizon pitch can't dip
-      // the camera under the waves.
-      const camX = cx + shakeX, camY = Math.max(8, cy), camZ = cz + shakeY;
-      this.camera.position.set(camX, camY, camZ);
-      // ORIENTATION: aim at a point whose DISTANCE is an explicitly designed function of
-      // pitch, not derived from the orbit-position geometry above. The previous code did
-      // `camera.lookAt(tx, ty, tz)` -- always the fixed point 20m above the ship -- which
-      // made the screen-centre aim raycast land at EXACTLY ty/tan(pitch) from the ship no
-      // matter how far the camera was zoomed (the zoom term cancels out of that ratio
-      // entirely -- verified numerically: aim distance was ~36m at every zoom level tested
-      // from 140 to 1500 at the default pitch). That squeezed the whole 200-1800m useful
-      // firing range into roughly 6 degrees of pitch out of ~130 degrees of slider travel,
-      // which is why long shots felt "impossible" even once the camera itself could go flat.
-      // A first attempt pointed the camera along the raw orbit yaw/pitch direction instead of
-      // at the fixed point -- but that direction is BY CONSTRUCTION the reverse of the vector
-      // from camera to the same fixed orbit target, so it produced the identical curve.
-      // Instead, design the mapping directly: pitch linearly controls aim distance across the
-      // pitch slider's full travel (PITCH_MIN/MAX mirror main3d.js's pitchOff clamp of
-      // [-0.55, 0.75] plus CAM_BASE_PITCH 0.5), flattest pitch -> AIM_DIST_MAX, steepest pitch
-      // -> AIM_DIST_MIN, and aim the camera at that exact point on the sea. This deliberately
-      // avoids trig blow-up (no tan() anywhere) so every part of the slider is usable, and it
-      // guarantees the visual crosshair always lands exactly where the sim's aim point is,
-      // since both are the same computed point.
-      const AIM_DIST_MIN = 150, AIM_DIST_MAX = 2000;
-      const PITCH_MIN = -0.05, PITCH_MAX = 1.25; // CAM_BASE_PITCH(0.5) + pitchOff range [-0.55,0.75]
-      const aimT = clamp01((PITCH_MAX - pitch) / (PITCH_MAX - PITCH_MIN));
-      const aimDist = lerp(AIM_DIST_MIN, AIM_DIST_MAX, aimT);
-      const aimX = tx + Math.cos(yaw) * aimDist, aimZ = tz + Math.sin(yaw) * aimDist;
-      this.camera.lookAt(aimX, 0, aimZ);
-      this.sun.target.position.set(p.pos.x, 0, p.pos.y);
-      this.sun.target.updateMatrixWorld();
-   }
-
-   // raycast helper for input3d.js: screen (nx,ny in [-1,1]) -> world point on sea plane
-   screenToWorld(nx, ny) {
-      // Reuse the instance Raycaster (set up in the constructor) -- no per-call allocation.
-      this._ray.setFromCamera({ x: nx, y: ny }, this.camera);
-      const planeY = 0;
-      const dirY = this._ray.ray.direction.y;
-      if (Math.abs(dirY) < 1e-6) return null;
-      const t = (planeY - this._ray.ray.origin.y) / dirY;
-      if (t < 0) return null;
-      const p = this._ray.ray.origin.clone().addScaledVector(this._ray.ray.direction, t);
-      return { x: p.x, y: p.z };
-   }
-
-   // ================= MINIMAP (2D canvas overlay, same convention as render.js) =================
-   _minimap(world) {
-      const g = this.minimapCtx;
-      if (!g) return;
-      const W = 180, H = 180;
-      const ARENA = 3800;
-      const sc = W / (ARENA * 2);
-      const mx = (x) => W / 2 + x * sc;
-      const my = (y) => H / 2 + y * sc;
-      g.clearRect(0, 0, W, H);
-      g.fillStyle = 'rgba(8,24,40,0.9)';
-      g.fillRect(0, 0, W, H);
-      g.strokeStyle = 'rgba(120,170,220,0.4)';
-      g.strokeRect(mx(-ARENA), my(-ARENA), ARENA * 2 * sc, ARENA * 2 * sc);
-      for (const o of world.obstacles) {
-         g.fillStyle = o.kind === 'reef' ? 'rgba(90,190,170,0.5)' : 'rgba(90,140,90,0.6)';
-         g.beginPath(); g.arc(mx(o.c.x), my(o.c.y), Math.max(2, o.r * sc), 0, Math.PI * 2); g.fill();
-      }
-      for (const cl of world.smokeClouds) {
-         g.fillStyle = 'rgba(180,180,180,0.35)';
-         g.beginPath(); g.arc(mx(cl.c.x), my(cl.c.y), Math.max(2, cl.r * sc), 0, Math.PI * 2); g.fill();
-      }
-      for (const t of world.torpedoes) {
-         g.fillStyle = t.owner === 'player' ? '#8fdcff' : '#ff9a8a';
-         g.fillRect(mx(t.pos.x) - 1, my(t.pos.y) - 1, 2, 2);
-      }
-      for (const s of world.ships) {
-         if (!s.alive) continue;
-         const x = mx(s.pos.x), y = my(s.pos.y);
-         g.save(); g.translate(x, y); g.rotate(s.heading);
-         g.fillStyle = s.side === 'player' ? '#7CFF9A' : '#ff5a4d';
-         g.beginPath(); g.moveTo(5, 0); g.lineTo(-3.5, -3); g.lineTo(-3.5, 3); g.closePath(); g.fill();
-         g.restore();
-      }
-   }
-
-   _compass(world) {
-      const g = this.compassCtx;
-      if (!g) return;
-      const p = world.player;
-      const W = 220, H = 42;
-      g.clearRect(0, 0, W, H);
-      g.fillStyle = 'rgba(8,24,40,0.85)';
-      g.fillRect(0, 0, W, H);
-      if (!p) return;
-      const heading = p.heading;
-      const pxPerDeg = W / 90;
-      g.strokeStyle = 'rgba(160,200,240,0.5)';
-      g.fillStyle = '#cfe8ff';
-      g.font = '10px monospace';
-      g.textAlign = 'center';
-      const labels = [['N', 0], ['E', 90], ['S', 180], ['W', 270]];
-      const headingDeg = heading * 180 / Math.PI;
-      for (const [label, deg] of labels) {
-         let delta = ((deg - headingDeg + 540) % 360) - 180;
-         const x = W / 2 + delta * pxPerDeg;
-         if (x > -20 && x < W + 20) { g.fillText(label, x, H / 2 + 4); }
-      }
-      g.strokeStyle = '#ffd479';
-      g.beginPath(); g.moveTo(W / 2, 2); g.lineTo(W / 2 - 5, 14); g.lineTo(W / 2 + 5, 14); g.closePath(); g.fillStyle = '#ffd479'; g.fill();
-   }
+   // ================= CAMERA (delegated to camera3d.js) =================
+   setCameraPose(yaw, pitch, dist) { this.cam.setCameraPose(yaw, pitch, dist); }
+   screenToWorld(nx, ny) { return this.cam.screenToWorld(nx, ny); }
+   get scopeT() { return this.cam.scopeT; }
 }

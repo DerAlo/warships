@@ -2,8 +2,8 @@
 
 A World-of-Warships-style naval combat game. You command the battleship
 *Bismarck* against 5 AI-controlled bots, offline only. Vanilla JS, no build
-step. Two ways to play, sharing the same simulation core (game/state.js,
-game/ship.js, game/ai.js, game/combat.js):
+step. Two ways to play, each with its own simulation core (2D: `game/`, 3D: `game3d/`,
+see `game3d/ARCHITECTURE.md`):
 
 - **2D** (`index.html`) — top-down Canvas 2D view.
 - **3D** (`index-3d.html`) — real 3D ships (Three.js, vendored locally under
