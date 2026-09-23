@@ -595,7 +595,7 @@ const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
 // Menu data only (no functions).
 export const MISSIONS = DEFS.map(d => ({
    id: d.id, name: d.name, subtitle: d.subtitle, briefing: d.briefing, env: { ...d.env }, type: d.type,
-   playableShips: d.playableShips ? [...d.playableShips] : null, recommendedShip: d.recommendedShip,
+   playableShips: d.playableShips ? [...d.playableShips] : [...PLAYABLE], recommendedShip: d.recommendedShip,
    timeLimit: d.timeLimit, arena: d.arena,
 }));
 export const MISSION_IDS = DEFS.map(d => d.id);
