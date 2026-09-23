@@ -285,6 +285,11 @@ await shot('02-normal');
    await wait(100);
    check('releasing Tab hides the scoreboard', (await ctl()).board === false);
    if (lockId != null) await press('x');
+   await press('h');
+   await wait(200);
+   check('H shows the controls help', await page.locator('#help-panel').isVisible());
+   await shot('09-help');
+   await press('h');
 }
 
 check('zero console errors', errors.length === 0, errors.slice(0, 5));
