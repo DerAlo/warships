@@ -373,3 +373,35 @@ export const DIFFICULTY = {
 };
 
 export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 60 };
+
+// Per-class display stats for the ship picker (menu3d.js). Ratings are 0..100 relative to the
+// playable line-up so the menu can draw bars without knowing the raw numbers.
+export function shipStats(key) {
+   const c = SHIPS[key];
+   if (!c) return null;
+   const m = c.main, t = c.torp;
+   const layout = {};
+   for (const tr of m.turrets) layout[tr.guns] = (layout[tr.guns] || 0) + 1;
+   const salvo = m.guns * (m.ap || m.he).dmg;
+   const rate = (x, lo, hi) => Math.round(Math.max(0, Math.min(1, (x - lo) / (hi - lo))) * 100);
+   return {
+      key, name: c.name, className: c.className, type: c.hull.type, typeName: CLASS_NAMES[c.hull.type],
+      nation: c.hull.nation, nationName: NATION_NAMES[c.hull.nation] || '',
+      hp: c.hp, speedKn: c.speedKn, lengthM: c.hull.L, beamM: c.hull.beam,
+      main: Object.entries(layout).map(([g, n]) => n + '×' + g).join(' + ') + ' · ' + m.caliber + ' mm',
+      mainGuns: m.guns, caliber: m.caliber, reload: m.reload, rangeKm: +(m.range / 1000).toFixed(1),
+      traverse180: Math.round(180 / m.traverse), apDmg: m.ap ? m.ap.dmg : 0, heDmg: m.he ? m.he.dmg : 0,
+      secRangeKm: c.sec ? +(c.sec.range / 1000).toFixed(1) : 0,
+      torp: t ? { tubes: t.tubes, launchers: t.launchers.length, rangeKm: +(t.range / 1000).toFixed(1), speedKn: t.speedKn, dmg: t.dmg, reload: t.reload } : null,
+      detectKm: +(c.detect.surface / 1000).toFixed(1), belt: c.armor.belt,
+      consumables: c.consumables.map(k => CONSUMABLES[k.key].name),
+      ratings: {
+         firepower: Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2),
+         survivability: rate(c.hp * (1 + c.armor.belt / 400), 15000, 110000),
+         mobility: rate(c.speedKn * 1000 / c.turnR, 25, 60),
+         concealment: rate(-c.detect.surface, -16500, -7000),
+         torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 100000) : 0,
+      },
+   };
+}
+export const SHIP_STATS = Object.fromEntries(Object.keys(SHIPS).map(k => [k, shipStats(k)]));

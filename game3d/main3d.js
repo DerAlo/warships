@@ -89,7 +89,9 @@ window.__weaponSel = () => weaponSel; // test hook
 
 function startGame() {
    weaponSel = 'main';
-   world = new World(difficulty);
+   // [sim3d] mission/ship come from the menu (integration) or ?mission=&ship= for testing
+   const qs = new URLSearchParams(location.search);
+   world = new World(difficulty, { mission: window.__mission || qs.get('mission') || 'standard', ship: window.__ship || qs.get('ship') || null });
    world.audio = audio;
    renderer.buildObstacles(world);
    // Camera is now a world-space orbit pose (not heading-locked). Seed its yaw from the
@@ -115,8 +117,8 @@ function showEnd() {
    const won = world.phase === 'won';
    $('end-emoji').textContent = won ? '🏆' : '💀';
    $('end-title').textContent = won ? 'SIEG' : 'NIEDERLAGE';
-   $('end-sub').textContent = won ? 'Alle feindlichen Schiffe versenkt.' : 'Die Bismarck ist gesunken.';
-   $('stat-kills').textContent = String(world.killCount);
+   $('end-sub').textContent = world.result ? world.result.reason : (won ? 'Sieg.' : 'Niederlage.');
+   $('stat-kills').textContent = String(world.stats.kills);
    $('stat-dmg').textContent = Math.round(p.dmgDealt).toLocaleString('de-DE');
    const m = Math.floor(world.time / 60), s = Math.floor(world.time % 60);
    $('stat-time').textContent = m + ':' + String(s).padStart(2, '0');
@@ -165,6 +167,7 @@ function controlPlayer(dt) {
       p.aim = norm(toAim);
       p.aimBearing = angleOf(toAim);
       world._aimPoint = worldPt;
+      p.aimPoint = { x: worldPt.x, y: worldPt.y };   // [sim3d] turrets track ship.aimPoint
    }
    // The reticle is fixed at screen centre by CSS now (index-3d.html) -- no per-frame
    // positioning needed, since the aim point is always dead centre.
@@ -191,14 +194,12 @@ function controlPlayer(dt) {
    }
 
    // helm & throttle
-   const helm = inp.helmAxis();
-   p.helm = clamp(helm, -1, 1);
-   const thr = inp.throttleAxis();
-   const anchorWasOut = p.anchorOut;
-   p.anchorOut = inp.down('SPACE');
-   if (thr !== 0 && !p.anchorOut) p.throttleIn = thr;
-   else if (!p.anchorOut && anchorWasOut) p.throttleIn = WORLD.MIN_THROTTLE;
-   if (inp.tapped('SPACE')) { world.log(p, '⚓ Anker fällt!', 'info'); audio.uiClick(); }
+   // [sim3d] WoWs-style: W/S step the engine telegraph (-1..4), A/D step the rudder (-2..2)
+   if (inp.tapped('W')) p.setTelegraph(p.telegraph + 1);
+   if (inp.tapped('S')) p.setTelegraph(p.telegraph - 1);
+   if (inp.tapped('A') || inp.tapped('Q')) p.setRudder(p.rudderCmd - 1);
+   if (inp.tapped('D') || inp.tapped('E')) p.setRudder(p.rudderCmd + 1);
+   if (inp.tapped('SPACE')) p.setTelegraph(0);
 
    // ---- weapon selection: number row. 1 = main battery, 2 = secondaries, 3 = AA.
    // LEFT mouse hold fires whatever is selected; RIGHT mouse is pure free-look and never
@@ -255,14 +256,9 @@ function controlPlayer(dt) {
       }
    }
 
-   if (inp.tapped('F') && p.smoke.cd <= 0 && !p.smoke.active) {
-      p.smoke.active = true; p.smoke.t = WORLD.SMOKE_DURATION; p.smoke.cd = WORLD.SMOKE_CD + WORLD.SMOKE_DURATION;
-      world.log(p, 'Rauchvorhang gelegt', 'info');
-   }
-   if (inp.tapped('SHIFT') && p.cfg.boost && !p.boost.active && p.boost.cd <= 0) {
-      p.boost.active = true; p.boost.t = p.cfg.boost.dur; p.boost.cd = p.cfg.boost.cd;
-      world.log(p, '⚡ Turbo!', 'info');
-   }
+   // [sim3d] consumables go through ship.useConsumable
+   if (inp.tapped('F') && p.useConsumable(world, 'smoke')) world.log(p, 'Rauchvorhang gelegt', 'info');
+   if (inp.tapped('SHIFT') && p.useConsumable(world, 'boost')) world.log(p, '⚡ Turbo!', 'info');
    if (inp.tapped('R')) {
       if (p.fires.length || p.floods.length) { p.repairAll(); world.log(p, '🔧 Schäden behoben', 'info'); audio.uiClick(); }
    }

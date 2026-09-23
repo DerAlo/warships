@@ -1,362 +1,430 @@
-// game/ai.js — enemy bot behavior: steering primitives + per-class finite-state machines.
-// The AI only *decides when/where* to move and fire; the physics/combat module owns projectiles.
-import { sub, add, fromAngle, angleOf, angleDelta, dist, clamp, clamp01, approach,
-   approachAngle, norm, TAU, DEG } from './utils.js';
-import { WORLD, COMBAT } from './config.js';
+// game3d/ai.js — bot captains for both teams. Every bot drives through the same controls API as
+// the player (setTelegraph / setRudder / setAmmo / fireMain / fireTorpedoes / useConsumable).
+//
+// Per-bot mission hints live in ship.ai (set by missions.js):
+//   passive      never fires (training targets, convoy freighters)
+//   route        [{x,y}] waypoints to follow (zigzag: weave around the course)
+//   patrol       [{x,y}] waypoints to loop
+//   escortId     ship id to stay close to; escortIdPlayer: escort the player
+//   huntId       preferred target id (navigates towards it even when unseen)
+//   capId        preferred capture point (domination)
+//   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
+//   aggro        >1 closes range more eagerly
+import { WORLD } from './config.js';
+import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, interceptPoint, gaussR } from './utils.js';
+import { flightTime } from './combat.js';
 
-// How long a bot may deny the fight before it is forced into a last stand.
-// Fast classes get a shorter leash (they can kite the longest); the value only
-// matters in a stalemate — normal matches end well before these clocks run out.
-const COMMIT_TIME = { DD: 130, LC: 150, HC: 170, EB: 200 };
+const DECIDE_DT = 0.4;             // s between navigation decisions
+const TARGET_DT = 2;               // s between target re-evaluations
+const CANDIDATES = [0, 15, -15, 30, -30, 50, -50, 75, -75, 100, -100, 130, -130, 165, -165].map(d => d * DEG);
 
-// ---------- steering primitives (pure, testable) ----------
-// Each returns {heading, throttle}.
-function seek(target, from) { return { heading: angleOf(sub(target, from)), throttle: 1 }; }
-function arrive(target, from, slowR) {
-   const d = dist(target, from);
-   const t = d > slowR ? 1 : WORLD.MIN_THROTTLE + (d / slowR) * (1 - WORLD.MIN_THROTTLE);
-   return { heading: angleOf(sub(target, from)), throttle: t };
+// Called once per world tick (World.update). Deduped so a second call in the same tick is a no-op.
+export function updateBots(world, dt) {
+   if (world._aiTick === world.tick) return;
+   world._aiTick = world.tick;
+   for (const b of world.ships) if (b.alive && !b.isPlayer) think(b, world, dt);
 }
-// sub(from, target) already points AWAY from the threat — no extra π.
-function flee(target, from) { return { heading: angleOf(sub(from, target)), throttle: 1 }; }
-function flank(target, from, angleDeg, side, prefRange) {
-   const bearing = angleOf(sub(target, from));
-   const rel = bearing + side * angleDeg * DEG;
-   const aim = add(target, fromAngle(rel, prefRange));
-   return seek(aim, from);
-}
-function kite(target, from, side, prefRange) {
-   const bearing = angleOf(sub(target, from));
-   const d = dist(target, from);
-   const perp = bearing + side * (Math.PI / 2);
-   const radial = clamp((d - prefRange) / prefRange, -1, 1);
-   return { heading: perp + side * 0.4 * radial, throttle: 1 };
+// Legacy per-bot entry point (old main3d loop). World.update already runs every bot.
+export function updateBot() {}
+
+function init(b, w) {
+   const ai = b.ai;
+   ai._init = true;
+   ai.role = ai.role || b.cfg.ai.role;
+   const pr = b.cfg.ai.prefRange;
+   const maxR = b.cfg.main.range * 0.92;
+   ai.pref = [Math.min(pr[0], maxR * 0.8), Math.min(pr[1], maxR)];
+   ai.decideT = w.rng() * DECIDE_DT;
+   ai.targetT = w.rng() * TARGET_DT;
+   ai.target = null;
+   ai.targetSince = 0;
+   ai.desired = b.heading;
+   ai.tel = b.telegraph;
+   ai.angSide = w.rng() < 0.5 ? 1 : -1;
+   ai.dodged = new Set();
+   ai.dodgeT = 0;
+   ai.stuckT = 0;
+   ai.reverseT = 0;
+   ai.aimErr = { r: 0, l: 0 };
+   ai.salvoCount = 0;
+   ai.ammoT = 0;
+   ai.torpT = 2 + w.rng() * 4;
+   ai.consT = w.rng();
+   ai.routeIdx = ai.routeIdx || 0;
+   ai.zigPhase = w.rng() * TAU;
+   if (ai.escortIdPlayer && w.player) ai.escortId = w.player.id;
 }
 
-// Obstacle avoidance (highest-priority blend). Returns a blended {heading, throttle} or null.
-// Includes the arena border itself: without this a bot driving nearly bow-on into the
-// edge gets its position clamped and speed halved every single frame (ship.js's arena
-// clamp), which is a stable near-standstill -- the bot never turns away on its own and
-// the match times out with everyone camped on the wall.
-function avoidObstacles(bot, world, steer) {
-   // Steering straight AWAY from an obstacle's center works for slow, tight-turning ships,
-   // but once turn radius (v/omega) grows large relative to the obstacle, pointing directly
-   // away means momentum keeps carrying the ship toward the obstacle while it slowly comes
-   // about -- it overshoots the repel zone, and once past the center the "away" direction
-   // flips, yanking the heading back the other way: a stable oscillation/orbit around the
-   // obstacle instead of a clean pass. The fix is TANGENTIAL steering: aim perpendicular to
-   // the obstacle (whichever side is the smaller turn from current heading), so the ship
-   // curves around it in one direction instead of fighting a flip-flopping radial target.
-   // Use maxSpeed, not current speed, for the turn-radius estimate: a ship that has just
-   // collided and stalled to ~0 would otherwise compute turnRadius~0 -> a tiny buffer ->
-   // "not near enough to avoid" -> steers straight at the obstacle again next frame -> hits
-   // it again -> stays at 0 forever. maxSpeed keeps the safety margin honest regardless of
-   // the ship's current (possibly collision-stalled) speed.
-   // Buffer scales with turn radius but is capped: with turn rates unchanged while speed
-   // tripled, turn radius alone reached 900-1400m for the big classes -- on a 3800m-radius
-   // arena with 7 obstacles that meant almost every point on the map had some obstacle
-   // "in range", so avoidance permanently overrode combat steering (bots wandering, losing
-   // their target, never actually engaging). The cap keeps avoidance a local correction near
-   // an obstacle, not a global steering override.
-   const turnRadius = bot.maxSpeed / Math.max(0.05, bot.cfg.turnRate || 0.2);
-   const speedBuf = clamp(turnRadius * 1.1, 300, 550);
-   let best = null;
-   for (const o of world.obstacles) {
-      const d = dist(bot.pos, o.c);
-      const buf = o.r + speedBuf;
-      if (d < buf) {
-         const toObs = angleOf(sub(o.c, bot.pos));
-         const perpCW = toObs + Math.PI / 2, perpCCW = toObs - Math.PI / 2;
-         const dir = Math.abs(angleDelta(bot.heading, perpCW)) < Math.abs(angleDelta(bot.heading, perpCCW))
-            ? perpCW : perpCCW;
-         const w = 1 - d / buf;
-         const cand = { heading: dir, throttle: 0.7, w };
-         if (!best || cand.w > best.w) best = cand;
-      }
+function think(b, w, dt) {
+   const ai = b.ai;
+   if (!ai._init) init(b, w);
+   const d = w.difficulty;
+   ai.targetT -= dt;
+   if (ai.targetT <= 0 || (ai.target && (!ai.target.alive || !w.canSee(b.side, ai.target)))) {
+      ai.targetT = TARGET_DT * (0.8 + w.rng() * 0.4);
+      const t = pickTarget(b, w);
+      if (t !== ai.target) { ai.target = t; ai.targetSince = w.time; ai.salvoCount = 0; newAimError(b, w); }
    }
-   const half = WORLD.ARENA, edgeBuf = clamp(turnRadius * 1.3, 400, 700);
-   const edgeD = half - Math.max(Math.abs(bot.pos.x), Math.abs(bot.pos.y));
-   if (edgeD < edgeBuf) {
-      // steer back toward the center, weighted by how close to the wall we are
-      const dir = angleOf(sub({ x: 0, y: 0 }, bot.pos));
-      const w = 1 - Math.max(0, edgeD) / edgeBuf;
-      const cand = { heading: dir, throttle: 0.7, w };
-      if (!best || cand.w > best.w) best = cand;
-   }
-   if (best) return best;
-   return steer;
+   ai.decideT -= dt;
+   if (ai.decideT <= 0) { ai.decideT = DECIDE_DT; decide(b, w, d); }
+   steer(b, dt);
+   if (!ai.passive) { gunnery(b, w, d, dt); torpedoes(b, w, dt); }
+   ai.consT -= dt;
+   if (ai.consT <= 0) { ai.consT = 0.5 + w.rng() * 0.5; consumables(b, w, d); }
 }
 
-// Nearest enemy shell threatening the bot.
-function nearestThreatShell(bot, world) {
-   let best = null, bestD = WORLD.THREAT_RANGE;
-   for (const s of world.shells) {
-      if (s.owner === bot.side) continue;
-      const d = dist(s.pos, bot.pos);
-      if (d < bestD) { bestD = d; best = s; }
+// ---------------------------------------------------------------- targeting
+function pickTarget(b, w) {
+   if (b.ai.passive) return null;
+   let best = null, bestS = 0;
+   const cur = b.ai.target;
+   for (const e of w.ships) {
+      if (!e.alive || e.side === b.side || !w.canSee(b.side, e)) continue;
+      const dd = Math.sqrt(dist2(b.pos, e.pos));
+      if (dd > b.cfg.main.range * 1.35) continue;
+      let s = (e.cfg.ai.value || 40) * (1.8 - e.hp / e.maxHP * 0.8) / (1 + dd / 7000);
+      if (dd <= b.cfg.main.range) s *= 1.6;
+      const aspect = Math.abs(Math.sin(angleDelta(e.heading, Math.atan2(b.pos.y - e.pos.y, b.pos.x - e.pos.x))));
+      s *= 0.8 + aspect * 0.4;                          // broadside targets are juicier
+      if (b.ai.huntId === e.id) s *= 3;
+      if (e.type === 'TR' && b.ai.huntId != null) s *= 1.5;
+      if (b.ai.role === 'dd' && e.type === 'DD') s *= 1.3;
+      if (e === cur) s *= 1.3;                          // hysteresis
+      if (s > bestS) { bestS = s; best = e; }
    }
    return best;
 }
+function newAimError(b, w) {
+   const e = w.difficulty.aimErr * (b.ai.salvoCount > 1 ? 0.75 : 1.2);   // first salvos are ranging shots
+   b.ai.aimErr = { r: gaussR(w.rng) * e, l: gaussR(w.rng) * e * 0.5 };
+}
 
-// ---------- main entry ----------
-export function updateBot(bot, world, dt) {
-   if (!bot.alive) return;
-   bot.stateTime += dt;
-   const diff = world.difficulty;
+// ---------------------------------------------------------------- navigation
+function decide(b, w, d) {
+   const ai = b.ai, hpF = b.hp / b.maxHP;
+   const tgt = ai.target;
+   let want = b.heading, tel = 3;
 
-   // recompute conditions
-   let nearest = null, nearestD = Infinity;
-   for (const e of world.enemiesOf(bot)) {
-      const d = dist(bot.pos, e.pos);
-      if (d < nearestD) { nearestD = d; nearest = e; }
+   // stuck on a coast or rammed: back off for a few seconds
+   if (ai.reverseT > 0) {
+      ai.reverseT -= DECIDE_DT;
+      ai.tel = -1; ai.rudderOverride = ai.revRudder;
+      return;
    }
-   const detect = nearest && nearestD < bot.cfg.detect * (diff ? diff.detectMult : 1);
-   const threat = nearestThreatShell(bot, world);
-   const underFire = !!threat;
-   const lowHP = bot.hp < bot.maxHP * WORLD.LOW_HP;
-   const critHP = bot.hp < bot.maxHP * WORLD.CRIT_HP;
-   const inSmoke = world.inSmoke(bot.pos, bot.side);
-   bot.reactionTimer = Math.max(0, bot.reactionTimer - dt);
-   // reset the "how long has it been running" clock whenever it isn't fleeing
-   if (bot.state !== 'RETREAT') bot.retreatTime = 0;
+   ai.rudderOverride = null;
+   if ((b.grounded || (Math.abs(b.speed) < 1.5 && b.telegraph > 0)) && w.time > 5) ai.stuckT += DECIDE_DT;
+   else ai.stuckT = Math.max(0, ai.stuckT - DECIDE_DT);
+   if (ai.stuckT > 3) { ai.stuckT = 0; ai.reverseT = 6; ai.revRudder = w.rng() < 0.5 ? 2 : -2; return; }
 
-   // State-independent leash: a ship that has simply survived too long stops
-   // denying the fight (fast DDs can otherwise kite the Bismarck forever) and
-   // commits to a last stand. This guarantees every match reaches a conclusion.
-   // A ship that is the LAST of its side commits immediately — no more stalling.
-   bot.aliveT = (bot.aliveT || 0) + dt;
-   const alliesLeft = world.bots.filter(b => b !== bot && b.alive).length;
-   const commitT = alliesLeft === 0 ? 6 : (COMMIT_TIME[bot.cls] || 160);
-   if (!bot.lastStand && bot.aliveT > commitT) {
-      bot.lastStand = true;
-      if (bot.state !== 'ENGAGE') { bot.state = 'ENGAGE'; bot.stateTime = 0; }
+   // mission retreat (permanent) or generic break-off to repair
+   if (ai.retreatBelow && hpF < ai.retreatBelow) ai.retreating = true;
+   if (!ai.retreating && ai.role !== 'tr' && !ai.route && d.smarts > 0.6) {
+      if (hpF < 0.22 && b.consumable('repair')) ai.breakOff = true;
+      if (ai.breakOff && hpF > 0.45) ai.breakOff = false;
    }
+   const threat = threatVector(b, w);
 
-   let steer = { heading: bot.heading, throttle: 0.6 };
-
-   switch (bot.state) {
-      case 'STANDBY': {
-         bot.patrolTimer = (bot.patrolTimer || 0) + dt;
-         if (bot.patrolTimer > 8) {
-            bot.patrolTimer = 0;
-            const a = Math.random() * TAU, r = 900 + Math.random() * 500;
-            bot.patrolPoint = { x: clamp(bot.pos.x + Math.cos(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200),
-               y: clamp(bot.pos.y + Math.sin(a) * r, -WORLD.ARENA + 200, WORLD.ARENA - 200) };
-         }
-         steer = seek(bot.patrolPoint, bot.pos);
-         if (detect) { bot.target = nearest; bot.reactionTimer = diff ? diff.reactionTime * (bot.cfg.reactionMult || 1) : 0.9; bot.state = 'DETECT'; bot.stateTime = 0; }
-         break;
-      }
-      case 'DETECT': {
-         bot.target = nearest || bot.target;
-         steer = { heading: bot.aimBearing || angleOf(sub(bot.target.pos, bot.pos)), throttle: 0.7 };
-         if (underFire) { bot.state = 'DODGE'; bot.stateTime = 0; break; }
-         if (lowHP) { bot.state = 'RETREAT'; bot.stateTime = 0; break; }
-         if (bot.reactionTimer <= 0) {
-            if (bot.cls === 'DD') { bot.flankSign = sideTowardOpenSpace(bot, world); bot.state = 'FLANK'; }
-            else bot.state = 'ENGAGE';
-            bot.stateTime = 0;
-         }
-         break;
-      }
-      case 'ENGAGE': {
-         const target = bot.target && bot.target.alive ? bot.target : nearest;
-         bot.target = target;
-         if (!target) { bot.state = 'STANDBY'; bot.stateTime = 0; break; }
-         const d = dist(bot.pos, target.pos);
-         if (bot.lastStand) {
-            // Fight to the death. Most enemy classes are FASTER than the Bismarck, so
-            // kiting would let them run forever. Instead come straight forward and fight:
-            // both sides close in, so the duel converges no matter where it started.
-            steer = seek(target.pos, bot.pos);
-         } else if (bot.cls === 'DD') steer = flank(target, bot.pos, bot.cfg.flankDeg, bot.flankSign, bot.cfg.prefRange || 550);
-         else steer = kite(target, bot.pos, bot.flankSign, bot.cfg.prefRange || 1200); // all gun ships hold their preferred range
-         if (bot.cls === 'EB' && !bot.lastStand) steer.throttle = 0.55;
-         if (critHP && !bot.lastStand) { bot.state = 'RETREAT'; bot.stateTime = 0; break; }
-         if (!bot.lastStand && underFire && Math.random() < (bot.cfg.fire || 0.25) * dt * 4) {
-            bot.state = (bot.cls === 'DD') ? 'SMOKE' : 'DODGE'; bot.stateTime = 0; break;
-         }
-         // fire when ready & in range & roughly facing
-         if (target.alive) bot.aimBearing = angleOf(sub(target.pos, bot.pos));
-         break;
-      }
-      case 'FLANK': {
-         const target = bot.target && bot.target.alive ? bot.target : nearest;
-         bot.target = target;
-         if (!target) { bot.state = 'STANDBY'; bot.stateTime = 0; break; }
-         steer = flank(target, bot.pos, bot.cfg.flankDeg, bot.flankSign, bot.cfg.prefRange || 550);
-         if (bot.cls === 'DD') {
-            const d = dist(bot.pos, target.pos);
-            const crossAngle = Math.abs(angleDelta(bot.heading, angleOf(sub(target.pos, bot.pos))));
-            if (d < bot.cfg.torp.range && crossAngle < 35 * DEG) {
-               bot.fireTorpedo(world, target, sub(target.pos, bot.pos));
-               bot.flankSign *= -1;
-            }
-         }
-         if (underFire) { bot.state = 'DODGE'; bot.stateTime = 0; break; }
-         if (lowHP && !bot.lastStand) { bot.state = 'RETREAT'; bot.stateTime = 0; break; }
-         if (dist(bot.pos, bot.target.pos) < (bot.cfg.prefRange || 600) * 1.2) { bot.state = 'ENGAGE'; bot.stateTime = 0; }
-         break;
-      }
-      case 'DODGE': {
-         const t = nearestThreatShell(bot, world);
-         if (t) {
-            const perp = angleOf(t.vel) + Math.PI / 2;
-            steer = { heading: perp, throttle: 1 };
-         } else steer = flee(nearest || bot.pos, bot.pos);
-         if (bot.stateTime > 2.0 && !underFire) { bot.state = lowHP ? 'RETREAT' : 'ENGAGE'; bot.stateTime = 0; }
-         break;
-      }
-      case 'SMOKE': {
-         if (bot.smoke.cd <= 0 && !bot.smoke.active) {
-            bot.smoke.active = true; bot.smoke.t = WORLD.SMOKE_DURATION; bot.smoke.cd = WORLD.SMOKE_CD + WORLD.SMOKE_DURATION;
-         }
-         // run into the smoke to break detection
-         const cloud = world.smokeCloudAt(bot.pos, bot.side);
-         steer = cloud ? seek(cloud, bot.pos) : flee(bot.target || bot.pos, bot.pos);
-         if (bot.stateTime > WORLD.SMOKE_DURATION + 1) {
-            bot.state = lowHP ? 'RETREAT' : 'ENGAGE'; bot.stateTime = 0;
-         }
-         break;
-      }
-      case 'RETREAT': {
-         const threat = world.nearestThreatPos(bot);
-         // Last stand: a ship that has been running too long (or is pinned at the
-         // arena edge) stops kiting and fights to the death. Guarantees every match
-         // ends — a fast DD can no longer outrun the Bismarck forever.
-         bot.retreatTime = (bot.retreatTime || 0) + dt;
-         const nearEdge = Math.abs(bot.pos.x) > WORLD.ARENA - 700 || Math.abs(bot.pos.y) > WORLD.ARENA - 700;
-         const chased = world.nearestThreat(bot) < 1600;
-         if (bot.retreatTime > 40 || (nearEdge && chased)) {
-            bot.lastStand = true;
-            bot.state = 'ENGAGE'; bot.stateTime = 0; break;
-         }
-         steer = flee(threat || bot.pos, bot.pos);
-         bot.repairTimer += dt;
-         // A bot only ever ENTERS RETREAT while lowHP (<40%), so the old "hp > 50%" gate
-         // here was unreachable — the REPAIR state never fired and bots limped back into
-         // fights permanently damaged. Repair once you've been running a moment AND are
-         // still hurt; the REPAIR state itself re-checks danger before sitting down.
-         if (bot.repairTimer > 3 && bot.hp < bot.maxHP * 0.85) {
-            bot.state = 'REPAIR'; bot.stateTime = 0;
-         }
-         break;
-      }
-      case 'REPAIR': {
-         // don't sit still while being hunted — re-engage or keep running
-         if (underFire || world.nearestThreat(bot) < 900) {
-            bot.repairTimer = 0; // don't instantly re-enter REPAIR next frame
-            bot.state = lowHP ? 'RETREAT' : 'ENGAGE'; bot.stateTime = 0; break;
-         }
-         const safe = world.safeZone(bot);
-         steer = seek(safe, bot.pos);
-         steer.throttle = 0.5;
-         bot.repairAll();
-         if (bot.hp > bot.maxHP * 0.85) { bot.state = 'STANDBY'; bot.stateTime = 0; }
-         break;
+   if (ai.dodgeT > 0) {
+      ai.dodgeT -= DECIDE_DT;
+      want = ai.dodgeHeading; tel = 4;
+   } else if (ai.route) {
+      const pt = ai.route[Math.min(ai.routeIdx, ai.route.length - 1)];
+      if (dist2(b.pos, pt) < 700 * 700 && ai.routeIdx < ai.route.length - 1) ai.routeIdx++;
+      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x);
+      if (ai.zigzag) want += Math.sin(w.time / 20 + ai.zigPhase) * 25 * DEG;
+      tel = 4;
+      if (threat.near && ai.convoy && d.smarts > 0.5) want += clamp(angleDelta(want, threat.away), -0.5, 0.5);
+   } else if (ai.patrol) {
+      ai.patrolIdx = ai.patrolIdx || 0;
+      const pt = ai.patrol[ai.patrolIdx % ai.patrol.length];
+      if (dist2(b.pos, pt) < 500 * 500) ai.patrolIdx++;
+      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x);
+      tel = b.telegraph || 1;
+   } else if (ai.retreating) {
+      const to = ai.retreatTo || { x: b.pos.x + Math.cos(threat.away) * 5000, y: b.pos.y + Math.sin(threat.away) * 5000 };
+      want = Math.atan2(to.y - b.pos.y, to.x - b.pos.x);
+      tel = 4;
+   } else if (ai.breakOff) {
+      want = threat.away; tel = 4;
+   } else {
+      const esc = ai.escortId != null ? w.shipById(ai.escortId) : null;
+      const cap = capGoal(b, w);
+      if (esc && esc.alive && (!tgt || dist2(b.pos, esc.pos) > 3200 * 3200)) {
+         // stay on the threatened side of the escorted ship
+         const side = threat.near ? threat.toward : esc.heading + ai.angSide * Math.PI / 2;
+         const pt = { x: esc.pos.x + Math.cos(side) * 1100 + Math.cos(esc.heading) * 600, y: esc.pos.y + Math.sin(side) * 1100 + Math.sin(esc.heading) * 600 };
+         const dd = Math.sqrt(dist2(b.pos, pt));
+         want = dd > 400 ? Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x) : esc.heading;
+         tel = dd > 1500 ? 4 : dd > 500 ? 3 : Math.max(1, esc.telegraph);
+      } else if (cap && (!tgt || ai.role === 'dd' || dist2(b.pos, tgt.pos) > ai.pref[1] ** 2)) {
+         const dd = Math.sqrt(dist2(b.pos, cap.pos));
+         want = dd > cap.r * 0.5 ? Math.atan2(cap.pos.y - b.pos.y, cap.pos.x - b.pos.x) : b.heading + 0.6 * ai.angSide;
+         tel = dd > cap.r ? 4 : 2;
+      } else if (tgt) {
+         ({ want, tel } = engage(b, w, tgt, d));
+      } else {
+         // nothing visible: head for the last known enemy position / hunted ship / enemy centroid
+         const goal = searchGoal(b, w);
+         want = Math.atan2(goal.y - b.pos.y, goal.x - b.pos.x);
+         tel = 3;
       }
    }
 
-   // Obstacle avoidance overrides
-   steer = avoidObstacles(bot, world, steer);
+   want = separation(b, w, want);
+   want = avoidTerrain(b, w, want);
+   ai.desired = want;
+   ai.tel = tel;
+   checkTorpedoes(b, w, d);
+}
 
-   // group cohesion: cruisers/DDs loosely follow the EB
-   if (bot.cls === 'LC' || bot.cls === 'HC' || bot.cls === 'DD') {
-      const eb = world.enemyLeader(bot);
-      if (eb && eb.alive && bot.state !== 'DODGE' && bot.state !== 'RETREAT') {
-         const d = dist(eb.pos, bot.pos);
-         if (d > 600 && d < 1800) {
-            const toEb = angleOf(sub(eb.pos, bot.pos));
-            steer.heading = approachAngle(steer.heading, toEb, 0.05); // gentle pull toward formation
-         }
-      }
+// Combat manoeuvring: close in angled, fight in the preferred band showing an angled broadside,
+// kite away when too close. DDs keep outside their own detection until torpedoes are ready.
+function engage(b, w, tgt, d) {
+   const ai = b.ai;
+   const dd = Math.sqrt(dist2(b.pos, tgt.pos));
+   const brg = Math.atan2(tgt.pos.y - b.pos.y, tgt.pos.x - b.pos.x);
+   let [lo, hi] = ai.pref;
+   if (ai.aggro) { lo /= ai.aggro; hi /= ai.aggro; }
+   const s = ai.angSide;
+   if (ai.role === 'dd') {
+      const tr = b.torps ? b.cfg.torp.range * 0.8 : 0;
+      const torpReady = b.torps && b.torps.launchers.some(l => l.reload <= 0);
+      if (torpReady && tgt.type !== 'DD' && dd > tr) return { want: brg + s * 20 * DEG, tel: 4 };
+      if (torpReady && dd <= tr) return { want: brg + s * 70 * DEG, tel: 4 };   // present the tubes
+      const stealth = b.detectRange * 1.1;
+      if (tgt.type !== 'DD' && dd < stealth) return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
+      if (dd > hi) return { want: brg + s * 25 * DEG, tel: 4 };
+      return { want: brg + s * 80 * DEG, tel: 4 };
    }
-   // separation
-   steer = applySeparation(bot, world, steer);
+   // flip the angling side now and then so the AI does not circle forever
+   if (w.rng() < 0.004 * d.smarts) ai.angSide = -ai.angSide;
+   if (dd > hi) return { want: brg + s * 25 * DEG, tel: 4 };
+   if (dd < lo) return { want: brg + Math.PI - s * 40 * DEG, tel: 4 };
+   // in band: angle ~55-65 deg off the bearing so all turrets bear but the belt is angled
+   const ang = (ai.role === 'bb' ? 60 : 70) * DEG;
+   return { want: brg + s * ang, tel: ai.role === 'bb' ? 3 : 4 };
+}
 
-   // apply steering to the ship
-   bot.helm = clamp((angleDelta(bot.heading, steer.heading) * 2.2), -1, 1);
-   bot.throttleIn = clamp(steer.throttle, -1, 1);
-   bot.aimBearing = bot.state === 'ENGAGE' || bot.state === 'FLANK'
-      ? angleOf(sub((bot.target || nearest || bot.pos).pos, bot.pos))
-      : steer.heading;
+function capGoal(b, w) {
+   if (!w.caps.length) return null;
+   const ai = b.ai;
+   let cap = ai.capId ? w.caps.find(c => c.id === ai.capId) : null;
+   if (cap && cap.owner === b.side && !cap.contested && cap.capper == null) cap = null;
+   if (!cap && (ai.role === 'dd' || ai.role === 'cl' || !ai.target)) {
+      let bd = Infinity;
+      for (const c of w.caps) {
+         if (c.owner === b.side && !c.contested) continue;
+         const dd = dist2(b.pos, c.pos);
+         if (dd < bd) { bd = dd; cap = c; }
+      }
+      if (cap && ai.role !== 'dd' && bd > 7000 * 7000) cap = null;
+   }
+   return cap;
+}
 
-   // firing (shared lead/shell model, difficulty-scaled)
-   if (bot.state === 'ENGAGE' || bot.state === 'FLANK') {
-      const target = bot.target && bot.target.alive ? bot.target : nearest;
-      if (target && bot.alive) bot._maybeFire(world, target, dt);
+function searchGoal(b, w) {
+   const hunt = b.ai.huntId != null ? w.shipById(b.ai.huntId) : null;
+   if (hunt && hunt.alive) return hunt.pos;
+   let best = null, bd = Infinity;
+   for (const e of w.ships) {
+      if (!e.alive || e.side === b.side || e.type === 'TR' && b.ai.role !== 'dd') continue;
+      const p = b.side === 'player' ? (e.lastSeen || e.pos) : e.pos;   // allies use the team's intel
+      const dd = dist2(b.pos, p);
+      if (dd < bd) { bd = dd; best = p; }
+   }
+   if (best) return best;
+   for (const e of w.ships) if (e.alive && e.side !== b.side) return e.pos;
+   return { x: 0, y: 0 };
+}
+
+// Where is the danger? Averages visible enemy bearings (closer = heavier).
+function threatVector(b, w) {
+   let x = 0, y = 0, near = false;
+   for (const e of w.ships) {
+      if (!e.alive || e.side === b.side || e.type === 'TR' || !w.canSee(b.side, e)) continue;
+      const dx = e.pos.x - b.pos.x, dy = e.pos.y - b.pos.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 14000 * 14000) near = true;
+      const k = 1 / Math.max(d2, 1e6);
+      x += dx * k; y += dy * k;
+   }
+   const toward = Math.atan2(y, x);
+   return { near, toward, away: toward + Math.PI };
+}
+
+// Keep ~800 m between friendly hulls so the AI does not stack into one torpedo lane.
+function separation(b, w, want) {
+   let px = 0, py = 0;
+   for (const o of w.ships) {
+      if (o === b || !o.alive || o.side !== b.side) continue;
+      const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y;
+      const d2 = dx * dx + dy * dy;
+      const R = 650 + (b.cfg.hull.L + o.cfg.hull.L);
+      if (d2 > R * R || d2 < 1) continue;
+      const k = (R - Math.sqrt(d2)) / R;
+      px += dx / Math.sqrt(d2) * k; py += dy / Math.sqrt(d2) * k;
+   }
+   if (!px && !py) return want;
+   const m = Math.hypot(px, py);
+   const ax = Math.cos(want) + px / m * Math.min(1.2, m * 2), ay = Math.sin(want) + py / m * Math.min(1.2, m * 2);
+   return Math.atan2(ay, ax);
+}
+
+// Pick the candidate heading nearest to `want` whose look-ahead line is clear of land and the
+// arena edge.
+function avoidTerrain(b, w, want) {
+   const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
+   const lim = w.arena - 700;
+   const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
+   const clear = (h) => {
+      const c = Math.cos(h), s = Math.sin(h);
+      for (let k = 1; k <= 6; k++) {
+         const f = (k / 6) * look;
+         const p = { x: b.pos.x + c * f, y: b.pos.y + s * f };
+         if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
+            // allow heading back inwards when already outside the limit
+            if (Math.abs(p.x) > Math.abs(b.pos.x) + 1 && Math.abs(p.x) > lim) return false;
+            if (Math.abs(p.y) > Math.abs(b.pos.y) + 1 && Math.abs(p.y) > lim) return false;
+         }
+         for (const o of near) if (obstacleT(o, p) < 1.12) return false;
+      }
+      return true;
+   };
+   for (const c of CANDIDATES) if (clear(want + c)) return want + c;
+   // boxed in: turn away from the closest island centre
+   let best = null, bd = Infinity;
+   for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }
+   return best ? Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x) : Math.atan2(-b.pos.y, -b.pos.x);
+}
+
+// Torpedo dodge: predicts closest approach of each visible enemy torpedo and turns parallel.
+function checkTorpedoes(b, w, d) {
+   const ai = b.ai;
+   if (ai.dodgeT > 0) return;
+   const reach = b.cfg.hull.L * 0.55 + 40;
+   for (const t of w.torpedoes) {
+      if (!t.alive || t.side === b.side || !t.visibleToOpp || ai.dodged.has(t.id)) continue;
+      const rvx = Math.cos(t.heading) * t.speed - b.vel.x, rvy = Math.sin(t.heading) * t.speed - b.vel.y;
+      const rx = t.pos.x - b.pos.x, ry = t.pos.y - b.pos.y;
+      const v2 = rvx * rvx + rvy * rvy || 1;
+      const tc = -(rx * rvx + ry * rvy) / v2;
+      if (tc < 0 || tc > 30) continue;
+      const cx = rx + rvx * tc, cy = ry + rvy * tc;
+      if (cx * cx + cy * cy > reach * reach) continue;
+      ai.dodged.add(t.id);
+      if (w.rng() > d.dodge) continue;
+      // comb the track: turn to whichever parallel heading needs less rudder
+      const h1 = t.heading, h2 = t.heading + Math.PI;
+      ai.dodgeHeading = Math.abs(angleDelta(b.heading, h1)) < Math.abs(angleDelta(b.heading, h2)) ? h1 : h2;
+      ai.dodgeT = 7;
+      if (b.consumable('boost')) b.useConsumable(w, 'boost');
+      return;
    }
 }
 
-// A bot fires when its timer is up, in range, in cone, and gun is "warmed up".
-Ship.prototype._maybeFire = function (world, target, dt) {
-   // fireTimer is already decremented in ship.js update() — don't double it here.
-   if (this.fireTimer > 0) return;
-   // Smoke used to only intercept shells already in flight (combat.js) -- it never stopped
-   // a shooter from acquiring/tracking a smoked target in the first place, so bots kept
-   // firing dead-accurate lead shots at a ship that was supposed to be invisible. Real
-   // smoke breaks targeting outright: a target sitting in a cloud that isn't its own side's
-   // cannot be fired on at all -- this is what makes ducking into smoke actually work as an
-   // escape, instead of merely giving incoming shells a random chance to be intercepted.
-   if (world.inSmoke(target.pos, target.side)) return;
-   const d = dist(this.pos, target.pos);
-   const bearing = angleOf(sub(target.pos, this.pos));
-   // the TURRET must face the target (hull may kite at 90°); any ready turret in cone suffices
-   let inCone = false;
-   for (const t of this.turrets) {
-      if (Math.abs(angleDelta(this.heading + t.bearing, bearing)) < WORLD.DETECT_CONE) { inCone = true; break; }
-   }
-   const inRange = d < this.cfg.main.range;
-   const warm = this.stateTime > 0.25;
-   if (inCone && inRange && warm) {
-      // fireMain expects a direction VECTOR, not an angle — wrap the lead angle
-      this.fireMain(world, target, fromAngle(bearingToDir(bearing, target, this, world)));
-   }
-};
-
-// lead the target with shell time-of-flight + reaction
-function bearingToDir(bearing, target, bot, world) {
-   const diff = world.difficulty;
-   const d = dist(bot.pos, target.pos);
-   const vShell = bot.cfg.main.vShell || 650;
-   let leadT = d / vShell + (diff ? diff.reactionTime : 0.9);
-   leadT *= (diff ? diff.leadQuality : 0.7);
-   const pred = add(target.pos, scale(target.vel, leadT));
-   return angleOf(sub(pred, bot.pos));
+// Rudder controller with lag anticipation: uses the yaw rate to predict where the bow will
+// settle, so heavy ships start counter-rudder early instead of overshooting.
+function steer(b, dt) {
+   const ai = b.ai;
+   b.setTelegraph(ai.tel);
+   if (ai.rudderOverride != null) { b.setRudder(ai.rudderOverride); return; }
+   const lead = b.cfg.rudderShift * 0.7 + 1.2;
+   let err = angleDelta(b.heading + b.omega * lead, ai.desired);
+   if (b.speed < 0) err = -err;
+   const a = Math.abs(err);
+   b.setRudder(a > 25 * DEG ? Math.sign(err) * 2 : a > 6 * DEG ? Math.sign(err) : a > 1.5 * DEG ? Math.sign(err) * (b.type === 'DD' ? 1 : 0) : 0);
 }
 
-function scale(v, s) { return { x: v.x * s, y: v.y * s }; }
-
-function sideTowardOpenSpace(bot, world) {
-   // pick the flank side whose approach point is farthest from our own leader —
-   // spreads the DDs across both flanks instead of stacking them on one side
-   const leader = world.enemyLeader(bot);
-   if (!leader || !bot.target) return bot.flankSign;
-   const bearing = angleOf(sub(bot.target.pos, bot.pos));
-   const r = bot.cfg.prefRange || 550;
-   const d1 = dist(add(bot.target.pos, fromAngle(bearing + 90 * DEG, r)), leader.pos);
-   const d2 = dist(add(bot.target.pos, fromAngle(bearing - 90 * DEG, r)), leader.pos);
-   return d1 >= d2 ? 1 : -1;
-}
-
-function applySeparation(bot, world, steer) {
-   let sx = 0, sy = 0;
-   const R = 250;
-   for (const o of world.enemiesOf(bot)) {
-      if (o === bot || !o.alive) continue;
-      const d = dist(bot.pos, o.pos);
-      if (d < R && d > 0) {
-         const w = (1 - d / R);
-         sx += (bot.pos.x - o.pos.x) / d * w;
-         sy += (bot.pos.y - o.pos.y) / d * w;
+// ---------------------------------------------------------------- weapons
+function gunnery(b, w, d, dt) {
+   const ai = b.ai, tgt = ai.target;
+   if (!tgt || !tgt.alive || !w.canSee(b.side, tgt)) { b.aimPoint = null; return; }
+   const m = b.cfg.main;
+   const dd = Math.sqrt(dist2(b.pos, tgt.pos));
+   // DDs hold fire while hidden unless they duel another DD (gun bloom would reveal them)
+   if (ai.role === 'dd' && !b.detected && tgt.type !== 'DD' && b.torps && b.torps.launchers.some(l => l.reload <= 2)) { b.aimPoint = tgtLead(b, tgt, d, dd); return; }
+   const aim = tgtLead(b, tgt, d, dd);
+   b.aimPoint = aim;
+   if (dd > m.range || w.time - ai.targetSince < d.reaction) return;
+   // ammo choice (re-evaluated every 8 s so the reload penalty is not paid constantly)
+   ai.ammoT -= dt;
+   if (ai.ammoT <= 0 && m.ap && m.he) {
+      ai.ammoT = 8;
+      const aspect = Math.abs(Math.sin(angleDelta(tgt.heading, Math.atan2(b.pos.y - tgt.pos.y, b.pos.x - tgt.pos.x))));
+      let want = 'HE';
+      if (tgt.type === 'BB' || tgt.type === 'CA' || tgt.type === 'CL') {
+         const apOK = m.caliber >= 280 ? (aspect > 0.45 || dd < 9000) : (aspect > 0.7 && dd < 10000 && tgt.type !== 'BB');
+         if (apOK) want = 'AP';
       }
+      if (b.cfg.main.he == null) want = 'AP';
+      if (want !== b.ammo && w.rng() < 0.6 + 0.4 * d.smarts) b.setAmmo(want);
    }
-   if (sx || sy) {
-      const away = angleOf({ x: sx, y: sy });
-      steer.heading = approachAngle(steer.heading, away, 0.3);
+   let ready = 0, bearers = 0, longWait = true;
+   for (const t of b.turrets) {
+      if (!t.alive || !t.canBear) continue;
+      bearers++;
+      if (t.reload <= 0 && t.err <= WORLD.FIRE_TOL) ready++;
+      else if (t.reload > 0 && t.reload < 3) longWait = false;
    }
-   return steer;
+   if (!ready || (ready < Math.ceil(bearers * 0.6) && !longWait)) return;
+   if (b.fireMain(w, aim) > 0) { ai.salvoCount++; newAimError(b, w); }
+}
+function tgtLead(b, tgt, d, dd) {
+   const t = flightTime(b.cfg.main, Math.min(dd, b.cfg.main.range));
+   const k = d.lead * t;
+   const e = b.ai.aimErr, bx = (tgt.pos.x - b.pos.x) / (dd || 1), by = (tgt.pos.y - b.pos.y) / (dd || 1);
+   return {
+      x: tgt.pos.x + tgt.vel.x * k + bx * e.r * dd - by * e.l * dd,
+      y: tgt.pos.y + tgt.vel.y * k + by * e.r * dd + bx * e.l * dd,
+   };
 }
 
-// ---- minimal Ship ref so _maybeFire can attach (avoid import cycle at load) ----
-import { Ship } from './ship.js';
+function torpedoes(b, w, dt) {
+   const ai = b.ai;
+   if (!b.torps) return;
+   ai.torpT -= dt;
+   if (ai.torpT > 0) return;
+   ai.torpT = 0.8;
+   const tgt = ai.target;
+   if (!tgt || !tgt.alive || !w.canSee(b.side, tgt)) return;
+   const tc = b.cfg.torp;
+   const dd = Math.sqrt(dist2(b.pos, tgt.pos));
+   if (dd > tc.range * (ai.role === 'dd' ? 0.85 : 0.7) || dd < 900) return;
+   const ip = interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel);
+   if (!ip || ip.t * tc.speed > tc.range * 0.95) return;
+   // light error so spreads are not laser-perfect
+   const brg = Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) + gaussR(w.rng) * w.difficulty.aimErr * 1.5;
+   // never through friendlies
+   for (const o of w.ships) {
+      if (o === b || !o.alive || o.side !== b.side) continue;
+      const od = Math.sqrt(dist2(b.pos, o.pos));
+      if (od > dd + 1500) continue;
+      const ob = Math.atan2(o.pos.y - b.pos.y, o.pos.x - b.pos.x);
+      if (Math.abs(angleDelta(brg, ob)) < Math.atan2(o.cfg.hull.L * 0.5 + 300, od)) return;
+   }
+   if (!b.torpLauncherFor(brg)) return;
+   b.setTorpSpread(dd > tc.range * 0.5 ? 'wide' : 'narrow');
+   if (b.fireTorpedoes(w, brg) > 0) ai.torpT = 2.5;
+}
+
+function consumables(b, w, d) {
+   const ai = b.ai, hpF = b.hp / b.maxHP;
+   if (w.rng() > 0.35 + 0.65 * d.smarts) return;           // dumber captains react late
+   const has = (k) => { const c = b.consumable(k); return c && !c.active && c.cd <= 0 && c.charges > 0; };
+   if (has('damageControl') && (b.fires.length >= 2 || b.floods.length || (b.fires.length && hpF < 0.5) || b.modules.rudder > 0 || b.modules.engine > 0)) b.useConsumable(w, 'damageControl');
+   if (has('repair') && hpF < 0.65 && b.healPool > b.maxHP * 0.12 && b.fires.length < 2) b.useConsumable(w, 'repair');
+   const underFire = w.time - b.lastHitT < 6;
+   if (has('smoke') && b.detected && (ai.role === 'dd' || ai.role === 'cl') && (underFire || hpF < 0.5) && ai.target) b.useConsumable(w, 'smoke');
+   if (has('smoke') && ai.convoy === undefined && ai.escortId != null && underFire) b.useConsumable(w, 'smoke');
+   if (has('hydro') || has('radar')) {
+      let nearHidden = false;
+      for (const e of w.ships) {
+         if (!e.alive || e.side === b.side) continue;
+         const dd = Math.sqrt(dist2(b.pos, e.pos));
+         const r = has('radar') ? b.consumable('radar').range : b.consumable('hydro').range;
+         if (dd < r * 0.9 && (!e.detected || e.inSmoke)) { nearHidden = true; break; }
+      }
+      if (nearHidden) b.useConsumable(w, has('radar') ? 'radar' : 'hydro');
+   }
+   if (has('boost') && (ai.retreating || ai.breakOff || (ai.role === 'dd' && w.caps.length && w.time < 90))) b.useConsumable(w, 'boost');
+}
