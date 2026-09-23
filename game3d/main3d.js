@@ -11,7 +11,7 @@ import { WORLD } from './config.js';
 import { Input3D } from './input3d.js';
 import { Renderer3D } from './render3d.js';
 import { BASE_FOV } from './camera3d.js';
-import { HudCanvases3D, shipType, TYPE_NAME, isAlly, isVisible, shipLen, torpSide, torpHeading } from './minimap3d.js';
+import { HudCanvases3D, shipType, TYPE_NAME, isAlly, isVisible, shipLen, torpSide, torpHeading, displayKn } from './minimap3d.js';
 import { Hud } from './hud.js';
 import { Overlay3D } from './hud3d.js';
 import { Audio } from './audio.js';
@@ -121,7 +121,6 @@ function gunRangeOf(p) {
 function hullL(p) { return p?.cfg?.hull?.L || shipLen(p); }
 function hullBeam(s) { return s?.cfg?.hull?.beam || OLD_BEAM[s?.cls] || shipLen(s) * 0.12; }
 function hullDeckH(s) { return s?.cfg?.hull?.deckH || Math.max(8, shipLen(s) * 0.075); }
-function speedKn(s) { return s?.speedKn ?? s?.speedKnots ?? Math.abs(s?.speed || 0) * 1.94384; }
 function maxSpeedMs(s) { return s?.maxSpeed ?? (s?.maxSpeedKn ? s.maxSpeedKn * KN : 20); }
 function velOf(s) {
    if (s.vel && typeof s.vel.x === 'number') return s.vel;
@@ -1014,7 +1013,7 @@ function buildUi(dt) {
    ui.telegraph = ctl.telegraph; ui.rudder = ctl.rudder;
    ui.teleName = TELE_NAMES[ctl.telegraph]; ui.rudderName = RUDDER_NAMES[ctl.rudder];
    ui.rudderActual = p.rudder ?? p.helm ?? 0;
-   ui.speedKn = speedKn(p);
+   ui.speedKn = displayKn(p);
    ui.spotted = fx.spotted;
    ui.dmg = world.stats?.dmg ?? p.dmgDealt ?? fx.dmg;
    ui.spread = ctl.spread;

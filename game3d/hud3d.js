@@ -157,7 +157,9 @@ export class Overlay3D {
       }
       g.restore();
 
-      if (ui.mode === 'guns') this._turretSchematic(ui, cx, cy + 92);
+      // turret schematic lives bottom-centre, left of the weapon panel, so it never sits on
+      // the own hull (which fills the lower middle of the chase view)
+      if (ui.mode === 'guns') this._turretSchematic(ui, Math.max(cx - 300, 372), this.H - 50);
    }
 
    // Small top-down hull under the reticle, rotated relative to the camera (up = where you
@@ -198,10 +200,16 @@ export class Overlay3D {
       for (const m of ui.markers || []) {
          if (!m.onScreen) continue;
          const col = m.ally ? COL.ally : COL.enemy;
-         const x = m.x, y = m.y;
-         // fade markers that sit right on the crosshair so the centre stays readable
-         const dc = Math.hypot(x - this.W / 2, y - this.H / 2);
-         g.globalAlpha = dc < 60 ? 0.45 : 1;
+         const x = m.x, cxs = this.W / 2, cys = this.H / 2;
+         let y = m.y;
+         // a marker over the reticle is lifted above it (thin leader to the ship) so the
+         // crosshair, range and "out of range" readouts stay readable
+         if (Math.abs(x - cxs) < 90 && y > cys - 74 && y < cys + 64) {
+            g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1;
+            g.beginPath(); g.moveTo(x, cys - 74 + 22); g.lineTo(x, Math.max(cys - 74 + 22, y - 4)); g.stroke();
+            y = cys - 74;
+         }
+         g.globalAlpha = 1;
          g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
          drawClassIcon(g, m.type, x, y, 13, col, { lineWidth: 1.4 });
          g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
@@ -348,10 +356,13 @@ export class Overlay3D {
       g.fillStyle = 'rgba(210,235,255,0.55)';
       for (let k = Math.ceil(40 / sp); k * sp < R0 * 0.9; k++) { g.beginPath(); g.arc(cx, cy - k * sp, 1.6, 0, TAU); g.fill(); }
       // magnification
-      g.font = 'bold 14px Consolas, monospace'; g.textAlign = 'center'; g.fillStyle = 'rgba(210,235,255,0.85)';
-      g.fillText(ui.zoom + '×', cx, cy + R0 * 0.9 - 14);
-      g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(210,235,255,0.55)';
-      g.fillText('Mausrad: Vergrößerung · Shift: zurück', cx, cy + R0 * 0.9 + 4);
+      // magnification + hint on the right arm of the cross (bottom is covered by the HUD panels)
+      const rx = cx + Math.min(R0 * 0.88, W / 2 - 20);
+      g.font = 'bold 18px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+      g.fillStyle = 'rgba(210,235,255,0.9)';
+      g.fillText(ui.zoom + '×', rx, cy - 10);
+      g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(210,235,255,0.5)';
+      g.fillText('Mausrad: Zoom · Shift: zurück', rx, cy - 34);
       g.restore();
    }
 
@@ -361,13 +372,14 @@ export class Overlay3D {
       g.save();
       g.fillStyle = 'rgba(3,9,16,0.9)';
       g.fillRect(0, 0, W, H);
-      const size = Math.max(200, Math.min(W - 80, H - 110));
-      const x0 = Math.round((W - size) / 2), y0 = Math.round((H - size) / 2 + 12);
+      // keep clear of the top bar (score) and the bottom panels
+      const size = Math.max(200, Math.min(W - 80, H - 92 - 128));
+      const x0 = Math.round((W - size) / 2), y0 = 92;
       paintMap(g, ui.world, x0, y0, size, { ...ui.mapOpts, big: true });
       g.fillStyle = '#e8f2ff'; g.font = 'bold 18px Segoe UI, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'bottom';
       g.fillText('TAKTISCHE KARTE', x0, y0 - 10);
-      g.font = '12px Segoe UI, sans-serif'; g.fillStyle = 'rgba(200,220,240,0.7)'; g.textAlign = 'right';
-      g.fillText('M – schließen   ·   gestrichelt: Entdeckungsradius   ·   Kreis: Hauptbatterie', x0 + size, y0 - 12);
+      g.font = '12px Segoe UI, sans-serif'; g.fillStyle = 'rgba(200,220,240,0.7)'; g.textAlign = 'center'; g.textBaseline = 'top';
+      g.fillText('M – schließen   ·   gestrichelt: Entdeckungsradius   ·   Kreis: Hauptbatterie', x0 + size / 2, y0 + size + 7);
       g.restore();
    }
 }

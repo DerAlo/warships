@@ -15,6 +15,14 @@ export const COL = {
 // ---------- shared ship helpers (contract fields first, old-sim fallbacks second) ----------
 const OLD_TYPE = { DD: 'DD', LC: 'CL', HC: 'CA', EB: 'BB', Bismarck: 'BB' };
 export function shipType(s) { return s?.cfg?.hull?.type || OLD_TYPE[s?.cls] || s?.cfg?.type || 'CA'; }
+// Speed for display. The contract sim gives speedKn; the old arcade sim moves ~90 m/s, so its
+// speed is shown as a fraction of a plausible top speed for the class instead.
+const REAL_KN = { DD: 38, CL: 34, CA: 32, BB: 30 };
+export function displayKn(s) {
+   if (s?.speedKn != null) return s.speedKn;
+   if (s?.maxSpeed > 0) return Math.abs(s.speed || 0) / s.maxSpeed * (REAL_KN[shipType(s)] || 30);
+   return Math.abs(s?.speed || 0) * 1.94384;
+}
 export const TYPE_NAME = { DD: 'Zerstörer', CL: 'Leichter Kreuzer', CA: 'Schwerer Kreuzer', BB: 'Schlachtschiff', CV: 'Flugzeugträger', TR: 'Transporter' };
 export const TYPE_SHORT = { DD: 'Z', CL: 'LK', CA: 'SK', BB: 'SS', CV: 'FT', TR: 'TR' };
 export function shipLen(s) {

@@ -8,7 +8,7 @@
 // Everything here only reads sim state; DOM writes are throttled or diffed so the HUD costs
 // next to nothing per frame.
 import { clamp01 } from './utils.js';
-import { shipType, TYPE_NAME, isAlly, isVisible } from './minimap3d.js';
+import { shipType, TYPE_NAME, isAlly, isVisible, displayKn } from './minimap3d.js';
 
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
@@ -397,7 +397,7 @@ export class Hud {
       if (!s) return;
       const p = ui.p;
       const d = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y);
-      const kn = s.speedKn ?? s.speedKnots ?? Math.abs(s.speed || 0) * 1.94384;
+      const kn = displayKn(s);
       const hpF = clamp01(s.hp / (s.maxHP || 1));
       const sig = s.id + '|' + Math.round(hpF * 200) + '|' + Math.round(d / 50) + '|' + Math.round(kn);
       if (sig === this._sig.lock) return;
