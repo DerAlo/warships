@@ -55,7 +55,7 @@ let endTimer = 0;
 let difficulty = 'normal';
 
 // sound throttling (effects are polled; weapon/hit cues come from world.events)
-const snd = { hitCd: 0, eCannonCd: 0 };
+const snd = { hitCd: 0, eCannonCd: 0, cueCd: 0, citCd: 0, reloadCd: 0 };
 // main-battery trigger state: click = full salvo, hold = ripple (one turret per HANDLING.rippleGap)
 const trig = { holdT: 0, rippleCd: 0 };
 // read-only handle for the headless self-test (tests/playwright.shots.mjs)
@@ -219,10 +219,19 @@ function drainEvents() {
          case 'torp': if (ev.ship === p) audio.torpLaunch(); break;
          case 'hit':
             if (ev.outcome === 'RICOCHET' && ev.shooter === p) audio.bounce();
+            if (ev.shooter === p) {
+               // at most one chime per salvo; a citadel always gets its own, louder cue
+               if (ev.outcome === 'CITADEL') { if (snd.citCd <= 0) { audio.citadel(); snd.citCd = 0.6; snd.cueCd = 0.6; } }
+               else if (ev.outcome !== 'SEC' && ev.outcome !== 'RICOCHET' && snd.cueCd <= 0) { audio.ribbon(); snd.cueCd = 0.25; }
+            }
             if (ev.target === p && snd.hitCd <= 0) { audio.hit(); snd.hitCd = 0.3; }
             break;
-         case 'sink': audio.sink(); break;
+         case 'sink': audio.sink(); if (ev.by === p) setTimeout(() => audio.kill(), 400); break;
          case 'cons': case 'ammo': if (ev.ship === p) audio.uiClick(); break;
+         // ripple fire reloads turrets one by one -- throttle so it reads as a rhythm, not noise
+         case 'reloaded': if (snd.reloadCd <= 0) { audio.reloaded(); snd.reloadCd = 1.2; } break;
+         case 'torpReady': audio.torpReady(); break;
+         case 'spotted': if (ev.ship === p) audio.spotted(); break;
       }
    }
    hud.onEvents(world, evs);
@@ -233,6 +242,9 @@ function pollSounds(dt) {
    const p = world.player;
    snd.hitCd = Math.max(0, snd.hitCd - dt);
    snd.eCannonCd = Math.max(0, snd.eCannonCd - dt);
+   snd.cueCd = Math.max(0, snd.cueCd - dt);
+   snd.citCd = Math.max(0, snd.citCd - dt);
+   snd.reloadCd = Math.max(0, snd.reloadCd - dt);
    for (const e of world.effects) {
       if (e.age < dt * 1.5) {
          if (e.kind === 'explosion') audio.explosion(e.big);

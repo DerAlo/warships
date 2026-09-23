@@ -280,6 +280,24 @@ test('torpedoes: side launchers only fire into their beam arc, fan width toggles
    assert.strictEqual(p.launchers.find(l => l.id === 'port').cd, 0, 'port launcher still loaded');
 });
 
+test('reload events drive the audio cues: turret reloaded + launcher ready', () => {
+   const w = new World('normal');
+   const p = w.player;
+   p.anchorOut = true;
+   w.bots.forEach(b => { b.alive = false; });  // nothing to interfere; we only watch the player's own events
+   p.heading = 0;
+   assert.ok(p.fireTorpedo(w, null, { x: 0, y: 1 }) > 0);
+   p.fireMain(w, null, { x: 1, y: 0 }, { aimPoint: { x: p.pos.x + 900, y: p.pos.y } });
+   const seen = new Set();
+   for (let i = 0; i < 60 * (p.cfg.torp.cd + 2); i++) {
+      w.update(1 / 60);
+      for (const ev of w.events) if (ev.ship === p) seen.add(ev.kind);
+      w.events.length = 0;
+   }
+   assert.ok(seen.has('reloaded'), 'turret reload emitted');
+   assert.ok(seen.has('torpReady'), 'launcher ready emitted');
+});
+
 test('hit events carry ribbon outcomes for the HUD', () => {
    const w = new World('normal');
    const dd = w.bots.find(b => b.cls === 'DD');
