@@ -277,9 +277,9 @@ void main() {
 
    // water body: deep/shallow from the baked depth map, sand showing through very shallow water
    float depth = depthAt(vPlane);
-   float shallow = exp(-depth / 7.0);
+   float shallow = exp(-depth / 10.0);
    vec3 body = mix(uDeep, uShallow, shallow);
-   body = mix(body, uSand * 0.55, exp(-depth / 1.6) * 0.55);
+   body = mix(body, uSand * 0.6, exp(-depth / 2.8) * 0.6);
    float sunUp = max(L.y, 0.0);
    vec3 illum = uSunColor * uSunI * (0.12 + 0.45 * sunUp) * uSunUp + uSkyAmb;
    vec3 col = body * illum;
@@ -297,7 +297,8 @@ void main() {
    float crestFoam = smoothstep(0.55, 0.05, jac) * smoothstep(0.35, 0.8, ft) * smoothstep(0.1, 0.6, uSea);
    crestFoam += smoothstep(0.62, 0.95, crest) * smoothstep(0.5, 0.75, ft) * uSea * 0.8;
    float band = sin(depth * 1.6 - uWTime * 1.7 + ft * 4.0) * 0.5 + 0.5;
-   float shoreFoam = smoothstep(3.5, 0.3, depth) * smoothstep(0.45, 0.9, band * ft + 0.25) + smoothstep(0.9, 0.05, depth) * (0.55 + 0.45 * ft);
+   // surf bands only close to the waterline, lace thins out over wide flats (reefs stay turquoise)
+   float shoreFoam = smoothstep(2.2, 0.2, depth) * smoothstep(0.55, 0.95, band * ft + 0.2) * 0.8 + smoothstep(0.5, 0.02, depth) * (0.35 + 0.5 * ft);
    float foam = clamp((crestFoam + shoreFoam) * (1.0 - smoothstep(1500.0, 6000.0, dist) * 0.8), 0.0, 1.0);
    vec3 foamCol = vec3(0.86, 0.9, 0.93) * (uSunColor * uSunI * (0.2 + 0.6 * sunUp) * uSunUp + uSkyAmb * 1.6);
    col = mix(col, foamCol, foam);

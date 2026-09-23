@@ -108,7 +108,7 @@ function makeReefField(o, idx) {
          const s = Math.hypot(u, v) * (1 + 0.18 * fbm(n2, u * 2 + 3, v * 2 + 3, 3));
          const n = fbm(n1, u * 3.5, v * 3.5, 4);
          const core = 1 - smoothstep(0.35, 1.2, s);
-         return Math.max(DEEP, -11 + core * (10.2 + 2.6 * n) - smoothstep(1.0, 1.45, s) * 8);
+         return Math.max(DEEP, -11 + core * (9.3 + 3.4 * n) - smoothstep(1.0, 1.45, s) * 8);
       },
    };
 }
@@ -372,7 +372,7 @@ export class Terrain {
             col[q] = c[0] * ao; col[q + 1] = c[1] * ao; col[q + 2] = c[2] * ao;
             sv[k] = vis[k];
             // rocks on reefs where the bank breaks the surface, and at cliff feet
-            if (f.kind === 'reef' && h > -1.5 && rnd() < 0.05) rocks.push({ x, y: h - 0.5, z, s: 1.5 + rnd() * 4, r: rnd() * 6 });
+            if (f.kind === 'reef' && h > -2.4 && rnd() < 0.06) rocks.push({ x, y: h - 0.5, z, s: 1.5 + rnd() * 4, r: rnd() * 6 });
             else if (f.kind === 'island' && h > -1 && h < 2.5 && slope > 0.35 && rnd() < 0.05) rocks.push({ x, y: h - 0.6, z, s: 2 + rnd() * 5, r: rnd() * 6 });
          }
       }

@@ -32,8 +32,8 @@ export function shipDims(ship) {
 function hullTint(ship) {
    const hc = ship.cfg?.hull?.color;
    if (hc !== undefined && hc !== null && hc !== '') { try { return lin(hc); } catch (e) { /* fall through */ } }
-   if (ship.isPlayer || ship === ship.world?.player) return lin(0x7c8894);
-   return ship.side === 'enemy' ? lin(0x626466) : lin(0x858c93);
+   if (ship.isPlayer || ship === ship.world?.player) return lin(0x5c6670);
+   return ship.side === 'enemy' ? lin(0x4e5256) : lin(0x68717a);
 }
 
 // ---------------- hull loft ----------------
@@ -237,7 +237,7 @@ function superstructure(b, d, S, tur, col) {
    const deckMid = S.deckAt((xF + xA) / 2);
    const hw = (x) => S.halfDeckAt(x);
    const smoke = [];
-   const box = (x0, x1, y0, h, halfW, c) => b.box(x1 - x0, h, halfW * 2, (x0 + x1) / 2, y0 + h / 2, 0, c);
+   const box = (x0, x1, y0, h, halfW, c) => { b.band = 3; b.box(x1 - x0, h, halfW * 2, (x0 + x1) / 2, y0 + h / 2, 0, c); b.band = 0; };
    const windows = (x, y, halfW) => b.box(0.25, 0.7, halfW * 1.7, x + 0.02, y, 0, win);
    const funnel = (x, y0, h, rx, rz, rakeA) => {
       const g = new THREE.CylinderGeometry(1, 1.06, h, 16);
@@ -407,29 +407,61 @@ function superstructure(b, d, S, tur, col) {
 const SHIP_FRAG_PARS = /* glsl */`
 varying float vBand;
 varying vec3 vLocal;
+varying vec3 vLN;
 uniform vec2 uBoot;
+uniform float uDeck;
 float sHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 `;
-function makeShipMaterial() {
+function makeShipMaterial(deckH) {
    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18, envMapIntensity: 0.85, alphaHash: true });
    const uBoot = { value: new THREE.Vector2(-0.9, 0.55) };
+   const uDeck = { value: deckH || 8 };
    patchAtmosphere(mat, {
       key: 'ship',
-      uniforms: { uBoot },
-      vertexPars: 'attribute float aBand;\nvarying float vBand;\nvarying vec3 vLocal;\n',
-      vertexMain: 'vBand = aBand; vLocal = position;',
+      uniforms: { uBoot, uDeck },
+      vertexPars: 'attribute float aBand;\nvarying float vBand;\nvarying vec3 vLocal;\nvarying vec3 vLN;\n',
+      vertexMain: 'vBand = aBand; vLocal = position; vLN = normal;',
       fragmentPars: SHIP_FRAG_PARS,
       fragmentReplace: [['#include <color_fragment>', `#include <color_fragment>
+         float vert = 1.0 - smoothstep(0.25, 0.6, abs(vLN.y));
+         // horizontal coordinate along a vertical face (z on end faces, x on side faces)
+         float hc = abs(vLN.x) > abs(vLN.z) ? vLocal.z : vLocal.x;
          if (vBand > 0.5 && vBand < 1.5) {
             float y = vLocal.y;
             float aw = fwidth(y);
             vec3 red = vec3(0.20, 0.035, 0.03), blk = vec3(0.016, 0.016, 0.018);
             vec3 c = mix(red, blk, smoothstep(uBoot.x - aw, uBoot.x + aw, y));
             c = mix(c, diffuseColor.rgb, smoothstep(uBoot.y - aw, uBoot.y + aw, y));
-            // weathering: faint vertical rust/salt streaks below scuppers
+            // weathering: faint vertical rust/salt streaks below scuppers, grime toward the waterline
             float st = sHash(vec2(floor(vLocal.x * 0.7), 3.0));
-            c *= 1.0 - 0.08 * step(0.82, st) * smoothstep(0.5, 4.0, y);
+            c *= 1.0 - 0.1 * step(0.8, st) * smoothstep(0.5, 4.0, y);
+            c *= mix(0.84, 1.0, smoothstep(uBoot.y, uBoot.y + uDeck * 0.5, y));
+            // plating seams + a porthole row, faded out once they get sub-pixel
+            float fx = fwidth(vLocal.x);
+            float near = clamp(1.3 - fx * 3.0, 0.0, 1.0);
+            float seam = 1.0 - smoothstep(0.04, 0.04 + fx, abs(fract(vLocal.x / 9.0) - 0.5) * 9.0 - 4.4);
+            c *= 1.0 - 0.07 * seam * step(uBoot.y, y) * near;
+            vec2 pc = vec2(fract(vLocal.x / 3.2) - 0.5, (y - uDeck * 0.62) / 3.2) * 3.2;
+            float ph = 1.0 - smoothstep(0.22, 0.22 + max(fx, 0.02) * 1.5, length(pc));
+            ph *= near * step(abs(vLocal.x), 70.0) * step(4.0, uDeck);
+            c = mix(c, vec3(0.012), ph * 0.85);
             diffuseColor.rgb = c;
+         } else if (vBand > 2.5) {
+            // deckhouse: deck-level lines, window rows, stains; all fade to their mean when tiny
+            float y = vLocal.y;
+            float fy = fwidth(y) / 2.7, fh = fwidth(hc) / 1.6;
+            float lvl = floor(y / 2.7);
+            float ly = fract(y / 2.7);
+            float line = 1.0 - smoothstep(0.04, 0.04 + fy * 1.5, ly);
+            float wr = step(0.45, sHash(vec2(lvl, sign(vLN.x + vLN.z * 1.7) + 9.0)));
+            float wy = smoothstep(0.5, 0.5 + fy, ly) * (1.0 - smoothstep(0.74, 0.74 + fy, ly));
+            float wxm = 1.0 - smoothstep(0.26, 0.26 + fh, abs(fract(hc / 1.6) - 0.5));
+            float win = wy * wxm * wr;
+            float far = clamp(max(fy, fh) * 3.0 - 0.15, 0.0, 1.0);
+            float ao = 1.0 - 0.14 * (1.0 - smoothstep(0.0, 0.35, ly));
+            float s0 = (1.0 - 0.3 * line - 0.8 * win) * ao;
+            diffuseColor.rgb *= mix(1.0, mix(s0, 0.9, far), vert);
+            diffuseColor.rgb *= 1.0 - 0.08 * vert * step(0.86, sHash(vec2(floor(hc * 1.3), lvl)));
          } else if (vBand > 1.5) {
             float pz = vLocal.z / 0.42;
             float row = floor(pz);
@@ -442,6 +474,7 @@ function makeShipMaterial() {
          }`]],
    });
    mat.userData.uBoot = uBoot;
+   mat.userData.uDeck = uDeck;
    return mat;
 }
 
@@ -516,7 +549,7 @@ export class ShipModels {
          return g;
       });
       smoke = hullGeo.userData.smoke || [];
-      const mat = makeShipMaterial();
+      const mat = makeShipMaterial(d.D);
       const root = new THREE.Group();
       const body = new THREE.Group();   // pitch/roll/heave/sink
       root.add(body);

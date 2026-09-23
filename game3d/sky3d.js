@@ -6,7 +6,7 @@ import { ATM, ATM_GLSL, bindAtm, clamp, lerp, smoothstep } from './gfxcommon3d.j
 
 // ---------------- environment presets ----------------
 const TIME_PRESET = {
-   day:   { zen: [0.090, 0.235, 0.58], hor: [0.50, 0.65, 0.84], glow: [1.00, 0.82, 0.60], sun: [1.0, 0.95, 0.88], sunI: 3.6, el: 0.62, az: -0.46, exposure: 0.92 },
+   day:   { zen: [0.080, 0.215, 0.56], hor: [0.40, 0.56, 0.80], glow: [1.00, 0.82, 0.60], sun: [1.0, 0.95, 0.88], sunI: 3.6, el: 0.62, az: -0.46, exposure: 0.92 },
    dawn:  { zen: [0.070, 0.115, 0.30], hor: [0.96, 0.60, 0.40], glow: [1.90, 0.85, 0.40], sun: [1.0, 0.62, 0.36], sunI: 2.5, el: 0.07, az: 0.25, exposure: 1.05 },
    dusk:  { zen: [0.055, 0.065, 0.21], hor: [0.92, 0.45, 0.33], glow: [2.00, 0.72, 0.34], sun: [1.0, 0.50, 0.28], sunI: 2.3, el: 0.05, az: Math.PI - 0.3, exposure: 1.08 },
    night: { zen: [0.004, 0.008, 0.020], hor: [0.020, 0.034, 0.060], glow: [0.04, 0.05, 0.07], sun: [0.55, 0.66, 0.92], sunI: 0.5, el: -0.35, az: 0.8, exposure: 2.2 },
@@ -43,7 +43,7 @@ export function resolveEnv(env) {
    if (time === 'day') {
       const warm = 1 - smoothstep(0.08, 0.7, el);
       sunCol = mixA(sunCol, [1.0, 0.72, 0.48], warm * 0.75);
-      hor = mixA(hor, [0.72, 0.66, 0.66], warm * 0.35);
+      hor = mixA(hor, [0.64, 0.60, 0.64], warm * 0.3);
       glow = mixA(glow, [1.5, 0.85, 0.5], warm * 0.6);
    }
    const greyify = (c, k, dark) => { const l = c[0] * 0.3 + c[1] * 0.55 + c[2] * 0.15; return mixA(c, [l * 0.98, l * 1.0, l * 1.04], k).map(v => v * dark); };
