@@ -259,7 +259,7 @@ void main() {
    float NdV = max(dot(N, V), 0.001);
    vec3 R = reflect(-V, N);
    R.y = abs(R.y);
-   float rough = mix(0.05, 0.22, smoothstep(20.0, 9000.0, dist)) + 0.06 * uSea;
+   float rough = mix(0.075, 0.22, smoothstep(20.0, 9000.0, dist)) + 0.06 * uSea;
    vec3 refl = textureLod(uEnvCube, R, rough * 6.0).rgb;
    float F = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
    F = min(F, 0.9);
@@ -273,7 +273,7 @@ void main() {
    float k = rough * rough * 0.5;
    float G = NdL / (NdL * (1.0 - k) + k) * NdV / (NdV * (1.0 - k) + k);
    float Fs = 0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-   vec3 spec = uSunColor * uSunI * min(D * G * Fs / (4.0 * NdV + 1e-3), 60.0) * uSunUp;
+   vec3 spec = uSunColor * uSunI * min(D * G * Fs / (4.0 * NdV + 1e-3), 24.0) * uSunUp;   // capped: uncapped GGX turns the near sea into a sparkle carpet
 
    // water body: deep/shallow from the baked depth map, sand showing through very shallow water
    float depth = depthAt(vPlane);

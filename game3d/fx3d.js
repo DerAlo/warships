@@ -465,7 +465,7 @@ void main() {
    float m = as * vA.y;                     // metres from the track centre line
    // track-aligned coordinates stretch the noise into streaks that follow the ship's path
    vec2 tc = vec2(vA.x * vA.y, vB.z);
-   float n = texture2D(uNoise, tc / vec2(9.0, 70.0)).a * 0.6 + texture2D(uNoise, tc / vec2(3.0, 16.0) + 0.37).r * 0.4;
+   float n = texture2D(uNoise, tc / vec2(9.0, 70.0)).a * 0.45 + texture2D(uNoise, tc / vec2(3.0, 16.0) + 0.37).r * 0.55;
    float foam, aer;
    if (vA.w < 0.5) {
       // turbulent band about a beam wide that widens slowly; foam breaks up into streaks with age
@@ -512,7 +512,7 @@ class Wakes {
       this.material = new THREE.ShaderMaterial({
          uniforms: Object.assign(uniforms, { uNoise: { value: noiseTex } }),
          vertexShader: WAKE_VERT, fragmentShader: WAKE_FRAG,
-         transparent: true, depthWrite: false,
+         transparent: true, depthWrite: false, side: THREE.DoubleSide,   // strips fold over in tight turns; culling punched holes
       });
       this.mesh = new THREE.Mesh(g, this.material);
       this.mesh.frustumCulled = false;
