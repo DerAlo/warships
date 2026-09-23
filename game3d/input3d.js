@@ -1,120 +1,129 @@
-// game/input3d.js — keyboard identical to the 2D game (game/input.js), but the mouse now
-// works like World of Warships instead of a drag-to-orbit scheme:
+// game3d/input3d.js — raw keyboard/mouse state for the WoWs-style 3D controls.
+// This module only REPORTS input (held keys, edge taps, mouse deltas, wheel notches); every
+// gameplay decision (telegraph stepping, hold-repeat, zoom levels, firing) lives in main3d.js.
 //
-//   • The mouse ALWAYS steers the camera/turrets, no button held -- exactly like WoWs: the
-//     reticle sits fixed at screen centre, moving the mouse turns the view (and the guns
-//     track wherever the reticle points), and the ship keeps sailing under that view. We
-//     accumulate raw `movementX/Y` deltas every frame (works with or without Pointer Lock)
-//     instead of tracking absolute cursor position, so the look never runs out of screen.
-//   • Pointer Lock is requested on the first click so the OS cursor disappears and the deltas
-//     stay unbounded (no clamping at the screen edge). It's opportunistic: browsers reject it
-//     without a preceding user gesture, and headless test runners don't grant it at all --
-//     both are silently ignored (movementX/Y still arrive from plain mousemove either way).
-//   • LEFT mouse (hold) fires the SELECTED weapon (still gated by turret traverse for the
-//     main battery in main3d). Weapon selection is on the NUMBER ROW: 1 = main battery,
-//     2 = secondaries, 3 = AA -- so aiming/looking never accidentally fires anything.
-//   • MOUSE WHEEL zooms the camera in/out; scrolled all the way in it engages the sniper
-//     scope (main3d.js decides the threshold -- this module only reports the raw zoom axis).
-//   • WASD/QE only steer the ship -- they never move the camera.
+// Key names are normalised to short ids ('W', 'SHIFT', 'TAB', '1', ...). Letters are read from
+// e.key (layout-aware) so a German QWERTZ keyboard's printed "Y" really is the Y action --
+// by physical code it would be KeyZ. Digits and special keys use e.code (Shift+1 = '!').
+const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H',
+   '1', '2', '3', '4', 'P', 'SHIFT', 'TAB', 'SPACE', 'CTRL']);
+
 export class Input3D {
    constructor(canvas) {
       this.canvas = canvas;
-      this.gameActive = false;
-      this.keys = new Set();
-      this.pressed = new Set();
-      // dx/dy: raw look deltas accumulated since the last endFrame() (movementX/Y sum, NOT
-      // cursor position -- there is no meaningful "cursor position" once the look is
-      // unbounded and the aim is always screen-centre, see main3d.js). down: left mouse
-      // (fire). wheel: per-frame zoom accumulator.
-      this.mouse = { dx: 0, dy: 0, down: false, wheel: 0 };
-      this._locked = false;
+      this.gameActive = false;   // main3d sets this; gates preventDefault + pointer lock requests
+      this.keys = new Set();     // currently held
+      this.pressed = new Set();  // went down since the last consumeTaps()/endFrame()
+      // dx/dy: raw movementX/Y summed since endFrame(). down: LMB (fire). right: RMB (free look).
+      // wheel: notches (+ = scroll toward the user = zoom out), fractional for touchpads.
+      this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false };
+      this.locked = false;
+      this._hadLock = false;
+      this.onLockLost = null;    // callback: pointer lock dropped (Esc / alt-tab) while playing
       this._bind();
    }
 
    _bind() {
       const onKey = (e, down) => {
-         const k = this._norm(e.key, e.code);
+         const k = this._norm(e);
+         if (!k) return;
          if (down) { if (!this.keys.has(k)) this.pressed.add(k); this.keys.add(k); }
          else this.keys.delete(k);
-         if (this.gameActive && [' ', 'w', 'a', 's', 'd', 'q', 'e', 'r', 't', 'f', 'm', 'p', 'x', 'escape', 'shift', '1', '2', '3'].includes((e.key || '').toLowerCase()))
-            e.preventDefault();
+         // Tab would move focus away from the canvas; Space/arrows would scroll the page.
+         if ((this.gameActive && GAME_KEYS.has(k)) || k === 'TAB') e.preventDefault();
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
       window.addEventListener('keyup', (e) => onKey(e, false));
-      window.addEventListener('blur', () => { this.keys.clear(); this.pressed.clear(); this.mouse.down = false; });
+      window.addEventListener('blur', () => {
+         this.keys.clear(); this.pressed.clear(); this.mouse.down = false; this.mouse.right = false;
+      });
 
       this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-      const requestLockSafe = () => {
-         if (!this.gameActive || document.pointerLockElement === this.canvas) return;
-         try {
-            const ret = this.canvas.requestPointerLock({ unadjustedMovement: true });
-            if (ret && typeof ret.catch === 'function') ret.catch(() => {}); // rejected without a user gesture -- fine, deltas still flow
-         } catch (e) { /* older browsers throw synchronously instead of rejecting -- same story */ }
-      };
-      document.addEventListener('pointerlockchange', () => { this._locked = document.pointerLockElement === this.canvas; });
+      document.addEventListener('pointerlockchange', () => {
+         const now = document.pointerLockElement === this.canvas;
+         if (this.locked && !now && this._hadLock && this.gameActive && this.onLockLost) this.onLockLost();
+         this.locked = now;
+         if (now) this._hadLock = true;
+      });
+      // Rejections (no user gesture, headless runners) are expected: deltas still arrive.
       document.addEventListener('pointerlockerror', () => {});
 
       this.canvas.addEventListener('mousedown', (e) => {
-         if (e.button === 0) { this.mouse.down = true; requestLockSafe(); }
+         if (e.button === 0) { this.mouse.down = true; this.mouse.clicked = true; }
+         if (e.button === 2) this.mouse.right = true;
+         this.requestLock();
+      });
+      window.addEventListener('mouseup', (e) => {
+         if (e.button === 0) this.mouse.down = false;
+         if (e.button === 2) this.mouse.right = false;
       });
       window.addEventListener('mousemove', (e) => {
          this.mouse.dx += e.movementX || 0;
          this.mouse.dy += e.movementY || 0;
       });
-      window.addEventListener('mouseup', (e) => {
-         if (e.button === 0) this.mouse.down = false;
-      });
-      // Wheel zoom: sign of deltaY, consumed each frame by main3d.js.
       this.canvas.addEventListener('wheel', (e) => {
          e.preventDefault();
-         this.mouse.wheel += Math.sign(e.deltaY);
+         // Normalise the three deltaModes to "notches": a classic wheel click is ~100px or 3 lines.
+         const d = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY : e.deltaY / 100;
+         this.mouse.wheel += Math.max(-3, Math.min(3, d));
       }, { passive: false });
-
-      // Touch: single finger fires (no look-around on touch -- there's no analogue for
-      // relative mouse deltas without a drag gesture, and drag is reserved for nothing here
-      // since look no longer needs a held button. Touch users get tap-to-fire only.)
-      this.canvas.addEventListener('touchstart', () => { this.mouse.down = true; }, { passive: true });
-      this.canvas.addEventListener('touchend', () => { this.mouse.down = false; });
    }
 
-   _norm(key, code) {
-      if (code) {
-         if (code === 'KeyW') return 'W';
-         if (code === 'KeyA') return 'A';
-         if (code === 'KeyD') return 'D';
-         if (code === 'KeyS') return 'S';
-         if (code === 'KeyQ') return 'Q';
-         if (code === 'KeyE') return 'E';
-         if (code === 'KeyF') return 'F';
-         if (code === 'KeyT') return 'T';
-         if (code === 'KeyR') return 'R';
-         if (code === 'KeyM') return 'M';
-         if (code === 'KeyX') return 'X';
-         if (code === 'Digit1') return '1';
-         if (code === 'Digit2') return '2';
-         if (code === 'Digit3') return '3';
-         if (code === 'KeyP' || code === 'Escape') return 'P';
-         if (code === 'ShiftLeft' || code === 'ShiftRight') return 'SHIFT';
-         if (code === 'Space') return 'SPACE';
-         if (code === 'ArrowUp') return 'W';
-         if (code === 'ArrowDown') return 'S';
-         if (code === 'ArrowLeft') return 'A';
-         if (code === 'ArrowRight') return 'D';
+   requestLock() {
+      if (!this.gameActive || document.pointerLockElement === this.canvas) return;
+      try {
+         const ret = this.canvas.requestPointerLock({ unadjustedMovement: true });
+         if (ret && typeof ret.catch === 'function') {
+            // unadjustedMovement is unsupported on some platforms -- retry without it.
+            ret.catch(() => {
+               try {
+                  const r2 = this.canvas.requestPointerLock();
+                  if (r2 && typeof r2.catch === 'function') r2.catch(() => {});
+               } catch (err) { /* ignore */ }
+            });
+         }
+      } catch (err) { /* older browsers throw synchronously */ }
+   }
+
+   releaseLock() {
+      this._hadLock = false; // an intentional release must not trigger the pause callback
+      if (document.pointerLockElement === this.canvas) {
+         try { document.exitPointerLock(); } catch (err) { /* ignore */ }
       }
-      return key.toUpperCase();
    }
 
-   // Clear ONLY the edge-triggered tap set. main3d.js calls this after EACH fixed sim step so
-   // a key pressed once fires exactly once per step instead of re-firing on every step of a
-   // multi-step frame (the old bug: P double-toggled, SPACE logged "Anker fällt!" twice).
-   // endFrame() still clears dx/dy/wheel once per animation frame as before.
-   consumeTaps() { this.pressed.clear(); }
+   _norm(e) {
+      const code = e.code || '', key = e.key || '';
+      switch (code) {
+         case 'ShiftLeft': case 'ShiftRight': return 'SHIFT';
+         case 'ControlLeft': case 'ControlRight': return 'CTRL';
+         case 'Tab': return 'TAB';
+         case 'Space': return 'SPACE';
+         case 'Escape': return 'P';
+         case 'ArrowUp': return 'W';
+         case 'ArrowDown': return 'S';
+         case 'ArrowLeft': return 'A';
+         case 'ArrowRight': return 'D';
+         case 'Digit1': case 'Numpad1': return '1';
+         case 'Digit2': case 'Numpad2': return '2';
+         case 'Digit3': case 'Numpad3': return '3';
+         case 'Digit4': case 'Numpad4': return '4';
+         default: break;
+      }
+      if (key.length === 1) {
+         const k = key.toUpperCase();
+         if (k >= 'A' && k <= 'Z') return k;
+      }
+      // Fallback for synthetic events without e.key: physical code.
+      if (code.startsWith('Key')) return code.slice(3);
+      return key ? key.toUpperCase() : null;
+   }
 
-   endFrame() { this.pressed.clear(); this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0; }
+   // Edge taps are consumed once per fixed sim step so a key fires exactly once even on a
+   // multi-step frame; endFrame() additionally clears the per-frame mouse accumulators.
+   consumeTaps() { this.pressed.clear(); this.mouse.clicked = false; }
+   endFrame() { this.consumeTaps(); this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0; }
 
    down(k) { return this.keys.has(k); }
    tapped(k) { return this.pressed.has(k); }
-   helmAxis() { let h = 0; if (this.down('A') || this.down('Q')) h -= 1; if (this.down('D') || this.down('E')) h += 1; return h; }
-   throttleAxis() { let t = 0; if (this.down('W')) t += 1; if (this.down('S')) t -= 1; return t; }
 }
