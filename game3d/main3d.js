@@ -921,9 +921,12 @@ function buildUi(dt) {
    const live = turretCache.filter(t => t.state !== 'dead');
    const anyReady = live.some(t => t.state === 'ready');
    const loaded = live.filter(t => t.reload <= 0).length;
-   const minRl = live.length ? Math.min(...live.map(t => t.reload)) : 0;
+   // soonest reload among mounts actually reloading (blocked mounts read 0 and would mask it)
+   const rl = live.filter(t => t.reload > 0).map(t => t.reload);
+   const minRl = rl.length ? Math.min(...rl) : 0;
    const rlMax = live[0]?.reloadMax || 1;
-   ui.reload = { anyReady, loaded, total: live.length, left: minRl, frac: 1 - clamp01(minRl / rlMax) };
+   const ready = live.filter(t => t.state === 'ready').length, trav = live.filter(t => t.state === 'traverse').length;
+   ui.reload = { anyReady, loaded, ready, trav, total: live.length, left: minRl, frac: 1 - clamp01(minRl / rlMax) };
    // lead ticks: pixels per knot of perpendicular target speed at this range
    const tf = flightTime(Math.min(d, aim.gunRange));
    ui.pxPerKn = d > 1 ? (KN * tf / d) * ui.pxPerRad : 0;

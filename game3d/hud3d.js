@@ -142,7 +142,7 @@ export class Overlay3D {
          g.fillStyle = ui.ammo === 'HE' ? '#ffa45a' : '#9fd4ff';
          g.fillText(ui.ammo === 'HE' ? 'HE' : 'AP', cx - 40, ty);
          g.font = '12px Consolas, monospace'; g.fillStyle = dim;
-         g.fillText(r.anyReady ? `${r.loaded}/${r.total}` : (r.left || 0).toFixed(1).replace('.', ',') + ' s', cx - 40, ty + 15);
+         g.fillText(r.anyReady ? `${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? r.left.toFixed(1).replace('.', ',') + ' s' : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Winkel' : '—', cx - 40, ty + 15);
       } else {
          g.font = 'bold 13px Segoe UI, sans-serif'; g.fillStyle = '#b6f0c0';
          g.fillText('TORPEDO', cx - 40, ty);
@@ -172,6 +172,10 @@ export class Overlay3D {
       const L = 58, B = 12;
       g.save();
       g.translate(cx, cy);
+      g.fillStyle = 'rgba(6,14,24,0.55)'; g.strokeStyle = 'rgba(160,190,220,0.25)'; g.lineWidth = 1;
+      g.beginPath(); g.arc(0, 0, 38, 0, TAU); g.fill(); g.stroke();
+      // tick at the top = camera direction
+      g.beginPath(); g.moveTo(0, -38); g.lineTo(0, -32); g.stroke();
       // local frame: bow along +x; screen up is canvas angle -90deg
       g.rotate(rot - Math.PI / 2);
       g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 3;
@@ -373,13 +377,15 @@ export class Overlay3D {
       g.fillStyle = 'rgba(3,9,16,0.9)';
       g.fillRect(0, 0, W, H);
       // keep clear of the top bar (score) and the bottom panels
-      const size = Math.max(200, Math.min(W - 80, H - 92 - 128));
+      const size = Math.max(200, Math.min(W - 80, H - 92 - 150));
       const x0 = Math.round((W - size) / 2), y0 = 92;
       paintMap(g, ui.world, x0, y0, size, { ...ui.mapOpts, big: true });
-      g.fillStyle = '#e8f2ff'; g.font = 'bold 18px Segoe UI, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'bottom';
-      g.fillText('TAKTISCHE KARTE', x0, y0 - 10);
-      g.font = '12px Segoe UI, sans-serif'; g.fillStyle = 'rgba(200,220,240,0.7)'; g.textAlign = 'center'; g.textBaseline = 'top';
-      g.fillText('M – schließen   ·   gestrichelt: Entdeckungsradius   ·   Kreis: Hauptbatterie', x0 + size / 2, y0 + size + 7);
+      // title + legend under the map: the HTML score box covers the strip above it
+      g.textBaseline = 'top';
+      g.fillStyle = '#e8f2ff'; g.font = 'bold 15px Segoe UI, sans-serif'; g.textAlign = 'left';
+      g.fillText('TAKTISCHE KARTE', x0, y0 + size + 7);
+      g.font = '12px Segoe UI, sans-serif'; g.fillStyle = 'rgba(200,220,240,0.7)'; g.textAlign = 'right';
+      g.fillText('M – schließen  ·  gestrichelt: Entdeckung  ·  Kreis: Hauptbatterie', x0 + size, y0 + size + 9);
       g.restore();
    }
 }

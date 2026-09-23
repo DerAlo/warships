@@ -367,7 +367,8 @@ export class Hud {
       const [he, ap, tp] = this._wslots;
       if (!he) return;
       const r = ui.reload || {};
-      const mainTxt = r.anyReady ? `bereit ${r.loaded}/${r.total}` : r.loaded > 0 ? `schwenkt ${r.loaded}/${r.total}` : (r.left || 0).toFixed(1) + ' s';
+      const mainTxt = r.anyReady ? `bereit ${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? `lädt ${r.left.toFixed(1).replace('.', ',')} s`
+         : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Schusswinkel' : '—';
       for (const [el, type] of [[he, 'HE'], [ap, 'AP']]) {
          const sel = ui.mode === 'guns' && ui.ammo === type;
          el.classList.toggle('sel', sel);
