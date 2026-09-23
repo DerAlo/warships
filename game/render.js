@@ -1,14 +1,15 @@
 // game/render.js — the whole visual layer: sea, obstacles, ships (2.5D), projectiles, FX, HUD canvases.
 // Draw order: ocean -> obstacles -> wakes -> torpedoes -> shell shadows -> ships -> smoke ->
 //             effects (explosions/splashes/fire) -> shells (in air) -> AA tracers -> damage numbers -> reticle.
-import { add, sub, scale, fromAngle, angleOf, clamp, clamp01, TAU, DEG } from './utils.js';
-import { WORLD, PALETTE, TUNE, SHIPS } from './config.js';
+import { add, sub, scale, fromAngle, angleOf, angleDelta, clamp, clamp01, dist, TAU, DEG } from './utils.js';
+import { WORLD, PALETTE, VISION, HANDLING } from './config.js';
 
-const DIMS = {
-   DD: { L: 120, beam: 13 }, LC: { L: 170, beam: 18 }, HC: { L: 205, beam: 22 },
-   EB: { L: 251, beam: 36 }, Bismarck: { L: 251, beam: 36 },
-};
-const dimsOf = (cls) => DIMS[cls] || { L: 180, beam: 20 };
+// hull footprint straight from the ship class (config.js L/beam)
+const dimsOf = (s) => ({ L: s.cfg.L || 180, beam: s.cfg.beam || 20 });
+// Enemies are drawn only while spotted; hidden ones leave a fading "last known position" ghost.
+const shown = (s) => s.alive && (s.side !== 'enemy' || s.visible);
+const ghostAge = (world, s) => (s.alive && s.side === 'enemy' && !s.visible && s.lastKnown) ? world.time - s.lastKnown.t : Infinity;
+const HIT_COL = { CITADEL: '#ffd23a', PEN: '#ffffff', HE: '#ffae5a', RICOCHET: '#8fb0cc', OVERPEN: '#d0d6de', TORP: '#7fe0ff' };
 
 export class Renderer {
    constructor(sceneCanvas, fxCanvas, cam, ocean) {
@@ -38,12 +39,15 @@ export class Renderer {
       this._wakes(ctx, world);
       this._torpedoes(ctx, world);
       this._shellShadows(ctx, world);
-      for (const s of world.ships) if (s.alive && cam.visible(s.pos, 400)) this._ship(ctx, world, s);
+      this._ghosts(ctx, world);
+      for (const s of world.ships) if (shown(s) && cam.visible(s.pos, 400)) this._ship(ctx, world, s);
       this._smoke(ctx, world);
       this._effects(ctx, world);
       this._shells(ctx, world);
       this._aaTracers(ctx, world);
       this._damageNumbers(ctx, world);
+      this._hitMarks(ctx, world, dt);
+      this._torpFan(ctx, world);
       this._reticle(ctx, world);
 
       // fx layer: screen-space vignette pulse when under heavy fire
@@ -121,7 +125,7 @@ export class Renderer {
    _wakes(ctx, world) {
       const cam = this.cam;
       for (const s of world.ships) {
-         if (!s.alive || !cam.visible(s.pos, 500)) continue;
+         if (!shown(s) || !cam.visible(s.pos, 500)) continue;
          const sp = Math.abs(s.speed);
          if (sp < 2) continue;
          const k = clamp01(sp / 20);
@@ -154,7 +158,7 @@ export class Renderer {
    // ================= SHIPS =================
    _ship(ctx, world, s) {
       const cam = this.cam;
-      const d = dimsOf(s.cls);
+      const d = dimsOf(s);
       const z = cam.zoom;
       const c = cam.w2s(s.pos);
       const L = d.L * z, B = d.beam * z;
@@ -291,6 +295,107 @@ export class Renderer {
             ctx.restore();
          }
       }
+   }
+
+   // ================= GHOSTS (last known position of hidden enemies) =================
+   _ghosts(ctx, world) {
+      const cam = this.cam;
+      for (const s of world.ships) {
+         const age = ghostAge(world, s);
+         if (age > VISION.ghostTime) continue;
+         const lk = s.lastKnown;
+         if (!cam.visible(lk.pos, 300)) continue;
+         const d = dimsOf(s);
+         const c = cam.w2s(lk.pos);
+         const L = d.L * cam.zoom, B = d.beam * cam.zoom;
+         const a = 0.55 * (1 - age / VISION.ghostTime) + 0.1;
+         ctx.save();
+         ctx.translate(c.x, c.y);
+         ctx.rotate(lk.heading);
+         ctx.globalAlpha = a;
+         ctx.setLineDash([4, 4]);
+         ctx.strokeStyle = '#ff9a8a';
+         ctx.lineWidth = 1.5;
+         hullPath(ctx, L, B);
+         ctx.stroke();
+         ctx.setLineDash([]);
+         // course arrow: where it was heading when it vanished
+         ctx.beginPath(); ctx.moveTo(L * 0.55, 0); ctx.lineTo(L * 0.9, 0); ctx.stroke();
+         ctx.restore();
+         ctx.globalAlpha = a;
+         ctx.font = '10px "SF Mono", monospace';
+         ctx.textAlign = 'center';
+         ctx.fillStyle = '#ffb4a8';
+         ctx.fillText(`? ${s.name} · ${Math.round(age)} s`, c.x, c.y - L * 0.5 - 8);
+         ctx.globalAlpha = 1;
+      }
+      // secondary focus marker (RMB)
+      const p = world.player;
+      const f = p && p.secFocus;
+      if (f && f.alive && f.visible) {
+         const c = cam.w2s(f.pos);
+         const r = dimsOf(f).L * cam.zoom * 0.62 + 6;
+         ctx.strokeStyle = 'rgba(255,212,121,0.8)';
+         ctx.lineWidth = 1.5;
+         ctx.setLineDash([6, 5]);
+         ctx.beginPath(); ctx.arc(c.x, c.y, r, world.time * 0.8, world.time * 0.8 + TAU); ctx.stroke();
+         ctx.setLineDash([]);
+      }
+   }
+
+   // ================= HIT MARKERS (player hits, fed by hud.onEvents) =================
+   _hitMarks(ctx, world, dt) {
+      const marks = world._hitMarks;
+      if (!marks || !marks.length) return;
+      const cam = this.cam;
+      for (let i = marks.length - 1; i >= 0; i--) {
+         const m = marks[i];
+         m.age += dt;
+         if (m.age > 0.7) { marks.splice(i, 1); continue; }
+         const c = cam.w2s(m.pos);
+         const t = m.age / 0.7;
+         const r = (m.big ? 14 : 9) * (1 + t * 0.6);
+         ctx.globalAlpha = 1 - t;
+         ctx.strokeStyle = HIT_COL[m.outcome] || '#fff';
+         ctx.lineWidth = m.big ? 3 : 2;
+         ctx.beginPath();
+         ctx.moveTo(c.x - r, c.y - r); ctx.lineTo(c.x - r * 0.35, c.y - r * 0.35);
+         ctx.moveTo(c.x + r, c.y - r); ctx.lineTo(c.x + r * 0.35, c.y - r * 0.35);
+         ctx.moveTo(c.x - r, c.y + r); ctx.lineTo(c.x - r * 0.35, c.y + r * 0.35);
+         ctx.moveTo(c.x + r, c.y + r); ctx.lineTo(c.x + r * 0.35, c.y + r * 0.35);
+         ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+   }
+
+   // ================= TORPEDO FAN PREVIEW (hold T) =================
+   _torpFan(ctx, world) {
+      const p = world.player;
+      if (!world._torpPreview || !p || !p.alive || !p.cfg.torp) return;
+      const cam = this.cam;
+      const bearing = angleOf(p.aim);
+      const l = p.launcherFor(bearing);
+      const T = p.cfg.torp;
+      const origin = l ? p.launcherPos(l) : p.pos;
+      const ready = l && l.cd <= 0;
+      const col = !l ? 'rgba(255,90,80,0.55)' : ready ? 'rgba(124,255,154,0.75)' : 'rgba(170,190,210,0.5)';
+      const o = cam.w2s(origin);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash(ready ? [10, 6] : [3, 7]);
+      for (const a of p.torpFan(bearing)) {
+         const e = cam.w2s(add(origin, fromAngle(a, T.range)));
+         ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      const lbl = !l ? 'Kein Werfer — Breitseite zeigen' : ready ? `Torpedos ${l.label} · ${p.torpSpread === 'wide' ? 'weit' : 'eng'}` : `${l.label} lädt: ${Math.ceil(l.cd)} s`;
+      const tip = cam.w2s(add(origin, fromAngle(bearing, Math.min(T.range, 700))));
+      ctx.font = 'bold 11px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#000';
+      ctx.fillText(lbl, tip.x + 1, tip.y - 11);
+      ctx.fillStyle = col;
+      ctx.fillText(lbl, tip.x, tip.y - 12);
    }
 
    // ================= SMOKE =================
@@ -513,7 +618,9 @@ export class Renderer {
       // aim point (mouse)
       if (world._aimPoint) {
          const a = cam.w2s(world._aimPoint);
-         ctx.strokeStyle = 'rgba(255,212,121,0.9)';
+         const range = dist(p.pos, world._aimPoint);
+         const outOfRange = range > p.cfg.main.range;
+         ctx.strokeStyle = outOfRange ? 'rgba(255,90,80,0.9)' : 'rgba(255,212,121,0.9)';
          ctx.lineWidth = 1.5;
          const r = 10;
          ctx.beginPath();
@@ -527,6 +634,32 @@ export class Renderer {
          ctx.setLineDash([3, 6]);
          ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(a.x, a.y); ctx.stroke();
          ctx.setLineDash([]);
+         // loaded ammo + range + one pip per turret (green: loaded & on target, amber: loaded
+         // but still training / out of arc, grey: reloading)
+         const ap = p.ammo === 'AP';
+         ctx.font = 'bold 11px "SF Mono", monospace';
+         ctx.textAlign = 'left';
+         ctx.fillStyle = '#000';
+         ctx.fillText(p.ammo || '', a.x + 15, a.y - 3);
+         ctx.fillStyle = ap ? '#8fc8ff' : '#ffae5a';
+         ctx.fillText(p.ammo || '', a.x + 14, a.y - 4);
+         ctx.font = '10px "SF Mono", monospace';
+         ctx.fillStyle = outOfRange ? '#ff6a5a' : 'rgba(207,232,255,0.85)';
+         ctx.fillText((range / 1000).toFixed(1) + ' km' + (outOfRange ? ' ✕' : ''), a.x + 14, a.y + 9);
+         const n = p.turrets.length;
+         for (let i = 0; i < n; i++) {
+            const t = p.turrets[i];
+            const x = a.x - (n - 1) * 5 + i * 10, y = a.y + 18;
+            ctx.fillStyle = t.cd > 0 ? 'rgba(140,150,160,0.6)' : t.aligned ? '#7CFF9A' : '#ffd479';
+            if (t.cd > 0) {
+               // reload progress as a pie
+               ctx.beginPath(); ctx.moveTo(x, y);
+               ctx.arc(x, y, 3.5, -Math.PI / 2, -Math.PI / 2 + TAU * clamp01(1 - t.cd / (t.cdMax || 1)));
+               ctx.closePath(); ctx.fill();
+               ctx.strokeStyle = 'rgba(140,150,160,0.6)'; ctx.lineWidth = 1;
+               ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.stroke();
+            } else { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.fill(); }
+         }
       }
    }
 
@@ -562,7 +695,14 @@ export class Renderer {
       }
       // ships
       for (const s of world.ships) {
-         if (!s.alive) continue;
+         const age = ghostAge(world, s);
+         if (age <= VISION.ghostTime) {
+            g.strokeStyle = `rgba(255,110,90,${0.25 + 0.5 * (1 - age / VISION.ghostTime)})`;
+            g.lineWidth = 1;
+            g.beginPath(); g.arc(mx(s.lastKnown.pos.x), my(s.lastKnown.pos.y), 3.5, 0, TAU); g.stroke();
+            continue;
+         }
+         if (!shown(s)) continue;
          const x = mx(s.pos.x), y = my(s.pos.y);
          g.save();
          g.translate(x, y);
@@ -618,7 +758,7 @@ export class Renderer {
       g.closePath(); g.fill();
       // enemy bearings
       for (const s of world.ships) {
-         if (!s.alive || s.side === 'player') continue;
+         if (!shown(s) || s.side === 'player' || !p) continue;
          const a = angleOf(sub(s.pos, p.pos)) - heading;
          const x = cx + Math.cos(a) * (W / 2 - 20);
          const y = cy + Math.sin(a) * (H / 2 - 18);

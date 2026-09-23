@@ -7,26 +7,44 @@ import { WORLD } from '../game/config.js';
 
 const DT = 1 / 60;
 
-// ---- competent player controller: lead the target, hold range, evade under fire, smoke when hurt ----
+// ---- competent player controller: lead the target, pick AP/HE, hold range, evade under fire,
+// use consumables like a human would (with reaction delays), launch torpedoes when abeam ----
 function controlPlayer(w, dt) {
    const p = w.player;
    if (!p.alive) return;
+   // the player only knows what is spotted; a hidden enemy is chased at its last known position
    let target = null, bestD = Infinity;
    for (const b of w.bots) {
       if (!b.alive) continue;
-      const d = dist(p.pos, b.pos);
+      const known = b.visible ? b.pos : (b.lastKnown && w.time - b.lastKnown.t < 15 ? b.lastKnown.pos : null);
+      if (!known) continue;
+      const d = dist(p.pos, known) + (b.visible ? 0 : 800);
       if (d < bestD) { bestD = d; target = b; }
    }
-   if (!target) return;
+   if (!target) {
+      // nothing spotted: sweep toward the nearest enemy's rough area (a player reads the minimap)
+      for (const b of w.bots) if (b.alive && dist(p.pos, b.pos) < bestD) { bestD = dist(p.pos, b.pos); target = b; }
+      if (!target) return;
+   }
+   const tPos = target.visible ? target.pos : (target.lastKnown ? target.lastKnown.pos : target.pos);
+   const tVel = target.visible ? target.vel : { x: 0, y: 0 };
+   bestD = dist(p.pos, tPos);
 
    // --- aim with lead: predict where the target will be when the shell arrives ---
-   const vShell = p.cfg.main.vShell || 650;
+   const vShell = p.mainShell().vShell || 650;
    const tof = bestD / vShell;
-   const predX = target.pos.x + target.vel.x * tof;
-   const predY = target.pos.y + target.vel.y * tof;
-   const aimBearing = angleOf({ x: predX - p.pos.x, y: predY - p.pos.y });
+   const pred = { x: tPos.x + tVel.x * tof, y: tPos.y + tVel.y * tof };
+   const aimBearing = angleOf({ x: pred.x - p.pos.x, y: pred.y - p.pos.y });
    p.aimBearing = aimBearing;
    p.aim = { x: Math.cos(aimBearing), y: Math.sin(aimBearing) };
+
+   // --- ammo: HE for destroyers and bow-on targets, AP for broadsides (10 s hysteresis) ---
+   p._ammoCd = (p._ammoCd || 0) - dt;
+   if (target.visible && p._ammoCd <= 0) {
+      const rel = Math.abs(Math.sin(target.heading - angleOf(sub(target.pos, p.pos))));
+      const want = target.cls === 'DD' || rel < 0.45 ? 'HE' : 'AP';
+      if (p.setAmmo(want)) p._ammoCd = 10;
+   }
 
    // --- evasion: if under fire, swing hard away from the threat; else cross broadside ---
    const threat = w.nearestThreatPos(p);
@@ -88,24 +106,24 @@ function controlPlayer(w, dt) {
    p.helm = clamp(angleDelta(p.heading, want) * 2.2, -1, 1);
    p.throttleIn = bestD > 1500 ? 1 : bestD < 1000 ? -0.3 : 0.5;
 
-   // --- smoke when critically hurt ---
-   if (p.hp < p.maxHP * 0.25 && p.smoke.cd <= 0 && !p.smoke.active) {
-      p.smoke.active = true; p.smoke.t = 8; p.smoke.cd = 33;
+   // --- consumables, gated by a human reaction delay ---
+   p._consCd = (p._consCd || 0) - dt;
+   if (p._consCd <= 0) {
+      const burning = p.fires.length + 2 * p.floods.length;
+      if (burning >= 2 && p.useConsumable('dc')) p._consCd = 1.5;
+      else if (p.hp < p.maxHP * 0.6 && p.healable > p.maxHP * 0.12 && p.useConsumable('repair')) p._consCd = 1.5;
+      else if (p.hp < p.maxHP * 0.3 && underFire && p.useConsumable('smoke')) p._consCd = 1.5;
+      else if (bestD > 1800 && p.useConsumable('boost')) p._consCd = 1.5;
    }
 
-   // --- repair fires/floods with a human-like reaction delay (repairAll() itself has no
-   // cooldown -- a real player is limited by how fast they can notice+press R, not by game
-   // rules, so gate this the same way to avoid a superhuman instant-heal bot) ---
-   if ((p.fires.length || p.floods.length) && p._repairCd === undefined) p._repairCd = 0;
-   if (p._repairCd > 0) p._repairCd -= dt;
-   if ((p.fires.length || p.floods.length) && p._repairCd <= 0) {
-      p.repairAll();
-      p._repairCd = 2.5; // reaction + re-notice delay before the next repair press
+   // --- fire: full salvo at the led aim point (blind into smoke at the ghost, too) ---
+   if (bestD < p.cfg.main.range && p.fireTimer <= 0) p.fireMain(w, null, p.aim, { aimPoint: pred });
+   // --- torpedoes when the target is abeam and close ---
+   if (p.cfg.torp && target.visible && bestD < p.cfg.torp.range * 0.7) {
+      const l = p.launcherFor(aimBearing);
+      if (l && l.cd <= 0) p.fireTorpedo(w, null, p.aim);
    }
-
-   // --- fire ---
-   if (bestD < p.cfg.main.range && p.fireTimer <= 0) p.fireMain(w, target, p.aim);
-   if (p.cfg.sec && bestD < p.cfg.sec.range && p.secTimer <= 0) p.fireSecondary(w, target, p.aim);
+   // secondaries and AA fire on their own (ship.js)
 }
 
 function play(difficulty, maxSec = 600) {
