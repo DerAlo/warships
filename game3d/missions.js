@@ -46,8 +46,39 @@ function safePos(w, p, margin = 1.3) {
    q.x = Math.max(-lim, Math.min(lim, q.x)); q.y = Math.max(-lim, Math.min(lim, q.y));
    return q;
 }
+// Reinforcements (minDist): slide the spawn point away from the nearest opposing ship so nothing
+// materialises inside torpedo range of the player.
+function keepAway(w, side, pos, minDist) {
+   const q = { x: pos.x, y: pos.y }, lim = w.arena - 700;
+   for (let k = 0; k < 4; k++) {
+      let near = null, nd = Infinity;
+      for (const s of w.ships) {
+         if (!s.alive || s.side === side) continue;
+         const d = Math.hypot(s.pos.x - q.x, s.pos.y - q.y);
+         if (d < nd) { nd = d; near = s; }
+      }
+      if (!near || nd >= minDist) break;
+      let dx = q.x - near.pos.x, dy = q.y - near.pos.y;
+      const l = Math.hypot(dx, dy) || 1;
+      dx /= l; dy /= l;
+      q.x = Math.max(-lim, Math.min(lim, near.pos.x + dx * minDist));
+      q.y = Math.max(-lim, Math.min(lim, near.pos.y + dy * minDist));
+      // squeezed against the border: swing sideways along it
+      if (Math.hypot(q.x - near.pos.x, q.y - near.pos.y) < minDist * 0.9) { q.x = Math.max(-lim, Math.min(lim, q.x - dy * minDist * 0.6)); q.y = Math.max(-lim, Math.min(lim, q.y + dx * minDist * 0.6)); }
+   }
+   return q;
+}
 function add(w, cls, side, pos, heading, opts = {}) {
    const ai = { ...(opts.ai || {}) };
+   if (opts.minDist) {
+      pos = keepAway(w, side, pos, opts.minDist);
+      // face the enemy centre of mass on arrival
+      const foes = w.ships.filter(s => s.alive && s.side !== side);
+      if (foes.length) {
+         const cx = foes.reduce((a, s) => a + s.pos.x, 0) / foes.length, cy = foes.reduce((a, s) => a + s.pos.y, 0) / foes.length;
+         heading = Math.atan2(cy - pos.y, cx - pos.x);
+      }
+   }
    const ship = w.spawn(cls, side, safePos(w, pos), heading, {
       telegraph: opts.isPlayer ? 2 : 3, ...opts, ai,
       name: opts.name || (opts.isPlayer ? SHIPS[cls].name : nextName(w, cls, side)),
@@ -160,8 +191,8 @@ const DEFS = [
                S.phase = 2;
                later(S, w.time + 6, () => {
                   w.message('Alarm! Britische Zerstörer greifen aus Osten an. Z 25 kommt zur Unterstützung.', 'warn');
-                  add(w, 'Jervis', 'enemy', P(8200, -4500), Math.PI * 0.9, {});
-                  add(w, 'Jervis', 'enemy', P(8200, 4200), -Math.PI * 0.9, {});
+                  add(w, 'Jervis', 'enemy', P(8200, -4500), Math.PI * 0.9, { minDist: 10000 });
+                  add(w, 'Jervis', 'enemy', P(8200, 4200), -Math.PI * 0.9, { minDist: 10000 });
                   add(w, 'Z23', 'player', P(-7000, 1500), 0, { name: 'Z 25' });
                   objective(w, 'dds', 'Wehren Sie den Zerstörerangriff ab (0/2)');
                   w.score = { kind: 'count', player: 0, enemy: 0, target: 2 };
@@ -283,26 +314,25 @@ const DEFS = [
          S.transports = [];
          for (let i = 0; i < 4; i++) {
             const t = add(w, 'Transport', 'player', P(-10500 - i * 650, 1100 + (i % 2) * 220), 0,
-               { telegraph: 4, speedKn: 12, nation: 'de', ai: { route, routeIdx: 0, passive: true, convoy: true } });
+               { telegraph: 4, speedKn: 12, nation: 'de', hpMult: 1.6, ai: { route, routeIdx: 0, passive: true, convoy: true } });
             S.transports.push(t);
          }
          add(w, shipKey, 'player', P(-9300, 2300), 0, { isPlayer: true });
          add(w, 'Z23', 'player', P(-9000, -300), 0, { ai: { escortId: S.transports[0].id } });
          add(w, 'Z23', 'player', P(-11800, 2300), 0, { ai: { escortId: S.transports[3].id } });
+         add(w, 'Nuernberg', 'player', P(-10200, -700), 0, { ai: { escortId: S.transports[1].id } });
          // wave 1 waits in the east
          add(w, 'Fiji', 'enemy', P(8500, 2500), Math.PI, { ai: { huntId: S.transports[0].id } });
          add(w, 'Jervis', 'enemy', P(9200, 4200), Math.PI, { ai: { huntId: S.transports[1].id } });
-         add(w, 'Jervis', 'enemy', P(9500, -2800), Math.PI, { ai: { huntId: S.transports[2].id } });
          later(S, 150, () => {
             w.message('Zweite Angriffswelle aus Nordosten gemeldet!', 'warn');
-            add(w, 'Norfolk', 'enemy', P(10800, -5200), Math.PI * 0.85, { ai: { huntId: S.transports[1].id } });
-            add(w, 'Jervis', 'enemy', P(11000, -4000), Math.PI * 0.85, { ai: { huntId: S.transports[3].id } });
-            add(w, 'Jervis', 'enemy', P(11200, -6200), Math.PI * 0.85, {});
+            add(w, 'Norfolk', 'enemy', P(10800, -5200), Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[1].id } });
+            add(w, 'Jervis', 'enemy', P(11000, -4000), Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[3].id } });
          });
          later(S, 330, () => {
             w.message('Dritte Welle: Kreuzer aus Südosten!', 'warn');
-            add(w, 'Fiji', 'enemy', P(10800, 5200), -Math.PI * 0.85, { ai: { huntId: S.transports[2].id } });
-            add(w, 'Norfolk', 'enemy', P(11200, 6400), -Math.PI * 0.85, {});
+            add(w, 'Fiji', 'enemy', P(10800, 5200), -Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[2].id } });
+            add(w, 'Jervis', 'enemy', P(11200, 6400), -Math.PI * 0.85, { minDist: 11000 });
          });
          objective(w, 'arrive', 'Mindestens 2 Frachter erreichen den Ausgang (0/2)');
          objective(w, 'lose', 'Nicht mehr als 2 Frachter verlieren (0 verloren)');
@@ -363,8 +393,8 @@ const DEFS = [
          S.pow = add(w, 'KGV', 'enemy', P(7500, 6700), -2.35, { name: 'HMS Prince of Wales', telegraph: 4, ai: { retreatBelow: 0.35, retreatTo: P(12500, 12500) } });
          later(S, 210, () => {
             w.message('Norfolk und Suffolk schließen von achtern auf!', 'warn');
-            add(w, 'Norfolk', 'enemy', P(-12000, -4800), 0.2, { name: 'HMS Norfolk' });
-            add(w, 'Norfolk', 'enemy', P(-12200, -2600), 0.1, { name: 'HMS Suffolk' });
+            add(w, 'Norfolk', 'enemy', P(-12000, -4800), 0.2, { name: 'HMS Norfolk', minDist: 13000 });
+            add(w, 'Norfolk', 'enemy', P(-12200, -2600), 0.1, { name: 'HMS Suffolk', minDist: 13000 });
          });
          objective(w, 'hood', 'Versenken Sie HMS Hood');
          objective(w, 'pow', 'Versenken oder vertreiben Sie HMS Prince of Wales');
@@ -406,22 +436,21 @@ const DEFS = [
          ]);
          const S = w._script;
          const p = add(w, pickShip(this, shipKey), 'player', P(0, 0), 0.8, { isPlayer: true, telegraph: 2 });
-         p.hp = Math.round(p.maxHP * 0.8);
+         p.hp = Math.round(p.maxHP * 0.85);
          p.modules.rudder = 60;           // jammed: DC (R) frees it early
          p.rudder = -0.55; p.rudderCmd = -1;
-         S.kgv = add(w, 'KGV', 'enemy', P(-7600, -8200), 0.9, { name: 'King George V', telegraph: 4 });
-         S.rodney = add(w, 'Rodney', 'enemy', P(-9200, -6400), 0.8, { name: 'HMS Rodney', telegraph: 4 });
+         S.kgv = add(w, 'KGV', 'enemy', P(-9000, -9500), 0.9, { name: 'King George V', telegraph: 4 });
+         S.rodney = add(w, 'Rodney', 'enemy', P(-10200, -7600), 0.8, { name: 'HMS Rodney', telegraph: 4 });
          add(w, 'Jervis', 'enemy', P(7200, 2500), Math.PI, { name: 'HMS Cossack' });
-         add(w, 'Jervis', 'enemy', P(5500, -6200), 2.2, { name: 'HMS Maori' });
          later(S, 120, () => {
             w.message('Kreuzer Norfolk und Dorsetshire greifen ein!', 'warn');
-            add(w, 'Norfolk', 'enemy', P(1500, -10500), 1.6, { name: 'HMS Norfolk' });
-            add(w, 'Norfolk', 'enemy', P(4000, 10500), -1.8, { name: 'HMS Dorsetshire' });
+            add(w, 'Norfolk', 'enemy', P(1500, -10500), 1.6, { name: 'HMS Norfolk', minDist: 12000 });
+            add(w, 'Norfolk', 'enemy', P(4000, 10500), -1.8, { name: 'HMS Dorsetshire', minDist: 12000 });
          });
          later(S, 300, () => {
-            w.message('Weitere Zerstörer: Zulu und Sikh!', 'warn');
-            add(w, 'Jervis', 'enemy', P(10500, 4000), Math.PI, { name: 'HMS Zulu' });
-            add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Sikh' });
+            w.message('Weitere Zerstörer: Maori und Zulu!', 'warn');
+            add(w, 'Jervis', 'enemy', P(10500, 4000), Math.PI, { name: 'HMS Maori', minDist: 11000 });
+            add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Zulu', minDist: 11000 });
          });
          objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (12:00)');
          objective(w, 'bbs', 'Oder: Versenken Sie King George V und Rodney (0/2)');
@@ -503,8 +532,8 @@ const DEFS = [
          add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau' });
          later(S, 240, () => {
             w.message('HMS Rodney und HMS Sussex nähern sich aus Osten!', 'warn');
-            add(w, 'Rodney', 'enemy', P(12000, 2500), Math.PI, { name: 'HMS Rodney' });
-            add(w, 'Norfolk', 'enemy', P(12000, 4200), Math.PI, { name: 'HMS Sussex' });
+            add(w, 'Rodney', 'enemy', P(12000, 2500), Math.PI, { name: 'HMS Rodney', minDist: 12000 });
+            add(w, 'Norfolk', 'enemy', P(12000, 4200), Math.PI, { name: 'HMS Sussex', minDist: 12000 });
          });
          objective(w, 'sink', 'Versenken Sie 4 Frachter (0/4)');
          objective(w, 'escape', 'Höchstens 2 Frachter entkommen lassen (0 entkommen)');

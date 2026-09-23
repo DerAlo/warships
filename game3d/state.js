@@ -165,7 +165,9 @@ export class World {
 
    // ---------------- bookkeeping hooks (ship.js / combat.js) ----------------
    onHit(shooter, target, type, proj) {
-      if (!shooter || !shooter.isPlayer) return;
+      if (!shooter) return;
+      if (type !== 'ricochet' && type !== 'shatter') shooter.hits++;
+      if (!shooter.isPlayer) return;
       const st = this.stats;
       if (type === 'torp') st.torpHits++;
       else st.hits++;
@@ -176,7 +178,6 @@ export class World {
       else if (type === 'shatter') st.shatters++;
       else if (type === 'he') st.heHits++;
       else if (type === 'sec') st.secHits++;
-      shooter.hits++;
    }
    onDamage(target, shooter, amt, type) {
       if (shooter && shooter.isPlayer) this.stats.dmg += amt;

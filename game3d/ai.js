@@ -22,7 +22,8 @@ const CANDIDATES = [0, 15, -15, 30, -30, 50, -50, 75, -75, 100, -100, 130, -130,
 export function updateBots(world, dt) {
    if (world._aiTick === world.tick) return;
    world._aiTick = world.tick;
-   for (const b of world.ships) if (b.alive && !b.isPlayer) think(b, world, dt);
+   // world.autoPlayer: the AI also captains the player ship (tests, attract mode)
+   for (const b of world.ships) if (b.alive && (!b.isPlayer || world.autoPlayer)) think(b, world, dt);
 }
 // Legacy per-bot entry point (old main3d loop). World.update already runs every bot.
 export function updateBot() {}

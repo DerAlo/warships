@@ -6,7 +6,7 @@ import { WORLD, SHIPS, CONSUMABLES } from './config.js';
 import { TAU, DEG, clamp, clamp01, angleDelta, approach, toWorld, toLocal, obstacleT, obstacleRadiusAt, dist2 } from './utils.js';
 import { makeShell, launchAngle, flightTime } from './combat.js';
 
-const FIRE_DUR = { BB: 60, CA: 40, CL: 35, DD: 25, TR: 60, CV: 60 };
+const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
 const FLOOD_DUR = 40;
 const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, TR: 3.5, CV: 3.5 }; // s, yaw inertia
 const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
