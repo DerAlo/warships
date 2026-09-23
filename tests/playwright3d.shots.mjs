@@ -8,8 +8,11 @@
 // Mouse note: the aim is pure mouse-look (pointer lock, movementX/Y only). page.mouse.move()
 // teleports an absolute cursor and gets clamped at the viewport edge, so look() dispatches
 // synthetic mousemove events with explicit movementX/Y instead -- exactly what input3d.js reads.
-// main3d clamps the per-frame delta to +-400 px (guards against pointer-lock jumps), so long
-// sweeps are split into chunks spread over several frames.
+//
+// Frame-rate note: headless Chromium renders WebGL in software, so with the full graphics the
+// page may run at only a few fps. Everything here therefore waits for rendered FRAMES (or polls
+// a condition) instead of fixed milliseconds; the input layer counts taps per frame, so several
+// key presses inside one slow frame still register.
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
@@ -37,23 +40,23 @@ const turrets = () => ev(() => window.__turrets());
 const cons = () => ev(() => window.__cons());
 const fired = () => ev(() => window.__fired());
 const shot = name => page.screenshot({ path: `${OUT}/3d-${name}.png` });
-async function press(key, n = 1) { for (let i = 0; i < n; i++) { await page.keyboard.press(key); await wait(40); } }
+// resolve after n rendered frames
+const frames = (n = 2) => ev(n => new Promise(r => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+async function press(key, n = 1) { for (let i = 0; i < n; i++) { await page.keyboard.press(key); await wait(10); } await frames(2); }
 async function waitFor(fn, timeout = 8000, step = 100) {
    const t0 = Date.now();
    while (Date.now() - t0 < timeout) { if (await ev(fn)) return true; await wait(step); }
    return false;
 }
-// Mouse-look delta split over frames (see header).
+// Mouse-look delta as a burst of small synthetic moves (like a real mouse), then 2 frames.
 async function look(dx, dy, chunk = 150) {
    const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / chunk));
-   for (let i = 0; i < n; i++) {
-      await ev(([x, y]) => window.dispatchEvent(new MouseEvent('mousemove', { movementX: x, movementY: y, bubbles: true })), [dx / n, dy / n]);
-      await wait(22);
-   }
+   await ev(([x, y, n]) => { for (let i = 0; i < n; i++) window.dispatchEvent(new MouseEvent('mousemove', { movementX: x, movementY: y, bubbles: true })); }, [dx / n, dy / n, n]);
+   await frames(2);
 }
-async function click(ms = 70) {
+async function click() {
    await page.mouse.move(720, 405);
-   await page.mouse.down(); await wait(ms); await page.mouse.up(); await wait(40);
+   await page.mouse.down(); await frames(2); await page.mouse.up(); await frames(2);
 }
 
 // ------------------------------------------------------------------ load + start
@@ -65,6 +68,9 @@ if (menuVisible) await shot('01-menu');
 // start through the hook (menu3d may own the menu flow); deterministic default options
 await ev(() => window.__start({ difficulty: 'normal' }));
 check('game starts', await waitFor(() => window.__phase() === 'playing', 8000));
+// Keep every ship afloat: at software-rendering frame rates the run spans minutes of sim time,
+// and a sunk player (or a won match) would end the phase mid-test. Test-only, from the page.
+await ev(() => { setInterval(() => { for (const s of window.__world()?.ships || []) if (s.alive && s.maxHP) s.hp = s.maxHP; }, 50); });
 await wait(1500);
 await shot('02-normal');
 
@@ -82,7 +88,7 @@ await shot('02-normal');
    check('telegraph persists after release', (await ctl()).telegraph === 2);
    // holding repeats: tap step + repeats after the hold delay
    await press('s', 3);                       // -> -1
-   await page.keyboard.down('w'); await wait(1150); await page.keyboard.up('w');
+   await page.keyboard.down('w'); await wait(1200); await frames(6); await page.keyboard.up('w'); await frames(2);
    const th = (await ctl()).telegraph;
    check('holding W repeats steps', th >= 1, { telegraph: th });
    await press('s', 8); await press('w', 3);  // settle at 1/2
@@ -112,53 +118,54 @@ await shot('02-normal');
 // ------------------------------------------------------------------ aim range mapping
 {
    await look(0, 3000);                       // mouse down = shorter range
-   await wait(250);
    let a = await aim();
    const lo = a.targetRange;
    check('aim range reaches the minimum', Math.abs(lo - a.rangeMin) / a.rangeMin < 0.005, { lo, min: a.rangeMin });
    check('minimum range is <= 1 km', a.rangeMin <= 1000 + 1e-6, a.rangeMin);
    const seq = [lo];
-   for (let i = 0; i < 26; i++) { await look(0, -60); await wait(30); seq.push((await aim()).targetRange); }
+   for (let i = 0; i < 26; i++) { await look(0, -60); seq.push((await aim()).targetRange); }
    a = await aim();
    let mono = true;
    for (let i = 1; i < seq.length; i++) if (seq[i] < seq[i - 1] - 1e-6) mono = false;
    check('aim range is monotonic in mouse Y', mono && seq[seq.length - 1] > seq[0]);
    check('aim range reaches the maximum', Math.abs(seq[seq.length - 1] - a.rangeMax) / a.rangeMax < 0.005, { hi: seq[seq.length - 1], max: a.rangeMax });
    check('max range covers the gun range, capped ~20 km', a.rangeMax >= a.gunRange && a.rangeMax <= Math.max(20000, a.gunRange) * 1.13, { max: a.rangeMax, gun: a.gunRange });
-   await wait(400);
+   await waitFor(() => { const a = window.__aim(); return Math.abs(a.range - a.targetRange) / a.targetRange < 0.001; }, 10000);
    a = await aim();
    const p = await ev(() => { const s = window.__world().player; return { x: s.pos.x, y: s.pos.y }; });
    const d = Math.hypot(a.point.x - p.x, a.point.y - p.y);
    check('aim point sits at the aim range', a.snapped != null || Math.abs(d - a.range) / a.range < 0.02, { d, range: a.range });
    // back to a mid range for the rest of the run
    await look(0, 180);
-   await wait(300);
+   await frames(10);
 }
 
 // ------------------------------------------------------------------ binoculars
 {
-   await press('Shift');
-   await wait(600);
-   let c = await ctl(), a = await aim();
-   check('Shift enters binoculars', c.bino === true);
    const tanBase = Math.tan(55 * Math.PI / 360);
    const fovOk = (fov, z) => Math.abs(Math.tan(fov * Math.PI / 360) - tanBase / z) / (tanBase / z) < 0.12;
+   const settleFov = () => waitFor(() => { const a = window.__aim(), z = window.__ctl().zoom, tb = Math.tan(55 * Math.PI / 360);
+      return Math.abs(Math.tan(a.fov * Math.PI / 360) - tb / z) / (tb / z) < 0.05; }, 15000);
+   await press('Shift');
+   await settleFov();
+   let c = await ctl(), a = await aim();
+   check('Shift enters binoculars', c.bino === true);
    check(`binocular FOV matches ${c.zoom}x`, fovOk(a.fov, c.zoom), { fov: a.fov, zoom: c.zoom });
    await shot('03-binoculars');
    await page.mouse.move(720, 405);
    const zooms = [];
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await wait(80); }   // out to the widest
+   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await frames(2); }   // out to the widest
    zooms.push((await ctl()).zoom);
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -100); await wait(450); c = await ctl(); a = await aim(); zooms.push(c.zoom); if (!fovOk(a.fov, c.zoom)) zooms.push('fov!' + a.fov.toFixed(1)); }
+   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -100); await frames(2); await settleFov(); c = await ctl(); a = await aim(); zooms.push(c.zoom); if (!fovOk(a.fov, c.zoom)) zooms.push('fov!' + a.fov.toFixed(1)); }
    check('wheel steps 2x/4x/8x/16x (and clamps)', JSON.stringify(zooms) === JSON.stringify([2, 4, 8, 16, 16]), zooms);
    await shot('04-binoculars-16x');
    // sensitivity scales with FOV: the same mouse delta turns much less at 16x
    const y0 = (await aim()).targetYaw;
    await look(100, 0);
    const dyaw16 = (await aim()).targetYaw - y0;
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await wait(60); }
+   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await frames(2); }
    await press('Shift');
-   await wait(600);
+   await waitFor(() => Math.abs(window.__aim().fov - 55) < 0.5, 15000);
    const y1 = (await aim()).targetYaw;
    await look(100, 0);
    const dyaw1 = (await aim()).targetYaw - y1;
@@ -167,18 +174,37 @@ await shot('02-normal');
    await look(-200, 0);
 }
 
+// ------------------------------------------------------------------ free look
+{
+   await frames(4);
+   const a0 = await aim();
+   await page.keyboard.down('c');
+   await frames(2);
+   await look(600, 0);
+   await frames(4);
+   const c = await ctl(), a1 = await aim();
+   const ship = await ev(() => ({ x: window.__world().player.pos.x, y: window.__world().player.pos.y }));
+   const b0 = Math.atan2(a0.point.y - ship.y, a0.point.x - ship.x), b1 = Math.atan2(a1.point.y - ship.y, a1.point.x - ship.x);
+   const db = Math.abs(Math.atan2(Math.sin(b1 - b0), Math.cos(b1 - b0)));
+   check('C = free look, guns keep their aim', c.freeLook && Math.abs(a1.yaw - a0.yaw) > 1 && db < 0.1, { camTurn: a1.yaw - a0.yaw, aimTurn: db });
+   await page.keyboard.up('c');
+   await frames(8);
+   const a2 = await aim();
+   check('releasing C returns the camera to the aim', !(await ctl()).freeLook && Math.abs(a2.yaw - a0.yaw) < 0.05, { back: a2.yaw - a0.yaw });
+}
+
 // ------------------------------------------------------------------ firing rule
 {
-   check('some turret becomes ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 12000));
+   check('some turret becomes ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 45000));
    // knock every mount off the aim bearing: none is aligned, so LMB must not fire
    await ev(() => { for (const t of window.__world().player.turrets) t.bearing = (t.bearing || 0) + 1.6; });
-   await wait(40);
+   await frames(2);
    const st = (await turrets()).map(t => t.state);
    const f0 = await fired();
    await click();
    const f1 = await fired();
    check('misaligned turrets hold fire', f1.shots === f0.shots && !st.includes('ready'), { states: st, shots: f1.shots - f0.shots });
-   check('turrets re-align and become ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 12000));
+   check('turrets re-align and become ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 45000));
    const st2 = (await turrets()).map(t => t.state);
    await click();
    const f2 = await fired();
@@ -189,7 +215,7 @@ await shot('02-normal');
    const readyAfter = st3.filter(s => s === 'ready').length;
    check('reloading turrets do not fire again', readyAfter > 0 || f3.shots === f2.shots, { states: st3, shots: f3.shots - f2.shots });
    check('no shot from a non-ready turret', (await ev(() => window.__badFireCount)) === 0);
-   await wait(900);
+   await frames(10);
    await shot('05-after-salvo');
 }
 
@@ -210,7 +236,7 @@ await shot('02-normal');
    await press('3');
    let c = await ctl();
    check('3 enters torpedo mode', c.mode === 'torp' && (await ev(() => window.__weaponSel())) === 'torp');
-   await wait(300);
+   await frames(4);
    await shot('06-torpedo');
    // force the launchers ready (old sim: torpTimer, contract: launchers[].reload)
    await ev(() => {
@@ -218,14 +244,28 @@ await shot('02-normal');
       if ('torpTimer' in p) p.torpTimer = 0;
       for (const l of p.torps?.launchers || []) l.reload = 0;
    });
-   await wait(80);
+   await frames(2);
    const t0 = await fired();
-   const n0 = await ev(() => window.__world().torpedoes.length);
+   // collect ids of the player's torpedoes seen in the water (fast arcade torps may already be
+   // gone again by the time a slow frame returns)
+   await ev(() => {
+      const w = window.__world(), p = w.player, old = new Set(w.torpedoes.map(t => t.id));
+      const seen = window.__torpSeen = new Set();
+      const mine = t => (t.shooter === p || t.ownerId === p.id) && !old.has(t.id);
+      // at a few fps one frame runs many sim steps, so a fish that hits an island right away can
+      // be spawned and removed between two polls: also watch the push itself
+      const arr = w.torpedoes, push = arr.push;
+      arr.push = function (...a) { for (const t of a) if (t && mine(t)) seen.add(t.id); return push.apply(this, a); };
+      window.__torpUnhook = () => { arr.push = push; };
+      window.__torpPoll = setInterval(() => {
+         for (const t of window.__world().torpedoes) if ((t.shooter === p || t.ownerId === p.id) && !old.has(t.id)) seen.add(t.id);
+      }, 15);
+   });
    await click();
-   await wait(150);
+   await frames(2);
    const t1 = await fired();
-   const n1 = await ev(() => window.__world().torpedoes.length);
-   check('LMB launches torpedoes', t1.torps > t0.torps && n1 > n0, { fired: t1.torps - t0.torps, inWater: n1 - n0 });
+   const newTorps = await ev(() => { clearInterval(window.__torpPoll); window.__torpUnhook(); return window.__torpSeen.size; });
+   check('LMB launches torpedoes', t1.torps > t0.torps && newTorps > 0, { fired: t1.torps - t0.torps, inWater: newTorps });
    check('torpedo click fires no shells', t1.shots === t0.shots);
    await press('1');
    c = await ctl();
@@ -237,17 +277,14 @@ await shot('02-normal');
    const b = await cons();
    const rep0 = b.find(x => x.slot === 'T');
    await press('t');
-   await wait(120);
    let a = await cons();
    const rep1 = a.find(x => x.slot === 'T');
    check('T uses the repair party', rep1 && (rep1.active || rep1.cd > 0) && (rep0.charges == null || rep1.charges === rep0.charges - 1), { rep0, rep1 });
    await press('t');
-   await wait(120);
    a = await cons();
    const rep2 = a.find(x => x.slot === 'T');
    check('cooldown blocks a second use', rep2.charges === rep1.charges, rep2);
    await press('r');
-   await wait(120);
    const dc = (await cons()).find(x => x.slot === 'R');
    check('R uses damage control', dc && (dc.active || dc.cd > 0), dc);
 }
@@ -261,7 +298,7 @@ await shot('02-normal');
    const tB = await ev(() => window.__world().time);
    check('sim is frozen while paused', tA === tB, { tA, tB });
    await press('p');
-   await wait(400);
+   await frames(6);
    const tC = await ev(() => window.__world().time);
    check('P resumes', (await ev(() => window.__phase())) === 'playing' && tC > tB, { tB, tC });
 }
@@ -273,20 +310,20 @@ await shot('02-normal');
    console.log('lock target:', lockId);
    await press('m');
    check('M opens the tactical map', (await ctl()).mapOpen === true);
-   await wait(250);
+   await frames(3);
    await shot('07-map');
    await press('m');
    check('M closes the tactical map', (await ctl()).mapOpen === false);
    await page.keyboard.down('Tab');
-   await wait(300);
+   await frames(3);
    check('Tab shows the scoreboard', (await ctl()).board === true);
    await shot('08-scoreboard');
    await page.keyboard.up('Tab');
-   await wait(100);
+   await frames(2);
    check('releasing Tab hides the scoreboard', (await ctl()).board === false);
    if (lockId != null) await press('x');
    await press('h');
-   await wait(200);
+   await frames(2);
    check('H shows the controls help', await page.locator('#help-panel').isVisible());
    await shot('09-help');
    await press('h');

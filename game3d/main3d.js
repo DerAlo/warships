@@ -437,7 +437,7 @@ function frameInput(dt) {
    if (!ctl.mapOpen) {
       const fov = renderer.camera.fov || BASE_FOV;
       const k = Math.tan(fov * DEG / 2) / Math.tan(BASE_FOV * DEG / 2);
-      const dx = clamp(inp.mouse.dx, -400, 400), dy = clamp(inp.mouse.dy, -400, 400);
+      const dx = clamp(inp.mouse.dx, -4000, 4000), dy = clamp(inp.mouse.dy, -4000, 4000);
       view.yaw += dx * YAW_SENS * k;
       view.logR = clamp(view.logR - dy * RANGE_SENS * k, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
    }
@@ -451,7 +451,8 @@ function frameInput(dt) {
 function unwrapNear(a, ref) { return ref + angleDelta(ref, a); }
 
 function stepHold(key, dt, fn) {
-   if (input.tapped(key)) { fn(); ctl.hold[key] = HOLD_DELAY; return; }
+   const n = input.tapped(key);
+   if (n) { for (let i = 0; i < n; i++) fn(); ctl.hold[key] = HOLD_DELAY; return; }
    if (input.down(key)) {
       ctl.hold[key] -= dt;
       if (ctl.hold[key] <= 0) { fn(); ctl.hold[key] = HOLD_REPEAT; }
@@ -578,7 +579,8 @@ function applyControls(dt) {
    turretCache = computeTurrets(p);
 
    if (phase !== 'playing' || ctl.mapOpen) return;
-   if (ctl.mode === 'guns' && input.mouse.down) fireGuns();
+   // clicked covers a press+release inside one frame (low frame rates, quick taps)
+   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked)) fireGuns();
    if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
    if (simv.oldSecondaries) autoSecondaries();
 }
@@ -1047,14 +1049,14 @@ function frame() {
          tickConsEmu(dt);
          acc += dt;
          let steps = 0;
-         while (acc >= SIM_DT && steps < 6) {
+         while (acc >= SIM_DT && steps < 15) {
             snapshotPrev();
             applyControls(SIM_DT);
             if (!simv.botsInternal) for (const b of world.bots) updateBot(b, world, SIM_DT);
             world.update(SIM_DT);
             acc -= SIM_DT; steps++;
          }
-         if (steps === 6) acc = 0;
+         if (steps === 15) acc = 0;
          if (P) {
             processEvents(dt);
             updateIntel();

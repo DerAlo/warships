@@ -13,7 +13,8 @@ export class Input3D {
       this.canvas = canvas;
       this.gameActive = false;   // main3d sets this; gates preventDefault + pointer lock requests
       this.keys = new Set();     // currently held
-      this.pressed = new Set();  // went down since the last consumeTaps()/endFrame()
+      this.pressed = new Map();  // key -> press count since the last consumeTaps()/endFrame()
+                                 // (counted: at low frame rates several taps land in one frame)
       // dx/dy: raw movementX/Y summed since endFrame(). down: LMB (fire). right: RMB (free look).
       // wheel: notches (+ = scroll toward the user = zoom out), fractional for touchpads.
       this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false };
@@ -27,7 +28,7 @@ export class Input3D {
       const onKey = (e, down) => {
          const k = this._norm(e);
          if (!k) return;
-         if (down) { if (!this.keys.has(k)) this.pressed.add(k); this.keys.add(k); }
+         if (down) { if (!this.keys.has(k)) this.pressed.set(k, (this.pressed.get(k) || 0) + 1); this.keys.add(k); }
          else this.keys.delete(k);
          // Tab would move focus away from the canvas; Space/arrows would scroll the page.
          if ((this.gameActive && GAME_KEYS.has(k)) || k === 'TAB') e.preventDefault();
@@ -58,8 +59,12 @@ export class Input3D {
          if (e.button === 2) this.mouse.right = false;
       });
       window.addEventListener('mousemove', (e) => {
-         this.mouse.dx += e.movementX || 0;
-         this.mouse.dy += e.movementY || 0;
+         const mx = e.movementX || 0, my = e.movementY || 0;
+         // Some browsers emit one garbage delta of thousands of px when pointer lock engages;
+         // drop it rather than spin the camera. Real coalesced moves stay far below this.
+         if (Math.abs(mx) > 1500 || Math.abs(my) > 1500) return;
+         this.mouse.dx += mx;
+         this.mouse.dy += my;
       });
       this.canvas.addEventListener('wheel', (e) => {
          e.preventDefault();
@@ -125,5 +130,5 @@ export class Input3D {
    endFrame() { this.consumeTaps(); this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0; }
 
    down(k) { return this.keys.has(k); }
-   tapped(k) { return this.pressed.has(k); }
+   tapped(k) { return this.pressed.get(k) || 0; }   // count (0 = not tapped)
 }
