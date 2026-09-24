@@ -132,9 +132,13 @@ export class Renderer3D {
       this.time += dt;
       this._envFrom(world);
       this.cam.update(world, dt, camState);
-      // optics cut through the haze (as in WoWs): at full binocular zoom the air is ~2.5x clearer,
-      // otherwise targets at gun range dissolve into the grey exactly when the player looks for them
-      if (this.env?.fogD50) ATM.uFogDist.value = this.env.fogD50 / Math.LN2 * (1 + 1.5 * clamp(this.cam.scopeT || 0, 0, 1));
+      // optics cut through the haze (as in WoWs): the clearer air scales with magnification
+      // (2x: 2x clearer, 4x: 2.5x, 16x: 3.5x), otherwise targets at gun range dissolve into the grey exactly when
+      // the player zooms in to find them
+      if (this.env?.fogD50) {
+         const zk = 0.5 + 0.5 * Math.log2(Math.max(1, this.cam._zoomS || 1));
+         ATM.uFogDist.value = this.env.fogD50 / Math.LN2 * (1 + zk * clamp(this.cam.scopeT || 0, 0, 1));
+      }
       if (this.debugView) this._applyDebugView();
       this.camera.updateMatrixWorld();
       this.terrain.update(this.camera);

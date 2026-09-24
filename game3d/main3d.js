@@ -10,7 +10,7 @@ import { angleDelta, clamp, clamp01, lerp, TAU, DEG } from './utils.js';
 import { WORLD, SHIPS } from './config.js';
 import { Input3D } from './input3d.js';
 import { Renderer3D } from './render3d.js';
-import { BASE_FOV } from './camera3d.js';
+import { BASE_FOV, aimGain } from './camera3d.js';
 import { HudCanvases3D, shipType, TYPE_NAME, isAlly, isVisible, shipLen, torpSide, torpHeading, displayKn } from './minimap3d.js';
 import { Hud } from './hud.js';
 import { Overlay3D } from './hud3d.js';
@@ -28,7 +28,11 @@ const KN = WORLD.KN_TO_MS || 1 / 1.94384;     // m/s per knot (old sim: real kno
 const ALIGN_TOL = 3 * DEG;                    // old sim: turret counts as aligned within this
 const FIRE_TOL = WORLD.FIRE_TOL || WORLD.ALIGN_TOL || ALIGN_TOL;
 const ZOOMS = [2, 4, 8, 16];
-const YAW_SENS = 0.0028, RANGE_SENS = 0.0025; // rad/px and log(range)/px at base FOV
+const YAW_SENS = 0.0028;                      // rad/px at base FOV
+// Vertical: the view tilts VSENS rad/px (scaled by FOV) at the aim range -- screen-steady like the
+// yaw -- converted to a range step through camera3d.aimGain; RANGE_CAP bounds the log-range step
+// where the sea is nearly edge-on (third person at long range), so 1x stays finely adjustable.
+const VSENS = 0.0011, RANGE_CAP_TP = 0.0042, RANGE_CAP_BINO = 0.02;
 const AIM_TAU = 0.035;                        // aim smoothing time constant (s)
 const TELE_NAMES = { '-1': 'Rückwärts', 0: 'Stopp', 1: '1/4', 2: '1/2', 3: '3/4', 4: 'Voll' };
 const RUDDER_NAMES = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'halb Stb', 2: 'hart Stb' };
@@ -93,6 +97,12 @@ const fx = {
    ribbons: new Map(), dmg: 0, feed: [], msgs: [], shellSeen: new Set(), effSeen: new WeakSet(),
    whistled: new Set(), torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0,
 };
+// Player settings (per browser). sens scales both mouse axes.
+const SETTINGS_KEY = 'warships3d.settings.v1';
+const settings = { sens: 1 };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* private mode */ }
+settings.sens = clamp(Number(settings.sens) || 1, 0.3, 2.5);
+function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
 let turretCache = [];
 let lastMarkers = [];
 let fired = { shots: 0, salvos: 0, torps: 0 };
@@ -383,9 +393,11 @@ function endGame() {
    menu.showResults(world, lastOpts || resolveOpts({}), { ribbons: fx.ribbons, ribbonNames: RIBBON_NAMES });
 }
 
+let pausedAt = 0;
 function pause() {
    if (phase !== 'playing') return;
    phase = 'paused';
+   pausedAt = performance.now();
    input.gameActive = false;
    input.releaseLock();
    input.mouse.down = false;
@@ -475,9 +487,19 @@ function frameInput(dt) {
    if (!ctl.mapOpen) {
       const fov = renderer.camera.fov || BASE_FOV;
       const k = Math.tan(fov * DEG / 2) / Math.tan(BASE_FOV * DEG / 2);
-      const dx = clamp(inp.mouse.dx, -4000, 4000), dy = clamp(inp.mouse.dy, -4000, 4000);
+      const dx = clamp(inp.mouse.dx, -4000, 4000) * settings.sens, dy = clamp(inp.mouse.dy, -4000, 4000) * settings.sens;
       view.yaw += dx * YAW_SENS * k;
-      view.logR = clamp(view.logR - dy * RANGE_SENS * k, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+      if (dy) {
+         const st = renderer.cam?.scopeT ?? 0;
+         const cap = lerp(RANGE_CAP_TP, RANGE_CAP_BINO, clamp01(st));
+         // integrate in a few sub-steps: the gain changes along a long mouse sweep
+         const n = Math.min(12, Math.ceil(Math.abs(dy) / 40));
+         for (let i = 0; i < n; i++) {
+            const g = Math.max(1e-4, aimGain(p, cam3, Math.exp(view.logR), st));
+            const step = Math.min(cap, VSENS * k / g) * (dy / n);
+            view.logR = clamp(view.logR - step, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+         }
+      }
    }
    const s = 1 - Math.exp(-dt / AIM_TAU);
    cam3.yaw += (view.yaw - cam3.yaw) * s;
@@ -925,7 +947,7 @@ function pollAudio(dt) {
 
 // ------------------------------------------------------------------ render interpolation
 // Ships are drawn between the last two sim states so motion is smooth at any refresh rate.
-const prevState = new Map();
+const prevState = new WeakMap();   // keyed by Ship: finished matches' ships can be collected
 function snapshotPrev() {
    for (const s of world.ships) {
       let r = prevState.get(s);
@@ -1097,7 +1119,12 @@ function frame() {
    if (dt > 0.25) dt = 0.25;
 
    try {
-      if (world && input.tapped('P')) { if (phase === 'playing') pause(); else if (phase === 'paused') resume(); }
+      // Esc both drops the pointer lock (-> pause) and may arrive as a key tap in the same frame:
+      // that tap must not resume the pause it just caused.
+      if (world && input.tapped('P')) {
+         if (phase === 'playing') pause();
+         else if (phase === 'paused' && performance.now() - pausedAt > 400) resume();
+      }
       if (phase === 'playing' && world) {
          frameInput(dt);
          tickConsEmu(dt);
@@ -1181,6 +1208,15 @@ menu = new Menu3D($('menu'), $('end'), {
 click('btn-how-close', () => { $('howto').classList.add('hidden'); audio.uiClick(); });
 click('btn-resume', resume);
 click('btn-quit', toMenu);
+{
+   const sl = $('sens'), lab = $('sens-val');
+   const show = () => { if (lab) lab.textContent = Math.round(settings.sens * 100) + ' %'; };
+   if (sl) {
+      sl.value = String(Math.round(settings.sens * 100));
+      sl.addEventListener('input', () => { settings.sens = clamp(Number(sl.value) / 100, 0.3, 2.5); show(); saveSettings(); });
+   }
+   show();
+}
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };
 window.addEventListener('pointerdown', gesture);

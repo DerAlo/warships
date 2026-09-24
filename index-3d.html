@@ -205,6 +205,9 @@
    .stat .v { font-size: 22px; font-weight: 900; color: #fff; }
    .stat .l { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
    .hint { color: var(--hud-dim); font-size: 12px; margin-top: 14px; line-height: 1.5; }
+   .sens-row { display: block; margin-top: 18px; font-size: 13px; color: var(--hud-dim); }
+   .sens-row span { float: right; color: #fff; }
+   .sens-row input { display: block; width: 100%; margin-top: 8px; accent-color: #ffd36b; }
    .howto-body { text-align: left; max-width: 640px; margin: 10px auto 0; line-height: 1.6; font-size: 14px; }
    .howto-body p { margin-top: 8px; } .howto-body b { color: var(--gold); }
    #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #04070d; z-index: 30; color: var(--hud-dim); font-family: var(--mono); }
@@ -370,6 +373,9 @@
             <button class="play" id="btn-resume">Fortsetzen</button>
             <button class="play alt" id="btn-quit">Hauptmenü</button>
          </div>
+         <label class="sens-row">Mausempfindlichkeit <span id="sens-val">100 %</span>
+            <input type="range" id="sens" min="30" max="250" step="5" value="100">
+         </label>
          <div class="hint">P oder Esc setzt fort.</div>
       </div>
    </div>

@@ -364,15 +364,15 @@ export class Overlay3D {
       const R0 = Math.min(W, H) * 0.47;
       g.save();
       g.globalAlpha = a;
-      const grd = g.createRadialGradient(cx, cy, R0 * 0.82, cx, cy, R0 * 1.12);
+      // soft optical vignette instead of a hard black tube: like WoWs, the scope view keeps the
+      // whole screen usable (targets at the edge stay visible for leading and spotting)
+      const grd = g.createRadialGradient(cx, cy, R0 * 0.95, cx, cy, Math.hypot(W, H) * 0.56);
       grd.addColorStop(0, 'rgba(0,0,0,0)');
-      grd.addColorStop(0.55, 'rgba(0,4,8,0.75)');
-      grd.addColorStop(1, 'rgba(0,4,8,0.94)');
+      grd.addColorStop(1, 'rgba(0,4,8,0.55)');
       g.fillStyle = grd;
       g.fillRect(0, 0, W, H);
-      // lens ring + fine cross hairs to the lens edge
-      g.strokeStyle = 'rgba(190,220,255,0.35)'; g.lineWidth = 1;
-      g.beginPath(); g.arc(cx, cy, R0 * 0.9, 0, TAU); g.stroke();
+      // fine cross hairs out to the reticle radius
+      g.lineWidth = 1;
       g.strokeStyle = 'rgba(210,235,255,0.35)';
       g.beginPath();
       g.moveTo(cx - R0 * 0.9, cy); g.lineTo(cx - Math.min(W * 0.2, R0 * 0.5), cy);
