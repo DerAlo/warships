@@ -104,7 +104,7 @@ export const SHIPS = {
          sup: { x: -8, len: 70, w: 22, h: 26 }, funnels: [{ x: -14, r: 6.5, h: 18 }] },
       hp: 69600, speedKn: 30.8, accel: 26, turnR: 880, rudderShift: 14.6,
       detect: { surface: 15800, fire: 19500, smokeFire: 13300, torp: 1200 },
-      armor: { belt: 320, deck: 50, ends: 32, sup: 20, cit: 110, citLen: 0.56, tds: 0.36, turtle: 0.45, citH: 0.35 },
+      armor: { belt: 320, deck: 50, ends: 32, sup: 20, cit: 110, citLen: 0.56, tds: 0.36, turtle: 0.55, citH: 0.35 },
       main: {
          caliber: 380, turrets: [T(82, 2), T(60, 2), T(-57, 2, true), T(-79, 2, true)],
          traverse: 5, reload: 26, range: 21200, tMax: 10.5, fallMax: 30, dispH: 250, vRatio: 0.6, sigma: 1.8,
@@ -127,7 +127,7 @@ export const SHIPS = {
          sup: { x: 4, len: 52, w: 14, h: 20 }, funnels: [{ x: -6, r: 5, h: 14 }] },
       hp: 40400, speedKn: 32.5, accel: 18, turnR: 770, rudderShift: 8.8,
       detect: { surface: 12400, fire: 15300, smokeFire: 7500, torp: 1300 },
-      armor: { belt: 80, deck: 30, ends: 25, sup: 16, cit: 30, citLen: 0.52, tds: 0.2, turtle: 0.6 },
+      armor: { belt: 80, deck: 30, ends: 25, sup: 16, cit: 30, citLen: 0.52, tds: 0.2, turtle: 0.7 },
       main: {
          caliber: 203, turrets: [T(62, 2), T(46, 2), T(-44, 2, true), T(-60, 2, true)],
          traverse: 8, reload: 10.5, range: 15900, tMax: 8.5, fallMax: 26, dispH: 150, vRatio: 0.5, sigma: 2.05,
@@ -196,7 +196,7 @@ export const SHIPS = {
          sup: { x: 0, len: 62, w: 18, h: 24 }, funnels: [{ x: -8, r: 6, h: 16 }] },
       hp: 58000, speedKn: 32, accel: 22, turnR: 740, rudderShift: 12.6,
       detect: { surface: 14800, fire: 17600, smokeFire: 11500, torp: 1300 },
-      armor: { belt: 350, deck: 50, ends: 32, sup: 20, cit: 105, citLen: 0.55, tds: 0.3, turtle: 0.45, citH: 0.35 },
+      armor: { belt: 350, deck: 50, ends: 32, sup: 20, cit: 105, citLen: 0.55, tds: 0.3, turtle: 0.55, citH: 0.35 },
       main: {
          caliber: 283, turrets: [T(72, 3), T(52, 3), T(-62, 3, true)],
          traverse: 7.5, reload: 17, range: 17500, tMax: 9, fallMax: 28, dispH: 220, vRatio: 0.6, sigma: 1.8,
@@ -240,7 +240,7 @@ export const SHIPS = {
          sup: { x: 2, len: 64, w: 18, h: 25 }, funnels: [{ x: 8, r: 5, h: 14 }, { x: -12, r: 5, h: 14 }] },
       hp: 63700, speedKn: 28, accel: 25, turnR: 800, rudderShift: 13.9,
       detect: { surface: 14800, fire: 17800, smokeFire: 11000, torp: 1300 },
-      armor: { belt: 374, deck: 127, ends: 25, sup: 19, cit: 0, citLen: 0.55, tds: 0.34 },
+      armor: { belt: 374, deck: 127, ends: 25, sup: 19, cit: 0, citLen: 0.55, tds: 0.34, citH: 0.35 },
       main: {
          caliber: 356, turrets: [T(66, 4), T(48, 2), T(-66, 4, true)],
          traverse: 4.5, reload: 26, range: 17800, tMax: 10, fallMax: 30, dispH: 230, vRatio: 0.6, sigma: 1.8,

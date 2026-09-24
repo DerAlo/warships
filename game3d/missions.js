@@ -243,7 +243,7 @@ const DEFS = [
       briefing: 'Drei strategische Seegebiete – A, B und C – entscheiden über die Kontrolle der Fjordausfahrt. ' +
          'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
          'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
-      env: { time: 'day', weather: 'clear' }, type: 'domination', playableShips: null, recommendedShip: 'Z23',
+      env: { time: 'day', weather: 'clear' }, type: 'domination', playableShips: null, recommendedShip: 'Hipper',
       arena: 11000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [

@@ -201,6 +201,9 @@ function decide(b, w, d) {
 
    want = separation(b, w, want);
    want = avoidTerrain(b, w, want);
+   // tight water: slow down so the rudder has time to bite before the coast arrives
+   if (ai.avoidLevel >= 2 && tel > 2) tel = 2;
+   else if (ai.avoidLevel === 1 && tel > 3) tel = 3;
    ai.desired = want;
    ai.tel = tel;
    checkTorpedoes(b, w, d);
@@ -230,6 +233,9 @@ function engage(b, w, tgt, d) {
    if (ai.role === 'dd') {
       const tr = b.torps ? b.cfg.torp.range * 0.8 : 0;
       const torpReady = b.torps && b.torps.launchers.some(l => l.reload <= 0);
+      // lit up by several ships: break contact and reset detection (unless already in a torpedo run)
+      if (b.detected && d.smarts > 0.4 && exposed(b, w) && !(torpReady && dd <= tr && tgt.type !== 'DD'))
+         return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
       if (torpReady && tgt.type !== 'DD' && dd > tr) return { want: brg + s * 20 * DEG, tel: 4 };
       if (torpReady && dd <= tr) return { want: brg + s * 70 * DEG, tel: 4 };   // present the tubes
       const stealth = b.detectRange * 1.1;
@@ -339,11 +345,18 @@ function avoidTerrain(b, w, want) {
    const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
    const lim = w.arena - 700;
    const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
+   // candidate paths follow the real turn: the hull holds its heading until the rudder has shifted,
+   // then swings at the turning radius (a straight ray let heavy ships commit to coasts)
+   const turnR = b.cfg.turnR || 700, spd = Math.abs(b.speed);
    const clear = (h, L) => {
-      const c = Math.cos(h), s = Math.sin(h);
-      for (let k = 1; k <= 6; k++) {
-         const f = (k / 6) * L;
-         const p = { x: b.pos.x + c * f, y: b.pos.y + s * f };
+      const dh0 = angleDelta(b.heading, h);
+      const lagD = spd * (b.cfg.rudderShift || 8) * 0.3 * Math.abs(Math.sign(dh0) - b.rudder) / 2;
+      const n = 10, ds = L / n;
+      let x = b.pos.x, y = b.pos.y, hd = b.heading;
+      for (let k = 1; k <= n; k++) {
+         if (k * ds > lagD) hd += clamp(angleDelta(hd, h), -ds / turnR, ds / turnR);
+         x += Math.cos(hd) * ds; y += Math.sin(hd) * ds;
+         const p = { x, y };
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
             // allow heading back inwards when already outside the limit
             if (Math.abs(p.x) > Math.abs(b.pos.x) + 1 && Math.abs(p.x) > lim) return false;
@@ -355,7 +368,21 @@ function avoidTerrain(b, w, want) {
    };
    // narrow channels: when nothing is clear at full look-ahead, accept shorter clear runs
    // before falling back (otherwise ships oscillate between two islands at crawl speed)
-   for (const f of [1, 0.55, 0.3]) for (const c of CANDIDATES) if (clear(want + c, look * f)) return want + c;
+   // hysteresis: keep evading to the same side as last time, otherwise the pick flip-flops between
+   // port and starboard every decision while the heavy hull never actually turns
+   const ai = b.ai, side = ai.avoidSide || 1;
+   const levels = [1, 0.55, 0.3];
+   for (let li = 0; li < levels.length; li++) {
+      for (const c0 of CANDIDATES) {
+         const c = c0 * side;
+         if (clear(want + c, look * levels[li])) {
+            if (Math.abs(c) > 0.2) ai.avoidSide = Math.sign(c);
+            ai.avoidLevel = li;
+            return want + c;
+         }
+      }
+   }
+   ai.avoidLevel = 3;
    // boxed in: turn away from the closest island centre
    let best = null, bd = Infinity;
    for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }
