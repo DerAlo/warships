@@ -220,7 +220,7 @@ function injectStyle() {
 // ---------------------------------------------------------------- component
 export class Menu3D {
    // root: the #menu overlay; resultsRoot: the #end overlay.
-   // cb: { onStart({mission, ship, difficulty}), onHowTo(), onClick() (ui sound) }
+   // cb: { onStart({mission, ship, difficulty}), onPort() (leave the finished match), onHowTo(), onClick() (ui sound) }
    constructor(root, resultsRoot, cb = {}) {
       injectStyle();
       this.root = root; this.resRoot = resultsRoot; this.cb = cb;
@@ -257,6 +257,8 @@ export class Menu3D {
    }
    _remember() { this.progress.sel = this.selection; saveProgress(this.progress); }
 
+   // back to port: main3d drops the finished world first (onPort ends in show())
+   _toPort() { this.hideResults(); if (this.cb.onPort) this.cb.onPort(); else this.show(); }
    show() { this.hideResults(); this.render(); this.root.classList.remove('hidden'); }
    hide() { this.root.classList.add('hidden'); }
    hideResults() { this.resRoot.classList.add('hidden'); cancelAnimationFrame(this._countRaf); }
@@ -422,9 +424,9 @@ export class Menu3D {
          this.mission = next.id;
          if (!next.playableShips.includes(this.ship)) this.ship = next.recommendedShip || next.playableShips[0];
          this._remember();
-         this.show();
+         this._toPort();
       });
-      this.resRoot.querySelector('[data-act="port"]').addEventListener('click', () => this.show());
+      this.resRoot.querySelector('[data-act="port"]').addEventListener('click', () => this._toPort());
       // count-up of the earnings
       const nums = [...this.resRoot.querySelectorAll('[data-count]')];
       const t0 = performance.now();

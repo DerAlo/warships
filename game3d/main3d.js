@@ -1174,6 +1174,7 @@ const click = (id, fn) => $(id)?.addEventListener('click', fn);
 const showHowTo = () => { $('howto').classList.remove('hidden'); audio.init(); audio.uiClick(); };
 menu = new Menu3D($('menu'), $('end'), {
    onStart: (o) => startGame(o),
+   onPort: toMenu,
    onHowTo: showHowTo,
    onClick: () => { audio.init(); audio.uiClick(); },
 });
