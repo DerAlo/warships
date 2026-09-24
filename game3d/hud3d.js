@@ -201,31 +201,59 @@ export class Overlay3D {
       const g = this.g;
       g.save();
       g.textAlign = 'center';
-      for (const m of ui.markers || []) {
-         if (!m.onScreen) continue;
-         const col = m.ally ? COL.ally : COL.enemy;
-         const x = m.x, cxs = this.W / 2, cys = this.H / 2;
-         let y = m.y;
+      const cxs = this.W / 2, cys = this.H / 2;
+      // Layout pass in priority order (locked target, then nearest first): names that would
+      // overlap an already placed label or icon step up a line, or are dropped after two tries;
+      // range read-outs that collide are dropped. Drawn afterwards far-to-near (near on top).
+      const list = (ui.markers || []).filter(m => m.onScreen)
+         .sort((a, b) => ((b.locked ? 1 : 0) - (a.locked ? 1 : 0)) || ((a.dist || 0) - (b.dist || 0)));
+      const boxes = [];
+      const hit = (b) => boxes.some(o => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y);
+      const lay = [];
+      for (const m of list) {
+         const x = m.x;
+         let y = m.y, lifted = false;
          // a marker over the reticle is lifted above it (thin leader to the ship) so the
          // crosshair, range and "out of range" readouts stay readable
-         if (Math.abs(x - cxs) < 90 && y > cys - 74 && y < cys + 64) {
+         if (Math.abs(x - cxs) < 90 && y > cys - 74 && y < cys + 64) { lifted = true; y = cys - 74; }
+         const L = { m, x, y, lifted, nameY: null, showDist: false };
+         boxes.push({ x: x - 9, y: y - 9, w: 18, h: 18 });
+         g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
+         const nw = g.measureText(m.name || '').width + 6;
+         for (let k = 0, ny = y - 10; k < 3; k++, ny -= 12) {
+            const b = { x: x - nw / 2, y: ny - 12, w: nw, h: 12 };
+            if (m.locked || !hit(b)) { L.nameY = ny; boxes.push(b); break; }
+         }
+         if (!m.ally) {
+            g.font = '10px Consolas, monospace';
+            const b = { x: x - 22, y: y + 15, w: 44, h: 11 };
+            if (m.locked || !hit(b)) { L.showDist = true; boxes.push(b); }
+         }
+         lay.push(L);
+      }
+      for (let i = lay.length - 1; i >= 0; i--) {
+         const { m, x, y, lifted, nameY, showDist } = lay[i];
+         const col = m.ally ? COL.ally : COL.enemy;
+         if (lifted) {
+            g.shadowBlur = 0;
             g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1;
-            g.beginPath(); g.moveTo(x, cys - 74 + 22); g.lineTo(x, Math.max(cys - 74 + 22, y - 4)); g.stroke();
-            y = cys - 74;
+            g.beginPath(); g.moveTo(x, y + 22); g.lineTo(x, Math.max(y + 22, m.y - 4)); g.stroke();
          }
          g.globalAlpha = 1;
          g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
          drawClassIcon(g, m.type, x, y, 13, col, { lineWidth: 1.4 });
-         g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
-         g.fillStyle = m.ally ? '#c9ffd8' : '#ffd0ca';
-         g.textBaseline = 'bottom';
-         g.fillText(m.name, x, y - 10);
+         if (nameY != null) {
+            g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
+            g.fillStyle = m.ally ? '#c9ffd8' : '#ffd0ca';
+            g.textBaseline = 'bottom';
+            g.fillText(m.name, x, nameY);
+         }
          // HP bar
          g.shadowBlur = 0;
          const bw = 40, bh = 3;
          g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x - bw / 2 - 1, y + 9, bw + 2, bh + 2);
          g.fillStyle = col; g.fillRect(x - bw / 2, y + 10, bw * m.hpFrac, bh);
-         if (!m.ally) {
+         if (showDist) {
             g.shadowBlur = 3;
             g.font = '10px Consolas, monospace'; g.textBaseline = 'top'; g.fillStyle = 'rgba(255,220,215,0.85)';
             g.fillText(km(m.dist), x, y + 15);

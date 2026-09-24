@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const URL = process.env.URL3D || 'http://localhost:5173/index-3d.html';
-const OUT = 'tests/shots';
+const OUT = process.env.OUT || 'tests/shots';
 mkdirSync(OUT, { recursive: true });
 
 const errors = [];
@@ -39,9 +39,17 @@ const aim = () => ev(() => window.__aim());
 const turrets = () => ev(() => window.__turrets());
 const cons = () => ev(() => window.__cons());
 const fired = () => ev(() => window.__fired());
-const shot = name => page.screenshot({ path: `${OUT}/3d-${name}.png` });
 // resolve after n rendered frames
 const frames = (n = 2) => ev(n => new Promise(r => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+// Screenshots switch the WebGL scene on for a few frames; between shots the checks run with the
+// 3D render skipped (window.__setRender), because software GL at a few fps would stretch the run
+// to many minutes. The sim, the camera, the HUD and the overlay keep running either way.
+const shot = async name => {
+   await ev(() => window.__setRender?.(true));
+   await frames(3);
+   await page.screenshot({ path: `${OUT}/3d-${name}.png` });
+   await ev(() => window.__setRender?.(false));
+};
 async function press(key, n = 1) { for (let i = 0; i < n; i++) { await page.keyboard.press(key); await wait(10); } await frames(2); }
 async function waitFor(fn, timeout = 8000, step = 100) {
    const t0 = Date.now();
@@ -65,14 +73,15 @@ await wait(1200);
 const menuVisible = await page.locator('#menu').isVisible().catch(() => false);
 console.log('menu visible:', menuVisible);
 if (menuVisible) await shot('01-menu');
-// start through the hook (menu3d may own the menu flow); deterministic default options
-await ev(() => window.__start({ difficulty: 'normal' }));
+// start through the hook (menu3d may own the menu flow); deterministic default options.
+// Hipper: a cruiser with guns AND torpedoes on the new sim (the old sim ignores `ship`).
+await ev(() => window.__start({ difficulty: 'normal', ship: 'Hipper' }));
 check('game starts', await waitFor(() => window.__phase() === 'playing', 8000));
 // Keep every ship afloat: at software-rendering frame rates the run spans minutes of sim time,
 // and a sunk player (or a won match) would end the phase mid-test. Test-only, from the page.
 await ev(() => { setInterval(() => { for (const s of window.__world()?.ships || []) if (s.alive && s.maxHP) s.hp = s.maxHP; }, 50); });
 await wait(1500);
-await shot('02-normal');
+await shot('02-normal');   // (leaves the 3D render off until the next screenshot)
 
 // ------------------------------------------------------------------ telegraph
 {
@@ -197,7 +206,9 @@ await shot('02-normal');
 {
    check('some turret becomes ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 45000));
    // knock every mount off the aim bearing: none is aligned, so LMB must not fire
-   await ev(() => { for (const t of window.__world().player.turrets) t.bearing = (t.bearing || 0) + 1.6; });
+   await ev(() => { const w = window.__world(); for (const t of w.player.turrets) t.bearing = (t.bearing || 0) + 1.6; window.__knockT = w.time; });
+   // let a few sim steps run (fast frames can carry zero steps) so the HUD sees the new bearings
+   await waitFor(() => window.__world().time > window.__knockT + 0.1, 5000, 20);
    await frames(2);
    const st = (await turrets()).map(t => t.state);
    const f0 = await fired();
@@ -236,14 +247,17 @@ await shot('02-normal');
    await press('3');
    let c = await ctl();
    check('3 enters torpedo mode', c.mode === 'torp' && (await ev(() => window.__weaponSel())) === 'torp');
-   await frames(4);
-   await shot('06-torpedo');
-   // force the launchers ready (old sim: torpTimer, contract: launchers[].reload)
+   // force the launchers ready (old sim: torpTimer, contract: launchers[].reload) and aim abeam:
+   // cruiser/destroyer tubes bear to the side, not over the bow
    await ev(() => {
       const p = window.__world().player;
-      if ('torpTimer' in p) p.torpTimer = 0;
-      for (const l of p.torps?.launchers || []) l.reload = 0;
+      if (p.torps?.launchers) for (const l of p.torps.launchers) l.reload = 0;
+      else if ('torpTimer' in p) try { p.torpTimer = 0; } catch (e) { /* getter-only read-out */ }
+      window.__setAim?.(Math.PI / 2, 5000);
    });
+   await frames(4);
+   await shot('06-torpedo');
+   await ev(() => { for (const l of window.__world().player.torps?.launchers || []) l.reload = 0; });
    await frames(2);
    const t0 = await fired();
    // collect ids of the player's torpedoes seen in the water (fast arcade torps may already be
@@ -270,6 +284,8 @@ await shot('02-normal');
    await press('1');
    c = await ctl();
    check('1 returns to guns', c.mode === 'guns');
+   await ev(() => window.__setAim?.(0, 6000));
+   await frames(4);
 }
 
 // ------------------------------------------------------------------ consumables
@@ -303,11 +319,47 @@ await shot('02-normal');
    check('P resumes', (await ev(() => window.__phase())) === 'playing' && tC > tB, { tB, tC });
 }
 
-// ------------------------------------------------------------------ lock + panels
+// ------------------------------------------------------------------ target lock
 {
+   // bring an enemy into clear view down the aim bearing (islands may hide the real ones):
+   // ~5 km, or 60% of the gun range on the small arcade map of the old sim
+   const eid = await ev(() => {
+      const w = window.__world(), p = w.player, a = window.__aim(), R0 = Math.min(5000, a.gunRange * 0.6);
+      const e = w.ships.find(s => s.alive && s.side !== p.side && s.side !== 'neutral');
+      if (!e) return null;
+      const obs = w.obstacles || [];
+      const segClear = (A, B, pad) => obs.every(o => {
+         const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1;
+         const t = Math.max(0, Math.min(1, ((o.c.x - A.x) * dx + (o.c.y - A.y) * dy) / L2));
+         return Math.hypot(A.x + dx * t - o.c.x, A.y + dy * t - o.c.y) > o.r * 1.1 + pad;
+      });
+      // nearest bearing to the current aim first, then outward; shorter ranges as a fallback
+      for (const R of [R0, R0 * 0.7, R0 * 0.45]) {
+         for (let k = 0; k <= 30; k++) {
+            const off = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.2;
+            const b = a.yaw + off, pos = { x: p.pos.x + Math.cos(b) * R, y: p.pos.y + Math.sin(b) * R };
+            if (!segClear(p.pos, pos, R * 0.04) || (w.losBlocked && w.losBlocked(p.pos, pos))) continue;
+            e.pos.x = pos.x; e.pos.y = pos.y;
+            e.heading = b + Math.PI / 2; if (e.vel) { e.vel.x = 0; e.vel.y = 0; }
+            window.__setAim(b - p.heading, R);
+            w._updateSpotting?.();
+            return e.id;
+         }
+      }
+      return null;
+   });
+   await frames(6);
    await press('x');
    const lockId = (await ctl()).lockId;
-   console.log('lock target:', lockId);
+   check('X locks the enemy under the crosshair', eid != null && lockId === eid, { eid, lockId });
+   await frames(4);
+   await shot('10-lock');
+   await press('x');
+   check('X again releases the lock', (await ctl()).lockId == null);
+}
+
+// ------------------------------------------------------------------ panels
+{
    await press('m');
    check('M opens the tactical map', (await ctl()).mapOpen === true);
    await frames(3);
@@ -321,7 +373,6 @@ await shot('02-normal');
    await page.keyboard.up('Tab');
    await frames(2);
    check('releasing Tab hides the scoreboard', (await ctl()).board === false);
-   if (lockId != null) await press('x');
    await press('h');
    await frames(2);
    check('H shows the controls help', await page.locator('#help-panel').isVisible());

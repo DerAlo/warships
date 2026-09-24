@@ -35,6 +35,7 @@ export class Audio {
          this._brown = this._makeNoise(4, 'brown');
          this._shaper = ctx.createWaveShaper();
          this._shaper.curve = this._driveCurve(2.2);
+         this._shaper.connect(this.sfx);
          this._buildAmbient();
          this._buildEngine();
       } catch (e) { this.ctx = null; /* audio unavailable -- game runs silent */ }
@@ -171,8 +172,8 @@ export class Audio {
       const w = (0.75 + 0.25 * Math.min(count, 6) / 3) * (dist > 0 ? 0.8 : 1);
       // crack
       this._noise(delay, 0.09, { freq: 2500, type: 'highpass', gain: 0.35 * w, bus });
-      // body: saturated low thump
-      this._shaper.connect(bus || this.sfx);
+      // body: saturated low thump (the shared drive stage is wired to sfx once in init --
+      // connecting it per salvo would leak a permanent route into every distant sub-bus)
       this._tone(delay, 58 + (1 - heavy) * 40, 0.55 + heavy * 0.4, { gain: 0.9 * w, slideTo: 26, bus });
       this._noise(delay, 0.5 + heavy * 0.3, { freq: 1400, sweepTo: 160, gain: 0.8 * w, drive: dist === 0 });
       // rolling tail
@@ -287,4 +288,11 @@ export class Audio {
       this._tone(delay, 58, 1.8, { gain: 0.5, slideTo: 20, bus });
    }
    uiClick() { if (this._voice(0.2)) this._tone(0, 880, 0.06, { gain: 0.12, type: 'triangle', bus: this.ui }); }
+   // mission radio message: squelch burst + two-tone chirp
+   radio() {
+      if (!this._voice(0.7)) return;
+      this._noise(0, 0.12, { freq: 2600, type: 'bandpass', q: 1.5, gain: 0.12, bus: this.ui });
+      this._tone(0.1, 1046, 0.09, { gain: 0.1, type: 'square', bus: this.ui });
+      this._tone(0.2, 1318, 0.12, { gain: 0.1, type: 'square', bus: this.ui });
+   }
 }
