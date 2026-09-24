@@ -45,8 +45,12 @@ function makeIslandField(o, idx) {
    const Hp = Number.isFinite(o.height) && o.height > 0 ? o.height : clamp(R0 * 0.34, 40, 400);
    const cliffH = clamp(Hp * 0.22, 8, 60);
    const cx = o.c.x, cz = o.c.y;
+   const rough = clamp(Number.isFinite(o.rough) ? o.rough : 0.5, 0, 1);
+   // mission summits (the sim's islandReliefAt honours them too, so shells and LOS agree roughly)
+   const peaks = Array.isArray(o.peaks) ? o.peaks.filter(k => k && k.h > 0 && k.r > 0) : [];
+   const peakH = peaks.reduce((a, k) => Math.max(a, k.h), 0);
    const f = {
-      kind: 'island', cx, cz, Rmax, Hp, seed, reach: Rmax * 1.45, scale: 1,
+      kind: 'island', cx, cz, Rmax, Hp: Math.max(Hp, peakH), seed, reach: Rmax * 1.45, scale: 1,
       coastR(th) {
          const t = ((th / (Math.PI * 2)) % 1 + 1) % 1 * BINS;
          const i0 = Math.floor(t) % BINS, i1 = (i0 + 1) % BINS, fr = t - Math.floor(t);
@@ -66,11 +70,20 @@ function makeIslandField(o, idx) {
          }
          const u = dx / R0, v = dz / R0;
          const e = din / R;
-         const dome = Math.pow(smoothstep(0, 0.85, e), 0.85);
+         // steep flanks (full height already ~60% of the way in) and ridges that grow with o.rough;
+         // the (0.5 + 0.6 h) factor then pushes summits up against the lowland, so the islands read
+         // as mountains with valleys instead of soft green domes after the summit rescale
+         const dome = Math.pow(smoothstep(0, 0.6, e), 0.75);
          const rid = ridged(n1, u * 1.7 + 10, v * 1.7 + 10, 5);
          const bulk = fbm(n2, u * 1.2, v * 1.2, 4) * 0.5 + 0.5;
-         let hIn = dome * (0.18 + 0.62 * rid * rid + 0.38 * bulk) * this.scale * Hp;
+         const hn = dome * (0.12 + (0.5 + 0.35 * rough) * rid * rid + 0.3 * bulk);
+         let hIn = hn * (0.5 + 0.6 * hn) * this.scale * Hp;
          hIn += Hp * 0.035 * fbm(n3, u * 9, v * 9, 3) * smoothstep(0, 0.2, e);
+         for (const k of peaks) {
+            const px = dx - k.x, pz = dz - k.y;
+            const q = (px * px + pz * pz) / (k.r * k.r);
+            if (q < 1) hIn = Math.max(hIn, k.h * Math.pow(1 - q, 1.4) * (0.8 + 0.3 * rid) * Math.min(1, e * 4));
+         }
          const plateau = cl * cliffH * (0.75 + 0.25 * n4(u * 4, v * 4)) * smoothstep(0, 45, din);
          const hLand = Math.max(hIn, plateau);
          const ramp = lerp(din * 0.055, din * 2.4, cl);

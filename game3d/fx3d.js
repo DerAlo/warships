@@ -67,6 +67,15 @@ vec3 surfPoint(vec2 p) {
    vec3 o = waveDisp(p, dist, damp);
    return vec3(p.x + o.x, o.y + 0.15 + dist * 0.0006, p.y + o.z);
 }
+// Pure depth bias: slide the point along its own view ray toward the camera (same pixel, nearer
+// depth). The coarse strips interpolate the swell linearly between sparse vertices, so the finely
+// tessellated ocean poked through them as dark crest-shaped holes; at grazing angles a 1 m
+// height error is several metres along the ray, hence the distance term.
+vec3 toCam(vec3 wp) {
+   vec3 v = cameraPosition - wp;
+   float d = length(v);
+   return wp + v / max(d, 1.0) * min(d * 0.5, 1.5 + d * 0.004);
+}
 `;
 
 // ---------------- billboard particles ----------------
@@ -318,7 +327,7 @@ void main() {
    vec2 l = position.xz * iB.xy;
    float c = cos(iA.z), s = sin(iA.z);
    vec2 p = iA.xy + vec2(c * l.x - s * l.y, s * l.x + c * l.y);
-   vec3 wp = surfPoint(p);
+   vec3 wp = toCam(surfPoint(p));
    vUv = position.xz + 0.5;
    vWP = wp; vPlane = p; vB = iB; vType = iA.w; vAlpha = iC;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
@@ -447,7 +456,7 @@ varying vec3 vB;
 varying vec3 vWP;
 varying vec2 vPlane;
 void main() {
-   vec3 wp = surfPoint(position.xz);
+   vec3 wp = toCam(surfPoint(position.xz));
    vA = aA; vB = aB; vWP = wp; vPlane = position.xz;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
@@ -471,20 +480,23 @@ void main() {
       // turbulent band about a beam wide that widens slowly; foam breaks up into streaks with age
       float washW = vB.x * (0.42 + 0.55 * u);
       float band = 1.0 - smoothstep(washW * 0.35, washW, m);
-      float thr = 0.34 + 0.5 * u;
+      float thr = 0.42 + 0.42 * u;
       float wash = band * smoothstep(thr, thr + 0.25, n) * pow(1.0 - u, 1.8);
-      float churn = (1.0 - smoothstep(0.0, 0.1, u)) * (1.0 - smoothstep(0.15, 0.7, m / max(vB.x, 1.0)));   // white water at the stern
+      // white water at the stern: broken up by the noise and faded well inside the strip edge (a
+      // solid full-width churn read as a white slab glued to the transom)
+      float churn = (1.0 - smoothstep(0.0, 0.08, u)) * (1.0 - smoothstep(0.05, 0.42, m / max(vB.x, 1.0)))
+         * smoothstep(0.2, 0.6, n + 0.25 * (1.0 - u / 0.08));
       // screw-race foam line down the centre: outlasts the wash so the track reads from far off
       float centre = (1.0 - smoothstep(0.08, 0.5, m / max(washW, 1.0))) * pow(1.0 - u, 1.25) * smoothstep(0.22, 0.55, n + 0.35 * (1.0 - u));
       float arm = exp(-pow((as - 0.9) / 0.06, 2.0)) * (1.0 - smoothstep(0.03, 0.4, u)) * smoothstep(0.3, 0.7, n);
-      foam = (wash * 0.8 + churn * 0.9 + arm * 0.45 + centre * 0.7) * vB.y;
+      foam = (wash * 0.75 + churn * 0.7 + arm * 0.45 + centre * 0.45) * vB.y;
       aer = band * (1.0 - u) * vB.y;           // aerated, lighter water under the foam
    } else {
       float core = 1.0 - smoothstep(0.15, 1.0, as);
       foam = core * (1.0 - u) * smoothstep(0.25, 0.65, n + 0.25 * (1.0 - u)) * vB.y;
       aer = core * (1.0 - u) * vB.y * 0.6;
    }
-   foam = clamp(foam, 0.0, 1.0);
+   foam = 1.0 - exp(-1.5 * foam);          // soft saturation: overlapping terms no longer merge into a flat white slab
    float a = max(foam, aer * 0.22);
    if (a < 0.004) discard;
    vec3 col = mix(uFoamCol * vec3(0.5, 0.82, 0.84), uFoamCol, foam / a);
@@ -581,7 +593,7 @@ class Wakes {
             sp /= tk;
             const u = Math.min(1, age / life);
             // Kelvin spread, capped: past ~12 s the arms have faded and a huge fan only folds over itself in turns
-            const hw = t.kind === 0 ? t.beam * 0.55 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
+            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
             const nx = -dz, nz = dx;
             for (let s = -1; s <= 1; s += 2) {
                P[v * 3] = x + nx * hw * s; P[v * 3 + 1] = 0; P[v * 3 + 2] = z + nz * hw * s;
@@ -683,7 +695,7 @@ void main() {
    float ang = position.x, k = position.y;
    float rad = k < 0.5 ? uR + uW * 0.5 : k < 1.5 ? uR - uW * 0.5 : uR - uW * 0.5 - min(90.0, uR * 0.3);
    vec2 p = uC + vec2(cos(ang), sin(ang)) * rad;
-   vec3 wp = surfPoint(p);
+   vec3 wp = toCam(surfPoint(p));
    vAng = ang; vK = k; vWP = wp;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
