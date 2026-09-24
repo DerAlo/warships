@@ -1,0 +1,36 @@
+// scratch: top JS allocation sites during a running battle (CDP sampling heap profiler); deleted before commit
+import { chromium } from 'playwright';
+const URL = process.env.URL3D || 'http://localhost:5205/index-3d.html';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: +(process.env.VW || 1280), height: +(process.env.VH || 720) } });
+const errors = [];
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
+await page.goto(URL, { waitUntil: 'load' });
+await page.waitForTimeout(800);
+const mission = process.argv[2] || 'standard';
+await page.evaluate(m => window.__start({ difficulty: 'normal', mission: m }), mission);
+await page.waitForTimeout(4000);
+await page.evaluate(() => { const w = window.__world(); w.autoPlayer = true; });
+await page.waitForTimeout(+(process.env.WARM || 3000));
+const cdp = await page.context().newCDPSession(page);
+await cdp.send('HeapProfiler.enable');
+await cdp.send('HeapProfiler.startSampling', { samplingInterval: 2048, includeObjectsCollectedByMinorGC: true, includeObjectsCollectedByMajorGC: true });
+const t0 = Date.now();
+const n0 = await page.evaluate((NF) => new Promise(r => { let k = 0; const f = () => (++k >= NF ? r(k) : requestAnimationFrame(f)); requestAnimationFrame(f); }), +(process.env.NF || 60));
+const dt = (Date.now() - t0) / 1000;
+const { profile } = await cdp.send('HeapProfiler.stopSampling');
+const agg = new Map();
+let total = 0;
+const walk = (n) => {
+   const cf = n.callFrame;
+   const key = `${cf.functionName || '(anon)'} ${cf.url.split('/').pop()}:${cf.lineNumber + 1}`;
+   agg.set(key, (agg.get(key) || 0) + n.selfSize);
+   total += n.selfSize;
+   for (const c of n.children) walk(c);
+};
+walk(profile.head);
+console.log(`frames ${n0} in ${dt.toFixed(1)}s, sampled alloc total ${(total / 1e6).toFixed(2)} MB => ${(total / n0 / 1024).toFixed(1)} KB/frame`);
+[...agg].sort((a, b) => b[1] - a[1]).slice(0, +(process.argv[3] || 30)).forEach(([k, v]) => console.log((v / n0 / 1024).toFixed(2).padStart(8), 'KB/f', k));
+console.log('errors', errors.length, errors.slice(0, 3));
+await browser.close();
