@@ -1,329 +1,405 @@
-// game/state.js — the World: central container, dispatch, and query surface for every module.
-import { add, sub, dist, fromAngle, angleOf, clamp, pick, TAU } from './utils.js';
-import { WORLD, SHIPS, ENCOUNTER, OBSTACLES, DIFFICULTY, COMBAT, TUNE } from './config.js';
+// game3d/state.js — the World: mission container, fixed-step update, spotting, capture points,
+// events/stats bookkeeping and the query surface used by AI, renderer and HUD.
+import { WORLD, DIFFICULTY, TUNE } from './config.js';
+import { makeRng, dist2, clamp, makeLobes, segBlockedByIslands, pointSegDist, TAU } from './utils.js';
 import { Ship } from './ship.js';
-import { resolveShells, resolveTorpedoes, resolveAA } from './combat.js';
+import { resolveShells, resolveTorpedoes } from './combat.js';
+import { updateBots } from './ai.js';
+import { setupMission, updateMission } from './missions.js';
 
-let SEQ = 0;
+const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
+const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
+const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
+
 export class World {
-   constructor(difficulty = 'normal', seed = null) {
-      this.difficulty = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-      this.difficultyKey = difficulty;
+   // opts: { mission: id, ship: playable class key, seed }. Legacy call: new World(diff, seed).
+   constructor(difficulty = 'normal', opts = {}) {
+      if (opts === null || typeof opts !== 'object') opts = { seed: opts };
+      this.difficultyKey = DIFFICULTY[difficulty] ? difficulty : 'normal';
+      this.difficulty = DIFFICULTY[this.difficultyKey];
+      this.seed = opts.seed ?? ((Date.now() ^ (Math.random() * 1e9)) >>> 0);
+      this.rng = makeRng(this.seed);
+      this._nextId = 1;
+      this.tick = 0;
       this.time = 0;
-      this.phase = 'playing';   // playing | won | lost
-      this.ships = [];
+      this.phase = 'playing';
+      // Capability flags read by main3d.js: secondaries fire automatically, bots are driven inside update().
+      this.autoSecondaries = true;
+      this.aiInternal = true;
+      this.arena = WORLD.ARENA;
+      this.ships = [];          // alive + sinking
+      this.roster = [];         // every ship that took part (scoreboard), never pruned
+      this.bots = [];           // AI ships (allies + enemies), never pruned
+      this.player = null;
       this.shells = [];
       this.torpedoes = [];
-      this.aaTracers = [];
-      this.particles = [];
-      this.effects = [];        // {kind, ...} rendered each frame
       this.smokeClouds = [];
-      this.damageNumbers = [];
-      this.obstacles = OBSTACLES.map(o => ({ ...o, lobes: o.irregular ? makeIslandLobes(o) : null }));
-      this.player = null;
-      this.bots = [];
-      this.events = [];         // sink events etc. for HUD/log
+      this.effects = [];
+      this.planes = [];
+      this.events = [];
+      this._eventSeq = 0;
+      this.obstacles = [];
+      this.caps = [];
+      this.score = null;
+      this.timeLeft = null;
+      this.mission = null;
+      this.result = null;
+      this.env = null;
+      this.stats = {
+         dmg: 0, kills: 0, citadels: 0, pens: 0, overpens: 0, ricochets: 0, shatters: 0, heHits: 0, secHits: 0,
+         fires: 0, floods: 0, torpHits: 0, torpsFired: 0, shotsFired: 0, hits: 0, spottingDmg: 0, tanked: 0,
+         potential: 0, healed: 0, caps: 0, spotted: 0,
+      };
       this.logLines = [];
-      this._spawn();
-      this.log(null, '⚓ In See — feindliche Flotte gesichtet', 'warn');
-      this.killCount = 0;
-      this.seed = seed;
-    }
+      this.killCount = 0;       // legacy HUD: enemy ships sunk
+      this._shake = 0;
+      this._maxTerrainH = 0;
+      this._spotT = 0;
+      this._byId = new Map();
+      this.setEnv({});
+      setupMission(this, opts.mission || 'standard', opts.ship || null);
+      this._updateSpotting();
+   }
 
-   _spawn() {
-       // Player Bismarck at origin facing east
-      this.player = new Ship(this, 'Bismarck', 'player', { x: 0, y: 0 }, 0);
-      this.ships.push(this.player);
-       // Enemy wave
-      for (const spec of ENCOUNTER.bots) {
-         const r = ENCOUNTER.ring;
-         const p = fromAngle(spec.bearing, r);
-         p.x += this.player.pos.x; p.y += this.player.pos.y;
-         const facesPlayer = angleOf(sub(this.player.pos, p));
-         const bot = new Ship(this, spec.cls, 'enemy', p, facesPlayer, {
-            hpMult: this.difficulty.botHP,
-            dmgMult: this.difficulty.botDmg,
-         });
-         this.bots.push(bot);
-         this.ships.push(bot);
-       }
-    }
+   // ---------------- setup helpers (missions.js) ----------------
+   setEnv(e) {
+      const time = e.time || 'day', weather = e.weather || 'clear';
+      const [az, el] = SUN[time] || SUN.day;
+      this.env = {
+         time, weather,
+         seaState: e.seaState ?? ENV_SEA[weather] ?? 0.3,
+         visibility: e.visibility ?? (ENV_VIS[weather] ?? 1) * (time === 'night' ? 0.6 : time === 'day' ? 1 : 0.9),
+         sunAzimuth: e.sunAzimuth ?? az, sunElevation: e.sunElevation ?? el,
+         wind: e.wind ?? (weather === 'storm' ? 1 : weather === 'rain' ? 0.6 : 0.3),
+         // hard ceiling on visual detection (m), gun bloom included -- WoWs "cyclone" rule
+         spotCap: e.spotCap ?? (weather === 'storm' ? 8000 : Infinity),
+      };
+      return this.env;
+   }
+   addIsland(o) {
+      const isl = {
+         kind: o.kind || 'island', c: { x: o.c.x, y: o.c.y }, r: o.r, height: o.height ?? 150, seed: o.seed ?? 1,
+         lobeCount: typeof o.lobes === 'number' ? o.lobes : 5, elong: o.elong || 1, rot: o.rot || 0,
+         rough: o.rough ?? 0.5, peaks: o.peaks || null, name: o.name || null, snow: !!o.snow,
+      };
+      isl.lobes = makeLobes({ ...isl, lobes: isl.lobeCount });
+      isl.rMax = isl.lobes.reduce((a, l) => Math.max(a, l.r), 0);
+      this.obstacles.push(isl);
+      const peakH = isl.peaks ? isl.peaks.reduce((a, k) => Math.max(a, k.h), 0) : 0;
+      if (isl.kind === 'island') this._maxTerrainH = Math.max(this._maxTerrainH, isl.height * 1.4, peakH * 1.05);
+      return isl;
+   }
+   spawn(cls, side, pos, heading, opts = {}) {
+      const d = this.difficulty;
+      const bot = !opts.isPlayer;
+      const ship = new Ship(this, cls, side, pos, heading, {
+         hpMult: bot && side === 'enemy' ? d.botHP : 1,
+         dmgMult: bot && side === 'enemy' ? d.botDmg : 1,
+         ...opts,
+      });
+      this.ships.push(ship);
+      this.roster.push(ship);
+      this._byId.set(ship.id, ship);
+      if (opts.isPlayer) this.player = ship;
+      else this.bots.push(ship);
+      return ship;
+   }
+   // Take a ship out of the battle without sinking it (escaped / arrived / retreated).
+   removeShip(ship, reason = 'escaped') {
+      if (!ship.alive) return;
+      ship.alive = false; ship.sinking = false; ship.escaped = reason;
+      this.ships = this.ships.filter(s => s !== ship);
+   }
 
-    spawnPressure() {
-       for (const spec of ENCOUNTER.pressure) {
-         const r = ENCOUNTER.ring;
-         const p = fromAngle(spec.bearing, r);
-         p.x += this.player.pos.x; p.y += this.player.pos.y;
-         const bot = new Ship(this, spec.cls, 'enemy', p, angleOf(sub(this.player.pos, p)),
-            { hpMult: this.difficulty.botHP, dmgMult: this.difficulty.botDmg });
-         this.bots.push(bot); this.ships.push(bot);
-       }
-       this.log(null, '⚠ Verstärkung gesichtet!', 'warn');
-    }
-
-   // ---- queries used by AI / combat ----
-   enemiesOf(ship) {
-      const out = [];
-      for (const s of this.ships) if (s.alive && s.side !== ship.side) out.push(s);
-      return out;
-    }
-   // Is `ship` within spotting range of any living enemy right now? Same detect/detectMult
-   // rule the AI itself uses (ai.js) and, symmetrically, own smoke hides you from spotters
-   // on the other side. Lets the HUD tell the player "you're spotted" truthfully instead of
-   // just guessing from the range rings.
+   // ---------------- queries ----------------
+   shipById(id) { return id == null ? null : this._byId.get(id) || null; }
+   alliesOf(ship) { return this.ships.filter(s => s.alive && s.side === ship.side && s !== ship); }
+   enemiesOf(ship) { return this.ships.filter(s => s.alive && s.side !== ship.side); }
+   sideShips(side) { return this.ships.filter(s => s.alive && s.side === side); }
+   // Can the team `side` currently see `target`?
+   canSee(side, target) { return target.side === side || target.detected; }
+   // Enemy ships: visible to the player's team. The player: is the player detected (legacy HUD).
    isSpotted(ship) {
-      if (this.inSmoke(ship.pos, ship.side)) return false;
-      const mult = this.difficulty ? this.difficulty.detectMult : 1;
-      for (const e of this.enemiesOf(ship)) {
-         if (dist(ship.pos, e.pos) < e.cfg.detect * mult) return true;
-      }
+      if (!ship) return false;
+      if (ship === this.player) return ship.detected;
+      return ship.side === 'player' ? true : ship.spotted;
+   }
+   // Any smoke cloud covering pos (smoke hides whoever is inside, friend or foe).
+   inSmoke(pos) {
+      for (const c of this.smokeClouds) if (dist2(pos, c.c) < c.r * c.r) return true;
       return false;
    }
+   smokeBlocks(a, b) {
+      for (const c of this.smokeClouds) if (c.r > 60 && pointSegDist(c.c, a, b) < c.r * 0.85) return true;
+      return false;
+   }
+   losBlocked(a, b) { return segBlockedByIslands(a, b, this.obstacles); }
+   // Legacy HUD "under fire": distance from ship to the nearest incoming enemy shell impact.
    nearestThreat(ship) {
       let best = Infinity;
-      for (const s of this.enemiesOf(ship)) {
-         // threat = guns that can hit, plus torpedoes
-         const d = dist(ship.pos, s.pos);
-         const range = Math.max(s.cfg.main.range, s.cfg.torp ? s.cfg.torp.range : 0);
-         if (d < range) best = Math.min(best, d);
-      }
-      for (const t of this.torpedoes) if (t.owner !== ship.side) best = Math.min(best, dist(t.pos, ship.pos));
-      for (const s of this.shells) if (s.owner !== ship.side) best = Math.min(best, dist(s.pos, ship.pos));
-      return best;
-   }
-   nearestThreatPos(ship) {
-      let best = null, bestD = Infinity;
-      for (const s of this.enemiesOf(ship)) {
-         const d = dist(ship.pos, s.pos);
-         if (d < bestD) { bestD = d; best = s.pos; }
-      }
-      for (const t of this.torpedoes) if (t.owner !== ship.side) {
-         const d = dist(t.pos, ship.pos); if (d < bestD) { bestD = d; best = t.pos; }
-      }
-      if (!best) best = { x: 0, y: 0 }; // arena center — never a dead ship's corpse
-      return best;
-   }
-   safeZone(ship) {
-       // farthest arena corner from all enemies
-      const corners = [
-          { x: -WORLD.ARENA + 300, y: -WORLD.ARENA + 300 },
-          { x: WORLD.ARENA - 300, y: -WORLD.ARENA + 300 },
-          { x: -WORLD.ARENA + 300, y: WORLD.ARENA - 300 },
-          { x: WORLD.ARENA - 300, y: WORLD.ARENA - 300 },
-       ];
-      let best = corners[0], bestD = -1;
-      for (const c of corners) {
-         let md = Infinity;
-         for (const e of this.enemiesOf(ship)) md = Math.min(md, dist(c, e.pos));
-         for (const o of this.obstacles) md = Math.min(md, dist(c, o.c) - o.r);
-         if (md > bestD) { bestD = md; best = c; }
-       }
-      return best;
-   }
-   enemyLeader(ship) {
-       // the enemy battleship (or heaviest) is the squad leader
-      let best = null, bestHP = -1;
-      for (const s of this.enemiesOf(ship)) {
-         if (s.cls === 'EB' || s.maxHP > bestHP) { bestHP = s.maxHP; best = s; }
-       }
-      return best;
-   }
-   inSmoke(pos, side) {
-      for (const c of this.smokeClouds) {
-         if (c.side === side) continue; // your own smoke hides you, not others
-         if (dist(pos, c.c) < c.r) return true;
-       }
-      return false;
-   }
-   smokeCloudAt(pos, side) {
-      let best = null, bestD = 1e9;
-      for (const c of this.smokeClouds) {
-         if (c.side === side) continue;
-         const d = dist(pos, c.c);
-         if (d < c.r && d < bestD) { bestD = d; best = c.c; }
-       }
+      for (const s of this.shells) if (s.side !== ship.side) best = Math.min(best, Math.sqrt(dist2(s.target, ship.pos)));
+      for (const t of this.torpedoes) if (t.side !== ship.side && t.visibleToOpp) best = Math.min(best, Math.sqrt(dist2(t.pos, ship.pos)));
       return best;
    }
 
-   // ---- dispatch: projectiles ----
-   // estRange: real muzzle-to-target distance, used to size the ballistic arc so it spans
-   // the WHOLE flight (crests at the midpoint, descends to the target) instead of a fixed
-   // ~1.2s hop. Optional -- callers that can't estimate a target fall back to a guess.
-   spawnShell(shooter, muzzle, dir, gun, kind = 'main', estRange = null) {
-      if (this.shells.length > TUNE.maxProjectiles) return;
-      const dmgMult = shooter.dmgMult || 1;
-      const vShell = gun.vShell || 650;
-      // Previously this used dist(muzzle, shooter.pos) -- the turret's offset from the
-      // ship's OWN center (a few meters) -- instead of the distance to the target. That
-      // capped the visible arc at ~1.2s no matter the shot: the shell hopped once right
-      // after firing, then flew dead flat and laser-straight for the rest of a long-range
-      // shot. Real WoWs-style plunging fire arcs across the entire flight.
-      const range = Math.max(estRange || gun.range || 800, 150);
-      this.shells.push({
-         id: ++SEQ, pos: { x: muzzle.x, y: muzzle.y },
-         vel: { x: dir.x * vShell, y: dir.y * vShell },
-         dir: angleOf(dir),
-         owner: shooter.side,
-         shooter, gun, kind,
-         dmg: gun.dmg * dmgMult * (kind === 'sec' ? 0.5 : 1),
-         ap: gun.ap || 0,
-         type: gun.type || 'AP',
-         age: 0,
-         arc: 0,           // 0..1 flight-phase fraction; drives visual height (render.js)
-         arcDur: range / vShell,
-         alive: true,
-      });
+   // ---------------- spawning of transient things ----------------
+   addShell(s) { if (this.shells.length < TUNE.maxShells) this.shells.push(s); }
+   addTorpedo(t) { this.torpedoes.push(t); }
+   addSmoke(c) { this.smokeClouds.push({ age: 0, ...c, c: { x: c.c.x, y: c.c.y } }); }
+   addEffect(kind, pos, life = 1, size = 10, extra = {}) {
+      const e = { kind, pos: { x: pos.x, y: pos.y }, t: 0, age: 0, life, size, big: false, ...extra };
+      this.effects.push(e);
+      if (this.effects.length > TUNE.maxEffects) this.effects.splice(0, this.effects.length - TUNE.maxEffects);
+      return e;
    }
-
-   spawnTorpedo(shooter, muzzle, dir, torp) {
-      const dmgMult = shooter.dmgMult || 1;
-      this.torpedoes.push({
-         id: ++SEQ, pos: { x: muzzle.x, y: muzzle.y },
-         vel: { x: dir.x * torp.speed, y: dir.y * torp.speed }, speed: torp.speed,
-         dir: angleOf(dir), owner: shooter.side, shooter,
-         dmg: torp.dmg * dmgMult, range: torp.range, age: 0, alive: true, wake: [],
-      });
+   pushEvent(type, data = {}) {
+      const e = { seq: ++this._eventSeq, t: this.time, type, srcId: null, dstId: null, dmg: 0, pos: null, text: '', ...data };
+      this.events.push(e);
+      if (this.events.length > TUNE.maxEvents) this.events.splice(0, this.events.length - TUNE.maxEvents);
+      return e;
    }
-
-   spawnAA(shooter, dir, target) {
-       // rapid tracers at a target (visual + light dps)
-      for (let i = 0; i < 4; i++) {
-         this.aaTracers.push({
-            pos: { x: shooter.pos.x + (Math.random() - 0.5) * 30, y: shooter.pos.y + (Math.random() - 0.5) * 30 },
-            dir: dir + (Math.random() - 0.5) * 0.2,
-            owner: shooter.side, age: 0, life: 1.2,
-         });
-       }
-   }
-
-   // pos: optional world point to flash at (a turret's muzzle) instead of the ship's centre --
-   // the 3D renderer spawns one flash per firing turret so a broadside visibly lights up
-   // along its whole length instead of one flash at the hull's origin. 2D callers omit it.
-   addMuzzleFlash(ship, bearing, pos = null) {
-      this.effects.push({ kind: 'muzzle', pos: pos ? { x: pos.x, y: pos.y } : { x: ship.pos.x, y: ship.pos.y }, bearing, age: 0, life: 0.08, big: ship.cls === 'Bismarck' || ship.cls === 'EB' });
-   }
-
-   emitSmokePuff(ship, dt) {
-      this._smokeAccum = (this._smokeAccum || 0) + dt;
-      if (this._smokeAccum > 0.15) {
-         this._smokeAccum = 0;
-         // find or create a cloud trailing the ship
-         let cloud = this.smokeClouds.find(c => c.side === ship.side && c.ship === ship && dist(c.c, ship.pos) < WORLD.SMOKE_RADIUS * 0.7);
-         if (!cloud) {
-            cloud = { c: { x: ship.pos.x, y: ship.pos.y }, r: WORLD.SMOKE_RADIUS * 0.4, age: 0, life: WORLD.SMOKE_DURATION + 2, side: ship.side, ship, targetR: WORLD.SMOKE_RADIUS };
-            this.smokeClouds.push(cloud);
-         }
-         this.particles.push({ kind: 'smoke', pos: { x: ship.pos.x + (Math.random() - 0.5) * 20, y: ship.pos.y + (Math.random() - 0.5) * 20 },
-            vel: fromAngle(ship.heading + Math.PI + (Math.random() - 0.5) * 0.6, 10 + Math.random() * 15),
-            age: 0, life: WORLD.SMOKE_DURATION, r: 30 + Math.random() * 30, side: ship.side });
-      }
-   }
-
-   addExplosion(pos, big = false) {
-      this.effects.push({ kind: 'explosion', pos: { ...pos }, age: 0, life: big ? 1.1 : 0.5, big });
-      const n = big ? 40 : 16;
-      for (let i = 0; i < n; i++) {
-         const a = Math.random() * TAU, sp = (big ? 120 : 60) * Math.random();
-         this.particles.push({ kind: 'spark', pos: { x: pos.x, y: pos.y }, vel: { x: Math.cos(a) * sp, y: Math.sin(a) * sp },
-            age: 0, life: 0.5 + Math.random() * 0.6, r: 2 + Math.random() * 3, color: pick(['#ffd24a', '#ff7a2d', '#ffb03a']) });
-      }
-   }
-
-   addSplash(pos, big = false) {
-       // water column for a bounced/missed shell
-      this.effects.push({ kind: 'splash', pos: { ...pos }, age: 0, life: 0.6, big });
-      for (let i = 0; i < (big ? 14 : 6); i++) {
-         const a = Math.random() * TAU, sp = (big ? 80 : 40) * Math.random();
-         this.particles.push({ kind: 'water', pos: { x: pos.x, y: pos.y }, vel: { x: Math.cos(a) * sp, y: Math.sin(a) * sp },
-            age: 0, life: 0.5 + Math.random() * 0.4, r: 3 + Math.random() * 4, color: '#bfe3ff' });
-      }
-   }
-
-   addDamageNumber(pos, amount, type = 'dmg') {
-      this.damageNumbers.push({ pos: { x: pos.x + (Math.random() - 0.5) * 20, y: pos.y }, text: Math.round(amount).toString(), age: 0, life: 1.2, type });
-   }
-
    log(who, text, type = 'info') {
-      const line = { text: (who && who.name ? who.name + ': ' : '') + text, type, t: this.time };
-      this.logLines.push(line);
-      if (this.logLines.length > 60) this.logLines.shift();
+      this.logLines.push({ text: (who && who.name ? who.name + ': ' : '') + text, type, t: this.time });
+      if (this.logLines.length > TUNE.maxLog) this.logLines.shift();
    }
-
+   message(text, type = 'info') {           // mission radio message: log + HUD banner event
+      this.log(null, text, type);
+      this.pushEvent('objective', { text, level: type });
+   }
    shakeAdd(m) { this._shake = Math.max(this._shake || 0, m); }
 
-   onSink(ship) {
+   // ---------------- bookkeeping hooks (ship.js / combat.js) ----------------
+   onHit(shooter, target, type, proj) {
+      if (!shooter) return;
+      if (type !== 'ricochet' && type !== 'shatter') shooter.hits++;
+      if (!shooter.isPlayer) return;
+      const st = this.stats;
+      // main-battery accuracy = hits / shotsFired: secondaries fire on their own and are counted apart
+      if (type === 'torp') st.torpHits++;
+      else if (proj?.kind !== 'sec') st.hits++;   // secondary shatters too
+      if (type === 'citadel') st.citadels++;
+      else if (type === 'pen') st.pens++;
+      else if (type === 'overpen') st.overpens++;
+      else if (type === 'ricochet') st.ricochets++;
+      else if (type === 'shatter') st.shatters++;
+      else if (type === 'he') st.heHits++;
+      else if (type === 'sec') st.secHits++;
+   }
+   onDamage(target, shooter, amt, type) {
+      if (shooter && shooter.isPlayer) this.stats.dmg += amt;
+      else if (shooter && shooter.side === 'player' && target.side !== 'player' && target.spottedByPlayer) this.stats.spottingDmg += amt;
+      if (target.isPlayer) this.stats.tanked += amt;
+   }
+   onStatus(ship, shooter, kind, zone) {
+      this.pushEvent(kind, { srcId: shooter ? shooter.id : null, dstId: ship.id, pos: { x: ship.pos.x, y: ship.pos.y }, zone,
+         text: kind === 'fire' ? 'Brand' : 'Wassereinbruch' });
+      if (shooter && shooter.isPlayer) this.stats[kind === 'fire' ? 'fires' : 'floods']++;
+      if (ship.isPlayer) this.log(null, kind === 'fire' ? '🔥 Feuer an Bord!' : '💧 Wassereinbruch!', 'warn');
+   }
+   onSink(ship, killer, type) {
       if (ship.side === 'enemy') this.killCount++;
-      this.log(null, (ship.side === 'enemy' ? '🎯 Versenkt: ' : '💀 Verlust: ') + ship.name, ship.side === 'enemy' ? 'kill' : 'warn');
-      // big explosion + fire
-      for (let i = 0; i < 3; i++) this.addExplosion({ x: ship.pos.x + (Math.random() - 0.5) * 40, y: ship.pos.y + (Math.random() - 0.5) * 40 }, true);
-      for (let i = 0; i < 6; i++) this.particles.push({ kind: 'smoke', pos: { x: ship.pos.x + (Math.random() - 0.5) * 60, y: ship.pos.y },
-         vel: { x: (Math.random() - 0.5) * 30, y: -20 - Math.random() * 30 }, age: 0, life: 6, r: 40 + Math.random() * 60, side: ship.side });
-      this.events.push({ kind: 'sink', ship, t: this.time });
-      // win is checked BEFORE loss: a simultaneous sink (mutual kill) counts as a victory
-      if (ship.side === 'enemy' && this.bots.every(b => !b.alive)) this._win();
-      else if (ship === this.player) this._lose();
+      if (killer) {
+         killer.kills++;
+         if (killer.isPlayer) {
+            this.stats.kills++;
+            this.pushEvent('kill', { srcId: killer.id, dstId: ship.id, pos: { x: ship.pos.x, y: ship.pos.y }, text: ship.name + ' versenkt' });
+         }
+      }
+      this.pushEvent('sunk', { srcId: killer ? killer.id : null, dstId: ship.id, pos: { x: ship.pos.x, y: ship.pos.y }, text: ship.name + ' gesunken', cause: type });
+      this.log(null, (ship.side === 'enemy' ? '🎯 Versenkt: ' : '💀 Verlust: ') + ship.name + (killer ? ' (' + killer.name + ')' : ''), ship.side === 'enemy' ? 'kill' : 'warn');
+      const L = ship.cfg.hull.L;
+      for (let i = 0; i < 3; i++) {
+         const f = (i - 1) * 0.3;
+         this.addEffect('explosion', { x: ship.pos.x + Math.cos(ship.heading) * L * f, y: ship.pos.y + Math.sin(ship.heading) * L * f },
+            1.6 + i * 0.3, 30 + L * 0.15, { big: true, sink: true, shipId: ship.id });
+      }
+      if (type === 'citadel' && ship.type !== 'DD') this.addEffect('detonation', ship.pos, 3, 60 + L * 0.3, { big: true, shipId: ship.id });
+      if (ship === this.player) this.shakeAdd(2);
+      if (this._script && this._script.onSink) this._script.onSink(this, ship, killer);
+      if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
    }
 
-   _win() { if (this.phase === 'playing') { this.phase = 'won'; this.log(null, '🏆 Alle Feinde versenkt — Sieg!', 'kill'); } }
-   _lose() { if (this.phase === 'playing') { this.phase = 'lost'; this.log(null, '💀 Die Bismarck ist gesunken — Niederlage.', 'warn'); } }
+   // ---------------- end of battle ----------------
+   flightTime(ship, R) { return ship && ship.flightTime ? ship.flightTime(R) : 0; }
 
+   end(victory, reason) {
+      if (this.phase !== 'playing') return;
+      this.phase = victory ? 'won' : 'lost';
+      const st = this.stats, d = this.difficulty;
+      for (const o of this.mission ? this.mission.objectives : []) {
+         if (o.state === 'active') o.state = victory && !o.optional ? 'done' : 'failed';
+      }
+      const base = victory ? 1100 : 450;
+      const xp = Math.round((base + st.dmg * 0.018 + st.kills * 160 + st.citadels * 12 + st.caps * 120 +
+         st.spottingDmg * 0.008 + st.potential * 0.0015 + (this.player && this.player.alive ? 150 : 0)) * (d.rewardMult || 1));
+      const credits = Math.round(xp * 55 + st.dmg * 1.2 + st.kills * 9000);
+      this.result = { victory, reason, xp, credits, time: this.time, stats: { ...st } };
+      this.pushEvent('objective', { text: (victory ? 'SIEG — ' : 'NIEDERLAGE — ') + reason, level: victory ? 'win' : 'lose', end: true });
+      this.log(null, (victory ? '🏆 ' : '💀 ') + reason, victory ? 'kill' : 'warn');
+   }
+
+   // ---------------- update ----------------
    update(dt) {
       this.time += dt;
-       // fire control pressure wave
-      if (!this._pressureSpawned && this.time > ENCOUNTER.pressureAt && this.bots.some(b => b.alive)) {
-         this._pressureSpawned = true; this.spawnPressure();
-       }
-       // update ships (movement + timers + DoT)
-      for (const s of this.ships) s.update(dt);
-       // projectiles, torpedoes, effects, particles
-      this._updateShells(dt);
-      this._updateTorpedoes(dt);
-      this._updateAA(dt);
-      this._updateEffects(dt);
+      this.tick++;
+      if (this.phase === 'playing' && this.timeLeft != null) this.timeLeft = Math.max(0, this.timeLeft - dt);
+      updateBots(this, dt);
+      for (const s of this.ships) s.update(dt, this);
+      this._collideShips();
+      resolveShells(this, dt);
+      resolveTorpedoes(this, dt);
       this._updateSmoke(dt);
-      this._updateDamageNumbers(dt);
-       // shake decay
-      if (this._shake) { this._shake *= Math.pow(0.02, dt); if (this._shake < 0.1) this._shake = 0; }
-       // win/lose recheck
-      if (this.phase === 'playing' && this.bots.every(b => !b.alive)) this._win();
+      this._updateEffects(dt);
+      this._spotT -= dt;
+      if (this._spotT <= 0) { this._spotT = WORLD.SPOT_DT; this._updateSpotting(); }
+      this._updateCaps(dt);
+      if (this.phase === 'playing') updateMission(this, dt);
+      if (this.ships.some(s => !s.alive && !s.sinking)) this.ships = this.ships.filter(s => s.alive || s.sinking);
+      if (this._shake) { this._shake *= Math.pow(0.02, dt); if (this._shake < 0.02) this._shake = 0; }
    }
 
-    // ---- combat resolution (delegated to combat.js to keep this file focused) ----
-   _updateShells(dt) { resolveShells(this, dt); }
-   _updateTorpedoes(dt) { resolveTorpedoes(this, dt); }
-   _updateAA(dt) { resolveAA(this, dt); }
-
-    // smoke & particles & effects are pure decay — keep inline
    _updateSmoke(dt) {
-      for (const c of this.smokeClouds) { c.age += dt; c.life -= dt; c.r = Math.min(c.targetR, c.r + dt * 120); }
-      this.smokeClouds = this.smokeClouds.filter(c => c.life > 0);
-      for (const p of this.particles) {
-         p.age += dt; p.life -= dt;
-         p.pos = add(p.pos, scaleV(p.vel, dt));
-         p.vel = scaleV(p.vel, 0.96);
-       }
-      this.particles = this.particles.filter(p => p.life > 0);
-      if (this.particles.length > TUNE.maxParticles) this.particles.splice(0, this.particles.length - TUNE.maxParticles);
-   }
-   _updateDamageNumbers(dt) {
-      for (const d of this.damageNumbers) { d.age += dt; d.life -= dt; d.pos.y -= dt * 30; }
-      this.damageNumbers = this.damageNumbers.filter(d => d.life > 0);
+      for (const c of this.smokeClouds) {
+         c.age += dt; c.life -= dt;
+         c.r = Math.min(c.maxR || WORLD.SMOKE_RADIUS, c.r + dt * 70);
+         if (c.life < 6) c.r *= Math.pow(0.85, dt);      // dissipates at the end
+      }
+      if (this.smokeClouds.some(c => c.life <= 0)) this.smokeClouds = this.smokeClouds.filter(c => c.life > 0);
    }
    _updateEffects(dt) {
-      for (const e of this.effects) { e.age += dt; e.life -= dt; }
-      this.effects = this.effects.filter(e => e.life > 0);
+      for (const e of this.effects) { e.t += dt; e.age += dt; }
+      if (this.effects.some(e => e.t >= e.life)) this.effects = this.effects.filter(e => e.t < e.life);
+   }
+
+   // Team-shared surface spotting: detectability range (after bloom/smoke/weather), island and
+   // smoke line of sight, 2 km proximity, radar/hydro. Updated every SPOT_DT seconds.
+   _updateSpotting() {
+      const ships = this.ships, prox2 = WORLD.PROXIMITY * WORLD.PROXIMITY;
+      for (const T of ships) {
+         if (!T.alive) continue;
+         let seen = false, byPlayer = false;
+         for (const O of ships) {
+            if (!O.alive || O.side === T.side) continue;
+            if (seen && !O.isPlayer) continue;
+            const d2 = dist2(O.pos, T.pos);
+            let sees = d2 < prox2;
+            if (!sees) {
+               const radar = O.consumableActive('radar') ? O.consumable('radar').range : 0;
+               const hydro = O.consumableActive('hydro') ? O.consumable('hydro').range : 0;
+               if (d2 < Math.max(radar, hydro) ** 2) sees = true;
+               else if (T.detectRange > 0 && d2 < T.detectRange * T.detectRange) {
+                  sees = !this.losBlocked(O.pos, T.pos) && (T.inSmoke || !this.smokeBlocks(O.pos, T.pos));
+               }
+            }
+            if (sees) { seen = true; if (O.isPlayer) byPlayer = true; }
+         }
+         const was = T.detected;
+         T.detected = seen;
+         T.spottedByPlayer = byPlayer;
+         T.spotted = T.side === 'player' ? true : seen;
+         if (seen) {
+            T.lastSeen = { x: T.pos.x, y: T.pos.y, heading: T.heading, speed: T.speed, t: this.time };
+            if (!was && T.side === 'enemy') {
+               this.pushEvent('spotted', { dstId: T.id, text: T.name + ' entdeckt', pos: { x: T.pos.x, y: T.pos.y } });
+               if (byPlayer) this.stats.spotted++;
+            }
+         }
+         if (was !== seen && T === this.player) this.pushEvent(seen ? 'spotted' : 'unspotted', { dstId: T.id, text: seen ? 'Sie wurden entdeckt!' : 'Nicht mehr entdeckt' });
+         else if (was && !seen && T.side === 'enemy') this.pushEvent('unspotted', { dstId: T.id, text: T.name + ' außer Sicht' });
+      }
+      // torpedoes: seen by the opposing team within their detect range (or hydrophone range)
+      for (const t of this.torpedoes) {
+         let vis = false;
+         for (const O of ships) {
+            if (!O.alive || O.side === t.side) continue;
+            const hyd = O.consumableActive('hydro') ? O.consumable('hydro').torpRange || 0 : 0;
+            const r = Math.max(t.detect || 1300, hyd);
+            if (dist2(O.pos, t.pos) < r * r) { vis = true; break; }
+         }
+         t.visibleToOpp = vis;
+         t.spotted = t.side === 'player' || vis;
+      }
+   }
+
+   _updateCaps(dt) {
+      if (!this.caps.length) return;
+      for (const cap of this.caps) {
+         let np = 0, ne = 0;
+         for (const s of this.ships) {
+            if (!s.alive || s.type === 'TR' || dist2(s.pos, cap.pos) > cap.r * cap.r) continue;
+            if (s.side === 'player') np++; else ne++;
+         }
+         cap.contested = np > 0 && ne > 0;
+         cap.inside = { player: np, enemy: ne };
+         if (cap.contested) continue;
+         const side = np ? 'player' : ne ? 'enemy' : null;
+         if (!side || side === cap.owner) {
+            cap.progress = Math.max(0, cap.progress - dt / (cap.time || 45) * 0.5);
+            if (cap.progress <= 0) cap.capper = null;
+            continue;
+         }
+         if (cap.capper !== side) { cap.capper = side; cap.progress = 0; }
+         const n = Math.min(3, side === 'player' ? np : ne);
+         cap.progress += dt / (cap.time || 45) * (1 + 0.35 * (n - 1));
+         if (cap.progress >= 1) {
+            const prev = cap.owner;
+            cap.owner = side; cap.progress = 0; cap.capper = null;
+            if (side === 'player') {
+               this.stats.caps++;
+               this.pushEvent('cap', { text: 'Punkt ' + cap.id + ' eingenommen', capId: cap.id, pos: { ...cap.pos } });
+               this.log(null, '🚩 Punkt ' + cap.id + ' eingenommen', 'kill');
+            } else {
+               this.pushEvent('capLost', { text: 'Punkt ' + cap.id + (prev === 'player' ? ' verloren' : ' vom Feind eingenommen'), capId: cap.id, pos: { ...cap.pos } });
+               this.log(null, '⚑ Punkt ' + cap.id + (prev === 'player' ? ' verloren' : ' vom Feind eingenommen'), 'warn');
+            }
+         }
+      }
+   }
+
+   // Soft hull-vs-hull collisions (keel segments), heavier ship shoves the lighter one.
+   _collideShips() {
+      const ships = this.ships;
+      for (let i = 0; i < ships.length; i++) {
+         const a = ships[i];
+         if (!a.alive) continue;
+         for (let j = i + 1; j < ships.length; j++) {
+            const b = ships[j];
+            if (!b.alive) continue;
+            const reach = (a.cfg.hull.L + b.cfg.hull.L) / 2;
+            if (dist2(a.pos, b.pos) > reach * reach) continue;
+            const hit = keelContact(a, b);
+            if (!hit) continue;
+            const wa = b.maxHP / (a.maxHP + b.maxHP), wb = 1 - wa;
+            a.pos.x += hit.nx * hit.depth * wa; a.pos.y += hit.ny * hit.depth * wa;
+            b.pos.x -= hit.nx * hit.depth * wb; b.pos.y -= hit.ny * hit.depth * wb;
+            a.speed *= 0.985; b.speed *= 0.985;
+         }
+      }
    }
 }
 
-function scaleV(v, s) { return { x: v.x * s, y: v.y * s }; }
-
-function makeIslandLobes(o) {
-    // irregular silhouette for the island obstacle (render-only)
-   const lobes = [];
-   for (let i = 0; i < 48; i++) {
-      const a = (i / 48) * TAU;
-      const r = o.r * (1 + 0.18 * Math.sin(a * 3 + 1) + 0.1 * Math.cos(a * 5) + 0.06 * Math.sin(a * 7));
-      lobes.push({ a, r });
-   }
-   return lobes;
+// Closest approach of two keel lines; returns push normal (from b to a) and overlap depth.
+function keelContact(a, b) {
+   const seg = (s) => {
+      const h = s.cfg.hull.L * 0.46, c = Math.cos(s.heading), n = Math.sin(s.heading);
+      return [{ x: s.pos.x + c * h, y: s.pos.y + n * h }, { x: s.pos.x - c * h, y: s.pos.y - n * h }];
+   };
+   const [a0, a1] = seg(a), [b0, b1] = seg(b);
+   let best = null;
+   const test = (p, q0, q1, sign) => {
+      const vx = q1.x - q0.x, vy = q1.y - q0.y;
+      const t = clamp(((p.x - q0.x) * vx + (p.y - q0.y) * vy) / (vx * vx + vy * vy || 1), 0, 1);
+      const cx = q0.x + vx * t, cy = q0.y + vy * t;
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      if (!best || d < best.d) best = { d, nx: (p.x - cx) * sign, ny: (p.y - cy) * sign };
+   };
+   test(a0, b0, b1, 1); test(a1, b0, b1, 1); test(b0, a0, a1, -1); test(b1, a0, a1, -1);
+   const minD = (a.cfg.hull.beam + b.cfg.hull.beam) * 0.5;
+   if (best.d >= minD) return null;
+   const l = best.d || 1;
+   if (best.d < 1e-3) { best.nx = Math.cos(a.heading + Math.PI / 2); best.ny = Math.sin(a.heading + Math.PI / 2); }
+   else { best.nx /= l; best.ny /= l; }
+   return { nx: best.nx, ny: best.ny, depth: (minD - best.d) * 0.5 };
 }
+
+export { TAU };
