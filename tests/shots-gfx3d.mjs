@@ -91,6 +91,17 @@ const views = {
          for (let a = 25; a >= 0; a -= 0.5) { const d = sp * a, o = 0.0005 * d * d; R.fx.wakes.feed(p, 0, sx - Math.cos(h) * d + Math.cos(h + 1.57) * o, sz - Math.sin(h) * d + Math.sin(h + 1.57) * o, sp, rec.d.B, 1, R.time - a); }
          const tk = {}; for (let a = 8; a >= 0; a -= 0.25) R.fx.wakes.feed(tk, 1, sx - Math.cos(h - 0.5) * (60 + 30 * a), sz - Math.sin(h - 0.5) * (60 + 30 * a), 30, 2, 1, R.time - a); }
       return { pos: [p.pos.x - Math.cos(h) * 320 + Math.cos(h + 1.57) * 90, 110, p.pos.y - Math.sin(h) * 320 + Math.sin(h + 1.57) * 90], look: [p.pos.x - Math.cos(h) * 60, 0, p.pos.y - Math.sin(h) * 60], fov: 55 };`,
+   // a laid smoke trail seen from outside, 2.4 km off its beam
+   smoke: `if (w.smokeClouds) w.smokeClouds.length = 0; const p = w.player, h = p.heading;
+      for (let i = 0; i < 7; i++) w.addSmoke({ c: { x: p.pos.x + Math.cos(h) * (i * 320 - 900), y: p.pos.y + Math.sin(h) * (i * 320 - 900) }, r: 450, life: 30 + i * 4, age: 10 });
+      window.__fxSim = 0.1; const a = h + 1.57, d = 1700;
+      return { pos: [p.pos.x + Math.cos(a) * d, 35, p.pos.y + Math.sin(a) * d], look: [p.pos.x, 60, p.pos.y], fov: 55 };`,
+   // an enemy ~11 km out, as the normal third-person camera would frame it (contrast check)
+   far: `if (w.smokeClouds) w.smokeClouds.length = 0; const p = w.player; const e = w.ships.find(s => s.side === 'enemy' && s.alive); if (!e) return null;
+      const a = Math.atan2(e.pos.y - p.pos.y, e.pos.x - p.pos.x); e.pos.x = p.pos.x + Math.cos(a) * 11000; e.pos.y = p.pos.y + Math.sin(a) * 11000; Object.defineProperty(e, 'detectRange', { get: () => 30000, set() {}, configurable: true }); e.spotted = true;
+      const b = a - 0.12; return { pos: [p.pos.x - Math.cos(a) * 260, 70, p.pos.y - Math.sin(a) * 260], look: [p.pos.x + Math.cos(b) * 11000, 0, p.pos.y + Math.sin(b) * 11000], fov: 55 };`,
+   smokeIn: `const p = w.player, h = p.heading;
+      return { pos: [p.pos.x - Math.cos(h) * 120, 40, p.pos.y - Math.sin(h) * 120], look: [p.pos.x + Math.cos(h) * 600, 20, p.pos.y + Math.sin(h) * 600], fov: 55 };`,
    water: `const p = w.player; const h = p.heading; return { pos: [p.pos.x - Math.cos(h) * 60, 9, p.pos.y - Math.sin(h) * 60 + 40], look: [p.pos.x - Math.cos(h) * 400, 0, p.pos.y - Math.sin(h) * 400 + 80], fov: 60 };`,
 };
 

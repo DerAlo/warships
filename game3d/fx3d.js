@@ -1445,13 +1445,18 @@ export class FX {
          if (!c || !c.c) continue;
          let st = this._clouds.get(c);
          if (!st) {
-            const n = 40;
+            const n = 44;
             const rng = mulberry32((Math.abs(Math.round(c.c.x * 7 + c.c.y * 13)) + 1) >>> 0);
             st = { n, ox: new Float32Array(n), oz: new Float32Array(n), h: new Float32Array(n), s: new Float32Array(n), ph: new Float32Array(n) };
+            // each cloud is a billowing mound: central puffs stack high, rim puffs hug the water,
+            // so a laid trail reads as a chain of heaps instead of one flat-topped wall
+            const tall = 0.6 + rng() * 0.4;
             for (let i = 0; i < n; i++) {
                const a = rng() * TAU, rad = Math.sqrt(rng()) * 0.85;
                st.ox[i] = Math.cos(a) * rad; st.oz[i] = Math.sin(a) * rad;
-               st.h[i] = 0.25 + rng() * 0.75; st.s[i] = 0.55 + rng() * 0.5; st.ph[i] = rng() * TAU;
+               const mound = 1 - (rad / 0.85) ** 2;
+               st.h[i] = 0.08 + 0.92 * tall * mound * (0.45 + 0.55 * rng());
+               st.s[i] = 0.55 + rng() * 0.5; st.ph[i] = rng() * TAU;
             }
             this._clouds.set(c, st);
          }
@@ -1463,14 +1468,18 @@ export class FX {
          const inside = 0.3 + 0.7 * clamp((cd - R * 0.6) / (R * 0.9), 0, 1);
          const alpha = clamp(life / 5, 0, 1) * aIn * 0.7 * inside;
          if (alpha <= 0.01) continue;
-         const Hs = clamp(R * 0.35, 18, 70);
+         const Hs = clamp(R * 0.36, 18, 165);
          for (let i = 0; i < st.n; i++) {
             const p = P.t();
+            const hi = st.h[i];
             const sw = Math.sin(t * 0.13 + st.ph[i]) * 0.04;
             p.x = c.c.x + (st.ox[i] + sw) * R; p.z = c.c.y + (st.oz[i] - sw) * R;
-            p.y = Hs * st.h[i];
-            p.s0 = p.s1 = R * 0.7 * st.s[i] + 18;
-            p.r = 0.66; p.g = 0.67; p.b = 0.69; p.a = alpha; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
+            p.y = Hs * hi + Math.sin(t * 0.09 + st.ph[i] * 2) * 4;
+            // big soft base, smaller puffs on top for a lumpy crown
+            p.s0 = p.s1 = R * (0.72 - 0.34 * hi) * st.s[i] + 18;
+            // underside in its own shadow, sunlit crown
+            const g = 0.54 + 0.2 * hi;
+            p.r = g; p.g = g + 0.01; p.b = g + 0.025; p.a = alpha; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
             p.rot = st.ph[i] + t * 0.02 * (i % 2 ? 1 : -1);
             P.emit(true);
          }
