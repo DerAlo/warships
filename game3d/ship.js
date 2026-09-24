@@ -444,6 +444,9 @@ export class Ship {
 
    // ================= legacy read-outs (old hud.js / main3d.js) =================
    get speedKnots() { return Math.abs(this.speedKn); }
+   get shotsHit() { return this.hits; }
+   // Main-battery shell flight time to range R (clamped to max range), for the lead indicator.
+   flightTime(R) { return flightTime(this.cfg.main, Math.min(Math.max(R, 0), this.cfg.main.range)); }
    get fireTimer() {
       let best = Infinity;
       for (const t of this.turrets) if (t.alive) best = Math.min(best, t.reload);

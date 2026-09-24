@@ -23,6 +23,9 @@ export class World {
       this.tick = 0;
       this.time = 0;
       this.phase = 'playing';
+      // Capability flags read by main3d.js: secondaries fire automatically, bots are driven inside update().
+      this.autoSecondaries = true;
+      this.aiInternal = true;
       this.arena = WORLD.ARENA;
       this.ships = [];          // alive + sinking
       this.roster = [];         // every ship that took part (scoreboard), never pruned
@@ -216,6 +219,8 @@ export class World {
    }
 
    // ---------------- end of battle ----------------
+   flightTime(ship, R) { return ship && ship.flightTime ? ship.flightTime(R) : 0; }
+
    end(victory, reason) {
       if (this.phase !== 'playing') return;
       this.phase = victory ? 'won' : 'lost';

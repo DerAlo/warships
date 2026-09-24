@@ -11,7 +11,7 @@
 //   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
 //   aggro        >1 closes range more eagerly
 import { WORLD } from './config.js';
-import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, interceptPoint, gaussR } from './utils.js';
+import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
@@ -115,18 +115,35 @@ function decide(b, w, d) {
    // stuck on a coast or rammed: back off for a few seconds
    if (ai.reverseT > 0) {
       ai.reverseT -= DECIDE_DT;
-      ai.tel = -1; ai.rudderOverride = ai.revRudder;
+      ai.tel = -1;
+      // pre-set the rudder for the turn toward the escape heading: a rudder shift takes up to 15 s, so
+      // flipping it for the astern leg would leave it on the wrong side once the ship goes ahead again
+      const dh = ai.escapeHeading == null ? 0 : angleDelta(b.heading, ai.escapeHeading);
+      ai.rudderOverride = Math.abs(dh) > 0.15 ? (dh > 0 ? 2 : -2) : ai.revRudder;
+      if (ai.reverseT <= 0 || Math.abs(dh) < 0.35) {
+         ai.reverseT = 0;
+         // fresh progress window, otherwise the slow re-acceleration re-triggers the reverse forever
+         ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
+      }
       return;
    }
    ai.rudderOverride = null;
    if ((b.grounded || (Math.abs(b.speed) < 1.5 && b.telegraph > 0)) && w.time > 5) ai.stuckT += DECIDE_DT;
    else ai.stuckT = Math.max(0, ai.stuckT - DECIDE_DT);
    // no net progress for 10 s while ordered ahead (rubbing along a coast / pinned in a pocket)
+   // (only counts if the hull touched ground in the window: accelerating out of a reverse or a tight
+   // turn in open water also shows little net progress)
+   if (b.grounded) ai.touchT = w.time;
    if (!ai.progPos || w.time - ai.progT > 10) {
-      if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12) ai.stuckT = 99;
+      if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12 &&
+         w.time - (ai.touchT ?? -99) < 10) ai.stuckT = 99;
       ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
    }
-   if (ai.stuckT > 3) { ai.stuckT = 0; ai.reverseT = 6; ai.revRudder = w.rng() < 0.5 ? 2 : -2; return; }
+   if (ai.stuckT > 3) {
+      ai.stuckT = 0; ai.reverseT = 8; ai.revRudder = w.rng() < 0.5 ? 2 : -2;
+      ai.escapeHeading = escapeHeading(b, w);
+      return;
+   }
 
    // mission retreat (permanent) or generic break-off to repair
    if (ai.retreatBelow && hpF < ai.retreatBelow) ai.retreating = true;
@@ -184,9 +201,24 @@ function decide(b, w, d) {
 
    want = separation(b, w, want);
    want = avoidTerrain(b, w, want);
+   // tight water: slow down so the rudder has time to bite before the coast arrives
+   if (ai.avoidLevel >= 2 && tel > 2) tel = 2;
+   else if (ai.avoidLevel === 1 && tel > 3) tel = 3;
    ai.desired = want;
    ai.tel = tel;
    checkTorpedoes(b, w, d);
+}
+
+// Heading away from the nearest coast (or the last desired heading in open water).
+function escapeHeading(b, w) {
+   let best = null, bd = Infinity;
+   for (const o of w.obstacles) {
+      if (o.kind !== 'island') continue;
+      const d = Math.sqrt(dist2(b.pos, o.c)) - obstacleRadiusAt(o, Math.atan2(b.pos.y - o.c.y, b.pos.x - o.c.x));
+      if (d < bd) { bd = d; best = o; }
+   }
+   if (best && bd < 1500) return Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x);
+   return b.ai.desired != null ? b.ai.desired : b.heading + Math.PI;
 }
 
 // Combat manoeuvring: close in angled, fight in the preferred band showing an angled broadside,
@@ -201,6 +233,9 @@ function engage(b, w, tgt, d) {
    if (ai.role === 'dd') {
       const tr = b.torps ? b.cfg.torp.range * 0.8 : 0;
       const torpReady = b.torps && b.torps.launchers.some(l => l.reload <= 0);
+      // lit up by several ships: break contact and reset detection (unless already in a torpedo run)
+      if (b.detected && d.smarts > 0.4 && exposed(b, w) && !(torpReady && dd <= tr && tgt.type !== 'DD'))
+         return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
       if (torpReady && tgt.type !== 'DD' && dd > tr) return { want: brg + s * 20 * DEG, tel: 4 };
       if (torpReady && dd <= tr) return { want: brg + s * 70 * DEG, tel: 4 };   // present the tubes
       const stealth = b.detectRange * 1.1;
@@ -310,11 +345,22 @@ function avoidTerrain(b, w, want) {
    const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
    const lim = w.arena - 700;
    const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
+   // candidate paths replay steer() with the real rudder shift and yaw inertia: a BB laid hard over
+   // one way keeps swinging that way for ~10 s after the order (a straight ray or a fixed lag
+   // distance let heavy ships commit to coasts)
+   const turnR = b.cfg.turnR || 700, spd = Math.max(Math.abs(b.speed), 8);
+   const shift = b.cfg.rudderShift || 8, lead = shift * 0.7 + 1.2, tau = b.type === 'BB' ? 3.2 : 2;
    const clear = (h, L) => {
-      const c = Math.cos(h), s = Math.sin(h);
-      for (let k = 1; k <= 6; k++) {
-         const f = (k / 6) * L;
-         const p = { x: b.pos.x + c * f, y: b.pos.y + s * f };
+      const n = 14, ds = L / n, dt = ds / spd, kYaw = 1 - Math.exp(-dt / tau);
+      let x = b.pos.x, y = b.pos.y, hd = b.heading, r = b.rudder, om = b.omega;
+      for (let k = 1; k <= n; k++) {
+         const err = angleDelta(hd + om * lead, h), a = Math.abs(err);
+         const rc = a > 25 * DEG ? Math.sign(err) : a > 6 * DEG ? Math.sign(err) * 0.5 : 0;
+         r += clamp(rc - r, -dt / shift, dt / shift);
+         om += (spd / turnR * r - om) * kYaw;
+         hd += om * dt;
+         x += Math.cos(hd) * ds; y += Math.sin(hd) * ds;
+         const p = { x, y };
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
             // allow heading back inwards when already outside the limit
             if (Math.abs(p.x) > Math.abs(b.pos.x) + 1 && Math.abs(p.x) > lim) return false;
@@ -326,7 +372,21 @@ function avoidTerrain(b, w, want) {
    };
    // narrow channels: when nothing is clear at full look-ahead, accept shorter clear runs
    // before falling back (otherwise ships oscillate between two islands at crawl speed)
-   for (const f of [1, 0.55, 0.3]) for (const c of CANDIDATES) if (clear(want + c, look * f)) return want + c;
+   // hysteresis: keep evading to the same side as last time, otherwise the pick flip-flops between
+   // port and starboard every decision while the heavy hull never actually turns
+   const ai = b.ai, side = ai.avoidSide || 1;
+   const levels = [1, 0.55, 0.3];
+   for (let li = 0; li < levels.length; li++) {
+      for (const c0 of CANDIDATES) {
+         const c = c0 * side;
+         if (clear(want + c, look * levels[li])) {
+            if (Math.abs(c) > 0.2) ai.avoidSide = Math.sign(c);
+            ai.avoidLevel = li;
+            return want + c;
+         }
+      }
+   }
+   ai.avoidLevel = 3;
    // boxed in: turn away from the closest island centre
    let best = null, bd = Infinity;
    for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }
@@ -366,7 +426,9 @@ function steer(b, dt) {
    if (ai.rudderOverride != null) { b.setRudder(ai.rudderOverride); return; }
    const lead = b.cfg.rudderShift * 0.7 + 1.2;
    let err = angleDelta(b.heading + b.omega * lead, ai.desired);
-   if (b.speed < 0) err = -err;
+   // astern steering only while ordered astern: a ship still backing after a reverse order already
+   // wants the rudder laid for the coming ahead leg (rudder shifts are slow)
+   if (b.speed < 0 && b.telegraph < 0) err = -err;
    const a = Math.abs(err);
    b.setRudder(a > 25 * DEG ? Math.sign(err) * 2 : a > 6 * DEG ? Math.sign(err) : a > 1.5 * DEG ? Math.sign(err) * (b.type === 'DD' ? 1 : 0) : 0);
 }
