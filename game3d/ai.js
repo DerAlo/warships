@@ -133,7 +133,7 @@ function decide(b, w, d) {
    // no net progress for 10 s while ordered ahead (rubbing along a coast / pinned in a pocket)
    // (only counts if the hull touched ground in the window: accelerating out of a reverse or a tight
    // turn in open water also shows little net progress)
-   if (b.grounded) ai.touchT = w.time;
+   if (b.grounded || b.atWall) ai.touchT = w.time;
    if (!ai.progPos || w.time - ai.progT > 10) {
       if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12 &&
          w.time - (ai.touchT ?? -99) < 10) ai.stuckT = 99;
@@ -217,7 +217,19 @@ function escapeHeading(b, w) {
       const d = Math.sqrt(dist2(b.pos, o.c)) - obstacleRadiusAt(o, Math.atan2(b.pos.y - o.c.y, b.pos.x - o.c.x));
       if (d < bd) { bd = d; best = o; }
    }
-   if (best && bd < 1500) return Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x);
+   let ax = 0, ay = 0;
+   if (best && bd < 1500) {
+      ax = b.pos.x - best.c.x; ay = b.pos.y - best.c.y;
+      const m = Math.hypot(ax, ay) || 1;
+      ax /= m; ay /= m;
+   }
+   // at the arena wall (alone or pinned between a coast and it): "away from the island" or the
+   // last desired heading points at the wall, so escape inwards and along the wall on the side the
+   // bow already points to (a full inward turn is too much for a heavy hull backing off)
+   const lim = w.arena - 900, c = Math.cos(b.heading), s = Math.sin(b.heading);
+   if (Math.abs(b.pos.x) > lim) { ax -= Math.sign(b.pos.x) * 0.7; ay += Math.sign(s) * 0.7; }
+   if (Math.abs(b.pos.y) > lim) { ay -= Math.sign(b.pos.y) * 0.7; ax += Math.sign(c) * 0.7; }
+   if (ax || ay) return Math.atan2(ay, ax);
    return b.ai.desired != null ? b.ai.desired : b.heading + Math.PI;
 }
 
@@ -353,8 +365,10 @@ function avoidTerrain(b, w, want) {
    // distance let heavy ships commit to coasts)
    const turnR = b.cfg.turnR || 700, spd = Math.max(Math.abs(b.speed), 8);
    const shift = b.cfg.rudderShift || 8, lead = shift * 0.7 + 1.2, tau = b.type === 'BB' ? 3.2 : 2;
-   const clear = (h, L) => {
-      const n = 14, ds = L / n, dt = ds / spd, kYaw = 1 - Math.exp(-dt / tau);
+   const n = 14;
+   // number of look-ahead steps that stay clear (n = the whole path)
+   const clearSteps = (h, L) => {
+      const ds = L / n, dt = ds / spd, kYaw = 1 - Math.exp(-dt / tau);
       let x = b.pos.x, y = b.pos.y, hd = b.heading, r = b.rudder, om = b.omega;
       for (let k = 1; k <= n; k++) {
          const err = angleDelta(hd + om * lead, h), a = Math.abs(err);
@@ -369,13 +383,19 @@ function avoidTerrain(b, w, want) {
             // physical arena wall (ship.js) first: a hull pinned against the wall nose-first would
             // otherwise see every turn-out path "go further out" and stay boxed in there for good
             const ax = Math.min(Math.abs(p.x), wall), ay = Math.min(Math.abs(p.y), wall);
-            if (ax > Math.abs(b.pos.x) + 1 && ax > lim) return false;
-            if (ay > Math.abs(b.pos.y) + 1 && ay > lim) return false;
+            if (ax > Math.abs(b.pos.x) + 1 && ax > lim) return k - 1;
+            if (ay > Math.abs(b.pos.y) + 1 && ay > lim) return k - 1;
          }
-         for (const o of near) if (obstacleT(o, p) < 1.12) return false;
+         for (const o of near) if (obstacleT(o, p) < 1.12) return k - 1;
       }
-      return true;
+      // already outside the limit: the path must end further in, or a nose-into-the-wall heading
+      // passes (its clamped points never get further out than the pinned hull)
+      const ex = Math.min(Math.abs(x), wall), ey = Math.min(Math.abs(y), wall);
+      if (Math.abs(b.pos.x) > lim && ex > Math.abs(b.pos.x) - L * 0.15) return n >> 1;
+      if (Math.abs(b.pos.y) > lim && ey > Math.abs(b.pos.y) - L * 0.15) return n >> 1;
+      return n;
    };
+   const clear = (h, L) => clearSteps(h, L) === n;
    // narrow channels: when nothing is clear at full look-ahead, accept shorter clear runs
    // before falling back (otherwise ships oscillate between two islands at crawl speed)
    // hysteresis: keep evading to the same side as last time, otherwise the pick flip-flops between
@@ -393,12 +413,21 @@ function avoidTerrain(b, w, want) {
       }
    }
    ai.avoidLevel = 3;
-   // boxed in: turn away from the closest island centre
-   let best = null, bd = Infinity;
-   for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }
-   // (near the arena edge the way out is always inwards: "away from the island" can point at the wall)
-   if (Math.abs(b.pos.x) > lim || Math.abs(b.pos.y) > lim) return Math.atan2(-b.pos.y, -b.pos.x);
-   return best ? Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x) : Math.atan2(-b.pos.y, -b.pos.x);
+   // boxed in (pocket between a coast and the arena wall, or a narrow bay): take the heading all
+   // round the compass with the longest clear run, mildly preferring `want`. The old "away from
+   // the island" / "toward the map centre" pick pointed straight at the coast in such pockets
+   // and bots ground back and forth there for the rest of the match.
+   // Outside the wall limit every short path of a slow heavy hull ties, so inward headings get a
+   // bonus (otherwise the pick fell back to `want`, often straight through the wall).
+   const inX = Math.abs(b.pos.x) > lim ? -Math.sign(b.pos.x) : 0, inY = Math.abs(b.pos.y) > lim ? -Math.sign(b.pos.y) : 0;
+   let bestH = want, bestS = -Infinity;
+   for (let i = 0; i < 24; i++) {
+      const h = want + i * (TAU / 24);
+      const sc = clearSteps(h, look * 0.6) - 2 * Math.abs(angleDelta(want, h)) / Math.PI +
+         3 * (Math.cos(h) * inX + Math.sin(h) * inY);
+      if (sc > bestS) { bestS = sc; bestH = h; }
+   }
+   return bestH;
 }
 
 // Torpedo dodge: predicts closest approach of each visible enemy torpedo and turns parallel.

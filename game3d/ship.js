@@ -350,11 +350,24 @@ export class Ship {
       this.vel.x = c * this.speed; this.vel.y = s * this.speed;
       this.pos.x += this.vel.x * dt; this.pos.y += this.vel.y * dt;
       this.speedKn = this.speed / WORLD.KN_TO_MS;
-      // map border: hard stop like WoWs
+      // map border: the hull glances off. Only the part of the way that points into the border is
+      // lost and the bow swings parallel to it; a flat stop left nose-on hulls with no way on to
+      // turn, so bots (and players) stayed pinned there
       const A = world.arena - 60;
-      if (Math.abs(this.pos.x) > A || Math.abs(this.pos.y) > A) {
-         this.pos.x = clamp(this.pos.x, -A, A); this.pos.y = clamp(this.pos.y, -A, A);
-         this.speed *= Math.pow(0.1, dt);
+      let nx = 0, ny = 0;
+      if (Math.abs(this.pos.x) > A) { nx = Math.sign(this.pos.x); this.pos.x = nx * A; }
+      if (Math.abs(this.pos.y) > A) { ny = Math.sign(this.pos.y); this.pos.y = ny * A; }
+      this.atWall = !!(nx || ny);
+      if (this.atWall) {
+         const sg = Math.sign(this.speed) || Math.sign(thr);
+         const into = (c * nx + s * ny) * sg;            // 0 = parallel .. 1 = nose-on
+         if (into > 0) {
+            this.speed *= Math.pow(0.1, dt * into);
+            // swing toward the wall tangent the heading already leans to (rudder side when nose-on)
+            const lean = (c * ny - s * nx) * sg;
+            const dir = Math.abs(lean) > 0.02 ? -Math.sign(lean) : (Math.sign(this.rudder) || 1);
+            this.heading = (((this.heading + dir * 0.07 * into * dt) % TAU) + TAU) % TAU;
+         }
       }
       // islands: probe bow, midships and stern; push the hull back out along the coast normal
       this.grounded = false;

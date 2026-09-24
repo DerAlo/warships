@@ -137,7 +137,21 @@ function pickShip(def, shipKey) {
    const allowed = def.playableShips || PLAYABLE;
    return allowed.includes(shipKey) ? shipKey : (def.recommendedShip || allowed[0]);
 }
-function islands(w, list) { for (const o of list) w.addIsland(o); }
+function islands(w, list) {
+   const A = w.arena - 60;
+   for (const o of list) {
+      const isl = w.addIsland(o);
+      // a sub-1.3 km channel between a coast and the arena wall is a dead end the AI (and players)
+      // wedge into: push such islands onto the wall so the coast closes the gap instead
+      let gx = Infinity, gy = Infinity;
+      for (const l of isl.lobes) {
+         gx = Math.min(gx, A - Math.abs(isl.c.x + Math.cos(l.a) * l.r));
+         gy = Math.min(gy, A - Math.abs(isl.c.y + Math.sin(l.a) * l.r));
+      }
+      if (gx > 0 && gx < 1300) isl.c.x += Math.sign(isl.c.x) * (gx + 300);
+      if (gy > 0 && gy < 1300) isl.c.y += Math.sign(isl.c.y) * (gy + 300);
+   }
+}
 // Deterministic archipelago filler: n islands in a box, keeping clear of `keepOut` circles.
 function scatter(w, seed, n, box, rMin, rMax, keepOut = []) {
    let s = seed >>> 0;
@@ -494,7 +508,9 @@ const DEFS = [
          ]);
          scatter(w, 507, 11, [-6500, -6000, 6500, 6000], 380, 950, [P(-8200, 0), P(8200, 0)].map(p => ({ ...p, r: 2400 })));
          const DE = [['Z23', 0, -800], ['Z23', 0, 800], ['Z23', 500, 0], ['Nuernberg', -700, -1800], ['Hipper', -900, 1800]];
-         const UK = [['Jervis', 0, -900], ['Jervis', 0, 900], ['Jervis', 500, -2400], ['Jervis', 500, 2400], ['Fiji', -700, -600], ['Norfolk', -900, 1000]];
+         // the 4th destroyer only on hard: 6 vs 5 in the dark was a coin flip even for cruisers
+         const UK = [['Jervis', 0, -900], ['Jervis', 0, 900], ['Jervis', 500, -2400], ['Fiji', -700, -600], ['Norfolk', -900, 1000]];
+         if (w.difficulty.key === 'hard') UK.push(['Jervis', 500, 2400]);
          spawnTeam(w, 'player', DE, P(-8200, 0), 0, shipKey);
          spawnTeam(w, 'enemy', UK, P(8200, 0), Math.PI, null);
          const n = combatants(w, 'enemy').length;
