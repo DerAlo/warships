@@ -63,10 +63,15 @@ export function resolveShells(world, dt) {
 }
 
 // Solid-rock test — reefs are shallow water and don't stop anything, only islands do.
+// Ground right around a coastal battery is its apron, not cover: a shell there flies on and can
+// still strike the fort (otherwise the shoreline in front would soak up every shell aimed at it).
 function hitsIsland(world, pos) {
    for (const o of world.obstacles) {
       if (o.kind !== 'island') continue;
-      if (dist2(pos, o.c) < o.r * o.r) return true;
+      if (dist2(pos, o.c) < o.r * o.r) {
+         for (const s of world.bots) if (s.alive && s.cfg.static && dist2(pos, s.pos) < 120 * 120) return false;
+         return true;
+      }
    }
    return false;
 }

@@ -124,11 +124,11 @@ export class Director {
          const bonus = 100 * this.wave;
          this.score += bonus;
          // a breather: patch up part of the hull and top up the repair party
-         const heal = p.maxHP * 0.12;
+         const heal = p.maxHP * 0.2;
          p.hp = Math.min(p.maxHP, p.hp + heal);
          p.fires = []; p.floods = [];
          this.inBreak = true;
-         this.breakT = 8;
+         this.breakT = 10;
          this.say(`🏁 Welle ${this.wave} überstanden · +${bonus} Punkte · Reparatur`, 'kill', 5);
          w.emit({ kind: 'waveClear', wave: this.wave });
       }

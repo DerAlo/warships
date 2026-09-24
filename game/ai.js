@@ -460,9 +460,11 @@ const ROLES = {
          steer = seek(bot.patrolPoint, bot.pos);
       }
       steer.throttle = threatened ? 1 : 0.75;
-      if (threatened) steer.heading += Math.sin(world.time * 0.45 + bot.id * 1.7) * 0.4;
-      // an escorted convoy waits for its escort instead of sailing off alone
-      if (bot.side === 'player' && world.player.alive && dist(bot.pos, world.player.pos) > 2000) steer.throttle = 0.4;
+      // enemy merchantmen zigzag under fire; a friendly convoy holds its course to the rendezvous
+      if (threatened && bot.side === 'enemy') steer.heading += Math.sin(world.time * 0.45 + bot.id * 1.7) * 0.4;
+      // a friendly convoy makes its best speed (every minute at sea is exposure) but still waits
+      // for its escort rather than sailing off alone
+      if (bot.side === 'player') steer.throttle = world.player.alive && dist(bot.pos, world.player.pos) > 2200 ? 0.6 : 1;
       bot.state = threatened ? 'DODGE' : 'STANDBY';
       drive(bot, world, steer);
       lightGuns(bot, world, k, ai, dt);

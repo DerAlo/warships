@@ -22,7 +22,7 @@ const reef = (x, y, r) => ({ kind: 'reef', c: { x, y }, r });
 // Battery on an island's shore, facing `toward` (so the approach from the sea has a clear shot).
 function battery(o, toward, extra = {}) {
    const a = Math.atan2(toward.y - o.c.y, toward.x - o.c.x);
-   const d = o.r * 0.7;
+   const d = o.r - 45;   // on the shoreline, so the guns see the water and the water sees them
    return { cls: 'CB', pos: { x: o.c.x + Math.cos(a) * d, y: o.c.y + Math.sin(a) * d }, heading: a, tag: 'battery', ...extra };
 }
 
@@ -97,7 +97,7 @@ export const MISSIONS = [
          { at: 30, msg: '🎧 Hydrophon: Schraubengeräusche! U-Boote — Wasserbomben mit [C]',
             bots: [{ cls: 'SUB', pos: { x: 2600, y: 900 } }, { cls: 'SUB', pos: { x: -2600, y: 400 } }] },
          { when: 'cleared', msg: '⚠ Das ganze Rudel greift an!',
-            bots: [{ cls: 'DD', pos: { x: 0, y: -3000 } }, { cls: 'TB', pos: { x: -2800, y: -1200 } }, { cls: 'TB', pos: { x: -3000, y: -900 } },
+            bots: [{ cls: 'DD', pos: { x: 0, y: -3000 } }, { cls: 'TB', pos: { x: -2900, y: -1000 } },
                { cls: 'TB', pos: { x: 2900, y: -1400 } }, { cls: 'TB', pos: { x: 3100, y: -1000 } }, { cls: 'SUB', pos: { x: 0, y: -2600 } }] },
       ],
       objectives: [{ type: 'sinkAll', text: 'Das Wolfsrudel vernichten' }],
@@ -189,10 +189,9 @@ export const MISSIONS = [
          { cls: 'LC', pos: { x: 2700, y: 1800 } },
          { cls: 'DD', pos: { x: 1200, y: 100 } },
          { cls: 'DD', pos: { x: 2000, y: -2100 } },
-         { cls: 'DD', pos: { x: 1400, y: 2300 } },
       ],
       waves: [
-         { at: 120, msg: '⚠ Torpedoboote nutzen den Sturm für einen Angriff!', bots: [{ cls: 'TB', pos: { x: -600, y: 3200 } }, { cls: 'TB', pos: { x: -200, y: 3300 } }, { cls: 'TB', pos: { x: 200, y: 3200 } }] },
+         { at: 120, msg: '⚠ Torpedoboote nutzen den Sturm für einen Angriff!', bots: [{ cls: 'TB', pos: { x: -600, y: 3200 } }, { cls: 'TB', pos: { x: -200, y: 3300 } }, { cls: 'DD', pos: { x: 200, y: 3200 } }] },
       ],
       objectives: [{ type: 'sinkAll', text: 'Den Verband im Sturm versenken' }],
       stars: [{ type: 'hp', min: 0.5 }, { type: 'time', max: 540 }],
@@ -203,30 +202,30 @@ export const MISSIONS = [
    },
    {
       id: 'm8', num: 8, title: 'Geleitschutz', tag: 'Eskorte',
-      briefing: 'Drei eigene Transporter müssen den Sammelpunkt im Nordosten erreichen. Ein Zerstörer und ein Kreuzer helfen dir. Mindestens zwei Transporter müssen durchkommen.',
+      briefing: 'Vier eigene Transporter müssen den Sammelpunkt im Nordosten erreichen. Ein Zerstörer und ein Kreuzer helfen dir. Mindestens zwei Transporter müssen durchkommen.',
       player: { cls: 'Bismarck', pos: { x: -2650, y: 2350 }, heading: -0.8 },
       obstacles: [isl(-1500, 700, 360), isl(300, -200, 380), isl(1700, -1700, 300), reef(-400, 1600, 280), isl(1300, 1500, 320), reef(-800, -1800, 300)],
       zones: [{ c: { x: 3300, y: -3100 }, r: 400, label: 'SAMMELPUNKT', kind: 'goal' }],
       allies: (() => {
          const exit = { x: 3300, y: -3100, r: 400 };
-         const path = [{ x: -1800, y: 1900 }, { x: -300, y: 700 }, { x: 1000, y: -900 }, { x: 2400, y: -2300 }];
-         const tr = (x, y, n) => ({ cls: 'TR', pos: { x, y }, heading: -0.8, tag: 'escort', path, exit, speedMult: 0.8, name: 'Frachter ' + n });
+         const path = [{ x: -1600, y: 1800 }, { x: -300, y: 700 }, { x: 1000, y: -900 }, { x: 2300, y: -2200 }];
+         const tr = (x, y, n) => ({ cls: 'TR', pos: { x, y }, heading: -0.8, tag: 'escort', path, exit, speedMult: 0.95, hpMult: 2.8, name: 'Frachter ' + n });
          return [
-            tr(-3000, 2900, 'Anna'), tr(-3300, 3200, 'Berta'), tr(-3450, 2700, 'Clara'),
+            tr(-2350, 2500, 'Anna'), tr(-2650, 2800, 'Berta'), tr(-2800, 2300, 'Clara'), tr(-3050, 2650, 'Dora'),
             { cls: 'DD', pos: { x: -2400, y: 2800 }, heading: -0.8, name: 'Z 23', asw: true },
             { cls: 'LC', pos: { x: -2900, y: 2000 }, heading: -0.8, name: 'Emden' },
          ];
       })(),
       bots: [
-         { cls: 'TB', pos: { x: -2600, y: -500 } }, { cls: 'TB', pos: { x: -2200, y: -700 } }, { cls: 'TB', pos: { x: -1800, y: -500 } },
+         { cls: 'TB', pos: { x: -2600, y: -500 } }, { cls: 'TB', pos: { x: -1900, y: -600 } },
       ],
       waves: [
-         { at: 50, msg: '🎧 U-Boote auf der Route voraus!', bots: [{ cls: 'SUB', pos: { x: 800, y: 600 } }, { cls: 'SUB', pos: { x: 1600, y: -300 } }] },
-         { at: 100, msg: '⚠ Feindlicher Kreuzerverband aus Osten!', bots: [{ cls: 'HC', pos: { x: 3400, y: 300 } }, { cls: 'LC', pos: { x: 3300, y: -600 } }, { cls: 'DD', pos: { x: 3100, y: 900 } }] },
-         { at: 160, msg: '⚠ Torpedoboote greifen den Geleitzug an!', bots: [{ cls: 'TB', pos: { x: 3300, y: -1800 } }, { cls: 'TB', pos: { x: 3400, y: -1400 } }, { cls: 'TB', pos: { x: 3100, y: -2200 } }, { cls: 'TB', pos: { x: 3500, y: -1000 } }] },
+         { at: 50, msg: '🎧 U-Boot auf der Route voraus — Z 23 und deine Wasserbomben [C]!', bots: [{ cls: 'SUB', pos: { x: 1200, y: 200 } }, { cls: 'TB', pos: { x: 2700, y: 1700 } }] },
+         { at: 115, msg: '⚠ Feindlicher Kreuzerverband aus Osten!', bots: [{ cls: 'HC', pos: { x: 3400, y: 2300 } }, { cls: 'DD', pos: { x: 3000, y: 2700 } }] },
+         { at: 140, msg: '⚠ Torpedoboote greifen den Geleitzug an!', bots: [{ cls: 'TB', pos: { x: 3300, y: -1800 } }, { cls: 'TB', pos: { x: 3100, y: -2200 } }] },
       ],
       objectives: [{ type: 'escort', tag: 'escort', need: 2, text: 'Transporter zum Sammelpunkt geleiten' }],
-      stars: [{ type: 'allOf', tag: 'escort', text: 'Alle drei Transporter gerettet' }, { type: 'hp', min: 0.4 }],
+      stars: [{ type: 'allOf', tag: 'escort', text: 'Alle vier Transporter gerettet' }, { type: 'hp', min: 0.4 }],
       hints: [
          { at: 2, text: '🛡 Bleib nah am Geleitzug — die Feinde haben es auf die Frachter abgesehen' },
          { at: 16, text: '🔫 Rechtsklick konzentriert die Sekundärbatterie auf einen Angreifer' },
@@ -244,14 +243,12 @@ export const MISSIONS = [
       bots: [
          { cls: 'BOSS', pos: { x: 1900, y: -1600 }, tag: 'boss' },
          { cls: 'HC', pos: { x: 1300, y: -2300 } },
-         { cls: 'LC', pos: { x: 2600, y: -800 } },
-         { cls: 'LC', pos: { x: 900, y: -1300 } },
          { cls: 'DD', pos: { x: 400, y: -2200 } },
-         { cls: 'DD', pos: { x: 2700, y: -2600 } },
          { cls: 'DD', pos: { x: 2900, y: 0 } },
       ],
       waves: [
-         { when: 'hp', tag: 'boss', below: 0.5, msg: '⚠ Leviathan ruft Verstärkung — Torpedoboote!', bots: [{ cls: 'TB', pos: { x: 3300, y: -3000 } }, { cls: 'TB', pos: { x: 3500, y: -2600 } }, { cls: 'TB', pos: { x: 3000, y: -3300 } }, { cls: 'DD', pos: { x: 3400, y: -1800 } }] },
+         { when: 'hp', tag: 'boss', below: 0.75, msg: '⚠ Zwei Kreuzer eilen dem Leviathan zu Hilfe!', bots: [{ cls: 'LC', pos: { x: 3300, y: -600 } }, { cls: 'LC', pos: { x: 2600, y: -3200 } }] },
+         { when: 'hp', tag: 'boss', below: 0.4, msg: '⚠ Leviathan ruft Verstärkung — Torpedoboote!', bots: [{ cls: 'TB', pos: { x: 3300, y: -3000 } }, { cls: 'TB', pos: { x: 3500, y: -2600 } }, { cls: 'TB', pos: { x: 3000, y: -3300 } }] },
       ],
       objectives: [{ type: 'sink', tag: 'boss', text: 'Leviathan versenken' }],
       stars: [{ type: 'hp', min: 0.4 }, { type: 'alliesAlive', text: 'Beide Begleitschiffe überleben' }],
