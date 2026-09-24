@@ -768,7 +768,9 @@ class CapMarkers {
       r.tex.needsUpdate = true;
    }
 
-   update(caps, time) {
+   update(caps, time, camera) {
+      // non-attenuated sprites still scale with the projection: undo the binocular zoom
+      const zk = camera?.fov ? Math.tan(camera.fov * Math.PI / 360) / Math.tan(55 * Math.PI / 360) : 1;
       const seen = this._seen || (this._seen = new Set());
       seen.clear();
       if (Array.isArray(caps)) {
@@ -790,6 +792,7 @@ class CapMarkers {
             U.uProg.value = capper ? clamp(Number(cap.progress) || 0, 0, 1) : 0;
             U.uDash.value = owner ? 0 : 1;
             r.sprite.position.set(cap.pos.x, 40 + R * 0.06, cap.pos.y);
+            r.sprite.scale.set(0.055 * zk, 0.055 * zk, 1);
             const key = `${id}|${owner}|${!!cap.contested}`;
             if (key !== r.key) { r.key = key; this._draw(r, id, owner, !!cap.contested); }
          }
@@ -1077,6 +1080,8 @@ export class FX {
       this.uTime.value = time;
       this.rain.update(time, this.windX, this.windZ);
       const cam = camera.position;
+      // zoom factor: pixel-size floors (tracers) must not balloon 16x in the binoculars
+      this._zk = camera.fov ? Math.tan(camera.fov * Math.PI / 360) / Math.tan(55 * Math.PI / 360) : 1;
       this.nImp = 0;
       this.citMarks.length = 0;
 
@@ -1097,7 +1102,7 @@ export class FX {
 
       this._ships(world, dt, time, cam, ships);
       this._smokeScreens(world, cam);
-      this.caps.update(world.caps, time);
+      this.caps.update(world.caps, time, camera);
 
       for (const l of this.lights) {
          const u = l.userData;
@@ -1172,12 +1177,12 @@ export class FX {
          const dist = Math.hypot(st.x - cam.x, st.y - cam.y, st.z - cam.z);
          const ap = st.ammo === 'AP';
          const ck = clamp(st.cal / 380, 0.3, 1.3);
-         const w = Math.max(0.7 + st.cal * 0.0045, dist * 0.0016);
+         const w = Math.max(0.7 + st.cal * 0.0045, dist * 0.0016 * Math.max(this._zk, 0.12));
          const spd = Math.hypot(st.vx, st.vy, st.vz);
          const cr = ap ? 7 : 16, cg = ap ? 8.5 : 7, cb = ap ? 14 : 2.2;
          const fade = clamp(dist / 120, 0.25, 1);   // don't blind a close camera
          if (spd > 1) {
-            const len = clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004;
+            const len = clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004 * this._zk;
             const ax = st.vx / spd, ay = st.vy / spd, az = st.vz / spd;
             const p = G.t();
             p.x = st.x - ax * len * 0.5; p.y = st.y - ay * len * 0.5; p.z = st.z - az * len * 0.5;

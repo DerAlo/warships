@@ -102,3 +102,26 @@ renderer.cam                 // ChaseCamera (camera3d.js)
 renderer.setCameraPose(...), renderer.screenToWorld(nx, ny), renderer.scopeT
 renderer.project(worldX, height, worldY) -> { x, y (CSS px), visible } // for floating HUD markers
 ```
+
+## Menu & match flow (`menu3d.js`, `main3d.js`)
+
+```
+const menu = new Menu3D(menuEl, endEl, { onStart(opts), onPort(), onHowTo(), onClick() })
+menu.show() / menu.hide()            // port: mission list + ship cards (PLAYABLE), difficulty
+menu.showResults(world, opts, extra) // Sieg/Niederlage, reason, damage/kills/citadels/fires, xp/credits
+menu.hideResults()
+// results buttons: "Nochmal" -> onStart(same opts); "Naechste Mission" -> select next + onPort;
+// "Hafen" -> onPort. main3d.onPort drops the finished World (world = null) and shows the port.
+```
+
+- `startGame(opts)` always builds a fresh `World` and calls `renderer.buildWorld(world)`, which
+  clears every per-match GPU resource first; GPU memory stays flat across restarts
+  (`tests/playtest3d.mjs` logs `renderer.info.memory` per round).
+- The end screen appears ~2.5 s after `world.phase` turns `won`/`lost` (sinking / ending shot).
+- Progress (unlocked missions, best results) lives in `localStorage['warships3d.progress.v1']`.
+- Visual scale: the sim runs ~5x time-compressed (`KN_TO_MS` ~2.6 m/s per knot), so time-based
+  FX (wakes) age by `speed / reference speed` to stay true to distance. Haze: `env.fogD50`
+  (sky3d `resolveEnv`) is the 50% contrast distance; binocular zoom multiplies it by up to 2.5.
+- Camera collision (`camera3d.js`) samples `renderer.terrain.heightAt` around the lens; when a
+  hill forces a lift, the orbit arm is shortened (not lengthened), so the own ship keeps its screen
+  spot. Pixel-floored FX (tracers, cap letters) scale with `tan(fov/2)` so they do not balloon at 16x.

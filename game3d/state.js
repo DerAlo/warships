@@ -174,8 +174,9 @@ export class World {
       if (type !== 'ricochet' && type !== 'shatter') shooter.hits++;
       if (!shooter.isPlayer) return;
       const st = this.stats;
+      // main-battery accuracy = hits / shotsFired: secondaries fire on their own and are counted apart
       if (type === 'torp') st.torpHits++;
-      else st.hits++;
+      else if (proj?.kind !== 'sec') st.hits++;   // secondary shatters too
       if (type === 'citadel') st.citadels++;
       else if (type === 'pen') st.pens++;
       else if (type === 'overpen') st.overpens++;

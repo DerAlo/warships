@@ -42,7 +42,8 @@ export class Renderer3D {
       this.scene.add(this.ocean.mesh);
       this.terrain = new Terrain();
       this.scene.add(this.terrain.group);
-      this.fx = new FX(this.scene, this.ocean, this.terrain);
+      this.cam.terrain = this.terrain;   // camera collision samples the real relief
+      this.fx =new FX(this.scene, this.ocean, this.terrain);
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.post = new Post(r, { samples: 4, bloomLevels: 5 });
 

@@ -92,14 +92,39 @@ export class ChaseCamera {
       let camX = lerp(tpX, biX, s), camY = lerp(tpY, biY, s), camZ = lerp(tpZ, biZ, s);
 
       // ---- collision: stay above the swell and above any island the camera drifts over.
-      camY = Math.max(camY, 12);
-      for (const o of world.obstacles || []) {
-         if (o.kind !== 'island') continue;
-         const d = Math.hypot(camX - o.c.x, camZ - o.c.y);
-         const r = (o.r || 0) * 1.25 + 40;
-         if (d < r) {
-            const top = (o.height ?? Math.max(40, (o.r || 0) * 0.12)) + 30;
-            camY = Math.max(camY, lerp(top, 12, clamp01((d - o.r) / (r - o.r))));
+      const T = this.terrain;
+      const liftAt = (x, z, y) => {
+         y = Math.max(y, 12);
+         if (T) {
+            // the real relief around the lens, not the island's bounding cone (which lifted the
+            // camera to peak height over a low beach and dropped the ship off the screen)
+            let h = T.heightAt(x, z);
+            for (let i = 0; i < 4; i++) h = Math.max(h, T.heightAt(x + 35 * Math.cos(i * 1.5708), z + 35 * Math.sin(i * 1.5708)));
+            return Math.max(y, h + 18);
+         }
+         for (const o of world.obstacles || []) {
+            if (o.kind !== 'island') continue;
+            const d = Math.hypot(x - o.c.x, z - o.c.y);
+            const r = (o.r || 0) * 1.25 + 40;
+            if (d < r) {
+               const top = (o.height ?? Math.max(40, (o.r || 0) * 0.12)) + 30;
+               y = Math.max(y, lerp(top, 12, clamp01((d - o.r) / (r - o.r))));
+            }
+         }
+         return y;
+      };
+      const y0 = camY;
+      camY = liftAt(camX, camZ, camY);
+      // A lift over a hill would tip the own ship out of the bottom of the screen (the view stays
+      // centred on the aim point). Pull the camera in along the arm instead: a scaled arm keeps
+      // the ship on the same screen spot, and the shore next to the ship is lower than the hill.
+      if (camY > y0 + 1 && s < 0.5) {
+         const x0 = camX, z0 = camZ;
+         for (let k = 0.85; k > 0.25; k -= 0.1) {
+            const y = pivotH + (y0 - pivotH) * k;
+            camX = px + (x0 - px) * k; camZ = pz + (z0 - pz) * k;
+            camY = liftAt(camX, camZ, y);
+            if (camY <= y + 1) break;
          }
       }
 

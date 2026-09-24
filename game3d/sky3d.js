@@ -101,6 +101,14 @@ float vnoise(vec2 p) {
    vec2 u = f * f * (3.0 - 2.0 * f);
    return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
 }
+// 3D value noise: the milky band must not be sampled on d.xz, which barely changes along a
+// vertical line near the horizon and drew pale "searchlight" shafts into the night sky
+float vnoise3(vec3 p) {
+   vec3 i = floor(p), f = fract(p);
+   vec3 u = f * f * (3.0 - 2.0 * f);
+   return mix(mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), u.x), mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), u.x), u.y),
+              mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), u.x), mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+}
 float cloudFbm(vec2 p) {
    float s = 0.0, a = 0.5;
    mat2 R = mat2(0.8, -0.6, 0.6, 0.8);
@@ -126,7 +134,7 @@ void main() {
          col += vec3(0.9, 0.95, 1.0) * smoothstep(0.12, 0.0, dd) * (h - 0.985) * 180.0 * tw * uStars * smoothstep(0.0, 0.25, dy);
       }
       // faint milky band
-      col += vec3(0.010, 0.012, 0.018) * uStars * smoothstep(0.35, 0.0, abs(dot(d, normalize(vec3(0.3, 0.2, 0.93))))) * vnoise(d.xz * 30.0);
+      col += vec3(0.010, 0.012, 0.018) * uStars * smoothstep(0.35, 0.0, abs(dot(d, normalize(vec3(0.3, 0.2, 0.93))))) * vnoise3(d * 30.0);
    }
    // moon
    if (uMoon > 0.0) {
