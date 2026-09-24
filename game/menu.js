@@ -1,9 +1,10 @@
 // game/menu.js — mission select: a card grid with procedural map thumbnails, the briefing panel
 // (objectives, star criteria, forces), difficulty chips and the star total. Pure DOM; main.js
 // passes callbacks and owns the game flow.
-import { MISSIONS, SURVIVAL } from './missions.js';
+import { MISSIONS, SURVIVAL, chapterOf } from './missions.js';
+import { buildDaily, dateKey, loadBoard, dayList, bestOf, shiftKey, formatKey } from './daily.js';
 import { SHIPS, WORLD, ENCOUNTER, OBSTACLES } from './config.js';
-import { isUnlocked, totalStars } from './progress.js';
+import { isUnlocked, totalStars, medalCount, hullBonus } from './progress.js';
 
 const $ = (id) => document.getElementById(id);
 const fmtTime = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
@@ -14,9 +15,9 @@ export const SKIRMISH = {
    briefing: 'Das klassische Duell: ein feindliches Linienschiff mit Kreuzern und Zerstörern auf dem Spawn-Ring. Nach 60 s laufen Verstärkungen ein. Keine Sterne — nur Ruhm.',
    player: { pos: { x: 0, y: 0 } }, bots: ENCOUNTER.bots, obstacles: OBSTACLES, skirmish: true,
 };
-const ENTRIES = [...MISSIONS, SURVIVAL, SKIRMISH];
 
-const ENV_LABEL = { night: '🌙 Nacht — Sicht halbiert', storm: '⛈ Sturm — Regenböen, Streuung' };
+const ENV_LABEL = { night: '🌙 Nacht — Sicht halbiert', storm: '⛈ Sturm — Regenböen, Streuung', fog: '🌫 Nebel — Sicht fast halbiert' };
+const ROMAN = ['', 'I', 'II', 'III', 'IV'];
 
 export function starCriterionText(c) {
    switch (c.type) {
@@ -64,16 +65,18 @@ export class Menu {
    _build() {
       this.grid.innerHTML = '';
       this.cards = new Map();
-      ENTRIES.forEach((m) => {
+      this.daily = buildDaily();
+      this.entries = [...MISSIONS, this.daily, SURVIVAL, SKIRMISH];
+      this.entries.forEach((m) => {
          const el = document.createElement('div');
-         el.className = 'mcard' + (m.survival || m.skirmish ? ' mode' : '') + (m.id === 'm9' ? ' boss' : '');
+         el.className = 'mcard' + (m.survival || m.skirmish || m.daily ? ' mode' : '') + (m.boss ? ' boss' : '') + (m.daily ? ' daily' : '');
          el.dataset.id = m.id;
          const cv = document.createElement('canvas');
          cv.width = 240; cv.height = 90;
          drawThumb(cv, m);
          el.appendChild(cv);
          el.insertAdjacentHTML('beforeend',
-            `<div class="mc-num">${m.num ? String(m.num).padStart(2, '0') : m.survival ? '∞' : '⚔'}</div>` +
+            `<div class="mc-num">${m.num ? String(m.num).padStart(2, '0') : m.survival ? '∞' : m.daily ? '📅' : '⚔'}</div>` +
             '<div class="mc-stars"></div>' +
             `<div class="mc-body"><div class="mc-title"></div><div class="mc-tag"></div></div>`);
          el.querySelector('.mc-title').textContent = m.title;
@@ -92,6 +95,8 @@ export class Menu {
    // refresh lock/star state (after a finished mission) and pick a sensible default selection
    refresh(prefer = null) {
       const p = this.progress;
+      // the date may have rolled over while the menu was open: rebuild the daily card
+      if (dateKey() !== this.daily.dateKey) this._build();
       let firstOpen = null, lastOpen = MISSIONS[0].id;
       MISSIONS.forEach((m, i) => {
          const el = this.cards.get(m.id);
@@ -104,7 +109,9 @@ export class Menu {
       // survival card shows the best wave on this difficulty
       const best = p.survivalBest[p.difficulty];
       this.cards.get('survival').querySelector('.mc-stars').textContent = best ? `W${best.wave}` : '';
-      $('star-total').textContent = `${totalStars(p)} / ${MISSIONS.length * 3}`;
+      const today = dayList(loadBoard(), this.daily.dateKey)[0];
+      this.cards.get('daily').querySelector('.mc-stars').textContent = today ? today.score.toLocaleString('de-DE') : '';
+      $('star-total').textContent = `${totalStars(p)} / ${MISSIONS.length * 3}` + (medalCount(p) ? ` · ⚓${medalCount(p)}` : '');
       const want = prefer && this.cards.has(prefer) && !this.cards.get(prefer).classList.contains('locked') ? prefer : (this.sel && !this.cards.get(this.sel).classList.contains('locked') ? this.sel : firstOpen || lastOpen);
       this.select(want);
    }
@@ -112,12 +119,13 @@ export class Menu {
    select(id) {
       this.sel = id;
       for (const [k, el] of this.cards) el.classList.toggle('sel', k === id);
-      const m = ENTRIES.find(e => e.id === id);
+      const m = this.entries.find(e => e.id === id);
       const p = this.progress;
-      $('brief-tag').textContent = m.num ? `Einsatz ${m.num} · ${m.tag}` : m.tag;
+      const ch = chapterOf(m.id);
+      $('brief-tag').textContent = m.num ? `Kapitel ${ROMAN[ch ? ch.num : 0]} · Einsatz ${m.num} · ${m.tag}` : m.daily ? `📅 ${m.tag} · ${m.mod.icon} ${m.mod.name}` : m.tag;
       $('brief-title').textContent = m.title;
       $('brief-text').textContent = m.briefing;
-      const objs = m.skirmish ? ['Alle Feindschiffe versenken'] : m.survival ? ['So viele Wellen wie möglich überstehen', 'Punkte für jedes versenkte Schiff und jede Welle']
+      const objs = m.skirmish ? ['Alle Feindschiffe versenken'] : m.daily ? ['Drei Angriffswellen versenken', 'Punkte: Versenkungen · bei Sieg Zeit-, Rumpf- und Trefferbonus'] : m.survival ? ['So viele Wellen wie möglich überstehen', 'Punkte für jedes versenkte Schiff und jede Welle']
          : (m.objectives || []).map(o => o.text);
       $('brief-obj').innerHTML = '';
       for (const t of objs) { const li = document.createElement('li'); li.textContent = '▸ ' + t; $('brief-obj').appendChild(li); }
@@ -131,6 +139,8 @@ export class Menu {
          li.className = best ? 'ok' : '';
          li.textContent = best ? `🏅 Welle ${best.wave} · ${best.score} Punkte` : 'Noch kein Rekord auf dieser Stufe';
          starsUl.appendChild(li);
+      } else if (m.daily) {
+         this._dailyBoard(starsUl, hdr, m);
       } else if (m.skirmish) {
          hdr.textContent = 'Sterne';
          const li = document.createElement('li'); li.textContent = 'Keine Wertung'; starsUl.appendChild(li);
@@ -139,6 +149,12 @@ export class Menu {
          hdr.textContent = `Sterne · Bestwert ${'★'.repeat(st)}${'☆'.repeat(3 - st)}`;
          const crit = ['Mission gewinnen', ...(m.stars || []).map(starCriterionText)];
          crit.forEach((t) => { const li = document.createElement('li'); li.textContent = '★ ' + t; starsUl.appendChild(li); });
+         if (m.boss && ch) {
+            const li = document.createElement('li');
+            li.className = p.medals[m.id] ? 'ok' : '';
+            li.textContent = (p.medals[m.id] ? '⚓ Orden erhalten: ' : '⚓ Boss-Belohnung: ') + `${ch.medal} (+5 % Rumpf im Feldzug)`;
+            starsUl.appendChild(li);
+         }
       }
       const chips = $('brief-forces');
       chips.innerHTML = '';
@@ -146,9 +162,28 @@ export class Menu {
       if (m.survival) chip('Endlose Wellen · alle Klassen');
       else for (const t of forces(m, 'bots')) chip(t);
       for (const t of forces(m, 'allies')) chip('⚓ ' + t, 'ally');
-      if (ENV_LABEL[m.env]) chip(ENV_LABEL[m.env], 'env');
+      if (m.daily) chip(`${m.mod.icon} ${m.mod.name}`, 'env');
+      else if (ENV_LABEL[m.env]) chip(ENV_LABEL[m.env], 'env');
+      if (m.num && hullBonus(p) > 1) chip(`⚓ Rumpf +${Math.round((hullBonus(p) - 1) * 100)} %`, 'ally');
       if ((m.minefields && m.minefields.length) || (m.mines && m.mines.length)) chip('💣 Minenfelder', 'env');
-      $('btn-play').textContent = m.survival ? '🌊 WELLEN STARTEN' : '⚓ AUSLAUFEN';
+      $('btn-play').textContent = m.survival ? '🌊 WELLEN STARTEN' : m.daily ? '📅 HERAUSFORDERUNG' : '⚓ AUSLAUFEN';
+   }
+
+   // today's top 10 (own best highlighted) and yesterday's best result
+   _dailyBoard(ul, hdr, m) {
+      const b = loadBoard();
+      const list = dayList(b, m.dateKey);
+      const mine = bestOf(b, m.dateKey);
+      hdr.textContent = `Bestenliste · ${formatKey(m.dateKey)}`;
+      if (!list.length) { const li = document.createElement('li'); li.textContent = 'Noch kein Ergebnis heute — sei der Erste!'; ul.appendChild(li); }
+      list.forEach((e, i) => {
+         const li = document.createElement('li');
+         li.className = e === mine ? 'ok' : '';
+         li.textContent = `${i + 1}. ${e.name} — ${e.score.toLocaleString('de-DE')} Pkt${e.won ? '' : ' (gesunken)'}`;
+         ul.appendChild(li);
+      });
+      const yk = shiftKey(m.dateKey, -1), y = bestOf(b, yk) || dayList(b, yk)[0];
+      if (y) { const li = document.createElement('li'); li.textContent = `Gestern: ${y.name} — ${y.score.toLocaleString('de-DE')} Pkt`; ul.appendChild(li); }
    }
 }
 
@@ -194,7 +229,9 @@ function drawThumb(cv, m) {
    const dot = (s, col, r = 2.4) => {
       if (!s.pos && s.bearing != null) s = { pos: { x: Math.cos(s.bearing) * ENCOUNTER.ring, y: Math.sin(s.bearing) * ENCOUNTER.ring } };
       if (!s.pos) return; g.fillStyle = col; g.beginPath(); g.arc(X(s.pos.x), Y(s.pos.y), r, 0, Math.PI * 2); g.fill(); };
-   for (const b of m.bots || []) dot(b, b.cls === 'BOSS' ? '#ff5040' : b.cls === 'CB' ? '#ffb070' : '#ff7a6a', b.cls === 'BOSS' ? 4.5 : 2.4);
+   const big = (b) => !!SHIPS[b.cls].bossPhases;
+   for (const b of m.bots || []) dot(b, big(b) ? '#ff5040' : b.cls === 'CB' ? '#ffb070' : '#ff7a6a', big(b) ? 4.5 : 2.4);
+   for (const wv of m.waves || []) for (const b of wv.bots || []) if (big(b)) dot(b, '#ff5040', 4.5);
    for (const a of m.allies || []) dot(a, '#7cff9a');
    if (m.player && m.player.pos) {
       const px = X(m.player.pos.x), py = Y(m.player.pos.y);

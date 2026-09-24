@@ -413,7 +413,7 @@ export class Ship {
    // opts.aimPoint so the salvo converges there; shells come down around that range (plunging
    // fire, see combat.js). opts.spreadMult / reloadMult are for blind area fire. Returns shells.
    fireMain(world, target, aimOverride, opts = {}) {
-      if (!this.alive) return 0;
+      if (!this.alive || this.mainLocked) return 0;
       const aimDir = aimOverride || this.aim;
       this.aimBearing = angleOf(aimDir);
       const gun = this.mainShell();
@@ -578,7 +578,7 @@ export class Ship {
       const bearing = angleOf(aimOverride || this.aim);
       const l = this.launcherFor(bearing);
       if (!l || l.cd > 0) return 0;
-      l.cd = T.cd;
+      l.cd = T.cd * (this.torpCdMult || 1);
       const muzzle = this.launcherPos(l);
       const fan = this.torpFan(bearing);
       for (const a of fan) world.spawnTorpedo(this, muzzle, fromAngle(a), T);

@@ -16,6 +16,7 @@
 //               | {type: 'alliesAlive'}]  -- each met criterion adds a star to the base one for winning
 //   hints      [{at: s, text}] tutorial / flavour lines
 import { DEG, makeRng } from './utils.js';
+import { buildDaily } from './daily.js';
 
 const isl = (x, y, r) => ({ kind: 'island', c: { x, y }, r, irregular: true });
 const reef = (x, y, r) => ({ kind: 'reef', c: { x, y }, r });
@@ -345,6 +346,7 @@ export function survivalWave(n, center, seed = n * 7919, obstacles = SURVIVAL.ob
 
 export function missionById(id) {
    if (id === SURVIVAL.id) return SURVIVAL;
+   if (id === 'daily') return buildDaily();   // today's challenge, rebuilt from the date seed
    return MISSIONS.find(m => m.id === id) || null;
 }
 export function nextMission(id) {
