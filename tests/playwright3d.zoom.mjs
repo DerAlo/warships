@@ -342,6 +342,7 @@ await shot('2x');
    check('restart resets the zoom (default distance, no scope, 55 deg)', !z.bino && z.level === z0.level && Math.abs(z.dist - z0.dist) < 1e-6 && z.scopeT === 0 && Math.abs(z.fov - 55) < 0.01, { before: { level: zb.level, bino: zb.bino }, after: { level: z.level, dist: f1(z.dist), scopeT: z.scopeT, fov: f3(z.fov) } });
 }
 
+check('zero console errors', errors.length === 0, errors);
 await browser.close();
 const failed = results.filter(r => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
