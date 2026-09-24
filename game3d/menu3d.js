@@ -112,6 +112,7 @@ const CSS = `
    text-shadow:0 1px 2px rgba(0,0,0,.5); transition:transform .12s, box-shadow .12s, filter .12s; }
 .m3-battle:hover { transform:translateY(-1px); filter:brightness(1.1); box-shadow:0 0 0 1px rgba(255,210,150,.7) inset, 0 8px 34px rgba(240,110,30,.6); }
 .m3-battle:disabled { filter:grayscale(1) brightness(.6); cursor:not-allowed; }
+.m3-left { display:flex; align-items:center; gap:22px; }
 .m3-right { display:flex; justify-content:flex-end; align-items:center; gap:14px; }
 .m3-diff { display:flex; gap:4px; background:rgba(0,0,0,.3); border:1px solid rgba(150,190,230,.16); border-radius:4px; padding:3px; }
 .m3-diff button { cursor:pointer; border:0; border-radius:3px; padding:6px 12px; font:700 12px var(--font,"Segoe UI"); color:#8fa8bf; background:transparent; letter-spacing:.5px; }
@@ -243,8 +244,8 @@ const CSS = `
 .m3-buy:hover:not(:disabled) { filter:brightness(1.25); } .m3-buy:disabled { opacity:.4; cursor:not-allowed; }
 .m3-buy.big { width:100%; padding:9px; font-size:13px; letter-spacing:1.5px; color:#cfeaff; border-color:rgba(143,211,255,.5); background:rgba(20,60,100,.5); }
 .m3-prog .hint { font-size:11px; color:#8aa3ba; margin-top:5px; text-align:center; }
-.m3-op .box.cap { max-width:760px; }
-.m3-op .box.cap .m3-bar { margin-top:10px; }
+.m3-op .box.captbox { max-width:760px; }
+.m3-op .box.captbox .m3-bar { margin-top:10px; }
 .m3-skills { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:14px 0 4px; }
 .m3-op .m3-skill { position:relative; text-align:left; padding:8px 30px 8px 10px; letter-spacing:0; font-weight:400; display:flex; flex-direction:column; gap:2px; }
 .m3-skill b { font-size:13px; color:#e6f0fa; } .m3-skill span { font-size:11px; color:#9db4c8; }
@@ -255,6 +256,7 @@ const CSS = `
 .m3-confirm { margin-top:12px; padding:10px 12px; border:1px solid rgba(230,110,90,.5); border-radius:3px; background:rgba(60,14,10,.5); font-size:12.5px; color:#ffd8cf; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .m3-confirm span { flex:1; min-width:200px; }
 .m3r-rw { margin-top:12px; }
+.m3r-note { font-size:12.5px; font-weight:800; color:#8fd3ff; letter-spacing:.5px; margin-top:8px; }
 .m3r-rw table { width:100%; border-collapse:collapse; font-size:12px; margin-top:2px; font-variant-numeric:tabular-nums; }
 .m3r-rw td { padding:2px 4px; color:#b6cadb; } .m3r-rw td.xp { text-align:right; color:#8fd3ff; } .m3r-rw td.cr { text-align:right; color:#ffd479; }
 .m3r-rw tr.sum td { border-top:1px solid rgba(150,190,230,.2); font-weight:800; color:#e6f0fa; }
@@ -319,6 +321,7 @@ export class Menu3D {
    }
    // loadout snapshot main3d hands to the World for the player ship
    loadout(ship) { return loadoutFor(this.profile, ship); }
+   _saveProfile() { saveProfile(this.profile); }
    _remember() { this.progress.sel = this.selection; saveProgress(this.progress); }
 
    // back to port: main3d drops the finished world first (onPort ends in show())
@@ -374,7 +377,7 @@ export class Menu3D {
       const pct = cl.next ? Math.round((pf.totalXp - cl.cur) / (cl.next - cl.cur) * 100) : 100;
       const el = document.createElement('div');
       el.className = 'm3-op m3-cap';
-      el.innerHTML = `<div class="box cap">
+      el.innerHTML = `<div class="box captbox">
             <div class="k">KAPITÄN · FERTIGKEITEN</div>
             <div class="t">Stufe ${cl.level}</div>
             <div class="st">${fmtInt(pf.totalXp)} EP gesamt · ${cl.next ? `nächste Stufe bei ${fmtInt(cl.next)} EP` : 'Höchststufe erreicht'} · <b class="pts">${free}</b> freie Punkte · ${pf.battles} Gefechte</div>
@@ -453,6 +456,7 @@ export class Menu3D {
          <div class="nm">${classSvg(S.type, 18)}${esc(S.name)}</div>
          <div class="cl">${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
          <div class="bars">${RATING_LABEL.map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
+         ${prog}
          <div class="m3-kv">
             <span>Kampfkraft</span><span>${fmtInt(S.hp)} HP</span>
             <span>Hauptbatterie</span><span>${esc(S.main)}</span>
@@ -467,7 +471,7 @@ export class Menu3D {
             <span>Gürtelpanzer</span><span>${S.belt} mm</span>
             <span>Abmessungen</span><span>${S.lengthM} × ${String(S.beamM).replace('.', ',')} m</span>
          </div>
-         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>${prog}` : '';
+         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>` : '';
       // fixed op ships (Duke of York, Washington ...) join the row only while their operation is selected
       const cards = [...PLAYABLE, ...allowed.filter(k => !PLAYABLE.includes(k))].map(k => {
          const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !isUnlocked(pf, k);
@@ -480,11 +484,11 @@ export class Menu3D {
       }).join('');
       this.root.innerHTML = `
          <div class="m3-top">
-            <div class="m3-logo">WARSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
+            <div class="m3-left"><div class="m3-logo">WARSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
+               <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button></div>
             <button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst erforschen"' : ''}>GEFECHT!</button>
             <div class="m3-right">
                <div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b> EP</span><span><b>${fmtInt(pf.credits)}</b> Kreditpunkte</span></div>
-               <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button>
                <div class="m3-diff">${DIFFS.map(([k, l]) => `<button data-diff="${k}" class="${k === this.difficulty ? 'sel' : ''}">${l}</button>`).join('')}</div>
                <button class="m3-help" data-act="help" title="So kämpfst du">?</button>
             </div>
@@ -534,8 +538,8 @@ export class Menu3D {
       const rwBox = `<div class="m3r-rw"><div class="m3-h"><span>Belohnung</span><span>${rw.mult && rw.mult !== 1 ? 'Schwierigkeit ×' + String(rw.mult).replace('.', ',') : ''}</span></div>
          <table>${rw.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="xp">${fmtInt(l.xp)} EP</td><td class="cr">${fmtInt(l.credits)} Kr.</td></tr>`).join('')}
          <tr class="sum"><td>Gesamt</td><td class="xp">${fmtInt(rw.xp)} EP</td><td class="cr">${fmtInt(rw.credits)} Kr.</td></tr></table>
-         ${lvl1 > lvl0 ? `<div class="m3r-medal">Kapitän erreicht Stufe ${lvl1} · +${lvl1 - lvl0} Fertigkeitspunkt${lvl1 - lvl0 > 1 ? 'e' : ''}</div>` : ''}
-         ${newShips.length ? `<div class="m3r-medal">Erforschbar: ${newShips.map(k => esc(SHIPS[k].name)).join(', ')}</div>` : ''}</div>`;
+         ${lvl1 > lvl0 ? `<div class="m3r-note">Kapitän erreicht Stufe ${lvl1} · +${lvl1 - lvl0} Fertigkeitspunkt${lvl1 - lvl0 > 1 ? 'e' : ''}</div>` : ''}
+         ${newShips.length ? `<div class="m3r-note">Erforschbar: ${newShips.map(k => esc(SHIPS[k].name)).join(', ')}</div>` : ''}</div>`;
       const rec = pr.missions[opts.mission] || { won: false, best: 0, plays: 0 };
       rec.plays++; rec.won = rec.won || !!res.victory; rec.best = Math.max(rec.best, res.xp || 0);
       const isOp = m.group === 'ops', medal = isOp ? opStars(world) : 0;

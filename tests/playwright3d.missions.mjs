@@ -20,6 +20,12 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0
 page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 await page.goto(URL, { waitUntil: 'load' });
 await page.waitForTimeout(800);
+// ---- fresh profile: two free ships, the others show a lock with their XP cost
+{
+   const lk = await page.evaluate(() => [...document.querySelectorAll('.m3-card.lock')].map(e => e.dataset.ship + ':' + e.textContent.replace(/\s+/g, ' ').trim()));
+   if (lk.length !== 2 || !lk.every(s => /EP/.test(s))) { console.log('LOCK FAIL', lk); errors.push('locked ship cards'); }
+   console.log('locked', JSON.stringify(lk));
+}
 // ---- historical operations through the real menu: section, briefing screen, Esc / Enter
 {
    const fail = (m) => { console.log('OPS MENU FAIL:', m); errors.push('ops menu: ' + m); };
@@ -153,6 +159,35 @@ for (const mission of missions) {
       stars: (JSON.parse(localStorage.getItem('warships3d.progress.v1') || '{}').missions || {}).rheinuebung?.stars || 0 }));
    if (!r.hist || !r.stars) { console.log('OPS DEBRIEF FAIL', JSON.stringify(r)); errors.push('ops debrief'); }
    console.log('ops debrief', JSON.stringify(r));
+}
+// ---- career: reward breakdown on the debrief above -> port -> buy a module -> spend a skill point -> sail with it
+{
+   const fail = (m) => { console.log('CAREER FAIL:', m); errors.push('career: ' + m); };
+   const prof = () => page.evaluate(() => JSON.parse(localStorage.getItem('warships3d.profile.v1') || 'null'));
+   const rw = await page.evaluate(() => ({ rows: document.querySelectorAll('.m3r-rw tr').length, sum: document.querySelector('.m3r-rw tr.sum')?.textContent || '' }));
+   const p0 = await prof();
+   if (rw.rows < 3 || !/EP/.test(rw.sum) || !p0 || !(p0.xp > 0 && p0.credits > 0)) fail('no reward breakdown / profile ' + JSON.stringify({ rw, p0 }));
+   await page.click('[data-act="port"]');
+   await page.waitForTimeout(200);
+   await page.click('[data-mis="standard"]'); await page.click('[data-ship="Hipper"]');
+   await page.click('[data-mod="main"]');
+   const p1 = await prof();
+   if (p1?.modules?.Hipper?.main !== 1 || p1.credits >= p0.credits) fail('module purchase ' + JSON.stringify(p1));
+   await page.click('[data-act="captain"]');
+   await page.click('[data-skill="prep"]');
+   const on = await page.evaluate(() => !!document.querySelector('.m3-cap [data-skill="prep"].on'));
+   await page.click('[data-cap="reset"]');
+   const conf = await page.evaluate(() => !!document.querySelector('.m3-confirm'));
+   await page.click('[data-cap="no"]');
+   const p2 = await prof();
+   if (!on || !conf || !p2?.skills?.includes('prep') || p2.xp !== p1.xp) fail('skill / reset confirm ' + JSON.stringify({ on, conf, p2 }));
+   await page.keyboard.press('Escape');
+   await page.click('[data-act="battle"]');
+   await page.waitForTimeout(300);
+   const sail = await page.evaluate(() => { const p = window.__world()?.player; return { cls: p?.cls, reload: p?.turrets[0].reloadMax, cd: p?.consumables[0].cdMax }; });
+   if (sail.cls !== 'Hipper' || !(sail.reload < 10.5)) fail('upgrade not applied in battle ' + JSON.stringify(sail));
+   await page.evaluate(() => window.__setRender(false));
+   console.log('career', JSON.stringify({ rw, xp: p0.xp, credits: p0.credits, module: p1.modules, skills: p2.skills, sail }));
 }
 console.log('TOTAL ERRORS', errors.length);
 for (const e of [...new Set(errors)].slice(0, 10)) console.log(' -', e);
