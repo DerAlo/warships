@@ -32,11 +32,11 @@ export function seedFor(key) {
 export const DAILY_MODS = [
    { id: 'fog', icon: '🌫', name: 'Dichter Nebel', text: 'Die Sichtweite ist fast halbiert — Gegner tauchen erst spät aus dem Dunst auf.', env: 'fog' },
    { id: 'storm', icon: '⛈', name: 'Sturm', text: 'Schwere See: Regenböen verdecken die Sicht, die Salven streuen stärker.', env: 'storm', squalls: 5 },
-   { id: 'double', icon: '👥', name: 'Doppelte Gegner', text: 'Jede Welle ist doppelt so groß — dafür halten die Feinde nur gut die Hälfte aus.', double: true },
+   { id: 'double', icon: '👥', name: 'Doppelte Gegner', text: 'Jede Welle ist doppelt so groß — dafür halten die Feinde nur die Hälfte aus.', double: true },
    { id: 'torps', icon: '🐟', name: 'Nur Torpedos', text: 'Die Hauptartillerie schweigt. Torpedos laden dreimal so schnell, es kommen nur leichte Schiffe.', noMain: true, torpCd: 0.33, light: true },
-   { id: 'glass', icon: '💥', name: 'Glaskanonen', text: 'Alle Schiffe richten 60 % mehr Schaden an — kurze, harte Gefechte.', dmg: 1.6 },
+   { id: 'glass', icon: '💥', name: 'Glaskanonen', text: 'Alle Schiffe richten 40 % mehr Schaden an — kurze, harte Gefechte.', dmg: 1.4 },
 ];
-const LIGHT = ['TB', 'DD', 'LC', 'ML'];
+const LIGHT = ['TB', 'DD', 'LC'];
 
 // ---------- generator ----------
 const isl = (x, y, r) => ({ kind: 'island', c: { x, y }, r, irregular: true });
@@ -64,15 +64,18 @@ export function buildDaily(key = dateKey()) {
    const mod = DAILY_MODS[Math.floor(rng() * DAILY_MODS.length)];
    const obstacles = genObstacles(rng);
    const heading = rng() * TAU - Math.PI;
-   const pool = mod.light ? SURV_POOL.filter(p => LIGHT.includes(p.cls)) : SURV_POOL;
-   const base = 2 + Math.floor(rng() * 2);
+   // no submarines or minelayers: hunting the last hidden or fleeing ship is not a race against the clock
+   const pool = SURV_POOL.filter(p => !['SUB', 'ML'].includes(p.cls) && (!mod.light || LIGHT.includes(p.cls)));
+   const base = 1 + Math.floor(rng() * 2);
    const center = { x: 0, y: 0 };
    const waves = [0, 1, 2].map(i => {
-      let specs = survivalWave(base + i * 2, center, (seed ^ ((i + 1) * 0x9e3779b1)) >>> 0, obstacles, pool);
+      let specs = survivalWave(base + i, center, (seed ^ ((i + 1) * 0x9e3779b1)) >>> 0, obstacles, pool);
       // at most one carrier per wave: two air wings at once is a wall, not a challenge
       let cv = 0;
       specs = specs.map(s => (s.cls === 'CV' && cv++ > 0 ? { ...s, cls: 'HC' } : s));
-      if (mod.double) specs = specs.flatMap(s => [{ ...s, hpMult: 0.55 }, { ...s, hpMult: 0.55, pos: { x: s.pos.x + 160, y: s.pos.y + 160 } }]);
+      // a fixed battle of three waves (no respawns, no shop): keep each wave small enough to finish
+      specs = specs.slice(0, (mod.double ? 2 : 3) + i);
+      if (mod.double) specs = specs.flatMap(s => [{ ...s, hpMult: 0.5 }, { ...s, hpMult: 0.5, pos: { x: s.pos.x + 160, y: s.pos.y + 160 } }]);
       return specs;
    });
    return {
@@ -86,8 +89,8 @@ export function buildDaily(key = dateKey()) {
       mods: { noMain: !!mod.noMain, torpCd: mod.torpCd || 1, dmg: mod.dmg || 1 },
       bots: waves[0],
       waves: [
-         { when: 'cleared', msg: '⚠ Zweite Welle im Anmarsch!', bots: waves[1] },
-         { when: 'cleared', msg: '⚠ Letzte Welle — alles oder nichts!', bots: waves[2] },
+         { when: 'cleared', heal: 0.5, msg: '⚠ Zweite Welle im Anmarsch! (Notreparatur)', bots: waves[1] },
+         { when: 'cleared', heal: 0.5, msg: '⚠ Letzte Welle — alles oder nichts! (Notreparatur)', bots: waves[2] },
       ],
       objectives: [{ type: 'sinkAll', text: 'Alle drei Wellen versenken' }],
       stars: [],

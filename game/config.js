@@ -285,7 +285,7 @@ export const ENV = {
    clear: { visionMult: 1, dispersion: 1 },
    night: { visionMult: 0.5, dispersion: 1.1, night: true },
    storm: { visionMult: 0.8, dispersion: 1.5, storm: true },
-   fog:   { visionMult: 0.55, dispersion: 1.05, fog: true },
+   fog:   { visionMult: 0.7, dispersion: 1.05, fog: true },
 };
 
 // ============ WEAPON HANDLING ============
