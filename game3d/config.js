@@ -43,8 +43,8 @@ export const CONSUMABLES = {
 };
 
 export const CLASS_NAMES = { BB: 'Schlachtschiff', CA: 'Schwerer Kreuzer', CL: 'Leichter Kreuzer', DD: 'Zerstörer', TR: 'Transporter', CV: 'Flugzeugträger' };
-export const NATION_NAMES = { de: 'Kriegsmarine', uk: 'Royal Navy' };
-const NATION_COLOR = { de: 0x6c7781, uk: 0x8b939b, tr: 0x5d5348 };
+export const NATION_NAMES = { de: 'Kriegsmarine', uk: 'Royal Navy', us: 'US Navy', jp: 'Kaiserliche Marine' };
+const NATION_COLOR = { de: 0x6c7781, uk: 0x8b939b, us: 0x6f7982, jp: 0x767b80, tr: 0x5d5348 };
 
 // ---- builders (keep the ship table readable) ----
 // Turret at x metres from midships (+ = bow). Fore turrets sweep +-arcW around the bow,
@@ -362,6 +362,79 @@ export const SHIPS = {
       ai: { prefRange: [0, 0], role: 'tr', value: 30 },
    }),
 };
+
+// ---- historical-operation variants ----
+// Stat/name variants of the existing classes for the "Historische Operationen" (missions.js).
+// The procedural renderer builds every model from cfg.hull + turret layout, so a variant needs no
+// new geometry code: 'us' hulls use the British superstructure style, 'jp' the German one.
+function variant(base, o) {
+   const d = structuredClone(base);
+   delete d.boost;
+   for (const k of ['hull', 'main', 'sec', 'armor', 'detect', 'ai']) if (o[k]) d[k] = { ...d[k], ...o[k] };
+   if (o.hull && o.hull.nation) delete d.hull.color;
+   if (o.torp !== undefined) d.torp = o.torp && d.torp ? { ...d.torp, ...o.torp } : o.torp;
+   for (const k of ['key', 'name', 'className', 'hp', 'speedKn', 'accel', 'turnR', 'rudderShift', 'consumables']) if (o[k] !== undefined) d[k] = o[k];
+   d.playable = false;
+   return ship(d);
+}
+const BB_CONS = (heal, extra = []) => [
+   C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
+   C('repair', { charges: 4, dur: 28, cd: 80, heal }),
+   ...extra,
+];
+// HMS Duke of York: King George V class with the Type 273/284 radar that found Scharnhorst at night
+SHIPS.DukeOfYork = variant(SHIPS.KGV, {
+   key: 'DukeOfYork', name: 'HMS Duke of York', className: 'King-George-V-Klasse',
+   consumables: BB_CONS(0.006, [C('radar', { charges: 4, dur: 40, cd: 100, range: 12000 })]),
+});
+// USS Washington (North Carolina class): 9 x 406 mm in three triple turrets, SG radar
+SHIPS.Washington = variant(SHIPS.KGV, {
+   key: 'Washington', name: 'USS Washington', className: 'North-Carolina-Klasse',
+   hull: { L: 222, beam: 33, draft: 10, deckH: 13, nation: 'us', sup: { x: 0, len: 60, w: 18, h: 26 }, funnels: [{ x: 4, r: 5, h: 13 }, { x: -12, r: 5, h: 13 }] },
+   hp: 62000, speedKn: 28, turnR: 820,
+   detect: { surface: 15200, fire: 18900 },
+   armor: { belt: 305, deck: 140 },
+   main: { caliber: 406, turrets: [T(62, 3), T(44, 3), T(-60, 3, true)], reload: 28, range: 18900, tMax: 11, ap: { dmg: 13500, pen: 690 }, he: { dmg: 5700, pen: 68, fire: 0.36 } },
+   sec: { caliber: 127, guns: 20, range: 6000, reload: 4.5, he: { dmg: 1800, pen: 21, fire: 0.05 } },
+   consumables: BB_CONS(0.006, [C('radar', { charges: 3, dur: 40, cd: 110, range: 10000 })]),
+   ai: { prefRange: [10000, 15000] },
+});
+// IJN Kirishima (Kongo class fast battleship, ex battlecruiser): fast, thinly armoured
+SHIPS.Kirishima = variant(SHIPS.Hood, {
+   key: 'Kirishima', name: 'Kirishima', className: 'Kongō-Klasse',
+   hull: { L: 222, beam: 31, draft: 9.7, deckH: 13, nation: 'jp', sup: { x: 4, len: 62, w: 17, h: 30 }, funnels: [{ x: 6, r: 5, h: 15 }, { x: -10, r: 5, h: 15 }] },
+   hp: 55000, speedKn: 30, turnR: 900,
+   detect: { surface: 15400, fire: 18000 },
+   armor: { belt: 203, deck: 70, ends: 25 },
+   main: { caliber: 356, turrets: [T(78, 2), T(60, 2), T(-50, 2, true), T(-72, 2, true)], reload: 28, range: 17500, ap: { dmg: 10500, pen: 560 }, he: { dmg: 4600, pen: 58, fire: 0.3 } },
+   sec: { caliber: 152, guns: 14, range: 6200, reload: 7, he: { dmg: 1600, pen: 30, fire: 0.07 } },
+});
+// IJN Atago / Takao (Takao class heavy cruiser): 10 x 203 mm and Type 93 "Long Lance" torpedoes
+SHIPS.Takao = variant(SHIPS.Hipper, {
+   key: 'Takao', name: 'Atago', className: 'Takao-Klasse',
+   hull: { L: 204, beam: 20.7, draft: 6.3, nation: 'jp', sup: { x: 6, len: 44, w: 15, h: 24 }, funnels: [{ x: -10, r: 5, h: 13 }] },
+   hp: 39000, speedKn: 34,
+   armor: { belt: 102, deck: 35 },
+   main: { turrets: [T(70, 2), T(56, 2), T(42, 2), T(-46, 2, true), T(-60, 2, true)], reload: 12 },
+   torp: { launchers: [L(-12, 'port', 4), L(-12, 'stbd', 4), L(-28, 'port', 4), L(-28, 'stbd', 4)], range: 10000, speedKn: 58, dmg: 15000, reload: 110 },
+});
+// IJN Ayanami & co. (Fubuki class destroyer): 3 triple 610 mm tube mounts
+SHIPS.Fubuki = variant(SHIPS.Jervis, {
+   key: 'Fubuki', name: 'Ayanami', className: 'Fubuki-Klasse',
+   hull: { L: 118, beam: 10.4, draft: 3.2, nation: 'jp' },
+   hp: 14200, speedKn: 38,
+   detect: { surface: 7200, fire: 9200 },
+   main: { caliber: 127, turrets: [T(38, 2), T(-22, 2, true), T(-36, 2, true)], reload: 5.5, range: 11000, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } },
+   torp: { launchers: [L(4, 'both', 3), L(-10, 'both', 3), L(-26, 'both', 3)], range: 10000, speedKn: 58, dmg: 15000, reload: 100 },
+});
+// US destroyers of TF 64 (Walke, Benham, Preston, Gwin) -- one stand-in class
+SHIPS.Benham = variant(SHIPS.Jervis, {
+   key: 'Benham', name: 'USS Benham', className: 'Benham-Klasse',
+   hull: { L: 104, beam: 10.8, nation: 'us' },
+   hp: 14500, speedKn: 36.5,
+   main: { caliber: 127, turrets: [T(34, 1), T(24, 1), T(-30, 1, true), T(-40, 1, true)], reload: 4.5, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } },
+   torp: { launchers: [L(-6, 'both', 4), L(-18, 'both', 4)] },
+});
 
 // Player-selectable classes, in menu order.
 export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23'];

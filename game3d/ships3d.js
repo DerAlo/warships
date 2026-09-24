@@ -258,7 +258,7 @@ function planShape(x0, x1, hw, rf = 0, ra = 0) {
 function superstructure(b, d, S, tl, col, ship) {
    const { L, B, type } = d;
    const hull = ship.cfg?.hull || {};
-   const nat = hull.nation === 'uk' ? 'uk' : 'de';
+   const nat = hull.nation === 'uk' || hull.nation === 'us' ? 'uk' : 'de';
    const lv = 2.6;            // one deck level (m)
    const { sup, dark, mast, win, plat } = col;
    const hw = (x) => S.halfDeckAt(x);
