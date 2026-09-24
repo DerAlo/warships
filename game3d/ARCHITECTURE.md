@@ -110,6 +110,10 @@ const menu = new Menu3D(menuEl, endEl, { onStart(opts), onPort(), onHowTo(), onC
 menu.show() / menu.hide()            // port: mission list + ship cards (PLAYABLE), difficulty
 menu.showResults(world, opts, extra) // Sieg/Niederlage, reason, damage/kills/citadels/fires, xp/credits
 menu.hideResults()
+menu.loadout(ship)                   // career snapshot { modules, skills } -> new World(diff, { loadout })
+// progress3d.js (pure): calcRewards (World.end), unlock/module/skill rules, profile storage,
+// applyLoadout(cfg, loadout) -> modified cfg copy handed to the player Ship once at spawn (opts.cfg);
+// bots and SHIPS[] stay untouched, nothing runs per frame (Adrenalinrausch is evaluated per salvo).
 // results buttons: "Nochmal" -> onStart(same opts); "Naechste Mission" -> select next + onPort;
 // "Hafen" -> onPort. main3d.onPort drops the finished World (world = null) and shows the port.
 ```

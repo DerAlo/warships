@@ -77,6 +77,16 @@ see `game3d/ARCHITECTURE.md`):
   - **Playable ships:** Bismarck (battleship), Admiral Hipper (heavy cruiser),
     Nürnberg (light cruiser) and Z 23 (destroyer), each with its own guns,
     torpedoes and consumables.
+  - **Career (Karriere):** every battle/op pays XP (EP) and credits
+    (Kreditpunkte) — base, win bonus, damage, kills, spotting, objectives,
+    survival, × difficulty — itemised on the results screen. Bismarck and
+    Hipper are free; Nürnberg (7 500 EP) and Z 23 (11 000 EP) are researched
+    with XP (ops keep their fixed ships). Credits buy 3 tiers of five modules
+    per ship (Hauptbatterie, Antrieb, Ruderanlage, Rumpf, Feuerleitung; ≤ 10 %
+    each), captain levels from lifetime XP give points for ten skills
+    (Vorbereitung, Brandschutz, Adrenalinrausch, Tarnexperte …; free respec).
+    Saved locally (`warships3d.profile.v1`), "Profil zurücksetzen" in the
+    Kapitän panel. Code: `game3d/progress3d.js`.
   - **WoWs scale:** 1 unit = 1 m, maps 16–28 km across, WoWs-like gun ranges,
     shell flight times, spotting/detectability and time-compressed movement.
     Turret traverse is a real gate on firing — only loaded turrets that have
@@ -140,7 +150,7 @@ node tests/play.mjs missions 10      # balance check: every campaign mission + s
 node tests/playwright.shots.mjs      # 2D browser self-test + screenshots
 node tests/playwright2d.missions.mjs # 2D browser play-test of every mission + survival
 node tests/playwright3d.shots.mjs    # 3D browser self-test + screenshots
-node --test tests/sim3d.test.mjs     # headless 3D simulation tests (ballistics, AI, missions)
+node --test tests/sim3d.test.mjs     # headless 3D simulation tests (ballistics, AI, missions, career)
 node --test tests/zoom3d.test.mjs    # 3D mouse-wheel zoom / binoculars ladder
 node tests/playwright3d.zoom.mjs     # 3D browser check of the wheel zoom
 node tests/playwright3d.missions.mjs # 3D browser play-test of every mission
