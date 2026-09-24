@@ -66,8 +66,14 @@ see `game3d/ARCHITECTURE.md`):
   (Three.js, vendored locally under `vendor/three/` — no CDN, still fully offline).
   - **Missions:** Übungsgefecht (training), Standardgefecht (7 vs 7),
     Herrschaft (domination, three capture points), Geleitzug (convoy escort),
-    Unternehmen Rheinübung, Letztes Gefecht, Nachtgefecht (destroyer night
-    action) and Handelskrieg (commerce raid), each with briefing and objectives.
+    Letztes Gefecht, Nachtgefecht (destroyer night action) and Handelskrieg
+    (commerce raid), each with briefing and objectives.
+  - **Historische Operationen:** Unternehmen Rheinübung (Bismarck vs Hood and
+    Prince of Wales at dawn), Nachtschlacht vor Guadalcanal (Washington vs
+    Kirishima and Long-Lance destroyers) and Schlacht am Nordkap (Duke of York
+    runs down Scharnhorst in an Arctic storm). Each op has fixed ships, an intro
+    briefing, scripted radio traffic, multi-stage objectives, a debrief with the
+    historical outcome and a medal (1–3 stars, saved locally).
   - **Playable ships:** Bismarck (battleship), Admiral Hipper (heavy cruiser),
     Nürnberg (light cruiser) and Z 23 (destroyer), each with its own guns,
     torpedoes and consumables.

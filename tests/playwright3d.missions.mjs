@@ -11,7 +11,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URL3D || 'http://localhost:5173/index-3d.html';
 const OUT = process.env.OUT || 'tests/shots';
 mkdirSync(OUT, { recursive: true });
-const missions = (process.env.MISSIONS || 'training,standard,domination,convoy,rheinuebung,laststand,night,raid').split(',');
+const missions = (process.env.MISSIONS || 'training,standard,domination,convoy,laststand,night,raid,rheinuebung,guadalcanal,nordkap').split(',');
 const ships = (process.env.SHIPS || 'Bismarck,Hipper,Nuernberg,Z23').split(',');
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -20,6 +20,25 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0
 page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 await page.goto(URL, { waitUntil: 'load' });
 await page.waitForTimeout(800);
+// ---- historical operations through the real menu: section, briefing screen, Esc / Enter
+{
+   const fail = (m) => { console.log('OPS MENU FAIL:', m); errors.push('ops menu: ' + m); };
+   const sec = await page.evaluate(() => document.querySelector('.m3-sec')?.textContent || '');
+   if (!/Historische Operationen/i.test(sec)) fail('no "Historische Operationen" section');
+   await page.click('[data-mis="nordkap"]');
+   const card = await page.evaluate(() => !!document.querySelector('[data-ship="DukeOfYork"]:not(.off)'));
+   if (!card) fail('Duke of York card missing');
+   await page.keyboard.press('Enter');
+   const intro = await page.evaluate(() => document.querySelector('.m3-op .t')?.textContent || '');
+   if (!/Nordkap/.test(intro)) fail('no briefing screen');
+   await page.keyboard.press('Escape');
+   if (await page.evaluate(() => !!document.querySelector('.m3-op'))) fail('Esc did not close the briefing');
+   await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+   await page.waitForTimeout(300);
+   const st = await page.evaluate(() => ({ phase: window.__phase(), id: window.__world()?.mission?.id, ship: window.__world()?.player?.cls }));
+   if (st.phase !== 'playing' || st.id !== 'nordkap' || st.ship !== 'DukeOfYork') fail('op did not start: ' + JSON.stringify(st));
+   console.log('ops menu', JSON.stringify({ sec: sec.trim(), card, intro, st }));
+}
 let i = 0;
 for (const mission of missions) {
    const ship = ships[i++ % ships.length];
@@ -42,6 +61,7 @@ for (const mission of missions) {
    // render a couple of frames for real too
    await page.evaluate(() => window.__setRender(true));
    await page.waitForTimeout(1500);
+   info.calls = await page.evaluate(() => window.__renderer3d.renderer.info.render.calls);
    await page.screenshot({ path: `${OUT}/3d-mission-${mission}.png` });
    await page.evaluate(() => window.__setRender(false));
    const st = await page.evaluate(() => ({ t: window.__world().time.toFixed(1), fired: window.__fired(), phase: window.__phase() }));
@@ -119,6 +139,20 @@ for (const mission of missions) {
    if (n1.prog !== n0.prog) fail(`night flashes compiled new programs ${n0.prog} -> ${n1.prog}`);
    console.log('night flashes calls', n0.calls, '->', n1.calls, 'prog', n0.prog, '->', n1.prog, 'frame ms', ft, 'fired', JSON.stringify(await ev(() => window.__fired())));
    await ev(() => window.__setRender(false));
+}
+// ---- operation debrief: win Rheinuebung -> history box, medal, stars persisted
+{
+   await page.evaluate(() => { window.__start({ difficulty: 'normal', mission: 'rheinuebung' }); window.__setRender(false); });
+   await page.waitForTimeout(200);
+   await page.evaluate(() => {
+      const w = window.__world();
+      for (const n of ['HMS Hood', 'HMS Prince of Wales']) { const s = w.ships.find(x => x.name === n); s.takeDamage(s.hp + 1, w.player, 'citadel'); }
+   });
+   await page.waitForFunction(() => !!document.querySelector('.m3r-hist'), null, { timeout: 15000 }).catch(() => {});
+   const r = await page.evaluate(() => ({ hist: !!document.querySelector('.m3r-hist'), medal: document.querySelector('.m3r-medal')?.textContent || '',
+      stars: (JSON.parse(localStorage.getItem('warships3d.progress.v1') || '{}').missions || {}).rheinuebung?.stars || 0 }));
+   if (!r.hist || !r.stars) { console.log('OPS DEBRIEF FAIL', JSON.stringify(r)); errors.push('ops debrief'); }
+   console.log('ops debrief', JSON.stringify(r));
 }
 console.log('TOTAL ERRORS', errors.length);
 for (const e of [...new Set(errors)].slice(0, 10)) console.log(' -', e);
