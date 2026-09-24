@@ -37,7 +37,8 @@ export class Hud {
 
    // per-match state (called from startGame)
    reset() {
-      this._lastLogLen = 0;
+      this._lastLogLine = null;
+      this._lastLogWorld = null;
       this._sirenOn = false;
       this._pipShip = null;
       this._ribbons = [];
@@ -299,9 +300,15 @@ export class Hud {
 
    _syncLog(world) {
       const lines = world.logLines;
-      if (lines.length === this._lastLogLen) return;
-      const e = this.el.log;
-      // rebuild only the tail (cheap enough at ≤60 lines)
+      // compare the newest entry, not the length: the buffer is capped at 60 and shifts, so the
+      // length stops changing (the log froze after 60 messages), and a restart can match it too
+      const last = lines[lines.length - 1] || null;
+      if (last === this._lastLogLine && world === this._lastLogWorld) return;
+      this._lastLogLine = last;
+      this._lastLogWorld = world;
+      // inner box carries the top fade so the panel frame itself stays crisp
+      if (!this._logIn) { this._logIn = document.createElement('div'); this._logIn.className = 'log-in'; this.el.log.appendChild(this._logIn); }
+      const e = this._logIn;
       const start = Math.max(0, lines.length - 7);
       e.innerHTML = '';
       for (let i = start; i < lines.length; i++) {
@@ -310,6 +317,5 @@ export class Hud {
          l.textContent = lines[i].text;
          e.appendChild(l);
       }
-      this._lastLogLen = lines.length;
    }
 }

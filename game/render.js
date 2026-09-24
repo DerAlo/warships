@@ -80,6 +80,79 @@ export class Renderer {
    }
 
    // ================= OBSTACLES =================
+   // reef look: turquoise shallows, sand shoals, scattered rocks and broken surf. The layout is
+   // generated once per reef (in meters, seeded by position) so it is stable and zoom-proof.
+   _reefLayout(o) {
+      this._reefArt = this._reefArt || new WeakMap();
+      let art = this._reefArt.get(o);
+      if (art) return art;
+      let seed = (Math.floor(o.c.x * 7 + o.c.y * 13) >>> 0) || 1;
+      const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      const shoals = [], rocks = [], surf = [];
+      for (let i = 0; i < 4; i++) {
+         const a = rnd() * TAU, d = rnd() * o.r * 0.45;
+         shoals.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, rx: o.r * (0.25 + rnd() * 0.25), ry: o.r * (0.15 + rnd() * 0.18), rot: rnd() * Math.PI });
+      }
+      const n = 8 + Math.floor(rnd() * 5);
+      for (let i = 0; i < n; i++) {
+         const a = rnd() * TAU, d = Math.sqrt(rnd()) * o.r * 0.75, size = o.r * (0.06 + rnd() * 0.11);
+         const pts = [];
+         const k = 5 + Math.floor(rnd() * 3);
+         for (let j = 0; j < k; j++) { const t = (j / k) * TAU; pts.push({ a: t, r: size * (0.65 + rnd() * 0.45) }); }
+         rocks.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, pts, size });
+      }
+      for (let i = 0; i < 7; i++) surf.push({ a: (i / 7) * TAU + rnd() * 0.5, len: 0.35 + rnd() * 0.45, rr: 0.82 + rnd() * 0.16, ph: rnd() * TAU });
+      art = { shoals, rocks, surf };
+      this._reefArt.set(o, art);
+      return art;
+   }
+
+   _reef(ctx, o, c, r, time) {
+      const z = this.cam.zoom, art = this._reefLayout(o);
+      // shallow water: bright turquoise core fading into the deep blue
+      const g = ctx.createRadialGradient(c.x, c.y, r * 0.2, c.x, c.y, r * 1.45);
+      g.addColorStop(0, 'rgba(95,210,195,0.42)');
+      g.addColorStop(0.55, 'rgba(60,170,170,0.22)');
+      g.addColorStop(1, 'rgba(40,130,150,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.45, 0, TAU); ctx.fill();
+      // sand shoals under the water
+      ctx.fillStyle = 'rgba(215,200,150,0.15)';
+      for (const sh of art.shoals) {
+         ctx.beginPath();
+         ctx.ellipse(c.x + sh.x * z, c.y + sh.y * z, sh.rx * z, sh.ry * z, sh.rot, 0, TAU);
+         ctx.fill();
+      }
+      // rocks: dark body, lit top-left rim, a lick of foam where the swell breaks
+      for (const rk of art.rocks) {
+         const x = c.x + rk.x * z, y = c.y + rk.y * z;
+         const path = () => {
+            ctx.beginPath();
+            rk.pts.forEach((p, i) => {
+               const px = x + Math.cos(p.a) * p.r * z, py = y + Math.sin(p.a) * p.r * z;
+               i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+            });
+            ctx.closePath();
+         };
+         ctx.fillStyle = 'rgba(225,245,250,0.10)';
+         ctx.beginPath(); ctx.arc(x + rk.size * z * 0.15, y + rk.size * z * 0.15, rk.size * z * 1.2, 0, TAU); ctx.fill();
+         path(); ctx.fillStyle = '#34423d'; ctx.fill();
+         ctx.save(); path(); ctx.clip();
+         ctx.fillStyle = 'rgba(150,165,150,0.55)';
+         ctx.beginPath(); ctx.arc(x - rk.size * z * 0.35, y - rk.size * z * 0.35, rk.size * z * 0.7, 0, TAU); ctx.fill();
+         ctx.restore();
+      }
+      // broken surf line marking the danger edge, gently pulsing
+      ctx.lineCap = 'round';
+      for (const sf of art.surf) {
+         const al = 0.22 + 0.18 * Math.sin(time * 1.3 + sf.ph);
+         ctx.strokeStyle = `rgba(230,248,255,${al.toFixed(3)})`;
+         ctx.lineWidth = 1.6;
+         ctx.beginPath(); ctx.arc(c.x, c.y, r * sf.rr, sf.a, sf.a + sf.len); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+   }
+
    _obstacles(ctx, world) {
       const cam = this.cam;
       for (const o of world.obstacles) {
@@ -87,25 +160,7 @@ export class Renderer {
          const c = cam.w2s(o.c);
          const r = o.r * cam.zoom;
          if (o.kind === 'reef') {
-            // shallow water halo
-            const g = ctx.createRadialGradient(c.x, c.y, r * 0.4, c.x, c.y, r * 1.5);
-            g.addColorStop(0, 'rgba(90,190,170,0.30)');
-            g.addColorStop(0.6, 'rgba(60,150,140,0.14)');
-            g.addColorStop(1, 'rgba(60,150,140,0)');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.5, 0, TAU); ctx.fill();
-            // reef rocks
-            ctx.fillStyle = '#2e4a44';
-            for (let i = 0; i < 9; i++) {
-               const a = (i / 9) * TAU + o.c.x * 0.01;
-               const rr = r * (0.35 + 0.45 * ((i * 37) % 10) / 10);
-               const x = c.x + Math.cos(a) * rr * 0.55, y = c.y + Math.sin(a) * rr * 0.55;
-               ctx.beginPath(); ctx.arc(x, y, rr * 0.42, 0, TAU); ctx.fill();
-            }
-            // foam edge
-            ctx.strokeStyle = 'rgba(220,245,255,0.5)';
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.72, 0, TAU); ctx.stroke();
+            this._reef(ctx, o, c, r, world.time);
          } else {
             // island with irregular lobes
             ctx.save();
@@ -602,8 +657,10 @@ export class Renderer {
          if (!cam.visible(d.pos, 50)) continue;
          const c = cam.w2s(d.pos);
          const a = clamp01(d.life / 0.5);
-         const col = d.type === 'fire' ? '#ffb24d' : d.type === 'torp' ? '#7fd8ff' : '#ffcf6b';
-         ctx.font = 'bold 13px "SF Mono", monospace';
+         const col = d.type === 'fire' ? '#ffb24d' : d.type === 'torp' ? '#7fd8ff' : d.type === 'cit' ? '#ff8a6b' : '#ffcf6b';
+         // bigger for heavy hits, with a short pop when a merged salvo adds to it
+         const px = Math.round((d.amount >= 2000 ? 16 : 13) * (1 + 0.25 * (d.pop || 0)));
+         ctx.font = `bold ${px}px "SF Mono", monospace`;
          ctx.globalAlpha = a;
          ctx.fillStyle = '#000';
          ctx.fillText(d.text, c.x + 1, c.y - 10 + 1);

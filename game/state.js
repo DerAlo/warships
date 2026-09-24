@@ -422,7 +422,20 @@ export class World {
    }
 
    addDamageNumber(pos, amount, type = 'dmg') {
-      this.damageNumbers.push({ pos: { x: pos.x + (Math.random() - 0.5) * 20, y: pos.y }, text: Math.round(amount).toString(), age: 0, life: 1.2, type });
+      // a salvo lands several shells within a few frames on one hull: sum them into a single
+      // number (strongest hit type wins) instead of stacking overlapping, unreadable digits
+      const RANK = { dmg: 0, torp: 1, fire: 2, cit: 3 };
+      for (const d of this.damageNumbers) {
+         if (d.age > 0.35 || Math.abs(d.src.x - pos.x) > 70 || Math.abs(d.src.y - pos.y) > 70) continue;
+         d.amount += amount;
+         d.text = Math.round(d.amount).toString();
+         if ((RANK[type] || 0) > (RANK[d.type] || 0)) d.type = type;
+         d.life = 1.2;
+         d.pop = 1;
+         return;
+      }
+      this.damageNumbers.push({ pos: { x: pos.x + (Math.random() - 0.5) * 20, y: pos.y }, src: { x: pos.x, y: pos.y },
+         amount, text: Math.round(amount).toString(), age: 0, life: 1.2, type, pop: 0 });
    }
 
    log(who, text, type = 'info') {
@@ -533,7 +546,7 @@ export class World {
       if (this.particles.length > TUNE.maxParticles) this.particles.splice(0, this.particles.length - TUNE.maxParticles);
    }
    _updateDamageNumbers(dt) {
-      for (const d of this.damageNumbers) { d.age += dt; d.life -= dt; d.pos.y -= dt * 30; }
+      for (const d of this.damageNumbers) { d.age += dt; d.life -= dt; d.pos.y -= dt * 30; d.pop = Math.max(0, (d.pop || 0) - dt * 4); }
       this.damageNumbers = this.damageNumbers.filter(d => d.life > 0);
    }
    _updateEffects(dt) {

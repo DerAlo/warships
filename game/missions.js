@@ -118,10 +118,11 @@ export const MISSIONS = [
          { cls: 'HC', pos: { x: 1200, y: -2300 } },
          { cls: 'LC', pos: { x: 2500, y: -500 } },
          { cls: 'DD', pos: { x: 1100, y: -1150 } },
-         { cls: 'DD', pos: { x: 2600, y: -2400 } },
       ],
+      // night halves the sighting range, so the whole squadron at once was a coin flip even on
+      // normal: the second destroyer now arrives with the torpedo boats
       waves: [
-         { at: 100, msg: '⚠ Torpedoboote kommen aus der Dunkelheit!', bots: [{ cls: 'TB', pos: { x: -3200, y: -1600 } }, { cls: 'TB', pos: { x: -3300, y: -1200 } }, { cls: 'TB', pos: { x: -3000, y: -2000 } }] },
+         { at: 100, msg: '⚠ Torpedoboote kommen aus der Dunkelheit!', bots: [{ cls: 'TB', pos: { x: -3200, y: -1600 } }, { cls: 'TB', pos: { x: -3000, y: -2000 } }, { cls: 'DD', pos: { x: 2600, y: -2400 } }] },
       ],
       objectives: [{ type: 'sinkAll', text: 'Den Nachtverband versenken' }],
       stars: [{ type: 'hp', min: 0.5 }, { type: 'time', max: 480 }],

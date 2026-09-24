@@ -157,7 +157,7 @@ export const SHIPS = {
       turrets: [ { x: 108, guns: 3 }, { x: 76, guns: 3 }, { x: -100, guns: 3 } ],
       sec: { guns: 12, caliber: 150, dmg: 45, reload: 1.8, range: 1100, type: 'HE', ap: 0, vShell: 600, fire: 0.04, burst: 4 },
       torp: null,
-      barrage: { every: 28, everyP2: 19, count: 5, countP2: 7, radius: 160, delay: 4.2, dmg: 1150, spread: 360 },
+      barrage: { every: 28, everyP2: 19, count: 5, countP2: 7, radius: 160, delay: 4.2, dmg: 950, spread: 360 },
       cons: { dc: { charges: 5, dur: 6, cd: 35 } },
       reactionMult: 1.1,
       ai: { role: 'battleship', commitTime: 1e9, holdThrottle: 0.5, noRetreat: true, boss: true }, noRepair: true,
@@ -262,8 +262,8 @@ export const HANDLING = {
 // *bots'* aim; the player's dispersion is fixed.
 export const DIFFICULTY = {
    easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 0.7 },
-   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 0.72 },
-   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.15, detectMult: 1.15, botHP: 1.2,  botDmg: 1.0 },
+   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 0.66 },
+   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.15, detectMult: 1.15, botHP: 1.1,  botDmg: 0.9 },
 };
 
 // ============ ENCOUNTER ============

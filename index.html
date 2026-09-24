@@ -132,7 +132,10 @@
    #siren.on { opacity: 1; animation: sirenPulse 1s infinite; }
    @keyframes sirenPulse { 0%,100%{opacity:.15} 50%{opacity:.6} }
 
-   #log { left: 18px; top: 18px; width: 260px; max-height: 150px; overflow: hidden; font-size: 11px; display:flex; flex-direction: column; gap:2px; justify-content: flex-end; }
+   #log { left: 18px; top: 18px; width: 260px; font-size: 11px; }
+   /* bottom-anchored and clipped at the top: fade old lines out instead of cutting glyphs in half */
+   #log .log-in { max-height: 128px; overflow: hidden; display:flex; flex-direction: column; gap:2px; justify-content: flex-end;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px); mask-image: linear-gradient(to bottom, transparent 0, #000 22px); }
    #log .l { opacity:.9; text-shadow: 0 1px 3px #000; }
    #log .l.dmg { color:#ffcf6b; } #log .l.kill { color:#7CFF9A; font-weight:700; }
    #log .l.warn { color:#ff6a5a; }
@@ -223,8 +226,9 @@
    .echip.env { background: rgba(90,140,220,.16); border-color: rgba(143,182,222,.45); color: #d4e8ff; }
    .brief .spacer { flex: 1; min-height: 8px; }
    .brief .diff-row { justify-content: flex-start; margin-top: 12px; }
-   .brief .btn-row { justify-content: flex-start; margin-top: 14px; }
-   .brief button.play { padding: 12px 22px; font-size: 15px; }
+   .brief .btn-row { justify-content: flex-start; margin-top: 14px; flex-wrap: nowrap; gap: 10px; }
+   .brief button.play { padding: 11px 14px; font-size: 14px; letter-spacing: .5px; white-space: nowrap; }
+   .brief #btn-play { flex: 1; }
    .menu-foot { margin-top: 14px; color: var(--hud-dim); font-size: 12px; text-align: center; }
    .menu-foot a { color: var(--hud); }
    @media (max-width: 960px) { .menu-body { grid-template-columns: 1fr; } .mission-grid { grid-template-columns: repeat(2, 1fr); } }
