@@ -12,9 +12,9 @@ export const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
 export const scale = (a, s) => ({ x: a.x * s, y: a.y * s });
 export const dot = (a, b) => a.x * b.x + a.y * b.y;
 export const cross = (a, b) => a.x * b.y - a.y * b.x;
-export const len = (a) => Math.hypot(a.x, a.y);
+export const len = (a) => Math.sqrt(a.x * a.x + a.y * a.y);
 export const len2 = (a) => a.x * a.x + a.y * a.y;
-export const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+export const dist = (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 export const dist2 = (a, b) => { const dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; };
 export const norm = (a) => { const l = Math.hypot(a.x, a.y) || 1; return { x: a.x / l, y: a.y / l }; };
 export const fromAngle = (a, l = 1) => ({ x: Math.cos(a) * l, y: Math.sin(a) * l });
@@ -189,7 +189,7 @@ export function obstacleRadiusAt(o, a) {
 // Normalised distance from the island centre: < 1 inside the coastline.
 export function obstacleT(o, p) {
    const dx = p.x - o.c.x, dy = p.y - o.c.y;
-   const d = Math.hypot(dx, dy);
+   const d = Math.sqrt(dx * dx + dy * dy);   // not Math.hypot: this runs thousands of times per step
    // no d/rMax shortcut: on elongated islands rMax is far larger than the radius at most
    // angles, which made safe water up to ~1.3 rMax look like coast (spawns and AI got pulled in)
    return d / obstacleRadiusAt(o, Math.atan2(dy, dx));

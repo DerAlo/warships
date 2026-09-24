@@ -404,7 +404,7 @@ export class Ship {
       const aim = this.aimPoint;
       const step = m.traverseRad * dt;
       let inRange = false, R = 0;
-      if (aim) { R = Math.hypot(aim.x - this.pos.x, aim.y - this.pos.y); inRange = R <= m.range; }
+      if (aim) { R = Math.sqrt((aim.x - this.pos.x) ** 2 + (aim.y - this.pos.y) ** 2); inRange = R <= m.range; }
       this.aimRange = R; this.inRange = inRange;
       const elevT = aim ? launchAngle(m, Math.min(R, m.range)) : 0;
       for (const t of this.turrets) {

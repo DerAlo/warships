@@ -74,8 +74,10 @@ export function makeShell(world, shooter, muzzle, aim, gun, kind, ammo) {
    };
 }
 
+const _near = [];   // reused: callers iterate it before the next call
 function nearbyShips(world, p, side, pad) {
-   const out = [];
+   const out = _near;
+   out.length = 0;
    for (const s of world.ships) {
       if (!s.alive || s.side === side) continue;
       const r = s.cfg.hull.L / 2 + pad;
@@ -102,6 +104,16 @@ function hitZone(ship, lp, a, prevLp, prevA) {
    return Math.abs(lp.x) <= cit ? 'belt' : 'ends';
 }
 
+// scratch points for the shell sub-steps: hitZone/resolveHit/addEffect only read (or copy) them,
+// and ~50 shells x 16 sub-steps x every sim step made these the top allocation site
+const _sp = [{ x: 0, y: 0 }, { x: 0, y: 0 }], _lp = { x: 0, y: 0 }, _plp = { x: 0, y: 0 };
+function toLocalInto(ship, p, out) {
+   const dx = p.x - ship.pos.x, dy = p.y - ship.pos.y;
+   const c = Math.cos(ship.heading), s = Math.sin(ship.heading);
+   out.x = dx * c + dy * s; out.y = -dx * s + dy * c;
+   return out;
+}
+
 export function resolveShells(world, dt) {
    const shells = world.shells;
    for (let i = 0; i < shells.length; i++) {
@@ -119,18 +131,20 @@ export function resolveShells(world, dt) {
       s.alt = arcAlt(s.H, s.h0, u);
       // only the low part of the flight can hit anything (ships ~<45 m, islands by height)
       if (Math.min(pa, s.alt) < world._maxTerrainH + 5) {
-         const segLen = Math.hypot(s.pos.x - px, s.pos.y - py);
+         const segLen = Math.sqrt((s.pos.x - px) ** 2 + (s.pos.y - py) ** 2);
          const n = Math.max(1, Math.min(16, Math.ceil(segLen / 8)));
          const cand = Math.min(pa, s.alt) < 60 ? nearbyShips(world, s.pos, s.side, segLen + 60) : null;
-         let prevP = { x: px, y: py }, prevA = pa;
+         let prevP = _sp[0], prevA = pa;
+         prevP.x = px; prevP.y = py;
          for (let k = 1; k <= n && s.alive; k++) {
             const f = k / n;
-            const p = { x: px + (s.pos.x - px) * f, y: py + (s.pos.y - py) * f };
+            const p = _sp[k & 1];
+            p.x = px + (s.pos.x - px) * f; p.y = py + (s.pos.y - py) * f;
             const a = arcAlt(s.H, s.h0, pu + (u - pu) * f);
             if (cand) {
                for (const ship of cand) {
-                  const lp = toLocal(ship, p);
-                  const zone = hitZone(ship, lp, a, toLocal(ship, prevP), prevA);
+                  const lp = toLocalInto(ship, p, _lp);
+                  const zone = hitZone(ship, lp, a, toLocalInto(ship, prevP, _plp), prevA);
                   if (zone) { resolveHit(world, s, ship, zone, lp, p, a); s.alive = false; break; }
                }
                if (!s.alive) break;
@@ -152,7 +166,10 @@ export function resolveShells(world, dt) {
          noteNearMiss(world, s);
       }
    }
-   world.shells = shells.filter(s => s.alive);
+   // compact in place (every reader fetches world.shells afresh)
+   let j = 0;
+   for (let i = 0; i < shells.length; i++) if (shells[i].alive) shells[j++] = shells[i];
+   shells.length = j;
 }
 
 // "Potential damage" (WoWs stat): enemy shells that landed close to the player.
