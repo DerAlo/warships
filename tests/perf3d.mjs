@@ -1,6 +1,7 @@
-// scratch: draw calls per mission and GPU memory growth across restarts; deleted before commit
+// 3D perf probe: draw calls per mission and GPU memory (geometries/textures) across restarts
+// usage: URL3D=http://localhost:5211/index-3d.html node tests/perf3d.mjs [mission,mission,...]
 import { chromium } from 'playwright';
-const URL = process.env.URL3D || 'http://localhost:5188/index-3d.html';
+const URL = process.env.URL3D || 'http://localhost:5211/index-3d.html';
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
