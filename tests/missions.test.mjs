@@ -223,3 +223,15 @@ test('accuracy counts main-battery hits only', () => {
    }
    assert.equal(p.shotsHit, 1, 'only the main-battery shell counts toward accuracy');
 });
+
+test('damage numbers from one salvo on one hull merge into a single number', () => {
+   const w = new World('normal', 3, missionById('m1'));
+   w.damageNumbers.length = 0;
+   const at = { x: 500, y: 200 };
+   w.addDamageNumber(at, 900, 'dmg');
+   w.addDamageNumber({ x: 520, y: 210 }, 2700, 'cit');
+   w.addDamageNumber({ x: 1500, y: 200 }, 300, 'dmg');   // another ship: stays separate
+   assert.equal(w.damageNumbers.length, 2);
+   assert.equal(w.damageNumbers[0].text, '3600');
+   assert.equal(w.damageNumbers[0].type, 'cit', 'the strongest hit type wins');
+});
