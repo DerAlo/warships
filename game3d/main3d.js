@@ -377,7 +377,7 @@ function startGame(opts = {}) {
    view.yaw = P.heading; view.logR = Math.log(R0);
    cam3.yaw = view.yaw; cam3.range = R0; zoom.reset(L); cam3.dist = zoom.dist; cam3.bino = false; cam3.zoom = zoom.zoom;
    // the last match may have ended in the scope: snap the lens back instead of blending out
-   if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; }
+   if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();

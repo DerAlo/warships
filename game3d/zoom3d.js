@@ -13,7 +13,7 @@ export const TP_STEPS = 5;               // 6 third-person distances
 export const LADDER_LEN = TP_STEPS + 1 + MAGS.length;
 const DETENT = 0.6;                      // notches to cross a discrete step (a wheel click = 1)
 const ACC_IDLE = 0.5;                    // s without scroll: a half-finished touchpad push is dropped
-const SPRING_W = 22;                     // 1/s, critically damped distance ease: settles in ~0.3 s
+const SPRING_W = 26;                     // 1/s, critically damped distance ease: settles in ~0.3 s
 const SHIFT_MAG0 = 1;                    // Shift opens at 4x until the player uses another power
 
 const clamp = (x, lo, hi) => x < lo ? lo : x > hi ? hi : x;
