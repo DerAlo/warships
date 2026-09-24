@@ -3,6 +3,8 @@
 //             effects (explosions/splashes/fire) -> shells (in air) -> AA tracers -> damage numbers -> reticle.
 import { add, sub, scale, fromAngle, angleOf, angleDelta, clamp, clamp01, dist, TAU, DEG } from './utils.js';
 import { WORLD, PALETTE, VISION, HANDLING } from './config.js';
+import { ENEMY_COL, ALLY_COL, ALLY_DECK, drawTurret, drawDetail, drawSub, drawBattery, drawZones, drawMines, drawDepthCharges,
+   drawBombs, drawBarrages, drawSonar, drawFlares, drawAircraft, drawNight, drawStorm, drawMinimapExtras } from './render-campaign.js';
 
 // hull footprint straight from the ship class (config.js L/beam)
 const dimsOf = (s) => ({ L: s.cfg.L || 180, beam: s.cfg.beam || 20 });
@@ -21,6 +23,7 @@ export class Renderer {
       this.compassCtx = null;
       this._smokeSprite = makeSmokeSprite();
       this._glowSprite = makeGlowSprite();
+      this._overlay = {};   // night mask canvas cache (render-campaign.js)
    }
 
    setHudCanvases(minimap, compass) {
@@ -36,15 +39,27 @@ export class Renderer {
 
       this.ocean.render(ctx, cam);
       this._obstacles(ctx, world);
+      if (world.zones.length) drawZones(ctx, cam, world);
       this._wakes(ctx, world);
+      if (world.mines.length) drawMines(ctx, cam, world);
+      if (world.depthCharges.length) drawDepthCharges(ctx, cam, world);
       this._torpedoes(ctx, world);
       this._shellShadows(ctx, world);
       this._ghosts(ctx, world);
       for (const s of world.ships) if (shown(s) && cam.visible(s.pos, 400)) this._ship(ctx, world, s);
+      if (world.sonarPings.length) drawSonar(ctx, cam, world);
       this._smoke(ctx, world);
       this._effects(ctx, world);
+      if (world.env.storm) drawStorm(ctx, cam, world);
+      if (world.env.night) drawNight(ctx, cam, world, this._overlay);
+      // telegraphs and flares must read through darkness, smoke and rain
+      if (world.bombs.length) drawBombs(ctx, cam, world);
+      if (world.barrages.length) drawBarrages(ctx, cam, world);
+      if (world.flares.length) drawFlares(ctx, cam, world, this._glowSprite);
       this._shells(ctx, world);
       this._aaTracers(ctx, world);
+      if (world.aircraft.length) drawAircraft(ctx, cam, world);
+      this._labels(ctx, world);
       this._damageNumbers(ctx, world);
       this._hitMarks(ctx, world, dt);
       this._torpFan(ctx, world);
@@ -163,12 +178,21 @@ export class Renderer {
       const c = cam.w2s(s.pos);
       const L = d.L * z, B = d.beam * z;
       const enemy = s.side === 'enemy';
-      const hullCol = enemy ? '#5a4a44' : s.color;
-      const deckCol = enemy ? '#6e5a50' : PALETTE.deck;
+      const ally = s.side === 'player' && !s.human;
+      const kind = s.cfg.draw || '';
+      const hullCol = enemy ? (ENEMY_COL[kind] || '#5a4a44') : ally ? ALLY_COL : s.color;
+      const deckCol = enemy ? (kind === 'boss' ? '#5a3a34' : '#6e5a50') : ally ? ALLY_DECK : PALETTE.deck;
 
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(s.heading);
+      if (kind === 'cb' || kind === 'sub') {
+         if (kind === 'cb') drawBattery(ctx, s, L, B, z, hullCol, world.time);
+         else drawSub(ctx, s, L, B, z, hullCol, world.time);
+         this._shipDamage(ctx, world, s, L * 0.6, B);
+         ctx.restore();
+         return;
+      }
 
       // drop shadow (offset down-right in screen space => rotate back)
       ctx.save();
@@ -207,6 +231,40 @@ export class Renderer {
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(L * 0.42, 0); ctx.lineTo(-L * 0.42, 0); ctx.stroke();
 
+      if (kind) drawDetail(ctx, s, kind, L, B, z, hullCol, deckCol, world.time);
+      else this._classicDeck(ctx, s, L, B, z, hullCol, deckCol);
+
+      // hit flash
+      if (s.hitFlash > 0) {
+         ctx.globalAlpha = s.hitFlash * 0.55;
+         ctx.fillStyle = '#fff';
+         hullPath(ctx, L, B);
+         ctx.fill();
+         ctx.globalAlpha = 1;
+      }
+      this._shipDamage(ctx, world, s, L, B);
+      ctx.restore();
+
+      // boost flame (screen space)
+      if (s.boost && s.boost.active) {
+         ctx.save();
+         ctx.translate(c.x, c.y);
+         ctx.rotate(s.heading + Math.PI);
+         ctx.translate(L * 0.5, 0);
+         const fl = 14 + Math.random() * 10;
+         const g = ctx.createLinearGradient(0, 0, fl, 0);
+         g.addColorStop(0, 'rgba(120,200,255,0.9)');
+         g.addColorStop(1, 'rgba(120,200,255,0)');
+         ctx.fillStyle = g;
+         ctx.beginPath();
+         ctx.moveTo(0, -4); ctx.lineTo(fl, 0); ctx.lineTo(0, 4);
+         ctx.closePath(); ctx.fill();
+         ctx.restore();
+      }
+   }
+
+   // the original generic warship deck: superstructure, bridge, funnel, gun houses
+   _classicDeck(ctx, s, L, B, z, hullCol, deckCol) {
       // superstructure block (midships)
       const sw = L * 0.16, sh = B * 0.42;
       ctx.fillStyle = darken(deckCol, 14);
@@ -218,38 +276,11 @@ export class Renderer {
       ctx.fillStyle = '#222a30';
       ctx.beginPath(); ctx.arc(-sw * 0.15, 0, Math.max(2, B * 0.10), 0, TAU); ctx.fill();
 
-      // turrets
-      for (const t of s.turrets) {
-         const tx = t.off.x * z, ty = t.off.y * z;
-         const tr = Math.max(2.5, B * 0.16);
-         ctx.save();
-         ctx.translate(tx, ty);
-         ctx.rotate(t.bearing);
-         // barrels
-         ctx.strokeStyle = darken(hullCol, 30);
-         ctx.lineWidth = Math.max(1.2, tr * 0.28);
-         const bl = tr * 2.6;
-         for (const bo of [-tr * 0.35, tr * 0.35]) {
-            ctx.beginPath(); ctx.moveTo(tr * 0.3, bo); ctx.lineTo(bl, bo); ctx.stroke();
-         }
-         // turret base
-         ctx.fillStyle = darken(hullCol, 12);
-         ctx.beginPath(); ctx.arc(0, 0, tr, 0, TAU); ctx.fill();
-         ctx.fillStyle = lighten(hullCol, 8);
-         ctx.beginPath(); ctx.arc(0, 0, tr * 0.62, 0, TAU); ctx.fill();
-         ctx.restore();
-      }
+      for (const t of s.turrets) drawTurret(ctx, t, z, B, hullCol);
+   }
 
-      // hit flash
-      if (s.hitFlash > 0) {
-         ctx.globalAlpha = s.hitFlash * 0.55;
-         ctx.fillStyle = '#fff';
-         hullPath(ctx, L, B);
-         ctx.fill();
-         ctx.globalAlpha = 1;
-      }
-
-      // fires & floods on deck
+   // fires & floods on deck (ship-local frame)
+   _shipDamage(ctx, world, s, L, B) {
       for (let i = 0; i < s.fires.length; i++) {
          const f = s.fires[i];
          const fx = ((f.mod % 3) - 1) * L * 0.18, fy = (f.mod % 2 ? 1 : -1) * B * 0.18;
@@ -261,39 +292,30 @@ export class Renderer {
          ctx.fillStyle = 'rgba(90,170,255,0.5)';
          ctx.beginPath(); ctx.ellipse(fx, fy, 5, 3.5, 0, 0, TAU); ctx.fill();
       }
+   }
 
-      ctx.restore();
-
-      // ---- screen-space labels (no rotation) ----
-      if (z > 0.18) {
-         // name + hp bar for enemies
-         if (enemy) {
-            const bw = Math.max(46, L * 0.7);
-            const bx = c.x - bw / 2, by = c.y - L * 0.5 - 14;
-            ctx.font = '10px "SF Mono", monospace';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'rgba(255,180,160,0.9)';
-            ctx.fillText(s.name, c.x, by - 3);
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillRect(bx, by, bw, 4);
-            ctx.fillStyle = '#ff5a4d';
-            ctx.fillRect(bx, by, bw * clamp01(s.hp / s.maxHP), 4);
-         }
-         // boost flame
-         if (s.boost.active) {
-            ctx.save();
-            ctx.translate(c.x, c.y);
-            ctx.rotate(s.heading + Math.PI);
-            const fl = 14 + Math.random() * 10;
-            const g = ctx.createLinearGradient(0, 0, fl, 0);
-            g.addColorStop(0, 'rgba(120,200,255,0.9)');
-            g.addColorStop(1, 'rgba(120,200,255,0)');
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.moveTo(0, -4); ctx.lineTo(fl, 0); ctx.lineTo(0, 4);
-            ctx.closePath(); ctx.fill();
-            ctx.restore();
-         }
+   // Name + HP bar over every AI ship, drawn after the night/storm overlays so they stay legible.
+   // Enemies red, allies green; mission targets (tagged) get a gold marker.
+   _labels(ctx, world) {
+      const cam = this.cam, z = cam.zoom;
+      ctx.font = '10px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      for (const s of world.ships) {
+         if (s.human || !shown(s) || !cam.visible(s.pos, 200)) continue;
+         const enemy = s.side === 'enemy';
+         const d = dimsOf(s);
+         const c = cam.w2s(s.pos);
+         const boss = s.cfg.draw === 'boss';
+         const span = Math.max(d.L, d.beam * 1.3) * z;
+         const bw = boss ? Math.max(110, span * 0.8) : Math.max(46, span * 0.7);
+         const bx = c.x - bw / 2, by = c.y - span * 0.5 - 14;
+         const target = !!s.tag;
+         ctx.fillStyle = enemy ? (target ? 'rgba(255,214,121,0.95)' : 'rgba(255,180,160,0.9)') : 'rgba(170,255,190,0.92)';
+         ctx.fillText((target && enemy ? '◆ ' : '') + s.name, c.x, by - 3);
+         ctx.fillStyle = 'rgba(0,0,0,0.55)';
+         ctx.fillRect(bx, by, bw, boss ? 6 : 4);
+         ctx.fillStyle = enemy ? '#ff5a4d' : '#5ad07a';
+         ctx.fillRect(bx, by, bw * clamp01(s.hp / s.maxHP), boss ? 6 : 4);
       }
    }
 
@@ -688,6 +710,7 @@ export class Renderer {
          g.fillStyle = 'rgba(180,180,180,0.35)';
          g.beginPath(); g.arc(mx(cl.c.x), my(cl.c.y), Math.max(2, cl.r * sc), 0, TAU); g.fill();
       }
+      drawMinimapExtras(g, world, mx, my, sc);
       // torpedoes
       for (const t of world.torpedoes) {
          g.fillStyle = t.owner === 'player' ? '#8fdcff' : '#ff9a8a';
@@ -707,7 +730,7 @@ export class Renderer {
          g.save();
          g.translate(x, y);
          g.rotate(s.heading);
-         g.fillStyle = s.side === 'player' ? '#7CFF9A' : '#ff5a4d';
+         g.fillStyle = s.human ? '#ffffff' : s.side === 'player' ? '#7CFF9A' : '#ff5a4d';
          g.beginPath();
          g.moveTo(5, 0); g.lineTo(-3.5, -3); g.lineTo(-3.5, 3);
          g.closePath(); g.fill();
@@ -716,7 +739,7 @@ export class Renderer {
       // player view cone
       const p = world.player;
       if (p && p.alive) {
-         g.strokeStyle = 'rgba(124,255,154,0.5)';
+         g.strokeStyle = 'rgba(255,255,255,0.55)';
          g.beginPath(); g.arc(mx(p.pos.x), my(p.pos.y), 7, 0, TAU); g.stroke();
       }
    }

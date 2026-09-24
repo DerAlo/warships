@@ -9,6 +9,9 @@ import { Hud } from './hud.js';
 import { Audio } from './audio.js';
 import { World } from './state.js';
 import { updateBot } from './ai.js';
+import { missionById, nextMission } from './missions.js';
+import { loadProgress, saveProgress, recordStars, recordSurvival } from './progress.js';
+import { Menu, SKIRMISH } from './menu.js';
 
 const $ = (id) => document.getElementById(id);
 const sceneCanvas = $('scene');
@@ -52,17 +55,25 @@ resize();
 let world = null;
 let phase = 'menu';        // menu | playing | paused | ended
 let endTimer = 0;
-let difficulty = 'normal';
+let progress = loadProgress();
+let difficulty = ['easy', 'normal', 'hard'].includes(progress.difficulty) ? progress.difficulty : 'normal';
+let missionId = 'm1';
+// per-run counters for the end screen that the World does not keep itself
+const run = { cit: 0, torpHits: 0 };
 
 // sound throttling (effects are polled; weapon/hit cues come from world.events)
-const snd = { hitCd: 0, eCannonCd: 0, cueCd: 0, citCd: 0, reloadCd: 0 };
+const snd = { hitCd: 0, eCannonCd: 0, cueCd: 0, citCd: 0, reloadCd: 0, airCd: 0, sonarCd: 0 };
 // main-battery trigger state: click = full salvo, hold = ripple (one turret per HANDLING.rippleGap)
 const trig = { holdT: 0, rippleCd: 0 };
 // read-only handle for the headless self-test (tests/playwright.shots.mjs)
 window.__game = { get world() { return world; }, get phase() { return phase; }, cam };
 
-function startGame() {
-   world = new World(difficulty);
+function startGame(id = missionId) {
+   missionId = id;
+   const m = id === SKIRMISH.id ? null : missionById(id);
+   // survival waves are seeded per run so every attempt plays differently; missions stay fixed
+   world = new World(difficulty, m && m.survival ? (Math.random() * 1e9) | 0 : null, m);
+   run.cit = 0; run.torpHits = 0;
    world.audio = audio;
    cam.setFollow(world.player);
    trig.holdT = 0; trig.rippleCd = 0;
@@ -73,9 +84,25 @@ function startGame() {
    $('menu').classList.add('hidden');
    $('end').classList.add('hidden');
    $('pause').classList.add('hidden');
+   $('howto').classList.add('hidden');
    hud.show(true);
    audio.init();
    audio.uiClick();
+}
+
+function missionLabel(m) {
+   if (!m) return 'Freies Gefecht';
+   return m.survival ? 'Überleben · Endlos' : `Einsatz ${m.num} · ${m.title}`;
+}
+
+function critList(ul, items) {
+   ul.innerHTML = '';
+   for (const c of items) {
+      const li = document.createElement('li');
+      li.className = c.ok ? 'ok' : '';
+      li.textContent = (c.ok ? '✓ ' : '✗ ') + c.text;
+      ul.appendChild(li);
+   }
 }
 
 function showEnd() {
@@ -83,15 +110,47 @@ function showEnd() {
    input.gameActive = false;
    const p = world.player;
    const won = world.phase === 'won';
-   $('end-emoji').textContent = won ? '🏆' : '💀';
-   $('end-title').textContent = won ? 'SIEG' : 'NIEDERLAGE';
-   $('end-sub').textContent = won ? 'Alle feindlichen Schiffe versenkt.' : 'Die Bismarck ist gesunken.';
+   const d = world.director;
+   const m = world.campaign ? world.mission : null;
+   const surv = !!(m && m.survival);
+   $('end-mission').textContent = missionLabel(m);
+   $('end-emoji').textContent = surv ? '🌊' : won ? '🏆' : '💀';
+   $('end-title').textContent = surv ? `WELLE ${d.wave}` : won ? 'SIEG' : 'NIEDERLAGE';
+   $('end-sub').textContent = surv ? `${d.score.toLocaleString('de-DE')} Punkte — die Bismarck ist gesunken.` : (world.endReason || (won ? 'Alle feindlichen Schiffe versenkt.' : 'Die Bismarck ist gesunken.'));
+   // stars + criteria (missions only)
+   const starsEl = $('end-stars');
+   let rec = '';
+   if (m && !surv) {
+      const stars = d.stars();
+      starsEl.style.display = '';
+      starsEl.innerHTML = [0, 1, 2].map(k => `<span class="${k < stars ? 'on' : ''}">★</span>`).join('');
+      critList($('end-crit'), [{ text: 'Mission gewonnen', ok: won }, ...d.criteria().map(c => ({ text: c.text, ok: c.ok && won }))]);
+      if (won && recordStars(progress, m.id, stars)) rec = stars === 3 ? '🏅 Perfekt — drei Sterne!' : '⭐ Neuer Bestwert!';
+      if (won && !nextMission(m.id)) rec = (rec ? rec + ' · ' : '') + '⚓ Feldzug abgeschlossen!';
+   } else {
+      starsEl.style.display = 'none';
+      $('end-crit').innerHTML = '';
+      if (surv) {
+         if (recordSurvival(progress, difficulty, d.wave, d.score)) rec = '🏅 Neuer Rekord!';
+         else { const b = progress.survivalBest[difficulty]; if (b) rec = `Rekord: Welle ${b.wave} · ${b.score.toLocaleString('de-DE')} Punkte`; }
+      }
+   }
+   saveProgress(progress);
+   $('end-record').textContent = rec;
    $('stat-kills').textContent = String(world.killCount);
    $('stat-dmg').textContent = Math.round(p.dmgDealt).toLocaleString('de-DE');
    $('stat-acc').textContent = p.shotsFired ? Math.round(100 * p.shotsHit / p.shotsFired) + '%' : '—';
-   const m = Math.floor(world.time / 60), s = Math.floor(world.time % 60);
-   $('stat-time').textContent = m + ':' + String(s).padStart(2, '0');
+   const mm = Math.floor(world.time / 60), ss = Math.floor(world.time % 60);
+   $('stat-time').textContent = mm + ':' + String(ss).padStart(2, '0');
+   $('stat-cit').textContent = String(run.cit);
+   $('stat-torp').textContent = String(run.torpHits);
+   $('stat-planes').textContent = String(world.stats.planesDown || 0);
+   $('stat-hull').textContent = Math.max(0, Math.round(100 * p.hp / p.maxHP)) + '%';
+   const next = won && m && !surv ? nextMission(m.id) : null;
+   $('btn-next').style.display = next ? '' : 'none';
+   $('btn-next').dataset.id = next ? next.id : '';
    $('end').classList.remove('hidden');
+   if (won) audio.victory(); else audio.defeat();
 }
 
 // ---------- player controller ----------
@@ -138,9 +197,9 @@ function controlPlayer(dt) {
    world._torpPreview = inp.down('T') && !!p.cfg.torp;
 }
 
-const CONS_NAMES = { repair: 'Reparatur', dc: 'Schadensbegrenzung', smoke: 'Nebelwand', boost: 'Maschinen-Boost' };
+const CONS_NAMES = { repair: 'Reparatur', dc: 'Schadensbegrenzung', smoke: 'Nebelwand', boost: 'Maschinen-Boost', dcharge: 'Wasserbomben', flare: 'Leuchtgranate' };
 const CONS_LOG = { repair: '🔧 Reparaturtrupp an Deck', dc: '🧯 Schadensbegrenzung: Brände & Wassereinbruch gestoppt',
-   smoke: '🌫 Nebelwand wird gelegt', boost: '⚡ Maschinen-Boost!' };
+   smoke: '🌫 Nebelwand wird gelegt', boost: '⚡ Maschinen-Boost!', dcharge: '💣 Wasserbomben rollen vom Heck', flare: '✨ Leuchtgranate abgefeuert' };
 
 function useCons(p, key) {
    const st = p.consState(key);
@@ -170,6 +229,9 @@ function playerEdges() {
    if (inp.tapped('E')) useCons(p, 'dc');
    if (inp.tapped('F')) useCons(p, 'smoke');
    if (inp.tapped('SHIFT')) useCons(p, 'boost');
+   if (inp.tapped('C')) useCons(p, 'dcharge');
+   // star shells only make sense at night; by day they would just be a free wallhack
+   if (inp.tapped('G')) { if (world.env.night) useCons(p, 'flare'); else world.log(p, 'Leuchtgranaten nur bei Nacht', 'warn'); }
    if (inp.tapped('SPACE')) { world.log(p, '⚓ Anker fällt!', 'info'); audio.uiClick(); }
 
    // T: hold to aim the fan (drawn by render.js), release to launch
@@ -198,6 +260,7 @@ function togglePause() {
    if (phase === 'playing') {
       phase = 'paused';
       input.gameActive = false;   // let the pause-menu buttons be keyboard-reachable
+      fillPause();
       $('pause').classList.remove('hidden');
    } else if (phase === 'paused') {
       phase = 'playing';
@@ -206,11 +269,29 @@ function togglePause() {
    }
 }
 
+function fillPause() {
+   const m = world.campaign ? world.mission : null;
+   $('pause-mission').textContent = missionLabel(m);
+   const ul = $('pause-obj');
+   ul.innerHTML = '';
+   const objs = world.director ? world.director.view().objectives : [{ text: 'Alle Feindschiffe versenken', progress: `${world.killCount}/${world.bots.length}`, state: 'active' }];
+   for (const o of objs) {
+      const li = document.createElement('li');
+      li.className = o.state === 'done' ? 'ok' : '';
+      li.textContent = (o.state === 'done' ? '✓ ' : '▸ ') + o.text + (o.progress ? '  —  ' + o.progress : '');
+      ul.appendChild(li);
+   }
+}
+
 // ---------- events -> audio + HUD ribbons ----------
 function drainEvents() {
    const p = world.player;
    const evs = world.events;
    for (const ev of evs) {
+      if (ev.kind === 'hit' && ev.shooter === p) {
+         if (ev.outcome === 'CITADEL') run.cit++;
+         else if (ev.outcome === 'TORP') run.torpHits++;
+      }
       switch (ev.kind) {
          case 'salvo':
             if (ev.ship === p) audio.cannon(true, ev.guns);
@@ -232,6 +313,14 @@ function drainEvents() {
          case 'reloaded': if (snd.reloadCd <= 0) { audio.reloaded(); snd.reloadCd = 1.2; } break;
          case 'torpReady': audio.torpReady(); break;
          case 'spotted': if (ev.ship === p) audio.spotted(); break;
+         case 'airLaunch': if (ev.ship.side === 'enemy' && snd.airCd <= 0) { audio.airRaid(); snd.airCd = 6; } break;
+         case 'airAttack': if (ev.type === 'dive' && ev.target === p) audio.diveWarn(); break;
+         case 'barrage': if (ev.ship.side === 'enemy') audio.alarm(); break;
+         case 'sonar': if (snd.sonarCd <= 0) { audio.sonar(); snd.sonarCd = 2; } break;
+         case 'escaped': audio.escaped(); break;
+         case 'arrived': audio.ribbon(); break;
+         case 'waveClear': audio.waveClear(); break;
+         case 'reinforce': if (world.time > 2) audio.reinforce(); break;
       }
    }
    hud.onEvents(world, evs);
@@ -245,6 +334,8 @@ function pollSounds(dt) {
    snd.cueCd = Math.max(0, snd.cueCd - dt);
    snd.citCd = Math.max(0, snd.citCd - dt);
    snd.reloadCd = Math.max(0, snd.reloadCd - dt);
+   snd.airCd = Math.max(0, snd.airCd - dt);
+   snd.sonarCd = Math.max(0, snd.sonarCd - dt);
    for (const e of world.effects) {
       if (e.age < dt * 1.5) {
          if (e.kind === 'explosion') audio.explosion(e.big);
@@ -316,7 +407,9 @@ function emptyWorld() {
       emptyWorld._w = {
          time: 0, ships: [], shells: [], torpedoes: [], aaTracers: [], particles: [],
          effects: [], smokeClouds: [], damageNumbers: [], obstacles: [], logLines: [], aircraft: [], events: [],
-         player: null, bots: [], _shake: 0, _aimPoint: null,
+         player: null, bots: [], allies: [], _shake: 0, _aimPoint: null,
+         mines: [], flares: [], barrages: [], bombs: [], depthCharges: [], squadrons: [], squalls: [], sonarPings: [],
+         zones: [], env: { visionMult: 1 }, stats: {}, flareR: () => 0,
       };
    }
    emptyWorld._w.time += 1 / 60;
@@ -327,31 +420,39 @@ function step(dt) {
    // player first, then bots decide, then physics
    controlPlayer(dt);
    for (const b of world.bots) updateBot(b, world, dt);
+   for (const a of world.allies) updateBot(a, world, dt);
    world.update(dt);
    ocean.update(dt);
 }
 
 // ---------- UI wiring ----------
-$('btn-play').addEventListener('click', startGame);
+const menu = new Menu(progress, {
+   onPlay: (id) => startGame(id),
+   onDifficulty: (key) => { difficulty = key; progress.difficulty = key; saveProgress(progress); menu.refresh(); },
+   onClick: () => audio.uiClick(),
+});
+menu.refresh();
+
+function toMenu(prefer = null) {
+   $('end').classList.add('hidden');
+   $('pause').classList.add('hidden');
+   hud.show(false);
+   input.gameActive = false;
+   phase = 'menu';
+   world = null;   // back to the drifting-sea backdrop
+   menu.refresh(prefer);
+   $('menu').classList.remove('hidden');
+}
+
+$('btn-play').addEventListener('click', () => startGame(menu.sel || 'm1'));
 $('btn-how').addEventListener('click', () => { $('howto').classList.remove('hidden'); audio.uiClick(); });
 $('btn-how-close').addEventListener('click', () => { $('howto').classList.add('hidden'); audio.uiClick(); });
-$('btn-again').addEventListener('click', startGame);
-$('btn-menu').addEventListener('click', () => {
-   $('end').classList.add('hidden');
-   $('menu').classList.remove('hidden');
-   hud.show(false);
-   phase = 'menu';
-});
+$('btn-again').addEventListener('click', () => startGame(missionId));
+$('btn-next').addEventListener('click', () => { const id = $('btn-next').dataset.id; if (id) startGame(id); });
+$('btn-menu').addEventListener('click', () => { toMenu(missionId); audio.uiClick(); });
 $('btn-resume').addEventListener('click', togglePause);
-
-document.querySelectorAll('.chip[data-diff]').forEach(ch => {
-   ch.addEventListener('click', () => {
-      document.querySelectorAll('.chip[data-diff]').forEach(c => c.classList.remove('sel'));
-      ch.classList.add('sel');
-      difficulty = ch.dataset.diff;
-      audio.uiClick();
-   });
-});
+$('btn-restart').addEventListener('click', () => startGame(missionId));
+$('btn-quit').addEventListener('click', () => { toMenu(missionId); audio.uiClick(); });
 
 // browsers suspend the AudioContext when the tab was hidden — bring it back on focus
 document.addEventListener('visibilitychange', () => { if (!document.hidden) audio.resume(); });

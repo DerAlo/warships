@@ -25,7 +25,7 @@ export class Input {
             this.keys.delete(k);
          }
          // prevent page scroll / context menu during play only — in menus, keys must still activate buttons
-         if (this.gameActive && [' ', 'w','a','s','d','q','e','r','t','f','p','1','2','escape','shift'].includes((e.key||'').toLowerCase()))
+         if (this.gameActive && [' ', 'w','a','s','d','q','e','r','t','f','p','1','2','c','g','escape','shift'].includes((e.key||'').toLowerCase()))
             e.preventDefault();
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
@@ -73,6 +73,8 @@ export class Input {
          if (code === 'KeyF') return 'F';
          if (code === 'KeyT') return 'T';
          if (code === 'KeyR') return 'R';
+         if (code === 'KeyC') return 'C';
+         if (code === 'KeyG') return 'G';
          if (code === 'Digit1' || code === 'Numpad1') return '1';
          if (code === 'Digit2' || code === 'Numpad2') return '2';
          if (code === 'KeyP' || code === 'Escape') return 'P';

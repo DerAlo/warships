@@ -8,11 +8,11 @@ const $ = (id) => document.getElementById(id);
 const RIBBON = {
    CITADEL: ['ZITADELLE!', 'cit'], PEN: ['DURCHSCHLAG', 'pen'], HE: ['DURCHSCHLAG', 'pen'],
    RICOCHET: ['ABPRALLER', 'ric'], OVERPEN: ['ÜBERDURCHSCHLAG', 'over'], SEC: ['SEKUNDÄR', 'pen'],
-   TORP: ['TORPEDOTREFFER', 'cit'],
+   TORP: ['TORPEDOTREFFER', 'cit'], DC: ['WASSERBOMBE', 'cit'], BARRAGE: ['DURCHSCHLAG', 'pen'],
 };
 const RIBBON_LIFE = 2.8;    // s a ribbon stays after its last increment
 const RIBBON_MAX = 5;
-const CONS_KEYS = ['repair', 'dc', 'smoke', 'boost'];
+const CONS_KEYS = ['repair', 'dc', 'smoke', 'boost', 'dcharge', 'flare'];
 
 export class Hud {
    constructor() {
@@ -25,7 +25,7 @@ export class Hud {
          ammoAP: $('ammo-ap'), ammoHE: $('ammo-he'), pips: $('turret-pips'),
          tlPort: $('tl-port'), tlStbd: $('tl-stbd'), torpSpread: $('torp-spread'), secLine: $('sec-line'),
          ribbons: $('ribbons'), dmgTotal: $('dmg-total'),
-         siren: $('siren'),
+         siren: $('siren'), missionTitle: $('mission-title'), banner: $('banner'),
       };
       this.cons = {};
       for (const k of CONS_KEYS) {
@@ -42,6 +42,10 @@ export class Hud {
       this._pipShip = null;
       this._ribbons = [];
       this._dmgShown = -1;
+      this._objKey = '';
+      this._bannerKey = '';
+      if (this.el.banner) this.el.banner.className = '';
+      if (this.el.missionTitle) this.el.missionTitle.textContent = '';
       if (this.el.ribbons) this.el.ribbons.innerHTML = '';
    }
 
@@ -62,6 +66,10 @@ export class Hud {
             }
          } else if (ev.kind === 'sink' && ev.by === p && ev.ship !== p) {
             this._ribbon('VERSENKT', 'kill');
+         } else if (ev.kind === 'aircraftDown' && ev.ship === p) {
+            this._ribbon('FLUGZEUG', 'pen');
+         } else if (ev.kind === 'mineCleared' && ev.by === p) {
+            this._ribbon('MINE GERÄUMT', 'over');
          }
       }
    }
@@ -130,14 +138,19 @@ export class Hud {
       const dmg = Math.round(p.dmgDealt);
       if (dmg !== this._dmgShown) { this._dmgShown = dmg; e.dmgTotal.textContent = dmg.toLocaleString('de-DE'); }
 
-      // status line
+      // objectives: the campaign director's list, or the skirmish kill count
       const aliveBots = world.bots.filter(b => b.alive).length;
-      e.objectives.textContent = `Ziele: ${world.killCount} / ${world.bots.length} versenkt`;
+      const view = world.director ? world.director.view() : null;
+      this._objectives(world, view);
+      this._banner(view);
       let line;
       if (!p.alive) line = '💀 Die Bismarck ist gesunken';
+      else if (world.barrages.some(b => b.side === 'enemy' && Math.hypot(b.pos.x - p.pos.x, b.pos.y - p.pos.y) < b.r + 260)) line = '⚠ SCHWERE SALVE — AUSWEICHEN!';
       else if (world.nearestThreat(p) < 500) line = '⚠ UNTER FEUER!';
       else if (p.hp < p.maxHP * 0.4) line = '🔴 Rumpf kritisch — absetzen & reparieren';
-      else if (aliveBots === 0) line = '🏆 Sieg!';
+      else if (world.phase === 'won') line = '🏆 Sieg!';
+      else if (view && view.survival && view.survival.inBreak) line = `🌊 Nächste Welle in ${Math.ceil(view.survival.breakT)} s — reparieren & Position beziehen`;
+      else if (aliveBots === 0) line = view ? 'Lage ruhig — Kurs halten' : '🏆 Sieg!';
       else if (world.time < 20) line = 'Feindliche Flotte voraus — Position beziehen';
       else line = `Der Kampf ist im Gange — ${aliveBots} Feind${aliveBots === 1 ? '' : 'e'} aktiv`;
       e.statusLine.textContent = line;
@@ -153,6 +166,46 @@ export class Hud {
       }
 
       this._syncLog(world);
+   }
+
+   _objectives(world, view) {
+      const e = this.el;
+      if (!view) {
+         const t = `Ziele: ${world.killCount} / ${world.bots.length} versenkt`;
+         if (this._objKey !== t) { this._objKey = t; e.objectives.textContent = t; e.missionTitle.textContent = 'Freies Gefecht'; }
+         return;
+      }
+      const objs = view.survival
+         ? [{ text: `Welle ${view.survival.wave}`, progress: `${view.survival.score.toLocaleString('de-DE')} Pkt`, state: 'active' }]
+         : view.objectives;
+      const key = view.title + '|' + objs.map(o => o.text + o.progress + o.state).join('|');
+      if (key === this._objKey) return;
+      this._objKey = key;
+      e.missionTitle.textContent = view.survival ? 'Überleben' : view.title;
+      e.objectives.innerHTML = '';
+      for (const o of objs) {
+         const row = document.createElement('div');
+         row.className = 'obj' + (o.state === 'done' ? ' done' : o.state === 'failed' ? ' failed' : '');
+         row.textContent = (o.state === 'done' ? '✓ ' : o.state === 'failed' ? '✗ ' : '▸ ') + o.text;
+         if (o.progress) { const pg = document.createElement('span'); pg.className = 'pg'; pg.textContent = o.progress; row.appendChild(pg); }
+         e.objectives.appendChild(row);
+      }
+   }
+
+   _banner(view) {
+      const b = view && view.banner;
+      const el = this.el.banner;
+      const key = b ? b.kind + b.text : '';
+      if (key === this._bannerKey) {
+         // fade the last second out
+         if (b) el.style.opacity = b.t < 1 ? String(Math.max(0, b.t)) : '';
+         return;
+      }
+      this._bannerKey = key;
+      el.style.opacity = '';
+      if (!b) { el.className = ''; return; }
+      el.textContent = b.text;
+      el.className = 'on ' + b.kind;
    }
 
    // Is the player seen, and why: the smoke/bloom states are what make smoke play readable.
@@ -220,8 +273,14 @@ export class Hud {
    }
 
    _consumables(p) {
+      const night = !!(p.world && p.world.env && p.world.env.night);
       for (const k of CONS_KEYS) {
          const slot = this.cons[k];
+         if (k === 'flare') {
+            const off = !night;
+            if (slot.off !== off) { slot.off = off; slot.cls = ''; }
+            if (off) { if (slot.root.className !== 'cons off') slot.root.className = 'cons off'; continue; }
+         }
          const c = p.cons[k];
          const st = p.consState(k);
          let cls = 'cons', txt = '', fill = 0;
