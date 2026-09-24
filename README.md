@@ -1,7 +1,7 @@
 # Bismarck — Offline Naval Combat
 
-A World-of-Warships-style naval combat game. You command the battleship
-*Bismarck* against 5 AI-controlled bots, offline only. Vanilla JS, no build
+A World-of-Warships-style naval combat game with German warships of 1939–45 and
+AI-controlled opponents (and allies), offline only. Vanilla JS, no build
 step. Two ways to play, each with its own simulation core (2D: `game/`, 3D: `game3d/`,
 see `game3d/ARCHITECTURE.md`):
 
@@ -46,11 +46,44 @@ see `game3d/ARCHITECTURE.md`):
   | Space | Anchor turn (hold: brake + tighter turn) |
   | P / Esc | Pause |
 
-- **3D** (`index-3d.html`) — real 3D ships (Three.js, vendored locally under
-  `vendor/three/` — no CDN, still fully offline) with a third-person chase
-  camera. The headline mechanic: turret traverse is a real gate on firing —
-  the main battery only fires once every ready turret has actually slewed
-  to bear on your aim point, not the instant you click.
+- **3D** (`index-3d.html`) — a singleplayer *World of Warships*: real 3D ships
+  (Three.js, vendored locally under `vendor/three/` — no CDN, still fully offline).
+  - **Missions:** Übungsgefecht (training), Standardgefecht (7 vs 7),
+    Herrschaft (domination, three capture points), Geleitzug (convoy escort),
+    Unternehmen Rheinübung, Letztes Gefecht, Nachtgefecht (destroyer night
+    action) and Handelskrieg (commerce raid), each with briefing and objectives.
+  - **Playable ships:** Bismarck (battleship), Admiral Hipper (heavy cruiser),
+    Nürnberg (light cruiser) and Z 23 (destroyer), each with its own guns,
+    torpedoes and consumables.
+  - **WoWs scale:** 1 unit = 1 m, maps 16–28 km across, WoWs-like gun ranges,
+    shell flight times, spotting/detectability and time-compressed movement.
+    Turret traverse is a real gate on firing — only loaded turrets that have
+    slewed onto the aim point fire.
+  - **Graphics:** animated sea with wakes, sky with time of day and weather
+    (dawn, dusk, night, rain, storm), distance haze, island relief, smoke
+    screens, muzzle flashes, splashes, fires and flooding.
+  - **Controls (WoWs-style):** fixed centre crosshair with lead ruler and
+    turret readiness display.
+
+  | Key | Action |
+  |-----|--------|
+  | W / S | Engine telegraph one step up / down |
+  | A / D | Rudder one step port / starboard |
+  | Q | Rudder amidships |
+  | Mouse | Bearing (sideways) and range (up/down) |
+  | Left click | Fire (only loaded, trained turrets) |
+  | Mouse wheel | Zoom ladder: camera distance → binoculars 2× / 4× / 8× / 16× |
+  | Shift | Binoculars on/off (last magnification) |
+  | C / right click | Free camera (turrets keep the target) |
+  | 1 / 2 | HE / AP shells |
+  | 3 | Torpedoes · press 3 again: narrow/wide spread |
+  | X | Lock / release target |
+  | L | Lead marker on/off |
+  | R / T | Damage control / repair party |
+  | Y / U | Special consumables (boost, smoke …) |
+  | M / Tab | Tactical map / scoreboard |
+  | H | Controls help |
+  | P / Esc | Pause |
 
 **Play it here:** https://deralo.github.io/warships/ · 3D: https://deralo.github.io/warships/index-3d.html
 
@@ -65,11 +98,16 @@ Then open http://localhost:5173 (2D) or http://localhost:5173/index-3d.html (3D)
 ## Tests
 
 ```
-node --test tests/sim.test.mjs       # headless simulation tests (shared core, both modes)
+node --test tests/sim.test.mjs       # headless 2D simulation tests
 node --test tests/missions.test.mjs  # headless 2D campaign checks (every mission, win/lose, stars, survival)
 node tests/play.mjs 50               # balance check: N free battles per difficulty
 node tests/play.mjs missions 10      # balance check: every campaign mission + survival
 node tests/playwright.shots.mjs      # 2D browser self-test + screenshots
 node tests/playwright2d.missions.mjs # 2D browser play-test of every mission + survival
 node tests/playwright3d.shots.mjs    # 3D browser self-test + screenshots
+node --test tests/sim3d.test.mjs     # headless 3D simulation tests (ballistics, AI, missions)
+node --test tests/zoom3d.test.mjs    # 3D mouse-wheel zoom / binoculars ladder
+node tests/playwright3d.zoom.mjs     # 3D browser check of the wheel zoom
+node tests/playwright3d.missions.mjs # 3D browser play-test of every mission
+node tests/perf3d.mjs                # 3D draw calls + GPU memory across restarts
 ```

@@ -7,6 +7,7 @@
     "start": "node server.js",
     "test": "node --test tests/ || true",
     "screenshots": "node tests/playwright.shots.mjs",
+    "test:3d": "node --test tests/sim3d.test.mjs tests/zoom3d.test.mjs",
     "screenshots:3d": "node tests/playwright3d.shots.mjs"
   },
   "devDependencies": {
