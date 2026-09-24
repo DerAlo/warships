@@ -65,6 +65,13 @@ export class World {
       const P = this.mission.player || { cls: 'Bismarck', pos: { x: 0, y: 0 }, heading: 0 };
       this.player = new Ship(this, P.cls || 'Bismarck', 'player', P.pos || { x: 0, y: 0 }, P.heading || 0);
       this.player.human = true;
+      // daily-challenge modifiers (daily.js): silenced main battery, faster torpedoes, damage
+      const M = this.mission.mods;
+      if (M) {
+         this.player.mainLocked = !!M.noMain;
+         this.player.torpCdMult = M.torpCd || 1;
+         this.player.dmgMult *= M.dmg || 1;
+      }
       this.ships.push(this.player);
       for (const spec of this.mission.bots || []) this.spawnBot(spec);
       for (const spec of this.mission.allies || []) this.spawnBot(spec, 'player');
@@ -87,6 +94,7 @@ export class World {
       const bot = new Ship(this, spec.cls, side, p, heading, enemy
          ? { hpMult: this.difficulty.botHP * (spec.hpMult || 1), dmgMult: this.difficulty.botDmg }
          : { hpMult: spec.hpMult || 1, dmgMult: 0.8 });
+      if (this.mission.mods && this.mission.mods.dmg) bot.dmgMult *= this.mission.mods.dmg;
       if (spec.name) bot.name = spec.name;
       bot.tag = spec.tag || null;
       bot.path = spec.path || null;

@@ -108,24 +108,54 @@ export function drawDetail(ctx, s, kind, L, B, z, hullCol, deckCol, time) {
          break;
       }
       case 'boss': {
-         // phase 2 (below half HP): the hull glows like a forge
-         if (s.hp < s.maxHP * 0.5) {
+         // later phases: the hull glows like a forge (phase 3 brighter)
+         const ph = s.bossPhase || 0;
+         if (ph >= 1 || s.hp < s.maxHP * 0.5) {
             ctx.save();
             ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = 0.18 + 0.1 * Math.sin(time * 5);
+            ctx.globalAlpha = (ph >= 2 ? 0.26 : 0.16) + 0.1 * Math.sin(time * 5);
             ctx.fillStyle = '#ff3a20';
             ctx.beginPath(); ctx.ellipse(0, 0, L * 0.55, B * 0.75, 0, 0, TAU); ctx.fill();
             ctx.restore();
          }
-         // armoured citadel belt
+         // rapid-salvo telegraph / active: yellow pulse around the hull
+         if (s.rapidWarn > 0 || s.rapidT > 0) {
+            ctx.save();
+            ctx.strokeStyle = s.rapidWarn > 0 ? `rgba(255,220,80,${0.5 + 0.5 * Math.sin(time * 18)})` : 'rgba(255,200,60,0.55)';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.ellipse(0, 0, L * 0.62, B * 1.1, 0, 0, TAU); ctx.stroke();
+            ctx.restore();
+         }
+         const style = s.cfg.bossStyle;
          ctx.strokeStyle = 'rgba(255,90,60,0.35)'; ctx.lineWidth = 1;
-         ctx.strokeRect(-L * 0.28, -B * 0.3, L * 0.56, B * 0.6);
-         ctx.fillStyle = darken(deckCol, 18);
-         ctx.fillRect(-L * 0.14, -B * 0.26, L * 0.26, B * 0.52);            // superstructure
-         ctx.fillStyle = lighten(deckCol, 6);
-         ctx.fillRect(L * 0.04, -B * 0.16, L * 0.1, B * 0.32);              // tower
-         ctx.fillStyle = '#1a1d20';
-         for (const x of [-L * 0.05, -L * 0.11]) { ctx.beginPath(); ctx.arc(x, 0, Math.max(2, B * 0.12), 0, TAU); ctx.fill(); }
+         if (style === 'rodney') {
+            // all three turrets forward, the tower block and funnel far aft
+            ctx.strokeRect(0, -B * 0.3, L * 0.44, B * 0.6);
+            ctx.fillStyle = darken(deckCol, 18);
+            ctx.fillRect(-L * 0.3, -B * 0.28, L * 0.3, B * 0.56);
+            ctx.fillStyle = lighten(deckCol, 6);
+            ctx.fillRect(-L * 0.06, -B * 0.18, L * 0.08, B * 0.36);        // tall bridge tower
+            ctx.fillStyle = '#1a1d20';
+            ctx.beginPath(); ctx.arc(-L * 0.2, 0, Math.max(2, B * 0.14), 0, TAU); ctx.fill();
+         } else if (style === 'hood') {
+            // long, lean battlecruiser: bridge forward of two funnels, turrets fore and aft
+            ctx.strokeRect(-L * 0.3, -B * 0.28, L * 0.6, B * 0.56);
+            ctx.fillStyle = darken(deckCol, 18);
+            ctx.fillRect(-L * 0.18, -B * 0.24, L * 0.36, B * 0.48);
+            ctx.fillStyle = lighten(deckCol, 6);
+            ctx.fillRect(L * 0.1, -B * 0.16, L * 0.08, B * 0.32);
+            ctx.fillStyle = '#1a1d20';
+            for (const x of [L * 0.03, -L * 0.08]) { ctx.beginPath(); ctx.ellipse(x, 0, Math.max(2.4, B * 0.2), Math.max(1.6, B * 0.12), 0, 0, TAU); ctx.fill(); }
+         } else {
+            // Leviathan: armoured citadel belt, superstructure and twin funnels amidships
+            ctx.strokeRect(-L * 0.28, -B * 0.3, L * 0.56, B * 0.6);
+            ctx.fillStyle = darken(deckCol, 18);
+            ctx.fillRect(-L * 0.14, -B * 0.26, L * 0.26, B * 0.52);
+            ctx.fillStyle = lighten(deckCol, 6);
+            ctx.fillRect(L * 0.04, -B * 0.16, L * 0.1, B * 0.32);
+            ctx.fillStyle = '#1a1d20';
+            for (const x of [-L * 0.05, -L * 0.11]) { ctx.beginPath(); ctx.arc(x, 0, Math.max(2, B * 0.12), 0, TAU); ctx.fill(); }
+         }
          for (const t of s.turrets) drawTurret(ctx, t, z, B, hullCol, 1.15);
          break;
       }
@@ -272,6 +302,30 @@ export function drawBombs(ctx, cam, world) {
    }
 }
 
+// Boss torpedo-fan telegraph: red lanes from the boss out to torpedo range, pulsing faster
+// until launch, with the countdown at the fan's apex.
+export function drawBossFans(ctx, cam, world) {
+   for (const b of world.bots) {
+      const w = b.fanWarn;
+      if (!w || !b.alive) continue;
+      const f = 1 - clamp01(w.t / w.T);
+      const blink = w.t < 1 ? 0.5 + 0.5 * Math.sin(world.time * 30) : 1;
+      const o = cam.w2s(w.from);
+      ctx.lineWidth = 5 * Math.max(0.6, cam.zoom * 2);
+      ctx.strokeStyle = `rgba(255,50,30,${(0.18 + 0.4 * f) * blink})`;
+      ctx.setLineDash([14, 10]);
+      for (const a of w.angles) {
+         const e = cam.w2s({ x: w.from.x + Math.cos(a) * w.range, y: w.from.y + Math.sin(a) * w.range });
+         ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.font = 'bold 14px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffd0c0';
+      ctx.fillText('🐟 ' + w.t.toFixed(1) + ' s', o.x, o.y - 28);
+   }
+}
+
 // Boss telegraph: a red ring per shell, filling up until impact, with a countdown on the first.
 export function drawBarrages(ctx, cam, world) {
    const first = new Set();
@@ -410,6 +464,18 @@ export function drawNight(ctx, cam, world, state) {
 }
 
 // Storm: rain curtains over the squalls, driving rain across the screen and the odd lightning flash.
+// Daily modifier "Dichter Nebel": a grey veil that thickens with distance from the player.
+export function drawFog(ctx, cam, world) {
+   const p = world.player;
+   if (!p) return;
+   const c = cam.w2s(p.pos), z = cam.zoom;
+   const g = ctx.createRadialGradient(c.x, c.y, 500 * z, c.x, c.y, 1500 * z);
+   g.addColorStop(0, 'rgba(185,195,200,0)');
+   g.addColorStop(1, 'rgba(185,195,200,0.5)');
+   ctx.fillStyle = g;
+   ctx.fillRect(0, 0, cam.w, cam.h);
+}
+
 export function drawStorm(ctx, cam, world) {
    const t = world.time;
    for (const q of world.squalls) {

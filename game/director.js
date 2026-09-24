@@ -61,8 +61,13 @@ export class Director {
          let go = false;
          if (wv.at != null && w.time >= wv.at) go = true;
          else if (wv.when === 'cleared' && !this.enemiesAlive()) go = true;
+         else if (wv.when === 'sunk') {
+            const s = w.bots.find(b => b.tag === wv.tag);
+            if (s && !s.alive) go = true;
+         }
          else if (wv.when === 'hp') {
             const s = w.bots.find(b => b.tag === wv.tag);
+            if (!s && this._pendingTagged(wv.tag)) continue;       // trigger ship still to come
             if (!s || !s.alive) { wv.done = true; continue; }  // trigger ship gone: wave never comes
             if (s.hp < s.maxHP * wv.below) go = true;
          }
@@ -79,6 +84,12 @@ export class Director {
       wv.done = true;
       for (const b of wv.bots || []) this.w.spawnBot(b, 'enemy');
       for (const a of wv.allies || []) this.w.spawnBot(a, 'player');
+      // boss intro: a breather -- part of the missing hull patched, fires and floods out
+      if (wv.heal && this.w.player.alive) {
+         const p = this.w.player;
+         p.hp = Math.min(p.maxHP, p.hp + (p.maxHP - p.hp) * wv.heal);
+         p.fires = []; p.floods = [];
+      }
       if (wv.msg) this.say(wv.msg, 'warn', 6);
       this.w.emit({ kind: 'reinforce' });
    }

@@ -54,7 +54,7 @@ await page.reload({ waitUntil: 'load' });
 await page.waitForTimeout(1000);
 check(await visible('#menu'), 'menu visible');
 const cards = await page.locator('.mcard').count();
-check(cards === 11, `11 mission cards (9 missions + survival + skirmish), got ${cards}`);
+check(cards === 12, `12 mission cards (9 missions + daily + survival + skirmish), got ${cards}`);
 check(await page.locator('.mcard[data-id="m1"].locked').count() === 0, 'mission 1 unlocked');
 check(await page.locator('.mcard[data-id="m2"].locked').count() === 1, 'mission 2 locked on a fresh profile');
 check(/0\s*\/\s*27/.test(await page.locator('#star-total').textContent()), 'star total 0 / 27');
@@ -255,6 +255,43 @@ check(await P(() => window.__game.world.barrages.length) > 0, 'boss barrage tele
 await page.screenshot({ path: OUT + '/15-m9-boss.png' });
 await tap('Escape'); await page.waitForTimeout(150);
 await page.click('#btn-quit'); await page.waitForTimeout(250);
+
+// ---------------- 5b) chapter boss: HP bar + phase change ----------------
+check(/BOSS|Hood/i.test(await page.locator('.mcard[data-id="m3"]').getAttribute('class') + await page.locator('.mcard[data-id="m3"]').textContent()), 'm3 card marked as boss mission');
+await startMission('m3');
+await P(() => { const w = window.__game.world, p = w.player; w.spawnBot({ cls: 'HOOD', pos: { x: p.pos.x + 1400, y: p.pos.y }, heading: Math.PI, tag: 'boss' }); });
+await cruise(2500);
+check(await visible('#boss-bar'), 'boss HP bar shown once the boss is spotted');
+await P(() => { const b = window.__game.world.bots.find(x => x.cls === 'HOOD'); b.hp = b.maxHP * 0.5; });
+await page.waitForTimeout(600);
+check(/Phase 2/.test(await page.locator('#boss-phase').textContent()), 'boss bar switches to phase 2 below 66 %');
+await page.waitForTimeout(4500);
+await page.screenshot({ path: OUT + '/15b-m3-boss.png' });
+await tap('Escape'); await page.waitForTimeout(150);
+await page.click('#btn-quit'); await page.waitForTimeout(250);
+check(!(await visible('#boss-bar')), 'boss bar hidden in the menu');
+
+// ---------------- 5c) daily challenge ----------------
+await page.click('.mcard[data-id="daily"]');
+await page.waitForTimeout(200);
+check(/Tagesmodifikator/.test(await page.locator('#brief').textContent()), 'daily briefing shows the modifier');
+await page.click('#btn-play');
+await page.waitForTimeout(800);
+const dk = await P(() => { const m = window.__game.world.mission; return m.daily && m.dateKey; });
+check(/^\d{4}-\d\d-\d\d$/.test(dk || ''), 'daily mission runs on today\'s date key');
+await cruise(2000);
+await P(() => window.__game.world._win('🏆 Testsieg'));
+await waitEnd();
+check(/PUNKTE/.test(await page.locator('#end-title').textContent()), 'daily end screen shows the score');
+check(await page.locator('#daily-board li.me').count() === 1, 'own best entry highlighted in the daily top 10');
+await page.fill('#daily-name', 'Lütjens');
+await page.dispatchEvent('#daily-name', 'change');
+check(/Lütjens/.test(await page.locator('#daily-board li.me').textContent()), 'name entry renames the leaderboard row');
+const board = await P(() => JSON.parse(localStorage.getItem('warships2d.daily.v1') || 'null'));
+check(board && board.name === 'Lütjens' && board.days[dk] && board.days[dk].length === 1, 'daily result saved per day');
+await page.screenshot({ path: OUT + '/15c-daily-end.png' });
+await page.click('#btn-menu');
+await page.waitForTimeout(300);
 
 // ---------------- 6) survival ----------------
 await startMission('survival');

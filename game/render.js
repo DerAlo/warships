@@ -4,7 +4,7 @@
 import { add, sub, scale, fromAngle, angleOf, angleDelta, clamp, clamp01, dist, TAU, DEG } from './utils.js';
 import { WORLD, PALETTE, VISION, HANDLING } from './config.js';
 import { ENEMY_COL, ALLY_COL, ALLY_DECK, drawTurret, drawDetail, drawSub, drawBattery, drawZones, drawMines, drawDepthCharges,
-   drawBombs, drawBarrages, drawSonar, drawFlares, drawAircraft, drawNight, drawStorm, drawMinimapExtras } from './render-campaign.js';
+   drawBombs, drawBarrages, drawBossFans, drawSonar, drawFlares, drawAircraft, drawNight, drawStorm, drawFog, drawMinimapExtras } from './render-campaign.js';
 
 // hull footprint straight from the ship class (config.js L/beam)
 const dimsOf = (s) => ({ L: s.cfg.L || 180, beam: s.cfg.beam || 20 });
@@ -51,10 +51,12 @@ export class Renderer {
       this._smoke(ctx, world);
       this._effects(ctx, world);
       if (world.env.storm) drawStorm(ctx, cam, world);
+      if (world.env.fog) drawFog(ctx, cam, world);
       if (world.env.night) drawNight(ctx, cam, world, this._overlay);
       // telegraphs and flares must read through darkness, smoke and rain
       if (world.bombs.length) drawBombs(ctx, cam, world);
       if (world.barrages.length) drawBarrages(ctx, cam, world);
+      if (world.bots.length) drawBossFans(ctx, cam, world);
       if (world.flares.length) drawFlares(ctx, cam, world, this._glowSprite);
       this._shells(ctx, world);
       this._aaTracers(ctx, world);

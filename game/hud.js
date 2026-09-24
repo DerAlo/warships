@@ -1,6 +1,7 @@
 // game/hud.js — DOM HUD: ship panel, weapons (ammo, turret pips, launchers, secondaries),
 // consumables, visibility state, ribbons + damage counter, log, siren. Cheap per-frame updates.
 import { clamp01 } from './utils.js';
+import { activeBoss } from './boss.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,6 +27,7 @@ export class Hud {
          tlPort: $('tl-port'), tlStbd: $('tl-stbd'), torpSpread: $('torp-spread'), secLine: $('sec-line'),
          ribbons: $('ribbons'), dmgTotal: $('dmg-total'),
          siren: $('siren'), missionTitle: $('mission-title'), banner: $('banner'),
+         bossBar: $('boss-bar'), bossName: $('boss-name'), bossPhase: $('boss-phase'), bossFill: $('boss-fill'), bossTrack: $('boss-track'),
       };
       this.cons = {};
       for (const k of CONS_KEYS) {
@@ -45,6 +47,8 @@ export class Hud {
       this._dmgShown = -1;
       this._objKey = '';
       this._bannerKey = '';
+      this._bossShip = null;
+      if (this.el.bossBar) this.el.bossBar.className = 'hidden';
       if (this.el.banner) this.el.banner.className = '';
       if (this.el.missionTitle) this.el.missionTitle.textContent = '';
       if (this.el.ribbons) this.el.ribbons.innerHTML = '';
@@ -144,6 +148,7 @@ export class Hud {
       const view = world.director ? world.director.view() : null;
       this._objectives(world, view);
       this._banner(view);
+      this._boss(world);
       let line;
       if (!p.alive) line = '💀 Die Bismarck ist gesunken';
       else if (world.barrages.some(b => b.side === 'enemy' && Math.hypot(b.pos.x - p.pos.x, b.pos.y - p.pos.y) < b.r + 260)) line = '⚠ SCHWERE SALVE — AUSWEICHEN!';
@@ -167,6 +172,28 @@ export class Hud {
       }
 
       this._syncLog(world);
+   }
+
+   // boss HP bar with phase thresholds (boss.js); hidden until the boss has been spotted
+   _boss(world) {
+      const e = this.el, b = activeBoss(world);
+      if (b !== this._bossShip) {
+         this._bossShip = b;
+         e.bossTrack.querySelectorAll('b').forEach(n => n.remove());
+         if (b) {
+            e.bossName.textContent = '👑 ' + b.name;
+            for (const ph of b.cfg.bossPhases.slice(1)) {
+               const t = document.createElement('b');
+               t.style.left = (ph.below * 100).toFixed(1) + '%';
+               e.bossTrack.appendChild(t);
+            }
+         }
+      }
+      if (!b) { e.bossBar.className = 'hidden'; return; }
+      const ph = b.bossPhase || 0;
+      e.bossBar.className = ph >= 2 ? 'p3' : ph === 1 ? 'p2' : '';
+      e.bossPhase.textContent = `Phase ${ph + 1}/${b.cfg.bossPhases.length} · ${b.cfg.bossPhases[ph].name}`;
+      e.bossFill.style.width = (clamp01(b.hp / b.maxHP) * 100).toFixed(1) + '%';
    }
 
    _objectives(world, view) {
@@ -261,7 +288,7 @@ export class Hud {
          if (!l) { el.style.opacity = 0.3; continue; }
          const ready = l.cd <= 0;
          el.classList.toggle('ready', ready);
-         el.firstElementChild.style.width = ((ready ? 1 : clamp01(1 - l.cd / T.cd)) * 100).toFixed(0) + '%';
+         el.firstElementChild.style.width = ((ready ? 1 : clamp01(1 - l.cd / (T.cd * (p.torpCdMult || 1)))) * 100).toFixed(0) + '%';
          el.lastElementChild.textContent = ready ? l.label : `${l.label} ${Math.ceil(l.cd)}s`;
       }
       e.torpSpread.textContent = (p.torpSpread === 'wide' ? 'weit' : 'eng') + ' [Q]';

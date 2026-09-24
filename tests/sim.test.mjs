@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { World } from '../game/state.js';
 import { updateBot } from '../game/ai.js';
+import { buildDaily, seedFor, recordDaily, loadBoard, saveBoard, bestOf, shiftKey } from '../game/daily.js';
+import { bossPhaseIndex } from '../game/boss.js';
+import { SHIPS } from '../game/config.js';
 
 function tick(world, dt = 1 / 60) {
    // mimic main.js step(): bots decide, then physics
@@ -360,4 +363,99 @@ test('passive self-repair: damage control clears fires and floods while safe', a
    }
    assert.strictEqual(eb.fires.length, 0, 'fires should be cleared while safe');
    assert.strictEqual(eb.floods.length, 0, 'floods should be pumped out while safe');
+});
+
+// ---------- daily challenge ----------
+const setupOf = (m) => JSON.stringify({ mod: m.mod.id, obstacles: m.obstacles, player: m.player, bots: m.bots, waves: m.waves });
+
+test('daily: same date -> identical battle, different date -> different battle', () => {
+   const a = buildDaily('2026-09-24'), b = buildDaily('2026-09-24');
+   assert.strictEqual(setupOf(a), setupOf(b));
+   assert.strictEqual(a.seed, seedFor('2026-09-24'));
+   const c = buildDaily('2026-09-25');
+   assert.notStrictEqual(setupOf(a), setupOf(c));
+   assert.ok(a.bots.length > 0 && a.waves.length === 2 && a.obstacles.length >= 5);
+   // over two weeks the modifier list is actually exercised
+   const mods = new Set();
+   for (let i = 0; i < 14; i++) mods.add(buildDaily(shiftKey('2026-09-24', i)).mod.id);
+   assert.ok(mods.size >= 3, `only ${[...mods]} in 14 days`);
+});
+
+// the generator (map, modifier, waves) is fully seeded; the combat sim itself keeps its dice
+// (dispersion, AI jitter) -- the player's own inputs make every run differ anyway
+test('daily: generator never touches Math.random, and the spawned battle starts identically', () => {
+   const rnd = Math.random;
+   Math.random = () => { throw new Error('Math.random used in daily generator'); };
+   let m;
+   try { m = buildDaily('2027-01-03'); } finally { Math.random = rnd; }
+   const start = () => {
+      const w = new World('normal', m.seed, buildDaily('2027-01-03'));
+      return w.bots.map(b => `${b.cls}:${Math.round(b.pos.x)},${Math.round(b.pos.y)}:${Math.round(b.maxHP)}`).join('|')
+         + `#${w.obstacles.length}#${Math.round(w.player.heading * 1000)}`;
+   };
+   assert.strictEqual(start(), start());
+});
+
+test('daily leaderboard: top 10 per day, sorted, survives missing/broken storage', () => {
+   const mem = {}; const store = { getItem: k => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } };
+   const b = loadBoard(store);
+   assert.strictEqual(b.name, 'Kapitän');
+   for (let i = 0; i < 12; i++) recordDaily(b, '2026-09-24', { name: 'Bot' + i, score: i * 100, time: 300, id: i });
+   const rank = recordDaily(b, '2026-09-24', { name: 'Kapitän', score: 650, time: 200, id: 99 });
+   assert.strictEqual(rank, 5);
+   assert.ok(saveBoard(b, store));
+   const b2 = loadBoard(store);
+   const list = b2.days['2026-09-24'];
+   assert.strictEqual(list.length, 10);
+   assert.ok(list.every((e, i) => i === 0 || list[i - 1].score >= e.score));
+   assert.strictEqual(bestOf(b2, '2026-09-24').id, 99);
+   assert.strictEqual(recordDaily(b2, '2026-09-24', { score: 1, time: 1 }), -1);
+   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+   assert.deepStrictEqual(loadBoard(broken).days, {});
+   assert.strictEqual(saveBoard(b2, broken), false);
+   assert.deepStrictEqual(loadBoard(null).days, {});
+});
+
+// ---------- boss phases ----------
+test('boss: phase index follows the hull thresholds', () => {
+   const ph = SHIPS.HOOD.bossPhases;
+   assert.strictEqual(bossPhaseIndex(ph, 1), 0);
+   assert.strictEqual(bossPhaseIndex(ph, 0.7), 0);
+   assert.strictEqual(bossPhaseIndex(ph, 0.6), 1);
+   assert.strictEqual(bossPhaseIndex(ph, 0.2), 2);
+   assert.strictEqual(bossPhaseIndex(undefined, 0.1), 0);
+   for (const k of ['BOSS', 'HOOD', 'RODNEY']) assert.ok(SHIPS[k].bossPhases.length >= 3, k);
+});
+
+test('boss: phases only advance, announce themselves, and the torpedo fan is telegraphed first', () => {
+   const mission = {
+      id: 'test-boss', title: 'Test', player: { cls: 'Bismarck', pos: { x: 0, y: 0 }, heading: 0 },
+      bots: [{ cls: 'HOOD', pos: { x: 1300, y: 0 }, heading: Math.PI, tag: 'boss' }],
+      objectives: [{ type: 'sinkAll', text: 'x' }], stars: [],
+   };
+   const w = new World('normal', 5, mission);
+   w.player.maxHP = w.player.hp = 1e9;
+   const boss = w.bots.find(b => b.cls === 'HOOD');
+   for (let i = 0; i < 60 * 2; i++) tick(w);
+   assert.strictEqual(boss.bossPhase, 0);
+   boss.hp = boss.maxHP * 0.6;
+   tick(w);
+   assert.strictEqual(boss.bossPhase, 1);
+   assert.ok(w.events.some(e => e.kind === 'bossPhase' && e.phase === 1));
+   // fan: warning lanes first, torpedoes only after the warning ran out
+   let warned = false, torpsAtWarn = -1;
+   for (let i = 0; i < 60 * 12 && !(warned && !boss.fanWarn); i++) {
+      tick(w);
+      if (boss.fanWarn && !warned) { warned = true; torpsAtWarn = w.torpedoes.length; assert.ok(boss.fanWarn.angles.length >= 3); }
+   }
+   assert.ok(warned, 'fan was never telegraphed');
+   assert.ok(w.torpedoes.length >= torpsAtWarn + 3, 'fan did not launch after the warning');
+   // healing back up never reverts the phase; dropping further skips straight to the last one
+   boss.hp = boss.maxHP;
+   tick(w);
+   assert.strictEqual(boss.bossPhase, 1);
+   boss.hp = boss.maxHP * 0.2;
+   tick(w);
+   assert.strictEqual(boss.bossPhase, 2);
+   assert.ok(boss.rapidCd > 0);
 });

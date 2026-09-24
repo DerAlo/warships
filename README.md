@@ -7,9 +7,22 @@ see `game3d/ARCHITECTURE.md`):
 
 - **2D** (`index.html`) — top-down Canvas 2D view with a fixed camera (no
   zoom; the minimap is the overview):
-  - **Campaign** of 9 missions (convoy hunt, escort, night action, storm,
-    carrier strike, boss fight, …) with briefings, objectives and a 3-star
+  - **Campaign** of 9 missions in three chapters (convoy hunt, escort, night
+    action, storm, carrier strike, …) with briefings, objectives and a 3-star
     rating, plus an endless **Survival** mode with waves and a saved record.
+  - **Boss battles** close every chapter: *Schlachtkreuzer Hood* (m3),
+    *Schlachtschiff Rodney* (m6) and the *Leviathan* (m9) — oversized unique
+    silhouettes, a boss HP bar and 3 attack phases that switch as the hull
+    drops (barrage rings, torpedo fan with red warning lanes, smoke +
+    reposition, announced rapid-fire salvos, called-in escorts). Easier/harder
+    difficulties stretch/shorten the telegraphs. Each boss kill awards a chapter
+    medal: +5 % hull for the Bismarck in the campaign.
+  - **Daily challenge** (📅 card): one battle per calendar day, generated from
+    a seed of the local date — same map, same three waves and the same daily
+    modifier (fog, storm, double enemies, torpedoes only, glass cannons) for
+    everyone that day. Score = sunk ships + time bonus + remaining hull +
+    accuracy; a local top 10 per day (with name entry and yesterday's best)
+    is kept in `localStorage`.
   - **Gunnery:** AP vs HE shells — AP into a broadside scores citadels, steep
     angles ricochet; HE is reliable damage and sets fires. Click for a full
     salvo, hold to ripple-fire turret by turret.
@@ -45,6 +58,9 @@ see `game3d/ARCHITECTURE.md`):
   | G | Star shell at cursor (night) |
   | Space | Anchor turn (hold: brake + tighter turn) |
   | P / Esc | Pause |
+
+  Boss fights need no extra keys: turn bow-on into the red torpedo lanes, change
+  course when the barrage rings or the rapid-fire warning appear.
 
 - **3D** (`index-3d.html`) — a singleplayer *World of Warships*: real 3D ships
   (Three.js, vendored locally under `vendor/three/` — no CDN, still fully offline).

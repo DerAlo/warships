@@ -10,7 +10,8 @@ import { Audio } from './audio.js';
 import { World } from './state.js';
 import { updateBot } from './ai.js';
 import { missionById, nextMission } from './missions.js';
-import { loadProgress, saveProgress, recordStars, recordSurvival } from './progress.js';
+import { loadProgress, saveProgress, recordStars, recordSurvival, recordMedal, hullBonus } from './progress.js';
+import { dailyScore, loadBoard, saveBoard, recordDaily, renameEntry, dayList, bestOf, shiftKey, formatKey } from './daily.js';
 import { Menu, SKIRMISH } from './menu.js';
 
 const $ = (id) => document.getElementById(id);
@@ -71,8 +72,12 @@ window.__game = { get world() { return world; }, get phase() { return phase; }, 
 function startGame(id = missionId) {
    missionId = id;
    const m = id === SKIRMISH.id ? null : missionById(id);
-   // survival waves are seeded per run so every attempt plays differently; missions stay fixed
-   world = new World(difficulty, m && m.survival ? (Math.random() * 1e9) | 0 : null, m);
+   // survival waves are seeded per run so every attempt plays differently; missions stay fixed;
+   // the daily challenge runs on its date seed (same for everyone)
+   world = new World(difficulty, m && m.survival ? (Math.random() * 1e9) | 0 : m && m.seed != null ? m.seed : null, m);
+   // boss medals toughen the Bismarck for the rest of the campaign (not survival / daily)
+   if (m && m.num) { const k = hullBonus(progress); world.player.maxHP *= k; world.player.hp = world.player.maxHP; }
+   daily.entry = null;
    run.cit = 0; run.torpHits = 0;
    world.audio = audio;
    cam.setFollow(world.player);
@@ -92,6 +97,7 @@ function startGame(id = missionId) {
 
 function missionLabel(m) {
    if (!m) return 'Freies Gefecht';
+   if (m.daily) return `Tägliche Herausforderung · ${formatKey(m.dateKey)}`;
    return m.survival ? 'Überleben · Endlos' : `Einsatz ${m.num} · ${m.title}`;
 }
 
@@ -113,6 +119,8 @@ function showEnd() {
    const d = world.director;
    const m = world.campaign ? world.mission : null;
    const surv = !!(m && m.survival);
+   $('end-daily').classList.toggle('hidden', !(m && m.daily));
+   if (m && m.daily) return showDailyEnd(m, won);
    $('end-mission').textContent = missionLabel(m);
    $('end-emoji').textContent = surv ? '🌊' : won ? '🏆' : '💀';
    $('end-title').textContent = surv ? `WELLE ${d.wave}` : won ? 'SIEG' : 'NIEDERLAGE';
@@ -126,6 +134,8 @@ function showEnd() {
       starsEl.innerHTML = [0, 1, 2].map(k => `<span class="${k < stars ? 'on' : ''}">★</span>`).join('');
       critList($('end-crit'), [{ text: 'Mission gewonnen', ok: won }, ...d.criteria().map(c => ({ text: c.text, ok: c.ok && won }))]);
       if (won && recordStars(progress, m.id, stars)) rec = stars === 3 ? '🏅 Perfekt — drei Sterne!' : '⭐ Neuer Bestwert!';
+      const medal = won && m.boss ? recordMedal(progress, m.id) : null;
+      if (medal) rec = (rec ? rec + ' · ' : '') + `⚓ Orden: ${medal.medal} — Kapitel ${medal.num} abgeschlossen, +5 % Rumpf im Feldzug!`;
       if (won && !nextMission(m.id)) rec = (rec ? rec + ' · ' : '') + '⚓ Feldzug abgeschlossen!';
    } else {
       starsEl.style.display = 'none';
@@ -137,6 +147,15 @@ function showEnd() {
    }
    saveProgress(progress);
    $('end-record').textContent = rec;
+   endStats(p);
+   const next = won && m && !surv ? nextMission(m.id) : null;
+   $('btn-next').style.display = next ? '' : 'none';
+   $('btn-next').dataset.id = next ? next.id : '';
+   $('end').classList.remove('hidden');
+   if (won) audio.victory(); else audio.defeat();
+}
+
+function endStats(p) {
    $('stat-kills').textContent = String(world.killCount);
    $('stat-dmg').textContent = Math.round(p.dmgDealt).toLocaleString('de-DE');
    $('stat-acc').textContent = p.shotsFired ? Math.round(100 * p.shotsHit / p.shotsFired) + '%' : '—';
@@ -146,12 +165,52 @@ function showEnd() {
    $('stat-torp').textContent = String(run.torpHits);
    $('stat-planes').textContent = String(world.stats.planesDown || 0);
    $('stat-hull').textContent = Math.max(0, Math.round(100 * p.hp / p.maxHP)) + '%';
-   const next = won && m && !surv ? nextMission(m.id) : null;
-   $('btn-next').style.display = next ? '' : 'none';
-   $('btn-next').dataset.id = next ? next.id : '';
+}
+
+// daily challenge: score breakdown, local top 10 with the name entry, yesterday's best
+const daily = { entry: null, key: null };
+function showDailyEnd(m, won) {
+   const p = world.player, sc = dailyScore(world), fmt = (n) => n.toLocaleString('de-DE');
+   $('end-mission').textContent = missionLabel(m);
+   $('end-emoji').textContent = won ? '🏆' : '📅';
+   $('end-title').textContent = `${fmt(sc.total)} PUNKTE`;
+   $('end-sub').textContent = `Versenkt ${fmt(sc.kills)} · Zeit ${fmt(sc.time)} · Rumpf ${fmt(sc.hull)} · Treffer ${fmt(sc.acc)}` + (won ? '' : ' — gesunken, nur Versenkungen zählen');
+   $('end-stars').style.display = 'none';
+   $('end-crit').innerHTML = '';
+   const board = loadBoard();
+   const id = Date.now();
+   const rank = recordDaily(board, m.dateKey, { name: board.name, score: sc.total, won, time: world.time, id });
+   saveBoard(board);
+   daily.entry = rank >= 0 ? id : null; daily.key = m.dateKey;
+   $('end-record').textContent = rank === 0 ? '🏅 Tagesbestleistung!' : rank > 0 ? `Platz ${rank + 1} der Tagesbestenliste` : 'Nicht unter den besten 10 — nochmal!';
+   $('daily-name').value = board.name;
+   renderDailyBoard(board);
+   endStats(p);
+   $('btn-next').style.display = 'none';
    $('end').classList.remove('hidden');
    if (won) audio.victory(); else audio.defeat();
 }
+function renderDailyBoard(board) {
+   const ol = $('daily-board'), mine = bestOf(board, daily.key);
+   ol.innerHTML = '';
+   dayList(board, daily.key).forEach((e, i) => {
+      const li = document.createElement('li');
+      li.className = (e === mine ? 'me' : '') + (e.id === daily.entry ? ' new' : '');
+      const l = document.createElement('span'), r = document.createElement('span');
+      l.textContent = `${i + 1}. ${e.name}`;
+      r.textContent = e.score.toLocaleString('de-DE') + (e.won ? '' : ' †');
+      li.append(l, r);
+      ol.appendChild(li);
+   });
+   const yk = shiftKey(daily.key, -1), y = bestOf(board, yk) || dayList(board, yk)[0];
+   $('daily-yday').textContent = y ? `Gestern (${formatKey(yk)}): ${y.name} — ${y.score.toLocaleString('de-DE')} Punkte` : '';
+}
+$('daily-name').addEventListener('change', () => {
+   const board = loadBoard();
+   renameEntry(board, daily.key, daily.entry, $('daily-name').value);
+   saveBoard(board);
+   renderDailyBoard(board);
+});
 
 // ---------- player controller ----------
 // Aim point clamped to main-battery range: firing past it just drops the salvo at max range.
@@ -316,6 +375,7 @@ function drainEvents() {
          case 'airLaunch': if (ev.ship.side === 'enemy' && snd.airCd <= 0) { audio.airRaid(); snd.airCd = 6; } break;
          case 'airAttack': if (ev.type === 'dive' && ev.target === p) audio.diveWarn(); break;
          case 'barrage': if (ev.ship.side === 'enemy') audio.alarm(); break;
+         case 'bossPhase': audio.alarm(); break;
          case 'sonar': if (snd.sonarCd <= 0) { audio.sonar(); snd.sonarCd = 2; } break;
          case 'escaped': audio.escaped(); break;
          case 'arrived': audio.ribbon(); break;

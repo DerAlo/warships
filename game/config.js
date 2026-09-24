@@ -158,8 +158,55 @@ export const SHIPS = {
       sec: { guns: 12, caliber: 150, dmg: 45, reload: 1.8, range: 1100, type: 'HE', ap: 0, vShell: 600, fire: 0.04, burst: 4 },
       torp: null,
       barrage: { every: 28, everyP2: 19, count: 5, countP2: 7, radius: 160, delay: 4.2, dmg: 950, spread: 360 },
-      cons: { dc: { charges: 5, dur: 6, cd: 35 } },
+      // attack phases (boss.js): each entry becomes active once hull drops below `below`
+      bossPhases: [
+         { below: 1, name: 'Sperrfeuer', barrage: true },
+         { below: 0.66, name: 'Torpedofächer', msg: 'fächert Torpedos — Bug in die roten Bahnen drehen!', barrage: true, fan: true },
+         { below: 0.33, name: 'Raserei', msg: 'legt Nebel und eröffnet Schnellfeuer!', barrage: true, smoke: true, rapid: true },
+      ],
+      fan: { every: 24, n: 7, spread: 56 * DEG, warn: 2.8, dmg: 900, speed: 150, range: 1800 },
+      rapid: { every: 26, dur: 9, mult: 0.5, warn: 2.4 },
+      cons: { dc: { charges: 5, dur: 6, cd: 35 }, smoke: { charges: 2, dur: 10, cd: 50 } },
       reactionMult: 1.1,
+      ai: { role: 'battleship', commitTime: 1e9, holdThrottle: 0.5, noRetreat: true, boss: true }, noRepair: true,
+   },
+   // Chapter I boss: the fast battlecruiser. Long, lean hull with two funnels and four twin turrets.
+   HOOD: {
+      key: 'HOOD', name: 'Schlachtkreuzer Hood', color: '#5a4038', L: 300, beam: 34, draw: 'boss', bossStyle: 'hood',
+      hp: 9000, maxSpeed: 84, turnRate: 0.16, turretSlew: 0.55, detect: 2700, prefRange: 1400, flankDeg: 45, armor: 200,
+      main: { guns: 8, caliber: 381, dmg: 230, reload: 8, range: 1900, type: 'AP', ap: 300, vShell: 650 },
+      turrets: [ { x: 96, guns: 2 }, { x: 70, guns: 2 }, { x: -78, guns: 2 }, { x: -102, guns: 2 } ],
+      sec: { guns: 8, caliber: 140, dmg: 38, reload: 2.0, range: 1000, type: 'HE', ap: 0, vShell: 600, fire: 0.04, burst: 4 },
+      torp: null,
+      barrage: { every: 30, everyP2: 26, count: 3, countP2: 4, radius: 150, delay: 4.4, dmg: 800, spread: 300 },
+      bossPhases: [
+         { below: 1, name: 'Gefechtsfahrt', barrage: true },
+         { below: 0.66, name: 'Torpedofächer', msg: 'dreht zum Torpedoangriff — Bug in die roten Bahnen drehen!', fan: true },
+         { below: 0.33, name: 'Nebel & Schnellfeuer', msg: 'legt Nebel, setzt sich ab und eröffnet Schnellfeuer!', smoke: true, rapid: true, barrage: true },
+      ],
+      fan: { every: 22, n: 5, spread: 44 * DEG, warn: 3.0, dmg: 750, speed: 145, range: 1700 },
+      rapid: { every: 28, dur: 8, mult: 0.5, warn: 2.6 },
+      cons: { dc: { charges: 3, dur: 6, cd: 35 }, smoke: { charges: 2, dur: 10, cd: 50 } },
+      ai: { role: 'battleship', commitTime: 1e9, holdThrottle: 0.6, noRetreat: true, boss: true }, noRepair: true,
+   },
+   // Chapter II boss: all three triple turrets forward of the bridge -- the unmistakable silhouette.
+   RODNEY: {
+      key: 'RODNEY', name: 'Schlachtschiff Rodney', color: '#54403a', L: 300, beam: 46, draw: 'boss', bossStyle: 'rodney',
+      hp: 10000, maxSpeed: 62, turnRate: 0.13, turretSlew: 0.5, detect: 2800, prefRange: 1500, flankDeg: 35, armor: 240,
+      main: { guns: 9, caliber: 406, dmg: 205, reload: 9.5, range: 2000, type: 'AP', ap: 320, vShell: 640 },
+      turrets: [ { x: 112, guns: 3 }, { x: 80, guns: 3 }, { x: 44, guns: 3 } ],
+      turretArc: 150 * DEG,
+      sec: { guns: 12, caliber: 152, dmg: 42, reload: 1.9, range: 1050, type: 'HE', ap: 0, vShell: 600, fire: 0.04, burst: 4 },
+      torp: null,
+      barrage: { every: 30, everyP2: 24, count: 3, countP2: 5, radius: 150, delay: 4.4, dmg: 720, spread: 340 },
+      bossPhases: [
+         { below: 1, name: 'Sperrfeuer', barrage: true },
+         { below: 0.6, name: 'Schnellfeuer', msg: 'lädt im Schnellfeuer — Deckung hinter den Inseln suchen!', barrage: true, rapid: true },
+         { below: 0.3, name: 'Nebel & Torpedos', msg: 'verschwindet im Nebel und fächert Torpedos!', smoke: true, fan: true, barrage: true },
+      ],
+      fan: { every: 22, n: 6, spread: 50 * DEG, warn: 2.8, dmg: 850, speed: 145, range: 1700 },
+      rapid: { every: 26, dur: 9, mult: 0.5, warn: 2.4 },
+      cons: { dc: { charges: 4, dur: 6, cd: 35 }, smoke: { charges: 2, dur: 10, cd: 50 } },
       ai: { role: 'battleship', commitTime: 1e9, holdThrottle: 0.5, noRetreat: true, boss: true }, noRepair: true,
    },
    Bismarck: {
@@ -238,6 +285,7 @@ export const ENV = {
    clear: { visionMult: 1, dispersion: 1 },
    night: { visionMult: 0.5, dispersion: 1.1, night: true },
    storm: { visionMult: 0.8, dispersion: 1.5, storm: true },
+   fog:   { visionMult: 0.7, dispersion: 1.05, fog: true },
 };
 
 // ============ WEAPON HANDLING ============
@@ -261,9 +309,9 @@ export const HANDLING = {
 // Rider multipliers on bot accuracy / HP / damage. One-knob presets. sigmaDeg only scales the
 // *bots'* aim; the player's dispersion is fixed.
 export const DIFFICULTY = {
-   easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 0.7 },
-   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 0.66 },
-   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.15, detectMult: 1.15, botHP: 1.1,  botDmg: 0.9 },
+   easy:   { reactionTime: 1.6, leadQuality: 0.30, sigmaDeg: 2.2,  salvoMult: 0.6, detectMult: 0.8,  botHP: 0.8,  botDmg: 0.7,  bossCd: 1.3, bossFan: -2, bossWarn: 1.25 },
+   normal: { reactionTime: 0.9, leadQuality: 0.70, sigmaDeg: 0.55, salvoMult: 1.0, detectMult: 1.0,  botHP: 1.0,  botDmg: 0.66, bossCd: 1.0, bossFan: 0,  bossWarn: 1.0 },
+   hard:   { reactionTime: 0.30, leadQuality: 1.0,  sigmaDeg: 0.2,  salvoMult: 1.15, detectMult: 1.15, botHP: 1.1,  botDmg: 0.9,  bossCd: 0.8, bossFan: 2,  bossWarn: 0.85 },
 };
 
 // ============ ENCOUNTER ============
