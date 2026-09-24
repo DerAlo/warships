@@ -345,16 +345,20 @@ function avoidTerrain(b, w, want) {
    const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
    const lim = w.arena - 700;
    const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
-   // candidate paths follow the real turn: the hull holds its heading until the rudder has shifted,
-   // then swings at the turning radius (a straight ray let heavy ships commit to coasts)
-   const turnR = b.cfg.turnR || 700, spd = Math.abs(b.speed);
+   // candidate paths replay steer() with the real rudder shift and yaw inertia: a BB laid hard over
+   // one way keeps swinging that way for ~10 s after the order (a straight ray or a fixed lag
+   // distance let heavy ships commit to coasts)
+   const turnR = b.cfg.turnR || 700, spd = Math.max(Math.abs(b.speed), 8);
+   const shift = b.cfg.rudderShift || 8, lead = shift * 0.7 + 1.2, tau = b.type === 'BB' ? 3.2 : 2;
    const clear = (h, L) => {
-      const dh0 = angleDelta(b.heading, h);
-      const lagD = spd * (b.cfg.rudderShift || 8) * 0.3 * Math.abs(Math.sign(dh0) - b.rudder) / 2;
-      const n = 10, ds = L / n;
-      let x = b.pos.x, y = b.pos.y, hd = b.heading;
+      const n = 14, ds = L / n, dt = ds / spd, kYaw = 1 - Math.exp(-dt / tau);
+      let x = b.pos.x, y = b.pos.y, hd = b.heading, r = b.rudder, om = b.omega;
       for (let k = 1; k <= n; k++) {
-         if (k * ds > lagD) hd += clamp(angleDelta(hd, h), -ds / turnR, ds / turnR);
+         const err = angleDelta(hd + om * lead, h), a = Math.abs(err);
+         const rc = a > 25 * DEG ? Math.sign(err) : a > 6 * DEG ? Math.sign(err) * 0.5 : 0;
+         r += clamp(rc - r, -dt / shift, dt / shift);
+         om += (spd / turnR * r - om) * kYaw;
+         hd += om * dt;
          x += Math.cos(hd) * ds; y += Math.sin(hd) * ds;
          const p = { x, y };
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
