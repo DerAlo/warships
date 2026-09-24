@@ -1,6 +1,6 @@
 // tests/shots-lab3d.mjs — fast model/FX screenshots on tests/gfx-lab.html (static fake world).
 // Usage: node tests/shots-lab3d.mjs <view,...> [--env=time:weather:sea] [--fleet=A,B] [--islands] [--w=1280]
-//   views: lineup | bow:<cls> | side:<cls> | aft:<cls> | top:<cls> | deck:<cls> | fx | fire | sea
+//   views: lineup | bow:<cls> | side:<cls> | aft:<cls> | q:<cls> (3/4 from astern) | top:<cls> | deck:<cls> | fx | fire | sea
 //   LAB_URL=http://localhost:5185/tests/gfx-lab.html  SHOTS_OUT=tests/shots
 const { chromium } = await import(process.env.PW_MODULE || 'playwright');
 import { mkdirSync } from 'node:fs';
@@ -40,6 +40,7 @@ for (const v of views) {
       } else if (kind === 'side') view = { pos: at(-1.35, len * 0.95, len * 0.12), look: [P.x, len * 0.05, P.y], fov: 42 };
       else if (kind === 'bow') view = { pos: at(-0.55, len * 0.62, len * 0.1), look: at(0, len * 0.08, len * 0.06), fov: 50 };
       else if (kind === 'aft') view = { pos: at(-2.2, len * 0.6, len * 0.14), look: at(Math.PI, len * 0.1, len * 0.06), fov: 50 };
+      else if (kind === 'q') view = { pos: at(-2.5, len * 0.85, len * 0.24), look: at(0, len * 0.05, len * 0.06), fov: 45 };
       else if (kind === 'top') view = { pos: at(-1.2, len * 0.35, len * 0.55), look: [P.x, 0, P.y], fov: 55 };
       else if (kind === 'deck') view = { pos: at(-0.25, len * 0.62, len * 0.07), look: at(Math.PI, len * 0.1, len * 0.1), fov: 60 };
       else if (kind === 'fx' || kind === 'fire' || kind === 'sea') {

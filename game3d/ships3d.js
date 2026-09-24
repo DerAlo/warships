@@ -25,7 +25,10 @@ export function shipDims(ship) {
    if (!type) type = L > 220 ? 'BB' : L > 180 ? 'CA' : L > 140 ? 'CL' : 'DD';
    const B = Number(h.beam) || leg.beam || L * 0.12;
    const T = clamp(Number(h.draft) || L * 0.034, 2.5, 11);
-   const D = clamp(Number(h.deckH) || (type === 'TR' ? L * 0.06 : L * 0.042), 3, L * 0.08);
+   // cfg.hull.deckH is the sim's hit-box deck height; the visible freeboard is lower (WoWs
+   // hulls sit ~0.55-0.6 of that), otherwise battleships look like barges
+   const dh = Number(h.deckH);
+   const D = dh > 0 ? clamp(dh * 0.58, L * 0.028, L * 0.055) : clamp(type === 'TR' ? L * 0.045 : L * 0.034, 3, L * 0.06);
    return { L, B, T, D, type };
 }
 
@@ -166,7 +169,7 @@ function loftHull(b, d, S, hullCol, deckCol) {
 }
 
 // ---------------- turret models ----------------
-function turretSize(caliber, B) { return Math.min(B * 0.17, 1.3 + caliber * 0.0125); }
+function turretSize(caliber, B) { return Math.min(B * 0.185, 1.4 + caliber * 0.0135); }
 
 function buildTurretHouse(r, caliber, guns, col, big) {
    const b = new GeoBuilder();
@@ -208,7 +211,7 @@ function gunOffsets(guns, r) {
 function buildBarrels(r, caliber, guns, col) {
    const b = new GeoBuilder();
    const cal = caliber / 1000;
-   const len = clamp(cal * 48, 3.5, 22);
+   const len = clamp(cal * 50, 3.5, 23);
    const rb = Math.max(0.16, cal * 0.95), rm = Math.max(0.11, cal * 0.55);
    const offs = gunOffsets(guns, r);
    const dark = shade(col, 0.55);
@@ -222,152 +225,300 @@ function buildBarrels(r, caliber, guns, col) {
    return { geo: b.build(), len, offs, tip: r * 0.18 + len * 1.01 };
 }
 
-// ---------------- superstructure by class ----------------
-function superstructure(b, d, S, tur, col) {
+// ---------------- superstructure ----------------
+// Layout follows cfg.hull.sup {x, len, w, h} (the sim's hit box, h = height above the deck)
+// and cfg.hull.funnels [{x, r, h}]; cfg.hull.nation picks the style. German ('de'): rounded
+// bridge levels ahead of a tower mast with a foretop director, capped funnels ringed by
+// searchlight platforms, heavy cranes, catapult + seaplane, shielded twin AA and AA director
+// domes. British ('uk'): square block bridges, tripod masts, upright black-topped funnels,
+// pom-poms. Without that data (legacy sim) the layout is derived from the turret positions.
+const SUP_LEN = { BB: 0.3, CA: 0.26, CL: 0.24, DD: 0.16, CV: 0.2, TR: 0.18 };
+const SUP_H = { BB: 24, CA: 18, CL: 16, DD: 10, CV: 14, TR: 13 };
+const FUN_DEF = {   // fallback funnels: [distance aft of the sup front / sup length, r / B, h]
+   BB: [[0.62, 0.18, 16]], CA: [[0.5, 0.16, 13], [0.72, 0.16, 13]], CL: [[0.45, 0.2, 11], [0.7, 0.2, 11]],
+   DD: [[1.25, 0.23, 8], [2.0, 0.23, 8]], TR: [[0.5, 0.18, 10]],
+};
+const _up = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3(), _qd = new THREE.Quaternion();
+
+// plan-view outline (x fore-aft, y = athwartships) with rounded front/back corners
+function planShape(x0, x1, hw, rf = 0, ra = 0) {
+   const s = new THREE.Shape();
+   const lim = (x1 - x0) * 0.49;
+   const cf = Math.min(hw * Math.min(rf, 0.95), lim), ca = Math.min(hw * Math.min(ra, 0.95), lim);
+   s.moveTo(x0 + ca, -hw);
+   s.lineTo(x1 - cf, -hw);
+   if (cf > 0.01) s.quadraticCurveTo(x1, -hw, x1, -hw + cf);
+   s.lineTo(x1, hw - cf);
+   if (cf > 0.01) s.quadraticCurveTo(x1, hw, x1 - cf, hw);
+   s.lineTo(x0 + ca, hw);
+   if (ca > 0.01) { s.quadraticCurveTo(x0, hw, x0, hw - ca); s.lineTo(x0, -hw + ca); s.quadraticCurveTo(x0, -hw, x0 + ca, -hw); }
+   return s;
+}
+
+function superstructure(b, d, S, tl, col, ship) {
    const { L, B, type } = d;
-   const lv = 2.7;            // one deck level (m)
-   const sup = col.sup, dark = col.dark, mast = col.mast, win = col.win, boat = col.boat;
-   const fwd = tur.filter(t => t.x > 0).sort((a, b2) => a.x - b2.x);
-   const aft = tur.filter(t => t.x <= 0).sort((a, b2) => b2.x - a.x);
-   const rT = tur.length ? Math.max(...tur.map(t => t.r)) : B * 0.12;
-   let xF = fwd.length ? fwd[0].x - fwd[0].r * 1.5 : L * 0.12;
-   let xA = aft.length ? aft[0].x + aft[0].r * 1.5 : -L * 0.26;
-   if (xF - xA < L * 0.16) { const c = (xF + xA) / 2; xF = c + L * 0.08; xA = c - L * 0.08; }
-   const span = xF - xA;
-   const deckMid = S.deckAt((xF + xA) / 2);
+   const hull = ship.cfg?.hull || {};
+   const nat = hull.nation === 'uk' ? 'uk' : 'de';
+   const lv = 2.6;            // one deck level (m)
+   const { sup, dark, mast, win, plat } = col;
    const hw = (x) => S.halfDeckAt(x);
+   const yD = (x) => S.deckAt(x);
    const smoke = [];
-   const box = (x0, x1, y0, h, halfW, c) => { b.band = 3; b.box(x1 - x0, h, halfW * 2, (x0 + x1) / 2, y0 + h / 2, 0, c); b.band = 0; };
-   const windows = (x, y, halfW) => b.box(0.25, 0.7, halfW * 1.7, x + 0.02, y, 0, win);
-   const funnel = (x, y0, h, rx, rz, rakeA) => {
-      const g = new THREE.CylinderGeometry(1, 1.06, h, 16);
-      g.translate(0, h / 2, 0);
-      g.scale(rx, 1, rz);
-      b.put(g, x, y0, 0, (px, py) => (py > y0 + h * 0.86 ? dark : sup), 0, 0, rakeA);
-      const cap = new THREE.CylinderGeometry(1.05, 1.05, 0.5, 16); cap.scale(rx, 1, rz);
-      const tx = x - Math.sin(rakeA) * h, ty = y0 + Math.cos(rakeA) * h;
-      b.put(cap, tx, ty, 0, dark, 0, 0, rakeA);
-      smoke.push(new THREE.Vector3(tx, ty + 0.5, 0));
+   // (dx, dz) turned by a (0 = ahead, +PI/2 = starboard) around (x, z); matches put(..., ry = -a)
+   const rot = (x, z, a, dx, dz) => [x + dx * Math.cos(a) - dz * Math.sin(a), z + dx * Math.sin(a) + dz * Math.cos(a)];
+
+   // ---- primitives ----
+   const prism = (shape, y0, h, c, band = 0) => {
+      const g = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false, curveSegments: 3 });
+      g.rotateX(-Math.PI / 2);   // plan (x, y) -> (x, -z), extrusion -> +y
+      b.band = band; b.put(g, 0, y0, 0, c); b.band = 0;
    };
-   const mastPole = (x, y0, h, r0, yard) => {
-      b.cyl(r0 * 0.5, r0, h, x, y0, 0, mast, 6);
-      if (yard) { const g = new THREE.CylinderGeometry(0.12, 0.12, yard, 5); g.rotateX(Math.PI / 2); b.put(g, x, y0 + h * 0.82, 0, mast); }
+   const house = (x0, x1, y0, h, w, rf = 0, ra = 0, c = sup) => prism(planShape(x0, x1, w, rf, ra), y0, h, c, 3);
+   // overhanging deck edge: the dark lip between levels is what makes a bridge read as stacked
+   const slab = (x0, x1, y, w, rf = 0, ra = 0, t = 0.32) => prism(planShape(x0, x1, w, rf, ra), y - t, t, plat);
+   const winBand = (x0, x1, y, w, rf) => prism(planShape(lerp(x0, x1, 0.4), x1, w + 0.05, rf, 0), y, 0.8, win);
+   const strut = (ax, ay, az, bx, by, bz, r, c = mast) => {
+      _dir.set(bx - ax, by - ay, bz - az);
+      const l = _dir.length();
+      const g = new THREE.CylinderGeometry(r * 0.8, r, l, 6);
+      g.translate(0, l / 2, 0);
+      g.applyQuaternion(_qd.setFromUnitVectors(_up, _dir.normalize()));
+      b.put(g, ax, ay, az, c);
    };
-   const rangefinder = (x, y, len) => {
-      const g = new THREE.CylinderGeometry(0.4, 0.4, len, 8); g.rotateX(Math.PI / 2); b.put(g, x, y, 0, dark);
-      b.box(1.6, 1.3, 1.8, x, y - 0.4, 0, sup);
+   const pole = (x, y0, h, r0, z = 0) => b.cyl(r0 * 0.45, r0, h, x, y0, z, mast, 6);
+   const yard = (x, y, span, r = 0.13) => b.put(new THREE.CylinderGeometry(r, r, span, 5).rotateX(Math.PI / 2), x, y, 0, mast);
+   const tripod = (x, y0, h, spread) => {
+      strut(x, y0, 0, x, y0 + h, 0, 0.55);
+      for (const s of [1, -1]) strut(x - spread, y0, s * spread * 0.7, x, y0 + h * 0.92, 0, 0.42);
    };
-   const aaMount = (x, y, z) => { b.box(1.6, 0.9, 1.6, x, y + 0.45, z, sup); b.tubeX(0.08, 0.06, 2.4, x, y + 0.8, z + 0.3, dark, 4); b.tubeX(0.08, 0.06, 2.4, x, y + 0.8, z - 0.3, dark, 4); };
-   const lifeboat = (x, y, z, len) => { const g = new THREE.SphereGeometry(1, 10, 6); b.put(g, x, y + 0.6, z, boat, 0, 0, 0, len / 2, 0.55, 1.0); };
-   const secTurret = (x, y, z, r) => {
-      b.cyl(r, r * 1.05, r * 0.7, x, y, z, shade(sup, 0.95), 10);
-      const dir = z > 0 ? 1 : -1;
-      const a = dir * 0.6;
-      b.put(new THREE.CylinderGeometry(0.13, 0.16, r * 2.4, 6).rotateZ(-Math.PI / 2).translate(r * 1.2, 0, 0), x, y + r * 0.45, z + dir * 0.25, dark, 0, -a, 0);
-      b.put(new THREE.CylinderGeometry(0.13, 0.16, r * 2.4, 6).rotateZ(-Math.PI / 2).translate(r * 1.2, 0, 0), x, y + r * 0.45, z - dir * 0.25, dark, 0, -a, 0);
+   const rfArms = (x, y, rl, r = 0.4) => {
+      b.put(new THREE.CylinderGeometry(r, r, rl, 8).rotateX(Math.PI / 2), x, y, 0, dark);
+      for (const s of [1, -1]) b.box(r * 2.4, r * 2.4, 0.6, x, y, s * rl / 2, sup);
+   };
+   // rotating director / control tower with rangefinder arms; returns its top
+   const director = (x, y, r, rl) => {
+      b.cyl(r * 0.85, r, r * 0.8, x, y, 0, shade(sup, 0.94), 12);
+      const g = new THREE.CylinderGeometry(r * 0.95, r * 1.05, r * 1.2, 12); g.translate(0, r * 0.6, 0);
+      b.band = 3; b.put(g, x, y + r * 0.8, 0, sup, 0, 0, 0, 1.25, 1, 1); b.band = 0;
+      rfArms(x - r * 0.15, y + r * 1.55, rl, clamp(r * 0.2, 0.25, 0.45));
+      return y + r * 2.0;
+   };
+   const searchlight = (x, y, z, s = 1) => {
+      b.cyl(0.35 * s, 0.45 * s, 0.7 * s, x, y, z, dark, 6);
+      b.tubeX(0.6 * s, 0.6 * s, 1.1 * s, x - 0.55 * s, y + 1.0 * s, z, sup, 10);
+      b.tubeX(0.52 * s, 0.52 * s, 0.06, x + 0.56 * s, y + 1.0 * s, z, col.lamp, 10);
+   };
+   const boat = (x, y, z, l, cabin) => {
+      const g = new THREE.SphereGeometry(1, 10, 4, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);   // lower half-shell
+      b.put(g, x, y + l * 0.16, z, col.boat, 0, 0, 0, l / 2, l * 0.1, l * 0.13);
+      b.box(l * 0.84, 0.12, l * 0.22, x, y + l * 0.16, z, shade(col.boat, 0.78));
+      if (cabin) b.box(l * 0.3, l * 0.08, l * 0.17, x + l * 0.06, y + l * 0.2, z, col.boat);
+      for (const o of [-0.28, 0.28]) b.box(0.35, l * 0.08, l * 0.2, x + o * l, y + l * 0.04, z, dark);
+   };
+   // fixed secondary turret training toward a (0 = ahead, +PI/2 = starboard)
+   const secTurret = (x, y, z, r, a, guns = 2) => {
+      const g = new THREE.CylinderGeometry(r * 0.88, r, r * 0.72, 10); g.translate(0, r * 0.36, 0);
+      b.put(g, x, y, z, shade(sup, 0.97), 0, -a, 0, 1.3, 1, 1);
+      for (const o of (guns === 1 ? [0] : [-0.3, 0.3])) {
+         const bg = new THREE.CylinderGeometry(0.11 * r, 0.15 * r, r * 2.5, 6).rotateZ(-Math.PI / 2 + 0.08).translate(r * 2.4, 0, o * r);
+         b.put(bg, x, y + r * 0.42, z, dark, 0, -a, 0);
+      }
+   };
+   const aaTwin = (x, y, z, r, a) => {   // shielded twin HA mount, barrels raised
+      b.cyl(r * 0.8, r * 0.9, 0.5, x, y, z, dark, 8);
+      b.put(new THREE.SphereGeometry(r, 10, 4, 0, Math.PI * 2, 0, Math.PI / 2), x, y + 0.45, z, shade(sup, 0.98), 0, -a, 0, 1.2, 0.85, 1);
+      for (const o of [-0.32, 0.32]) {
+         const bg = new THREE.CylinderGeometry(0.07 * r, 0.1 * r, r * 2.4, 5).translate(0, r * 1.2, 0).rotateZ(-Math.PI / 2 + 0.6).translate(r * 0.4, 0, o * r);
+         b.put(bg, x, y + r * 0.7, z, dark, 0, -a, 0);
+      }
+   };
+   const aaDome = (x, y, z) => {   // stabilised AA director ("Wackeltopp")
+      b.cyl(0.5, 0.7, 1.4, x, y, z, sup, 8);
+      b.put(new THREE.SphereGeometry(1.45, 12, 8), x, y + 2.3, z, sup);
+   };
+   const pompom = (x, y, z, a) => {
+      b.box(2.2, 1.2, 2.4, x, y + 0.6, z, shade(sup, 0.95), -a);
+      for (let row = 0; row < 2; row++) for (let i = 0; i < 4; i++) {
+         const [px, pz] = rot(x, z, a, 1.1, (i - 1.5) * 0.48);
+         b.put(new THREE.CylinderGeometry(0.06, 0.08, 1.7, 4).rotateZ(-Math.PI / 2 + 0.35).translate(0.8, 0, 0), px, y + 1.0 + row * 0.34, pz, dark, 0, -a, 0);
+      }
+   };
+   const tubes = (x, z, n, a) => {   // trainable torpedo tube bank
+      const y = yD(x);
+      b.cyl(0.9 + n * 0.12, 1.0 + n * 0.12, 0.55, x, y, z, sup, 10);
+      for (let k = 0; k < n; k++) {
+         const [px, pz] = rot(x, z, a, 0.4, (k - (n - 1) / 2) * 0.7);
+         b.put(new THREE.CylinderGeometry(0.3, 0.3, 7.2, 8).rotateZ(-Math.PI / 2), px, y + 1.0, pz, dark, 0, -a, 0);
+      }
+      const [sx, sz] = rot(x, z, a, -2.6, 0);
+      b.box(1.6, 1.3, n * 0.72 + 0.4, sx, y + 1.0, sz, sup, -a);
+   };
+   const funnel = (f, style) => {
+      const fx = f.x, fy = yD(fx), h = f.h;
+      // sim radii are hit-box sized; small-ship funnels read oversized at full r
+      const small = type === 'DD' || type === 'TR';
+      const rx = f.r * (small ? 0.78 : 1), rz = rx * (style === 'uk' ? 0.72 : 0.64);
+      const rake = type === 'DD' || type === 'TR' ? 0.09 : style === 'uk' ? 0.03 : 0;
+      // body + black top band as separate rings (one height segment would smear the band
+      // colour down the whole funnel)
+      const hb = h * (style === 'uk' ? 0.86 : 0.95);
+      const g = new THREE.CylinderGeometry(1.004, 1.04, hb, 20); g.translate(0, hb / 2, 0); g.scale(rx, 1, rz);
+      b.put(g, fx, fy, 0, sup, 0, 0, rake);
+      const gt = new THREE.CylinderGeometry(1, 1.004, h - hb, 20); gt.translate(0, hb + (h - hb) / 2, 0); gt.scale(rx, 1, rz);
+      b.put(gt, fx, fy, 0, col.cap, 0, 0, rake);
+      const tx = fx - Math.sin(rake) * h, ty = fy + Math.cos(rake) * h;
+      if (style === 'de') {
+         const cap = new THREE.CylinderGeometry(1.1, 1.0, 1.4, 20); cap.translate(0, 0.7, 0); cap.scale(rx, 1, rz);
+         b.put(cap, tx, ty - 0.5, 0, col.capMetal, 0, 0, rake);
+         if (type !== 'DD' && type !== 'TR') {   // searchlight platform ring
+            const yp = fy + h * 0.58;
+            slab(fx - rx * 1.5, fx + rx * 1.5, yp, rz * 1.85, 0.9, 0.9);
+            for (const s of [1, -1]) { searchlight(fx + rx * 0.3, yp, s * rz * 1.42); searchlight(fx - rx * 1.0, yp, s * rz * 1.2); }
+         }
+      } else {
+         const rim = new THREE.CylinderGeometry(1.06, 1.06, 0.6, 20); rim.scale(rx, 1, rz);
+         b.put(rim, tx, ty, 0, col.cap, 0, 0, rake);
+         for (const s of [1, -1]) b.cyl(0.16, 0.16, h * 1.03, fx - rx * 0.98, fy, s * rz * 0.35, mast, 5, rake);
+      }
+      smoke.push(new THREE.Vector3(tx, ty + 1, 0));
+   };
+   const seaplane = (x, y, z, a) => {
+      const P = (g, dx, dy, dz, c = col.plane) => { const [px, pz] = rot(x, z, a, dx, dz); b.put(g, px, y + dy, pz, c, 0, -a, 0); };
+      P(new THREE.CylinderGeometry(0.22, 0.58, 10.5, 8).rotateZ(Math.PI / 2), 0, 1.5, 0);   // fuselage, tail aft
+      P(new THREE.BoxGeometry(1.9, 0.16, 12.4), 0.9, 1.85, 0);
+      P(new THREE.BoxGeometry(1.1, 0.1, 4.2), -4.7, 1.65, 0);
+      P(new THREE.BoxGeometry(1.4, 1.5, 0.1), -4.8, 2.3, 0);
+      P(new THREE.CylinderGeometry(0.62, 0.62, 0.18, 10).rotateZ(Math.PI / 2), 5.3, 1.5, 0, dark);
+      for (const s of [1, -1]) {
+         P(new THREE.CylinderGeometry(0.26, 0.4, 6.6, 6).rotateZ(Math.PI / 2), 0.9, 0.25, s * 1.7);
+         P(new THREE.BoxGeometry(0.14, 1.35, 0.14), 1.1, 0.95, s * 1.7, dark);
+      }
+   };
+   const catapult = (x, y, l, a, withPlane) => {
+      b.cyl(1.0, 1.2, 0.9, x, y, 0, dark, 10);
+      b.put(new THREE.BoxGeometry(l, 0.55, 1.2), x, y + 1.2, 0, mast, 0, -a, 0);
+      b.put(new THREE.BoxGeometry(l * 0.92, 0.35, 0.6), x, y + 0.85, 0, dark, 0, -a, 0);
+      if (withPlane) seaplane(x, y + 1.5, 0, a);
+   };
+   const crane = (x, y0, z, h, jib, dir) => {
+      b.cyl(0.55, 0.8, h, x, y0, z, mast, 8);
+      b.box(2.0, 1.6, 1.8, x, y0 + h - 0.4, z, sup);
+      strut(x, y0 + h * 0.55, z, x + dir * jib * 0.94, y0 + h * 0.55 + jib * 0.34, z, 0.32);
+   };
+   const breakwater = (x) => {
+      const w = hw(x) * 0.78, dx = w * 0.6, l = Math.hypot(dx, w);
+      for (const s of [1, -1]) b.box(0.3, 1.4, l, x - dx / 2, yD(x) + 0.55, s * w / 2, sup, -s * Math.atan2(dx, w));
+   };
+   const bowFittings = () => {
+      const xa = L * 0.4;
+      for (const s of [1, -1]) {
+         b.cyl(0.55, 0.65, 0.7, xa - L * 0.02, yD(xa - L * 0.02), s * B * 0.1, dark, 8);      // capstans
+         b.box(L * 0.05, 0.08, 0.35, xa + L * 0.012, yD(xa) + 0.05, s * B * 0.11, dark, s * 0.25);   // cable runs
+         const xh = L * 0.445;
+         b.box(Math.max(1, B * 0.045), Math.max(1.3, B * 0.06), 0.35, xh, yD(xh) - Math.max(1.4, d.D * 0.2), s * (hw(xh) + 0.08), dark);   // anchors
+      }
    };
 
-   if (type === 'BB') {
-      const y0 = deckMid;
-      const hwm = Math.min(hw((xF + xA) / 2) * 0.62, B * 0.32);
-      box(xA, xF, y0, lv * 1.6, hwm, sup);                                  // main deckhouse
-      box(xA + span * 0.12, xF - span * 0.05, y0 + lv * 1.6, lv, hwm * 0.72, sup);
-      // forward tower: conning tower + stacked bridge levels + director
-      const xt = xF - span * 0.16;
-      b.cyl(B * 0.085, B * 0.09, lv * 2.2, xF - span * 0.035, y0 + lv * 1.6, 0, shade(sup, 0.85), 14);
-      let yy = y0 + lv * 2.6;
-      for (let i = 0; i < 4; i++) {
-         const w = hwm * (0.8 - i * 0.11), l = span * (0.2 - i * 0.022);
-         box(xt - l / 2, xt + l / 2, yy, lv * 0.95, w, sup);
-         if (i === 1 || i === 3) windows(xt + l / 2, yy + lv * 0.55, w);
-         yy += lv * 0.95;
+   // ---- towers ----
+   // German: armoured conning tower, rounded bridge levels, tower mast with foretop director
+   const deTower = (xf, yb, top, w, n, lenT, heavy) => {
+      const ctR = clamp(w * 0.3, 1.0, 3.3);
+      const xc = xf - ctR * 1.25;
+      b.put(new THREE.CylinderGeometry(ctR, ctR * 1.03, lv * 1.8, 14).translate(0, lv * 0.9, 0), xc, yb, 0, shade(sup, 0.88), 0, 0, 0, 1.25, 1, 1);
+      b.cyl(ctR * 0.4, ctR * 0.45, 0.9, xc - ctR * 0.3, yb + lv * 1.8, 0, shade(sup, 0.9), 8);
+      rfArms(xc - ctR * 0.3, yb + lv * 1.8 + 0.5, ctR * 2.6, 0.3);
+      const xb = xc - ctR * 1.3, xr0 = xb - lenT;
+      let y = yb, xrTop = xr0, xfTop = xb;
+      for (let i = 0; i < n; i++) {
+         const xr = xr0 + i * lenT * 0.07, xfr = xb - i * 0.8, wi = w * (1 - i * 0.1);
+         house(xr, xfr, y, lv, wi, 0.95, 0.35);
+         if (i === 1 || i === n - 1) winBand(xr, xfr, y + lv * 0.42, wi, 0.95);
+         slab(xr - 0.3, xfr + 0.5, y + lv + 0.02, wi + 0.45, 0.95, 0.35);
+         if (i === Math.min(2, n - 1)) slab(xfr - 3.2, xfr - 0.4, y + lv + 0.02, Math.min(w * 1.55, hw(xfr) * 0.96));   // bridge wings
+         y += lv; xrTop = xr; xfTop = xfr;
       }
-      rangefinder(xt, yy + 1.2, B * 0.34);
-      b.cyl(1.6, 1.8, 2.2, xt - 1.5, yy + 1.8, 0, shade(sup, 0.9), 12);
-      // tripod/pole mast behind the tower
-      mastPole(xt - span * 0.12, yy - lv, lv * 5, 0.6, B * 0.5);
-      // funnel
-      const xfn = xA + span * 0.45;
-      funnel(xfn, y0 + lv * 2.4, lv * 4.2, span * 0.075, B * 0.13, 0);
-      // aft control position
-      const xa = xA + span * 0.14;
-      box(xa - span * 0.07, xa + span * 0.07, y0 + lv * 2.6, lv * 1.3, hwm * 0.5, sup);
-      rangefinder(xa, y0 + lv * 4.5, B * 0.28);
-      mastPole(xa + span * 0.06, y0 + lv * 3.9, lv * 3.4, 0.4, B * 0.3);
-      // secondaries: three per side along the deckhouse
-      const sr = Math.min(1.9, B * 0.055);
-      for (let i = 0; i < 3; i++) {
-         const x = xA + span * (0.22 + i * 0.25);
-         const z = Math.min(hw(x) * 0.8, hwm + sr * 1.6);
-         secTurret(x, S.deckAt(x), z, sr); secTurret(x, S.deckAt(x), -z, sr);
+      const dR = clamp(w * 0.28, 0.9, 2.5), rT = clamp(w * 0.25, 0.8, 2.5);
+      const xd = xfTop - dR * 1.4;
+      director(xd, y, dR, w * 1.25);
+      const xt = Math.max(xrTop + rT * 1.3, xd - dR * 1.3 - rT * 1.25);
+      const yT = Math.max(y + lv * 1.5, top - rT * 2.4);
+      b.put(new THREE.CylinderGeometry(rT, rT * 1.1, yT - y, 12).translate(0, (yT - y) / 2, 0), xt, y, 0, sup, 0, 0, 0, 1.2, 1, 1);
+      const yp = lerp(y, yT, 0.45);
+      slab(xt - rT * 2.3, xt + rT * 2.3, yp, rT * 2.3, 0.9, 0.9);
+      for (const s of [1, -1]) searchlight(xt, yp, s * rT * 1.7, 0.8);
+      const ft = director(xt, yT, rT * 1.25, w * 1.35);
+      if (heavy) b.box(0.3, rT * 1.1, rT * 2.2, xt + rT * 1.6, yT + rT * 1.9, 0, dark);   // radar mattress
+      const mh = (top - yb) * 0.42;
+      pole(xt - rT * 0.4, ft, mh, 0.42);
+      yard(xt - rT * 0.4, ft + mh * 0.55, w * 2.4);
+      yard(xt - rT * 0.4, ft + mh * 0.8, w * 1.3, 0.1);
+      return { xr: xr0, top: ft + mh };
+   };
+   // British: tall square block bridge, DCT on the compass platform, tripod foremast abaft
+   const ukTower = (xf, yb, top, w, n, lenT) => {
+      let y = yb, xfTop = xf;
+      const xr0 = xf - lenT;
+      for (let i = 0; i < n; i++) {
+         const xr = xr0 + i * lenT * 0.05, xfr = xf - i * 0.6, wi = w * (1 - i * 0.06);
+         house(xr, xfr, y, lv * 1.05, wi, 0.3, 0.1);
+         slab(xr - 0.3, xfr + 0.4, y + lv * 1.05 + 0.02, wi + 0.4, 0.3, 0.1);
+         if (i === n - 1) winBand(xr, xfr, y + lv * 0.5, wi, 0.3);
+         if (i === n - 2) slab(xfr - 3, xfr - 0.3, y + lv * 1.05 + 0.02, Math.min(w * 1.5, hw(xfr) * 0.96));
+         y += lv * 1.05; xfTop = xfr;
       }
-      // AA + boats + cranes
-      for (const s of [1, -1]) {
-         aaMount(xfn + span * 0.12, y0 + lv * 1.6, s * hwm * 0.75);
-         aaMount(xfn - span * 0.14, y0 + lv * 1.6, s * hwm * 0.75);
-         lifeboat(xfn - span * 0.02, y0 + lv * 2.6, s * hwm * 0.55, 8);
-         b.cyl(0.25, 0.35, lv * 3.2, xfn - span * 0.1, y0 + lv * 2.6, s * hwm * 0.5, mast, 5);
+      const dR = clamp(w * 0.3, 0.9, 2.5);
+      const dTop = director(xfTop - dR * 1.5, y, dR, w * 1.3);
+      const xm = xr0 - 1.2, ym = Math.max(dTop + 2, top);
+      tripod(xm, yb, ym - yb, Math.max(3, (ym - yb) * 0.2));
+      house(xm - 2.4, xm + 2.4, ym, 2.4, 2.1, 0.6, 0.6);   // spotting top
+      slab(xm - 2.9, xm + 2.9, ym + 0.05, 2.6, 0.6, 0.6);
+      const ft = director(xm, ym + 2.4, 1.2, w * 0.9);
+      const mh = (top - yb) * 0.4;
+      pole(xm, ft, mh, 0.38);
+      yard(xm, ft + mh * 0.6, w * 2.2);
+      return { xr: xr0 - 3.5, top: ft + mh };
+   };
+
+   // ---- layout ----
+   const fwd = tl.filter(t => t.x > 0).sort((a, c) => a.x - c.x);
+   const aft = tl.filter(t => t.x <= 0).sort((a, c) => c.x - a.x);
+   const limF = fwd.length ? fwd[0].x - fwd[0].r * 1.3 : L * 0.3;
+   const limA = aft.length ? aft[0].x + aft[0].r * 1.3 : -L * 0.4;
+   const hs = hull.sup && Number.isFinite(hull.sup.len) ? hull.sup : null;
+   let x0, x1, W, H;
+   if (hs) { x0 = (hs.x || 0) - hs.len / 2; x1 = (hs.x || 0) + hs.len / 2; W = hs.w || B * 0.55; H = hs.h || SUP_H[type] || 16; }
+   else {
+      const len = L * (SUP_LEN[type] || 0.25);
+      if (type === 'DD') { x1 = limF - L * 0.03; x0 = x1 - len; }
+      else if (type === 'TR') { x1 = -L * 0.12; x0 = x1 - len; }
+      else { const c = (limF + limA) / 2 + L * 0.02; x0 = c - len / 2; x1 = c + len / 2; }
+      W = B * 0.6; H = SUP_H[type] || 16;
+   }
+   x1 = Math.min(x1, limF); x0 = Math.max(x0, limA);
+   if (x1 - x0 < L * 0.08) { const c = (x0 + x1) / 2; x0 = c - L * 0.04; x1 = c + L * 0.04; }
+   const capital = type === 'BB' || type === 'CA' || type === 'CL';
+   // warships: the deckhouse fills the free deck toward the inner turrets
+   const bx1 = capital ? Math.max(x1, Math.min(limF, x1 + L * 0.1)) : Math.min(limF, x1 + L * 0.04);
+   const bx0 = capital ? Math.min(x0, Math.max(limA, x0 - L * 0.04)) : x0;
+   const blen = bx1 - bx0, xm = (bx0 + bx1) / 2;
+   const y0 = yD(xm);
+   const hwA = Math.max(1.5, Math.min(W / 2, hw(xm) * (capital ? 0.7 : 0.66)));
+   const funnels = (Array.isArray(hull.funnels) && hull.funnels.length ? hull.funnels
+      : (FUN_DEF[type] || []).map(([f, r, h]) => ({ x: x1 - f * (x1 - x0), r: r * B, h })))
+      .map(f => ({ x: Number(f.x) || 0, r: Math.max(0.8, Number(f.r) || B * 0.15), h: Math.max(3, Number(f.h) || 10) }))
+      .sort((a, c) => c.x - a.x);
+   const fFront = funnels.length ? funnels[0].x + funnels[0].r + 2.5 : x0 + (x1 - x0) * 0.4;
+   const fBack = funnels.length ? funnels[funnels.length - 1].x - funnels[funnels.length - 1].r - 1 : fFront - 4;
+   const torpL = Array.isArray(ship.cfg?.torp?.launchers) ? ship.cfg.torp.launchers : null;
+   const launchers = () => {
+      for (const l of torpL) {
+         const x = Number(l.off?.x ?? l.x) || 0, n = clamp(l.tubes || 3, 1, 5);
+         if (l.side === 'port' || l.side === 'stbd') { const s = l.side === 'stbd' ? 1 : -1; tubes(x, s * Math.max(0, hw(x) - 3.2), n, s * 1.35); }
+         else tubes(x, 0, n, 0.25);
       }
-   } else if (type === 'CA' || type === 'CL') {
-      const y0 = deckMid;
-      const hwm = Math.min(hw((xF + xA) / 2) * 0.6, B * 0.3);
-      box(xA + span * 0.3, xF, y0, lv, hwm, sup);
-      const xb = xF - span * 0.1;
-      let yy = y0 + lv;
-      for (let i = 0; i < 3; i++) {
-         const w = hwm * (0.95 - i * 0.14), l = span * (0.18 - i * 0.03);
-         box(xb - l / 2, xb + l / 2, yy, lv * 0.95, w, sup);
-         if (i === 2) windows(xb + l / 2, yy + lv * 0.55, w);
-         yy += lv * 0.95;
-      }
-      rangefinder(xb - 1, yy + 1, B * 0.3);
-      // tripod mast
-      const xm = xb - span * 0.12;
-      for (const [dx, dz] of [[0, 0], [-4, 1.6], [-4, -1.6]]) {
-         b.put(new THREE.CylinderGeometry(0.25, 0.35, lv * 6, 5).translate(0, lv * 3, 0), xm + dx * 0.4, y0 + lv, dz * 0.4, mast, dz * 0.03, 0, dx * -0.02);
-      }
-      b.put(new THREE.CylinderGeometry(0.12, 0.12, B * 0.55, 5).rotateX(Math.PI / 2), xm, y0 + lv * 6, 0, mast);
-      // two raked funnels
-      const f1 = xA + span * 0.6, f2 = xA + span * 0.42;
-      funnel(f1, y0 + lv, lv * 3.3, span * 0.05, B * 0.1, 0.1);
-      funnel(f2, y0 + lv * 0.6, lv * 3.3, span * 0.05, B * 0.1, 0.1);
-      // catapult + crane amidships
-      b.box(span * 0.03, 0.6, B * 0.7, xA + span * 0.27, S.deckAt(xA + span * 0.27) + 1.2, 0, dark, 0.6);
-      b.cyl(0.3, 0.4, lv * 2.6, xA + span * 0.33, y0, hwm * 0.6, mast, 5);
-      // aft superstructure
-      box(xA, xA + span * 0.2, y0, lv * 1.4, hwm * 0.8, sup);
-      rangefinder(xA + span * 0.1, y0 + lv * 1.9, B * 0.24);
-      mastPole(xA + span * 0.16, y0 + lv * 1.4, lv * 3, 0.3, B * 0.28);
-      for (const s of [1, -1]) {
-         aaMount(f1 + span * 0.02, y0 + lv, s * hwm * 0.85);
-         lifeboat((f1 + f2) / 2, y0 + lv * 0.6, s * hwm * 0.95, 7);
-      }
-      if (type === 'CA') {
-         const sr = Math.min(1.5, B * 0.05);
-         for (const s of [1, -1]) { secTurret(xA + span * 0.72, S.deckAt(xA + span * 0.72), s * hw(xA + span * 0.72) * 0.7, sr); }
-      }
-   } else if (type === 'DD') {
-      const y0 = S.deckAt(xF);
-      const hwm = Math.min(hw(xF) * 0.62, B * 0.3);
-      const xb = xF - span * 0.08;
-      box(xb - span * 0.1, xb + span * 0.07, y0, lv * 1.1, hwm, sup);
-      box(xb - span * 0.07, xb + span * 0.05, y0 + lv * 1.1, lv * 0.95, hwm * 0.85, sup);
-      windows(xb + span * 0.05, y0 + lv * 1.6, hwm * 0.85);
-      rangefinder(xb - span * 0.02, y0 + lv * 2.4, B * 0.35);
-      mastPole(xb - span * 0.12, y0 + lv, lv * 5, 0.25, B * 0.5);
-      const ym = S.deckAt(0);
-      funnel(xA + span * 0.63, ym, lv * 2.6, span * 0.045, B * 0.13, 0.12);
-      funnel(xA + span * 0.46, ym, lv * 2.3, span * 0.045, B * 0.13, 0.12);
-      // torpedo tube mounts on the centreline
-      for (const tx of [xA + span * 0.3, xA + span * 0.14]) {
-         const ty = S.deckAt(tx);
-         b.cyl(1.3, 1.4, 0.7, tx, ty, 0, sup, 10);
-         for (let k = -1; k <= 1; k++) b.tubeX(0.32, 0.32, 7, tx - 3.5, ty + 1.0, k * 0.75, dark, 8);
-      }
-      // depth-charge racks at the stern
-      for (const s of [1, -1]) b.box(4, 0.8, 0.9, -L * 0.46, S.deckAt(-L * 0.46) + 0.4, s * hw(-L * 0.46) * 0.6, dark);
-      for (const s of [1, -1]) aaMount(xA + span * 0.55, ym, s * hw(xA + span * 0.55) * 0.6);
-   } else if (type === 'CV') {
+   };
+
+   if (type === 'CV') {
       const yF = S.deckAt(0) + lv * 2.4;
       b.box(L * 0.96, 1.0, B * 1.25, -L * 0.01, yF, 0, shade(col.deck, 0.9));
       b.band = 2;
@@ -380,27 +531,157 @@ function superstructure(b, d, S, tur, col) {
       const g = new THREE.CylinderGeometry(1, 1, lv * 2.6, 12); g.translate(0, lv * 1.3, 0); g.scale(L * 0.025, 1, B * 0.05);
       b.put(g, xi - L * 0.04, yF + 0.5 + lv * 3, zi, dark);
       smoke.push(new THREE.Vector3(xi - L * 0.04, yF + 0.5 + lv * 5.6, zi));
-      mastPole(xi + L * 0.02, yF + 0.5 + lv * 4.3, lv * 3, 0.3, B * 0.2);
-   } else {   // TR: freighter / transport
-      const xh = -L * 0.3;
-      const y0 = S.deckAt(xh);
-      const hwm = hw(xh) * 0.9;
-      box(xh - L * 0.1, xh + L * 0.08, y0, lv * 2.2, hwm, col.boat);
-      box(xh - L * 0.07, xh + L * 0.05, y0 + lv * 2.2, lv, hwm * 0.8, col.boat);
-      windows(xh + L * 0.05, y0 + lv * 2.7, hwm * 0.8);
-      funnel(xh - L * 0.03, y0 + lv * 3.2, lv * 2.4, L * 0.028, B * 0.16, 0.05);
-      for (const hx of [L * 0.3, L * 0.14, -L * 0.02, -L * 0.42]) {
-         b.box(L * 0.08, 1.2, hw(hx) * 1.1, hx, S.deckAt(hx) + 0.6, 0, dark);
+      pole(xi + L * 0.02, yF + 0.5 + lv * 4.3, lv * 3, 0.3);
+   } else if (type === 'TR') {
+      // freighter: cream midships/aft house with bridge, cargo hatches, masts with derricks
+      const hwT = Math.max(2, Math.min(W / 2, hw((x0 + x1) / 2) * 0.92)), len = x1 - x0;
+      const yb = yD((x0 + x1) / 2), cream = col.boat;
+      house(x0, x1, yb, lv * 1.3, hwT, 0.25, 0.1, cream);
+      slab(x0 - 0.3, x1 + 0.3, yb + lv * 1.3 + 0.02, hwT + 0.3, 0.25, 0.1);
+      house(x0 + len * 0.1, x1 - len * 0.06, yb + lv * 1.3, lv, hwT * 0.86, 0.25, 0.1, cream);
+      const yBr = yb + lv * 2.3;
+      house(x1 - len * 0.4, x1 - len * 0.1, yBr, lv, hwT * 0.7, 0.3, 0, cream);
+      winBand(x1 - len * 0.4, x1 - len * 0.1, yBr + lv * 0.45, hwT * 0.7, 0.3);
+      slab(x1 - len * 0.3, x1 - len * 0.1, yBr + lv + 0.02, Math.min(hwT * 1.15, hw(x1) * 0.98));
+      for (const f of funnels) funnel(f, 'uk');
+      for (const s of [1, -1]) boat(x0 + len * 0.3, yb + lv * 1.3, s * hwT * 0.9, 7, false);
+      const aftGun = aft.length ? aft[aft.length - 1].x + aft[aft.length - 1].r * 1.6 : -L * 0.44;
+      for (const hx of [L * 0.34, L * 0.19, L * 0.04, x0 - L * 0.1, x0 - L * 0.22]) {
+         if (hx > x0 - 4 && hx < x1 + 4) continue;
+         if (hx < aftGun + L * 0.03) continue;
+         b.box(L * 0.08, 1.2, hw(hx) * 1.1, hx, yD(hx) + 0.6, 0, dark);
       }
-      for (const mx of [L * 0.22, -L * 0.1]) {
-         mastPole(mx, S.deckAt(mx), lv * 6, 0.45, B * 0.6);
-         for (const s of [1, -1]) b.put(new THREE.CylinderGeometry(0.15, 0.2, L * 0.1, 5).rotateZ(Math.PI / 2 - 0.5), mx + L * 0.04, S.deckAt(mx) + lv * 2, s * 1.2, mast);
+      for (const mx of [L * 0.27, L * 0.115, x0 - L * 0.16]) {
+         if (mx < aftGun) continue;
+         pole(mx, yD(mx), lv * 6, 0.45);
+         yard(mx, yD(mx) + lv * 4.6, B * 0.6);
+         for (const s of [1, -1]) b.put(new THREE.CylinderGeometry(0.15, 0.2, L * 0.1, 5).rotateZ(Math.PI / 2 - 0.5), mx - L * 0.04, yD(mx) + lv * 2, s * 1.2, mast);
       }
+   } else if (type === 'DD') {
+      const xf = bx1, hwD = Math.max(1.5, Math.min(W / 2, hw(xf) * 0.66));
+      const lenB = clamp((x1 - x0) * 0.8, 6, L * 0.14);
+      const yb = yD(xf - 3);
+      house(xf - lenB, xf, yb, lv * 1.1, hwD, 0.6, 0.2);
+      slab(xf - lenB - 0.3, xf + 0.4, yb + lv * 1.1 + 0.02, hwD + 0.35, 0.6, 0.2);
+      let y = yb + lv * 1.1;
+      if (H >= 10) {   // flag deck under the bridge on fleet destroyers
+         house(xf - lenB * 0.8, xf - 0.5, y, lv * 0.9, hwD * 0.92, 0.8, 0.25);
+         slab(xf - lenB * 0.82, xf - 0.2, y + lv * 0.9 + 0.02, hwD * 0.92 + 0.3, 0.8, 0.25);
+         y += lv * 0.9;
+      }
+      house(xf - lenB * 0.7, xf - 0.8, y, lv, hwD * 0.86, 0.9, 0.3);
+      winBand(xf - lenB * 0.7, xf - 0.8, y + lv * 0.4, hwD * 0.86, 0.9);
+      slab(xf - lenB * 0.72, xf - 0.3, y + lv + 0.02, Math.min(hwD * 1.45, hw(xf) * 0.95), 0.6, 0.3);   // open bridge + wings
+      y += lv;
+      director(xf - lenB * 0.42, y, clamp(hwD * 0.4, 0.8, 1.6), hwD * 1.4);
+      const xmF = xf - lenB * 0.85, yM = yb + lv * 1.1, topM = yD(xf) + H * 1.35;
+      if (nat === 'uk') tripod(xmF, yM, topM - yM, 2.2); else pole(xmF, yM, topM - yM, 0.4);
+      yard(xmF, topM - (topM - yM) * 0.25, hwD * 3);
+      for (const f of funnels) funnel(f, nat);
+      if (nat === 'de' && funnels.length >= 2) {   // searchlight tower between the funnels
+         const xs = (funnels[0].x + funnels[1].x) / 2, ys = yD(xs);
+         b.cyl(0.9, 1.1, lv * 1.4, xs, ys, 0, sup, 10);
+         slab(xs - 1.8, xs + 1.8, ys + lv * 1.4 + 0.02, 1.8, 0.9, 0.9);
+         searchlight(xs, ys + lv * 1.4, 0, 1);
+      }
+      if (torpL) launchers();
+      else for (const tx of [fBack - 5, fBack - 16]) if (tx > limA + 4) tubes(tx, 0, 4, 0.25);
+      // aft deckhouse with AA platform and a short mainmast
+      const xha = aft.length ? aft[0].x + aft[0].r * 1.2 : -L * 0.28;
+      const xh1 = Math.min(xha + L * 0.08, fBack - 1), xh0 = xha;
+      if (xh1 - xh0 > 3) {
+         const yh = yD((xh0 + xh1) / 2), hwh = Math.min(hwD * 0.9, hw(xh0) * 0.6);
+         house(xh0, xh1, yh, lv, hwh, 0.4, 0.4);
+         slab(xh0 - 0.3, xh1 + 0.3, yh + lv + 0.02, hwh + 0.3, 0.4, 0.4);
+         if (nat === 'uk') pompom((xh0 + xh1) / 2, yh + lv, 0, 0);
+         else for (const s of [1, -1]) aaTwin((xh0 + xh1) / 2, yh + lv, s * hwh * 0.55, 0.9, s * 1.2);
+         pole(xh1 - 1, yh + lv, H * 0.9, 0.3);
+      }
+      for (const s of [1, -1]) b.box(4, 0.8, 0.9, -L * 0.46, yD(-L * 0.46) + 0.4, s * hw(-L * 0.46) * 0.6, dark);   // depth charges
+   } else {
+      // ---- BB / CA / CL ----
+      const isBB = type === 'BB';
+      const hA = lv * (isBB ? 1.2 : 1.0);
+      house(bx0, bx1, y0, hA, hwA, 0.55, 0.35);
+      slab(bx0 - 0.3, bx1 + 0.3, y0 + hA + 0.02, hwA + 0.35, 0.55, 0.35);
+      const yA = y0 + hA;
+      const tw = hwA * 0.8, xf = bx1 - 0.5;
+      const lenT = clamp(Math.min(blen * 0.24, xf - fFront - 3), 6, L * 0.12);
+      const nLev = clamp(Math.floor(H * 0.5 / lv), 3, 6);
+      const top = y0 + H;
+      const T = nat === 'uk' ? ukTower(xf, yA, top, tw, nLev, lenT) : deTower(xf, yA, top, tw, nLev, lenT, isBB);
+      const acL = Math.max(4, blen * 0.055);
+      const xAC = bx0 + Math.max(acL + 1, blen * 0.08);
+      const hAC = lv * (isBB ? 2 : 1.5);
+      // level B from the tower back to the aft control position
+      const hwB = hwA * 0.62, bB0 = xAC + acL - 1, bB1 = T.xr + 1;
+      const hasB = bB1 - bB0 > 4;
+      if (hasB) {
+         house(bB0, bB1, yA, lv, hwB, 0.3, 0.3);
+         slab(bB0 - 0.3, bB1 + 0.3, yA + lv + 0.02, hwB + 0.3, 0.3, 0.3);
+      }
+      const yB = yA + lv;
+      for (const f of funnels) funnel(f, nat);
+      // aft control position + mainmast
+      house(xAC - acL, xAC + acL, yA, hAC, hwA * 0.5, 0.7, 0.7);
+      slab(xAC - acL - 0.3, xAC + acL + 0.3, yA + hAC + 0.02, hwA * 0.5 + 0.35, 0.7, 0.7);
+      const acTop = director(xAC - acL * 0.2, yA + hAC, clamp(tw * 0.28, 1, 2.4), tw * (isBB ? 1.15 : 0.95));
+      const xMM = xAC + acL * 0.65, yMM = yA + hAC;
+      const mmTop = Math.max(acTop + 4, y0 + H * (isBB ? 1.12 : 1.0));
+      if (nat === 'uk' && isBB) tripod(xMM, yMM, mmTop - yMM, 2.5); else pole(xMM, yMM, mmTop - yMM, 0.45);
+      yard(xMM, mmTop - (mmTop - yA) * 0.2, tw * 2);
+      // aircraft between the aft funnel and the aft control position
+      const room = fBack - (xAC + acL), catX = (fBack + xAC + acL) / 2;
+      if (room > 5 && (nat === 'de' || type !== 'BB' || funnels.length >= 2)) {
+         const across = isBB || nat === 'uk';
+         const cl = across ? Math.min(W * 1.15, hw(catX) * 1.7) : Math.min(room * 0.9, 16);
+         catapult(catX, hasB ? yB : yA, cl, across ? Math.PI / 2 : 0.3, room > 12);
+      }
+      if (nat === 'de' || isBB) {
+         const ch = isBB ? lv * 3.2 : lv * 2.4, jib = isBB ? 15 : 10, fm = funnels.length ? funnels[funnels.length - 1] : null;
+         for (const s of [1, -1]) crane(fm ? fm.x : catX, yA, s * hwA * 0.86, ch, jib, -1);
+      }
+      // boats alongside the funnels on the level-B roof
+      const bl = clamp(L * 0.04, 6, 10);
+      for (const f of funnels) {
+         const onB = hasB && f.x > bB0 && f.x < bB1;
+         for (const s of [1, -1]) boat(f.x - f.r * 0.2, onB ? yB : yA, s * (f.r * (nat === 'uk' ? 0.72 : 0.64) + bl * 0.13 + 0.25), bl, s > 0);
+      }
+      // secondaries and AA
+      if (isBB) {
+         const r = clamp(B * 0.065, 1.4, 2.4);
+         [T.xr + lenT * 0.45, (fFront + fBack) / 2, xAC + acL * 1.3].forEach((x, i) => {
+            for (const s of [1, -1]) secTurret(x, yD(x), s * Math.min(hwA + r * 1.4, hw(x) - r * 1.2), r, s * [0.9, Math.PI / 2, 2.25][i]);
+         });
+      }
+      const zRoof = (hwA + hwB) / 2;
+      if (nat === 'de') {
+         if (isBB && hwA - hwB > 2.4) {
+            for (const x of [T.xr - 2.5, (T.xr + fFront) / 2, fFront + 1, xAC + acL + 1.8]) {
+               for (const s of [1, -1]) aaTwin(x, yA, s * zRoof, 1.5, s * 1.3);
+            }
+            for (const x of [T.xr - 1.5, (T.xr + fFront) / 2 + 3]) for (const s of [1, -1]) aaDome(x, yB, s * hwB * 0.55);
+         } else {
+            const r = clamp(B * 0.05, 0.9, 1.4);
+            for (const x of [T.xr + 2, (fFront + fBack) / 2, fBack - 3]) {
+               for (const s of [1, -1]) aaTwin(x, yD(x), s * Math.min(hwA + r * 1.3, hw(x) - r * 1.1), r, s * 1.4);
+            }
+            for (const s of [1, -1]) aaDome(T.xr - 1.5, yB, s * hwB * 0.5);
+         }
+      } else {
+         for (const x of [fFront + 1, fBack - 2]) for (const s of [1, -1]) pompom(x, yA, s * Math.min(zRoof + 0.3, hwA - 1.2), s * 0.3);
+      }
+      if (torpL && !isBB) launchers();
+   }
+
+   if (type !== 'CV') {
+      if (fwd.length && type !== 'TR') { const t = fwd[fwd.length - 1]; const x = t.x + t.r * 2.1; if (x < L * 0.4) breakwater(x); }
+      bowFittings();
    }
    // jackstaff + ensign staff
    b.cyl(0.08, 0.12, 5, L * 0.5 + (HULL_PARAMS[type]?.rake || 0.03) * L * 0.9, S.deckAt(L * 0.49), 0, mast, 4);
    b.cyl(0.08, 0.12, 6, -L * 0.5 + 0.8, S.deckAt(-L * 0.49), 0, mast, 4);
-   return { smoke, xF, xA };
+   return { smoke };
 }
 
 // ---------------- materials ----------------
@@ -527,11 +808,12 @@ export class ShipModels {
       // superfiring: a turret with another one further outboard (toward bow/stern) within reach is raised
       for (const t of tl) {
          const outboard = tl.filter(o => o !== t && Math.sign(o.x) === Math.sign(t.x) && Math.abs(o.x) > Math.abs(t.x) && Math.abs(o.x - t.x) < t.r * 4.5);
-         t.y = S.deckAt(t.x) + (outboard.length ? 2.9 : 0.25);
+         t.y = S.deckAt(t.x) + (outboard.length ? Math.max(2.6, t.r * 0.78) : 0.25);
       }
       const hullKey = `${ship.cls}|${d.type}|${d.L}|${d.B}|${tint.join(',')}|${tl.map(t => t.x.toFixed(1) + ':' + t.r.toFixed(1)).join(',')}`;
       const cols = {
-         sup: shade(tint, 1.12), dark: lin(0x2a2d31), mast: lin(0x3b3f44), win: lin(0x0b0d10), boat: lin(0xcfccc3),
+         sup: shade(tint, 1.12), plat: shade(tint, 0.86), dark: lin(0x2a2d31), mast: lin(0x3b3f44), win: lin(0x0b0d10), boat: lin(0xcfccc3),
+         cap: lin(0x17181a), capMetal: lin(0x45494e), plane: lin(0x6d7768), lamp: lin(0xe6eadc),
          deck: d.type === 'DD' || d.type === 'TR' ? lin(0x6b665e) : lin(0xa88a64),
       };
       let smoke = [];
@@ -543,7 +825,7 @@ export class ShipModels {
             const base = S.deckAt(t.x);
             if (t.y - base > 1) b.cyl(t.r * 0.9, t.r * 0.95, t.y - base, t.x, base, t.z, shade(tint, 1.02), 16);
          }
-         const res = superstructure(b, d, S, tl, cols);
+         const res = superstructure(b, d, S, tl, cols, ship);
          const g = b.build();
          g.userData.smoke = res.smoke;
          return g;
