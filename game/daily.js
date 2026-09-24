@@ -33,7 +33,7 @@ export const DAILY_MODS = [
    { id: 'fog', icon: '🌫', name: 'Dichter Nebel', text: 'Die Sichtweite ist fast halbiert — Gegner tauchen erst spät aus dem Dunst auf.', env: 'fog' },
    { id: 'storm', icon: '⛈', name: 'Sturm', text: 'Schwere See: Regenböen verdecken die Sicht, die Salven streuen stärker.', env: 'storm', squalls: 5 },
    { id: 'double', icon: '👥', name: 'Doppelte Gegner', text: 'Jede Welle ist doppelt so groß — dafür halten die Feinde nur die Hälfte aus.', double: true },
-   { id: 'torps', icon: '🐟', name: 'Nur Torpedos', text: 'Die Hauptartillerie schweigt. Torpedos laden dreimal so schnell, es kommen nur leichte Schiffe.', noMain: true, torpCd: 0.33, light: true },
+   { id: 'torps', icon: '🐟', name: 'Nur Torpedos', text: 'Die Hauptartillerie schweigt. Torpedos laden viermal so schnell, es kommen nur leichte, angeschlagene Schiffe.', noMain: true, torpCd: 0.25, light: true, hp: 0.55 },
    { id: 'glass', icon: '💥', name: 'Glaskanonen', text: 'Alle Schiffe richten 40 % mehr Schaden an — kurze, harte Gefechte.', dmg: 1.4 },
 ];
 const LIGHT = ['TB', 'DD', 'LC'];
@@ -75,6 +75,7 @@ export function buildDaily(key = dateKey()) {
       specs = specs.map(s => (s.cls === 'CV' && cv++ > 0 ? { ...s, cls: 'HC' } : s));
       // a fixed battle of three waves (no respawns, no shop): keep each wave small enough to finish
       specs = specs.slice(0, (mod.double ? 2 : 3) + i);
+      if (mod.hp) specs = specs.map(s => ({ ...s, hpMult: mod.hp }));
       if (mod.double) specs = specs.flatMap(s => [{ ...s, hpMult: 0.5 }, { ...s, hpMult: 0.5, pos: { x: s.pos.x + 160, y: s.pos.y + 160 } }]);
       return specs;
    });
