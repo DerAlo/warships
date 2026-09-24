@@ -118,6 +118,12 @@ window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
 let renderOn = true;
 window.__setRender = (on) => { renderOn = !!on; };
+// Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
+window.__setAim = (yawRel, range) => {
+   if (!P) return;
+   view.yaw = unwrapNear(P.heading + (yawRel || 0), cam3.yaw); cam3.yaw = view.yaw;
+   if (range) { view.logR = Math.log(clamp(range, cam3.rangeMin, cam3.rangeMax)); cam3.range = Math.exp(view.logR); }
+};
 
 // ------------------------------------------------------------------ adapters (contract first, old sim second)
 function gunRangeOf(p) {
