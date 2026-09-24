@@ -162,17 +162,18 @@ await shot('02-normal');   // (leaves the 3D render off until the next screensho
    check(`binocular FOV matches ${c.zoom}x`, fovOk(a.fov, c.zoom), { fov: a.fov, zoom: c.zoom });
    await shot('03-binoculars');
    await page.mouse.move(720, 405);
+   // one wheel ladder (zoom3d.js): 4x -> 2x -> out to the closest third-person view, then back in
    const zooms = [];
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await frames(2); }   // out to the widest
-   zooms.push((await ctl()).zoom);
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -100); await frames(2); await settleFov(); c = await ctl(); a = await aim(); zooms.push(c.zoom); if (!fovOk(a.fov, c.zoom)) zooms.push('fov!' + a.fov.toFixed(1)); }
-   check('wheel steps 2x/4x/8x/16x (and clamps)', JSON.stringify(zooms) === JSON.stringify([2, 4, 8, 16, 16]), zooms);
+   for (let i = 0; i < 2; i++) { await page.mouse.wheel(0, 100); await frames(2); }
+   c = await ctl(); zooms.push(c.bino ? c.zoom : 'tp');
+   for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, -100); await frames(2); await settleFov(); c = await ctl(); a = await aim(); zooms.push(c.zoom); if (!fovOk(a.fov, c.zoom)) zooms.push('fov!' + a.fov.toFixed(1)); }
+   check('wheel ladder: out of the scope, back in 2x/4x/8x/16x (and clamps)', JSON.stringify(zooms) === JSON.stringify(['tp', 2, 4, 8, 16, 16]), zooms);
    await shot('04-binoculars-16x');
    // sensitivity scales with FOV: the same mouse delta turns much less at 16x
    const y0 = (await aim()).targetYaw;
    await look(100, 0);
    const dyaw16 = (await aim()).targetYaw - y0;
-   for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 100); await frames(2); }
+   for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 100); await frames(2); }   // 16x -> 2x
    await press('Shift');
    await waitFor(() => Math.abs(window.__aim().fov - 55) < 0.5, 15000);
    const y1 = (await aim()).targetYaw;

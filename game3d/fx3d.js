@@ -67,6 +67,15 @@ vec3 surfPoint(vec2 p) {
    vec3 o = waveDisp(p, dist, damp);
    return vec3(p.x + o.x, o.y + 0.15 + dist * 0.0006, p.y + o.z);
 }
+// Pure depth bias: slide the point along its own view ray toward the camera (same pixel, nearer
+// depth). The coarse strips interpolate the swell linearly between sparse vertices, so the finely
+// tessellated ocean poked through them as dark crest-shaped holes; at grazing angles a 1 m
+// height error is several metres along the ray, hence the distance term.
+vec3 toCam(vec3 wp) {
+   vec3 v = cameraPosition - wp;
+   float d = length(v);
+   return wp + v / max(d, 1.0) * min(d * 0.5, 1.5 + d * 0.004);
+}
 `;
 
 // ---------------- billboard particles ----------------
@@ -318,7 +327,7 @@ void main() {
    vec2 l = position.xz * iB.xy;
    float c = cos(iA.z), s = sin(iA.z);
    vec2 p = iA.xy + vec2(c * l.x - s * l.y, s * l.x + c * l.y);
-   vec3 wp = surfPoint(p);
+   vec3 wp = toCam(surfPoint(p));
    vUv = position.xz + 0.5;
    vWP = wp; vPlane = p; vB = iB; vType = iA.w; vAlpha = iC;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
@@ -447,7 +456,7 @@ varying vec3 vB;
 varying vec3 vWP;
 varying vec2 vPlane;
 void main() {
-   vec3 wp = surfPoint(position.xz);
+   vec3 wp = toCam(surfPoint(position.xz));
    vA = aA; vB = aB; vWP = wp; vPlane = position.xz;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
@@ -471,20 +480,23 @@ void main() {
       // turbulent band about a beam wide that widens slowly; foam breaks up into streaks with age
       float washW = vB.x * (0.42 + 0.55 * u);
       float band = 1.0 - smoothstep(washW * 0.35, washW, m);
-      float thr = 0.34 + 0.5 * u;
+      float thr = 0.42 + 0.42 * u;
       float wash = band * smoothstep(thr, thr + 0.25, n) * pow(1.0 - u, 1.8);
-      float churn = (1.0 - smoothstep(0.0, 0.1, u)) * (1.0 - smoothstep(0.15, 0.7, m / max(vB.x, 1.0)));   // white water at the stern
+      // white water at the stern: broken up by the noise and faded well inside the strip edge (a
+      // solid full-width churn read as a white slab glued to the transom)
+      float churn = (1.0 - smoothstep(0.0, 0.08, u)) * (1.0 - smoothstep(0.05, 0.42, m / max(vB.x, 1.0)))
+         * smoothstep(0.2, 0.6, n + 0.25 * (1.0 - u / 0.08));
       // screw-race foam line down the centre: outlasts the wash so the track reads from far off
       float centre = (1.0 - smoothstep(0.08, 0.5, m / max(washW, 1.0))) * pow(1.0 - u, 1.25) * smoothstep(0.22, 0.55, n + 0.35 * (1.0 - u));
       float arm = exp(-pow((as - 0.9) / 0.06, 2.0)) * (1.0 - smoothstep(0.03, 0.4, u)) * smoothstep(0.3, 0.7, n);
-      foam = (wash * 0.8 + churn * 0.9 + arm * 0.45 + centre * 0.7) * vB.y;
+      foam = (wash * 0.75 + churn * 0.7 + arm * 0.45 + centre * 0.45) * vB.y;
       aer = band * (1.0 - u) * vB.y;           // aerated, lighter water under the foam
    } else {
       float core = 1.0 - smoothstep(0.15, 1.0, as);
       foam = core * (1.0 - u) * smoothstep(0.25, 0.65, n + 0.25 * (1.0 - u)) * vB.y;
       aer = core * (1.0 - u) * vB.y * 0.6;
    }
-   foam = clamp(foam, 0.0, 1.0);
+   foam = 1.0 - exp(-1.5 * foam);          // soft saturation: overlapping terms no longer merge into a flat white slab
    float a = max(foam, aer * 0.22);
    if (a < 0.004) discard;
    vec3 col = mix(uFoamCol * vec3(0.5, 0.82, 0.84), uFoamCol, foam / a);
@@ -581,7 +593,7 @@ class Wakes {
             sp /= tk;
             const u = Math.min(1, age / life);
             // Kelvin spread, capped: past ~12 s the arms have faded and a huge fan only folds over itself in turns
-            const hw = t.kind === 0 ? t.beam * 0.55 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
+            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
             const nx = -dz, nz = dx;
             for (let s = -1; s <= 1; s += 2) {
                P[v * 3] = x + nx * hw * s; P[v * 3 + 1] = 0; P[v * 3 + 2] = z + nz * hw * s;
@@ -683,7 +695,7 @@ void main() {
    float ang = position.x, k = position.y;
    float rad = k < 0.5 ? uR + uW * 0.5 : k < 1.5 ? uR - uW * 0.5 : uR - uW * 0.5 - min(90.0, uR * 0.3);
    vec2 p = uC + vec2(cos(ang), sin(ang)) * rad;
-   vec3 wp = surfPoint(p);
+   vec3 wp = toCam(surfPoint(p));
    vAng = ang; vK = k; vWP = wp;
    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
@@ -1433,13 +1445,18 @@ export class FX {
          if (!c || !c.c) continue;
          let st = this._clouds.get(c);
          if (!st) {
-            const n = 40;
+            const n = 44;
             const rng = mulberry32((Math.abs(Math.round(c.c.x * 7 + c.c.y * 13)) + 1) >>> 0);
             st = { n, ox: new Float32Array(n), oz: new Float32Array(n), h: new Float32Array(n), s: new Float32Array(n), ph: new Float32Array(n) };
+            // each cloud is a billowing mound: central puffs stack high, rim puffs hug the water,
+            // so a laid trail reads as a chain of heaps instead of one flat-topped wall
+            const tall = 0.6 + rng() * 0.4;
             for (let i = 0; i < n; i++) {
                const a = rng() * TAU, rad = Math.sqrt(rng()) * 0.85;
                st.ox[i] = Math.cos(a) * rad; st.oz[i] = Math.sin(a) * rad;
-               st.h[i] = 0.25 + rng() * 0.75; st.s[i] = 0.55 + rng() * 0.5; st.ph[i] = rng() * TAU;
+               const mound = 1 - (rad / 0.85) ** 2;
+               st.h[i] = 0.08 + 0.92 * tall * mound * (0.45 + 0.55 * rng());
+               st.s[i] = 0.55 + rng() * 0.5; st.ph[i] = rng() * TAU;
             }
             this._clouds.set(c, st);
          }
@@ -1451,14 +1468,18 @@ export class FX {
          const inside = 0.3 + 0.7 * clamp((cd - R * 0.6) / (R * 0.9), 0, 1);
          const alpha = clamp(life / 5, 0, 1) * aIn * 0.7 * inside;
          if (alpha <= 0.01) continue;
-         const Hs = clamp(R * 0.35, 18, 70);
+         const Hs = clamp(R * 0.36, 18, 165);
          for (let i = 0; i < st.n; i++) {
             const p = P.t();
+            const hi = st.h[i];
             const sw = Math.sin(t * 0.13 + st.ph[i]) * 0.04;
             p.x = c.c.x + (st.ox[i] + sw) * R; p.z = c.c.y + (st.oz[i] - sw) * R;
-            p.y = Hs * st.h[i];
-            p.s0 = p.s1 = R * 0.7 * st.s[i] + 18;
-            p.r = 0.66; p.g = 0.67; p.b = 0.69; p.a = alpha; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
+            p.y = Hs * hi + Math.sin(t * 0.09 + st.ph[i] * 2) * 4;
+            // big soft base, smaller puffs on top for a lumpy crown
+            p.s0 = p.s1 = R * (0.72 - 0.34 * hi) * st.s[i] + 18;
+            // underside in its own shadow, sunlit crown
+            const g = 0.54 + 0.2 * hi;
+            p.r = g; p.g = g + 0.01; p.b = g + 0.025; p.a = alpha; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
             p.rot = st.ph[i] + t * 0.02 * (i % 2 ? 1 : -1);
             P.emit(true);
          }

@@ -752,6 +752,13 @@ function makeShipMaterial(deckH) {
             float fw = fwidth(pz);
             gap = mix(gap, 0.9, clamp(fw * 2.0, 0.0, 1.0));
             diffuseColor.rgb *= tone * (0.62 + 0.38 * gap);
+         }`],
+         // readability cheat as in WoWs: spotted ships keep a darker silhouette through the haze
+         // than the islands and sea around them (overcast/rain made 10+ km targets vanish)
+         ['gl_FragColor.rgb = atmApply(gl_FragColor.rgb, vAtmWP);', `{
+            vec3 aV = vAtmWP - cameraPosition;
+            float aF = atmFogAmount(length(aV), cameraPosition.y, vAtmWP.y);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, atmFogColor(aV), aF * 0.7);
          }`]],
    });
    mat.userData.uBoot = uBoot;

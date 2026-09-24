@@ -30,12 +30,42 @@ function hullDims(ship) {
    return { L, deckH };
 }
 
+// Camera rig on the aim bearing for aim range R, before collision (back = metres behind the
+// ship's centre, negative = ahead; y = height).
+// Third person: orbit elevation falls as the aim range grows (steep at 1 km, shallow near max
+// range) so the own ship sits low on the screen and the horizon shows for long shots.
+// Binoculars: ahead of the bow (the own hull stays behind the lens, as in WoWs), raised with
+// range so the sea at the aim point is seen at >= ~1 deg depression -- splashes stay readable.
+function rigAt(L, deckH, R, s, cs) {
+   const rMin = cs.rangeMin || 1000, rMax = cs.rangeMax || 20000;
+   const tR = clamp01(Math.log(R / rMin) / Math.log(Math.max(1.5, rMax / rMin)));
+   const elev = lerp(20, 8.5, tR) * DEG;
+   const D = Math.max(cs.dist || L * 2, L * 0.6 + 40);
+   const pivotH = deckH * 1.4 + 6;
+   const fwd = L * 0.5 + 25;
+   const tpBack = Math.cos(elev) * D, tpY = pivotH + Math.sin(elev) * D;
+   const biBack = -fwd, biY = Math.max(deckH * 2.6 + 12, (R - fwd) * Math.tan(1.0 * DEG));
+   return { tpBack, tpY, biBack, biY, pivotH, D, back: lerp(tpBack, biBack, s), y: lerp(tpY, biY, s) };
+}
+
+// How fast a sea point at the aim range slides past the crosshair when the aim range changes:
+// |d(depression relative to the crosshair) / d(ln R)| in rad for the current view blend. main3d
+// divides the vertical mouse sensitivity by it, so a target moves under the crosshair at a steady
+// screen rate in every view and zoom (plain log-range steps froze the picture at 16x).
+export function aimGain(ship, cs, R, scopeT = 0) {
+   const { L, deckH } = hullDims(ship);
+   const rig = rigAt(L, deckH, R * Math.exp(0.01), smooth(clamp01(scopeT)), cs);
+   const dep = (r) => Math.atan2(rig.y, Math.max(1, r + rig.back));
+   return Math.abs(dep(R) - dep(R * Math.exp(0.01))) / 0.01;
+}
+
 export class ChaseCamera {
    constructor(camera, sun) {
       this.camera = camera;
       this.sun = sun || null;
       this.scopeT = 0;           // 0 = third person, 1 = binoculars (smoothed blend)
       this._zoomS = 1;           // smoothed magnification
+      this._zoomV = 0;           // its rate, d ln(zoom) / dt
       this._shakeMag = 0;
       this._ray = new THREE.Raycaster();
       this._v = new THREE.Vector3();
@@ -61,7 +91,10 @@ export class ChaseCamera {
       this.scopeT = clamp01(this.scopeT + (cs.bino ? 1 : -1) * dt / 0.16);
       const s = smooth(this.scopeT);
       const zTarget = cs.bino ? (cs.zoom || 4) : 1;
-      this._zoomS = Math.exp(lerp(Math.log(this._zoomS), Math.log(zTarget), 1 - Math.exp(-dt / 0.09)));
+      // critically damped in log space (like zoom3d's distance): eased, no overshoot, ~0.3 s a step
+      const zw = 26, ze = Math.log(this._zoomS / zTarget), zk = Math.exp(-zw * dt), zm = (this._zoomV + zw * ze) * dt;
+      this._zoomV = (this._zoomV - zw * zm) * zk;
+      this._zoomS = zTarget * Math.exp((ze + zm) * zk);
       const fov = fovForZoom(lerp(1, this._zoomS, s));
       if (Math.abs(cam.fov - fov) > 1e-3) { cam.fov = fov; cam.updateProjectionMatrix(); }
 
@@ -71,23 +104,10 @@ export class ChaseCamera {
       const px = p.pos.x, pz = p.pos.y;
       const Ax = px + cx * R, Az = pz + cz * R;
 
-      // ---- third-person: orbit behind the ship on the aim bearing. Elevation falls as the
-      // aim range grows (steep at 1 km, shallow near max range) so the own ship always sits
-      // in the lower part of the screen and the horizon is visible for long shots.
-      const rMin = cs.rangeMin || 1000, rMax = cs.rangeMax || 20000;
-      const tR = clamp01(Math.log(R / rMin) / Math.log(Math.max(1.5, rMax / rMin)));
-      const elev = lerp(20, 8.5, tR) * DEG;
-      const D = Math.max(cs.dist || L * 2, L * 0.6 + 40);
-      const pivotH = deckH * 1.4 + 6;
-      const tpX = px - cx * Math.cos(elev) * D, tpZ = pz - cz * Math.cos(elev) * D;
-      const tpY = pivotH + Math.sin(elev) * D;
-
-      // ---- binoculars: in front of the bow on the aim bearing (the own hull stays behind
-      // the lens, WoWs hides it too) and raised with range so the sea at the aim point is
-      // seen at >= ~1 deg depression -- splashes stay readable in depth at 15+ km.
-      const fwd = L * 0.5 + 25;
-      const biY = Math.max(deckH * 2.6 + 12, (R - fwd) * Math.tan(1.0 * DEG));
-      const biX = px + cx * fwd, biZ = pz + cz * fwd;
+      const rig = rigAt(L, deckH, R, s, cs);
+      const tpX = px - cx * rig.tpBack, tpZ = pz - cz * rig.tpBack, tpY = rig.tpY;
+      const biX = px - cx * rig.biBack, biZ = pz - cz * rig.biBack, biY = rig.biY;
+      const pivotH = rig.pivotH, D = rig.D;
 
       let camX = lerp(tpX, biX, s), camY = lerp(tpY, biY, s), camZ = lerp(tpZ, biZ, s);
 

@@ -190,7 +190,7 @@ function decide(b, w, d) {
          want = dd > cap.r * 0.5 ? Math.atan2(cap.pos.y - b.pos.y, cap.pos.x - b.pos.x) : b.heading + 0.6 * ai.angSide;
          tel = dd > cap.r ? 4 : 2;
       } else if (tgt) {
-         ({ want, tel } = engage(b, w, tgt, d));
+         ({ want, tel } = engage(b, w, tgt, d, threat));
       } else {
          // nothing visible: head for the last known enemy position / hunted ship / enemy centroid
          const goal = searchGoal(b, w);
@@ -223,12 +223,15 @@ function escapeHeading(b, w) {
 
 // Combat manoeuvring: close in angled, fight in the preferred band showing an angled broadside,
 // kite away when too close. DDs keep outside their own detection until torpedoes are ready.
-function engage(b, w, tgt, d) {
+function engage(b, w, tgt, d, threat) {
    const ai = b.ai;
    const dd = Math.sqrt(dist2(b.pos, tgt.pos));
    const brg = Math.atan2(tgt.pos.y - b.pos.y, tgt.pos.x - b.pos.x);
    let [lo, hi] = ai.pref;
    if (ai.aggro) { lo /= ai.aggro; hi /= ai.aggro; }
+   // an unescorted freighter shoots back with nothing: close in instead of kiting out of its
+   // (small) detection range and losing it again
+   if (tgt.type === 'TR' && !threat?.near) { lo = 1500; hi = Math.min(hi, 5500); }
    const s = ai.angSide;
    if (ai.role === 'dd') {
       const tr = b.torps ? b.cfg.torp.range * 0.8 : 0;
@@ -343,7 +346,7 @@ function separation(b, w, want) {
 // arena edge.
 function avoidTerrain(b, w, want) {
    const look = Math.max(1000, Math.abs(b.speed) * 22 + b.cfg.hull.L * 2);
-   const lim = w.arena - 700;
+   const lim = w.arena - 700, wall = w.arena - 60;
    const near = w.obstacles.filter(o => dist2(o.c, b.pos) < (look + (o.rMax || o.r * 1.6) + 200) ** 2);
    // candidate paths replay steer() with the real rudder shift and yaw inertia: a BB laid hard over
    // one way keeps swinging that way for ~10 s after the order (a straight ray or a fixed lag
@@ -362,9 +365,12 @@ function avoidTerrain(b, w, want) {
          x += Math.cos(hd) * ds; y += Math.sin(hd) * ds;
          const p = { x, y };
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
-            // allow heading back inwards when already outside the limit
-            if (Math.abs(p.x) > Math.abs(b.pos.x) + 1 && Math.abs(p.x) > lim) return false;
-            if (Math.abs(p.y) > Math.abs(b.pos.y) + 1 && Math.abs(p.y) > lim) return false;
+            // allow heading back inwards when already outside the limit; points are clamped to the
+            // physical arena wall (ship.js) first: a hull pinned against the wall nose-first would
+            // otherwise see every turn-out path "go further out" and stay boxed in there for good
+            const ax = Math.min(Math.abs(p.x), wall), ay = Math.min(Math.abs(p.y), wall);
+            if (ax > Math.abs(b.pos.x) + 1 && ax > lim) return false;
+            if (ay > Math.abs(b.pos.y) + 1 && ay > lim) return false;
          }
          for (const o of near) if (obstacleT(o, p) < 1.12) return false;
       }
@@ -390,6 +396,8 @@ function avoidTerrain(b, w, want) {
    // boxed in: turn away from the closest island centre
    let best = null, bd = Infinity;
    for (const o of near) { const dd = dist2(o.c, b.pos); if (dd < bd) { bd = dd; best = o; } }
+   // (near the arena edge the way out is always inwards: "away from the island" can point at the wall)
+   if (Math.abs(b.pos.x) > lim || Math.abs(b.pos.y) > lim) return Math.atan2(-b.pos.y, -b.pos.x);
    return best ? Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x) : Math.atan2(-b.pos.y, -b.pos.x);
 }
 

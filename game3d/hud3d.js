@@ -43,7 +43,34 @@ export class Overlay3D {
          if (ui.frozenPt) this._frozen(ui.frozenPt);
          this._reticle(ui);
          this._torpWarn(ui);
+         if (ui.zoomCueA > 0.01) this._zoomCue(ui);
       }
+   }
+
+   // ------------------------------------------------------------ zoom ladder cue
+   // Brief after a wheel/Shift change: a slim ladder left of the reticle (bottom = widest
+   // third-person view, top = 16x) with the current rung and its name.
+   _zoomCue(ui) {
+      const g = this.g, n = ui.zoomLadder || 10, tp = ui.zoomTP ?? 5, lv = ui.zoomLevel || 0;
+      // just outside the mil scale (at most W*0.2 each side), centred on the horizon line
+      const x = Math.round(Math.max(110, this.W * 0.3 - 30)) + 0.5, yB = this.H / 2 + 44;
+      const yOf = (i) => yB - i * 9 - (i > tp ? 7 : 0);   // a gap between camera and scope rungs
+      g.save();
+      g.globalAlpha = clamp01(ui.zoomCueA) * 0.9;
+      g.shadowColor = 'rgba(0,0,0,0.8)'; g.shadowBlur = 3;
+      g.lineWidth = 2;
+      for (let i = 0; i < n; i++) {
+         const on = Math.abs(i - lv) < 0.5, w = i > tp ? 10 : 6;
+         g.strokeStyle = on ? '#eef6ff' : i > tp ? 'rgba(210,235,255,0.45)' : 'rgba(210,235,255,0.28)';
+         g.beginPath(); g.moveTo(x - w, yOf(i)); g.lineTo(x + w, yOf(i)); g.stroke();
+      }
+      // exact (fractional) position for touchpad glides: a small pointer
+      const yl = lv > tp ? yOf(Math.round(lv)) : yB - lv * 9;
+      g.fillStyle = '#eef6ff';
+      g.beginPath(); g.moveTo(x + 14, yl); g.lineTo(x + 20, yl - 4); g.lineTo(x + 20, yl + 4); g.closePath(); g.fill();
+      g.font = 'bold 13px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
+      g.fillText(lv > tp ? 'Fernglas ' + ui.zoom + '×' : 'Kamera', x - 16, yl);
+      g.restore();
    }
 
    // ------------------------------------------------------------ reticle
@@ -364,15 +391,15 @@ export class Overlay3D {
       const R0 = Math.min(W, H) * 0.47;
       g.save();
       g.globalAlpha = a;
-      const grd = g.createRadialGradient(cx, cy, R0 * 0.82, cx, cy, R0 * 1.12);
+      // soft optical vignette instead of a hard black tube: like WoWs, the scope view keeps the
+      // whole screen usable (targets at the edge stay visible for leading and spotting)
+      const grd = g.createRadialGradient(cx, cy, R0 * 0.95, cx, cy, Math.hypot(W, H) * 0.56);
       grd.addColorStop(0, 'rgba(0,0,0,0)');
-      grd.addColorStop(0.55, 'rgba(0,4,8,0.75)');
-      grd.addColorStop(1, 'rgba(0,4,8,0.94)');
+      grd.addColorStop(1, 'rgba(0,4,8,0.55)');
       g.fillStyle = grd;
       g.fillRect(0, 0, W, H);
-      // lens ring + fine cross hairs to the lens edge
-      g.strokeStyle = 'rgba(190,220,255,0.35)'; g.lineWidth = 1;
-      g.beginPath(); g.arc(cx, cy, R0 * 0.9, 0, TAU); g.stroke();
+      // fine cross hairs out to the reticle radius
+      g.lineWidth = 1;
       g.strokeStyle = 'rgba(210,235,255,0.35)';
       g.beginPath();
       g.moveTo(cx - R0 * 0.9, cy); g.lineTo(cx - Math.min(W * 0.2, R0 * 0.5), cy);

@@ -508,7 +508,7 @@ const DEFS = [
    // ------------------------------------------------------------ 8. commerce raid
    {
       id: 'raid', name: 'Handelskrieg', subtitle: 'Nordatlantik · Unternehmen Berlin',
-      briefing: 'Ein britischer Geleitzug aus sechs Frachtern läuft nach Osten, gesichert von einem Kreuzer und zwei Zerstörern. ' +
+      briefing: 'Ein britischer Geleitzug aus sechs Frachtern läuft nach Osten, gesichert von einem Kreuzer und Zerstörern. ' +
          'Gemeinsam mit der Gneisenau sollen Sie mindestens vier Frachter versenken, bevor sie den Schutz der Küste erreichen. ' +
          'Vorsicht: Die Funkaufklärung meldet ein britisches Schlachtschiff, das dem Geleitzug zu Hilfe eilt.',
       env: { time: 'day', weather: 'rain' }, type: 'raid', playableShips: null, recommendedShip: 'Hipper',
@@ -525,16 +525,19 @@ const DEFS = [
          const route = [P(-6000, 4500), P(0, 2200), P(6000, 800), P(11600, -2600)];
          S.exit = { x: 11000, y: -2400, r: 1300 };
          S.transports = [];
+         // light, half-laden freighters (hpMult): four kills must be possible while the escort still fights
          for (let i = 0; i < 6; i++) {
             S.transports.push(add(w, 'Transport', 'enemy', P(-10800 + (i >> 1) * -700, 5600 + (i & 1) * 700), -0.2,
-               { telegraph: 4, speedKn: 11, ai: { route, routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
+               { telegraph: 4, speedKn: 9, hpMult: 0.7 * w.difficulty.botHP, ai: { route, routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
          }
          add(w, 'Fiji', 'enemy', P(-9200, 4500), -0.2, { ai: { escortId: S.transports[0].id } });
          add(w, 'Jervis', 'enemy', P(-9700, 7300), -0.2, { ai: { escortId: S.transports[1].id } });
-         add(w, 'Jervis', 'enemy', P(-12000, 5200), -0.2, { ai: { escortId: S.transports[4].id } });
-         add(w, pickShip(this, shipKey), 'player', P(-3000, -9000), 1.2, { isPlayer: true });
-         add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau' });
-         later(S, 240, () => {
+         if (w.difficulty.key === 'hard') add(w, 'Jervis', 'enemy', P(-12000, 5200), -0.2, { ai: { escortId: S.transports[4].id } });
+         // huntId: the raiders go for the freighters, not the escorts (the player's only matters for
+         // the autopilot); the heavy cover arrives after 6 min so the first strike can land
+         add(w, pickShip(this, shipKey), 'player', P(-3000, -9000), 1.2, { isPlayer: true, ai: { huntId: S.transports[2].id } });
+         add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau', ai: { huntId: S.transports[0].id } });
+         later(S, 360, () => {
             w.message('HMS Rodney und HMS Sussex nähern sich aus Osten!', 'warn');
             add(w, 'Rodney', 'enemy', P(12000, 2500), Math.PI, { name: 'HMS Rodney', minDist: 12000 });
             add(w, 'Norfolk', 'enemy', P(12000, 4200), Math.PI, { name: 'HMS Sussex', minDist: 12000 });

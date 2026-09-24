@@ -10,7 +10,7 @@ import { angleDelta, clamp, clamp01, lerp, TAU, DEG } from './utils.js';
 import { WORLD, SHIPS } from './config.js';
 import { Input3D } from './input3d.js';
 import { Renderer3D } from './render3d.js';
-import { BASE_FOV } from './camera3d.js';
+import { BASE_FOV, aimGain } from './camera3d.js';
 import { HudCanvases3D, shipType, TYPE_NAME, isAlly, isVisible, shipLen, torpSide, torpHeading, displayKn } from './minimap3d.js';
 import { Hud } from './hud.js';
 import { Overlay3D } from './hud3d.js';
@@ -21,14 +21,18 @@ import * as ai from './ai.js';
 import * as combat from './combat.js';
 import { getMission } from './missions.js';
 import { Menu3D } from './menu3d.js';
+import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
 const KN = WORLD.KN_TO_MS || 1 / 1.94384;     // m/s per knot (old sim: real knots)
 const ALIGN_TOL = 3 * DEG;                    // old sim: turret counts as aligned within this
 const FIRE_TOL = WORLD.FIRE_TOL || WORLD.ALIGN_TOL || ALIGN_TOL;
-const ZOOMS = [2, 4, 8, 16];
-const YAW_SENS = 0.0028, RANGE_SENS = 0.0025; // rad/px and log(range)/px at base FOV
+const YAW_SENS = 0.0028;                      // rad/px at base FOV
+// Vertical: the view tilts VSENS rad/px (scaled by FOV) at the aim range -- screen-steady like the
+// yaw -- converted to a range step through camera3d.aimGain; RANGE_CAP bounds the log-range step
+// where the sea is nearly edge-on (third person at long range), so 1x stays finely adjustable.
+const VSENS = 0.0011, RANGE_CAP_TP = 0.0042, RANGE_CAP_BINO = 0.02;
 const AIM_TAU = 0.035;                        // aim smoothing time constant (s)
 const TELE_NAMES = { '-1': 'Rückwärts', 0: 'Stopp', 1: '1/4', 2: '1/2', 3: '3/4', 4: 'Voll' };
 const RUDDER_NAMES = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'halb Stb', 2: 'hart Stb' };
@@ -80,10 +84,11 @@ const cam3 = { yaw: 0, range: 3000, dist: 500, bino: false, zoom: 4, rangeMin: 1
 const view = { yaw: 0, logR: Math.log(3000) };   // raw (unsmoothed) mouse targets
 const frozen = { yaw: 0, range: 3000 };           // gun aim held during free look
 const ctl = {
-   telegraph: 0, rudder: 0, ammo: 'HE', mode: 'guns', spread: 'narrow', zoomIdx: 1,
+   telegraph: 0, rudder: 0, ammo: 'HE', mode: 'guns', spread: 'narrow',
    lockId: null, lead: true, mapOpen: false, board: false, help: false,
-   hold: { W: 0, S: 0, A: 0, D: 0 }, wheelAcc: 0,
+   hold: { W: 0, S: 0, A: 0, D: 0 },
 };
+const zoom = new ZoomLadder();          // wheel ladder: third-person distance <-> 2x..16x scope
 const aim = { point: { x: 0, y: 0 }, snapped: null, gunRange: 15000, flight: 0, yaw: 0, range: 3000, out: false };
 let consEmu = null;                   // old-sim consumable emulation
 let flightCal = null;                 // { k } calibrated from the sim's own shell durations
@@ -93,6 +98,12 @@ const fx = {
    ribbons: new Map(), dmg: 0, feed: [], msgs: [], shellSeen: new Set(), effSeen: new WeakSet(),
    whistled: new Set(), torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0,
 };
+// Player settings (per browser). sens scales both mouse axes.
+const SETTINGS_KEY = 'warships3d.settings.v1';
+const settings = { sens: 1 };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* private mode */ }
+settings.sens = clamp(Number(settings.sens) || 1, 0.3, 2.5);
+function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
 let turretCache = [];
 let lastMarkers = [];
 let fired = { shots: 0, salvos: 0, torps: 0 };
@@ -120,6 +131,11 @@ window.__turrets = () => turretCache.map(t => ({ state: t.state, reload: t.reloa
 window.__cons = () => consumables().map(c => ({ slot: c.slot, key: c.key, charges: c.charges, cd: c.cd, active: c.active }));
 window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
+window.__zoom3d = () => ({
+   level: zoom.level, tp: zoom.tp, bino: zoom.bino, zoom: zoom.zoom, dist: zoom.dist, distTarget: zoom.distTarget,
+   acc: zoom.acc, scopeT: renderer.cam?.scopeT ?? 0, fov: renderer.camera.fov,
+   cam: { x: renderer.camera.position.x, y: renderer.camera.position.y, z: renderer.camera.position.z },
+});
 let renderOn = true;
 window.__setRender = (on) => { renderOn = !!on; };
 // Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
@@ -339,7 +355,7 @@ function startGame(opts = {}) {
    // controls
    ctl.telegraph = P.telegraph ?? 0; ctl.rudder = P.rudderCmd ?? 0;
    ctl.ammo = P.ammo || 'HE'; ctl.mode = 'guns'; ctl.spread = P.torps?.spread || 'narrow';
-   ctl.zoomIdx = 1; ctl.lockId = null; ctl.mapOpen = false; ctl.board = false; ctl.wheelAcc = 0;
+   ctl.lockId = null; ctl.mapOpen = false; ctl.board = false;
    ctl.lead = difficulty !== 'hard';
    for (const k in ctl.hold) ctl.hold[k] = 0;
    consEmu = simv.newCons ? null : makeConsEmu(P);
@@ -359,7 +375,9 @@ function startGame(opts = {}) {
    cam3.rangeMax = Math.min(aim.gunRange * 1.12, Math.max(20000, aim.gunRange * 1.02));
    const R0 = clamp(aim.gunRange * 0.6, cam3.rangeMin, cam3.rangeMax);
    view.yaw = P.heading; view.logR = Math.log(R0);
-   cam3.yaw = view.yaw; cam3.range = R0; cam3.dist = Math.max(150, L * 2); cam3.bino = false; cam3.zoom = ZOOMS[ctl.zoomIdx];
+   cam3.yaw = view.yaw; cam3.range = R0; zoom.reset(L); cam3.dist = zoom.dist; cam3.bino = false; cam3.zoom = zoom.zoom;
+   // the last match may have ended in the scope: snap the lens back instead of blending out
+   if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
@@ -383,9 +401,11 @@ function endGame() {
    menu.showResults(world, lastOpts || resolveOpts({}), { ribbons: fx.ribbons, ribbonNames: RIBBON_NAMES });
 }
 
+let pausedAt = 0;
 function pause() {
    if (phase !== 'playing') return;
    phase = 'paused';
+   pausedAt = performance.now();
    input.gameActive = false;
    input.releaseLock();
    input.mouse.down = false;
@@ -400,6 +420,8 @@ function resume() {
    audio.resume();
 }
 input.onLockLost = () => { if (phase === 'playing') pause(); };
+// The battle wheel zooms only with no map / overlay up; otherwise the page keeps the event.
+input.wheelGate = () => phase === 'playing' && !ctl.mapOpen && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
    phase = 'menu';
@@ -450,20 +472,12 @@ function frameInput(dt) {
    // --- consumables
    for (const k of CONS_SLOTS) if (inp.tapped(k)) useConsumable(k);
 
-   // --- binoculars + wheel
-   if (inp.tapped('SHIFT')) { cam3.bino = !cam3.bino; audio.uiClick(); }
-   if (!ctl.mapOpen && inp.mouse.wheel) {
-      if (cam3.bino) {
-         ctl.wheelAcc += inp.mouse.wheel;
-         while (ctl.wheelAcc <= -1) { ctl.wheelAcc += 1; ctl.zoomIdx = Math.min(ZOOMS.length - 1, ctl.zoomIdx + 1); }
-         while (ctl.wheelAcc >= 1) { ctl.wheelAcc -= 1; ctl.zoomIdx = Math.max(0, ctl.zoomIdx - 1); }
-      } else {
-         const L = hullL(p);
-         cam3.dist = clamp(cam3.dist * Math.pow(1.12, inp.mouse.wheel), Math.max(150, L * 0.9), Math.max(600, L * 5));
-      }
-   }
-   if (Math.abs(ctl.wheelAcc) < 1 && !inp.mouse.wheel) ctl.wheelAcc *= 0.9;
-   cam3.zoom = ZOOMS[ctl.zoomIdx];
+   // --- zoom ladder (zoom3d.js): the wheel runs third-person distance -> 2x..16x scope, Shift
+   // jumps in/out on the same state. Only the camera moves: bearing and range stay put.
+   if (inp.tapped('SHIFT')) { zoom.toggle(); audio.uiClick(); }
+   if (!ctl.mapOpen && inp.mouse.wheel && zoom.wheel(inp.mouse.wheel)) audio.uiClick();
+   zoom.update(dt);
+   cam3.bino = zoom.bino; cam3.zoom = zoom.zoom; cam3.dist = zoom.dist;
 
    // --- free look (C or RMB): the camera roams, the guns hold the last aim
    const wantFree = inp.down('C') || inp.mouse.right;
@@ -475,9 +489,19 @@ function frameInput(dt) {
    if (!ctl.mapOpen) {
       const fov = renderer.camera.fov || BASE_FOV;
       const k = Math.tan(fov * DEG / 2) / Math.tan(BASE_FOV * DEG / 2);
-      const dx = clamp(inp.mouse.dx, -4000, 4000), dy = clamp(inp.mouse.dy, -4000, 4000);
+      const dx = clamp(inp.mouse.dx, -4000, 4000) * settings.sens, dy = clamp(inp.mouse.dy, -4000, 4000) * settings.sens;
       view.yaw += dx * YAW_SENS * k;
-      view.logR = clamp(view.logR - dy * RANGE_SENS * k, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+      if (dy) {
+         const st = renderer.cam?.scopeT ?? 0;
+         const cap = lerp(RANGE_CAP_TP, RANGE_CAP_BINO, clamp01(st));
+         // integrate in a few sub-steps: the gain changes along a long mouse sweep
+         const n = Math.min(12, Math.ceil(Math.abs(dy) / 40));
+         for (let i = 0; i < n; i++) {
+            const g = Math.max(1e-4, aimGain(p, cam3, Math.exp(view.logR), st));
+            const step = Math.min(cap, VSENS * k / g) * (dy / n);
+            view.logR = clamp(view.logR - step, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+         }
+      }
    }
    const s = 1 - Math.exp(-dt / AIM_TAU);
    cam3.yaw += (view.yaw - cam3.yaw) * s;
@@ -925,7 +949,7 @@ function pollAudio(dt) {
 
 // ------------------------------------------------------------------ render interpolation
 // Ships are drawn between the last two sim states so motion is smooth at any refresh rate.
-const prevState = new Map();
+const prevState = new WeakMap();   // keyed by Ship: finished matches' ships can be collected
 function snapshotPrev() {
    for (const s of world.ships) {
       let r = prevState.get(s);
@@ -966,6 +990,9 @@ function buildUi(dt) {
    ui.pxPerRad = H / (2 * Math.tan(fov * DEG / 2));
    ui.scopeT = renderer.cam?.scopeT || 0;
    ui.bino = cam3.bino; ui.zoom = cam3.zoom; ui.freeLook = cam3.freeLook;
+   // brief ladder cue after a zoom change (hud3d fades it out)
+   ui.zoomLevel = zoom.level; ui.zoomLadder = LADDER_LEN; ui.zoomTP = TP_STEPS;
+   ui.zoomCueA = clamp01(1.6 - zoom.sinceChange * 1.25);
    if (!p) return ui;
 
    // aim / reticle
@@ -1097,7 +1124,12 @@ function frame() {
    if (dt > 0.25) dt = 0.25;
 
    try {
-      if (world && input.tapped('P')) { if (phase === 'playing') pause(); else if (phase === 'paused') resume(); }
+      // Esc both drops the pointer lock (-> pause) and may arrive as a key tap in the same frame:
+      // that tap must not resume the pause it just caused.
+      if (world && input.tapped('P')) {
+         if (phase === 'playing') pause();
+         else if (phase === 'paused' && performance.now() - pausedAt > 400) resume();
+      }
       if (phase === 'playing' && world) {
          frameInput(dt);
          tickConsEmu(dt);
@@ -1181,6 +1213,15 @@ menu = new Menu3D($('menu'), $('end'), {
 click('btn-how-close', () => { $('howto').classList.add('hidden'); audio.uiClick(); });
 click('btn-resume', resume);
 click('btn-quit', toMenu);
+{
+   const sl = $('sens'), lab = $('sens-val');
+   const show = () => { if (lab) lab.textContent = Math.round(settings.sens * 100) + ' %'; };
+   if (sl) {
+      sl.value = String(Math.round(settings.sens * 100));
+      sl.addEventListener('input', () => { settings.sens = clamp(Number(sl.value) / 100, 0.3, 2.5); show(); saveSettings(); });
+   }
+   show();
+}
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };
 window.addEventListener('pointerdown', gesture);
