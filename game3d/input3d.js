@@ -11,7 +11,9 @@ const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R'
 export class Input3D {
    constructor(canvas) {
       this.canvas = canvas;
-      this.gameActive = false;   // main3d sets this; gates preventDefault + pointer lock requests
+      this._active = false;      // gameActive (accessor below): main3d sets it; gates preventDefault,
+                                 // pointer lock requests and the battle wheel listener
+      this.wheelGate = null;     // optional (event) => bool from main3d: may the wheel zoom now?
       this.keys = new Set();     // currently held
       this.pressed = new Map();  // key -> press count since the last consumeTaps()/endFrame()
                                  // (counted: at low frame rates several taps land in one frame)
@@ -66,12 +68,29 @@ export class Input3D {
          this.mouse.dx += mx;
          this.mouse.dy += my;
       });
-      this.canvas.addEventListener('wheel', (e) => {
-         e.preventDefault();
+      // Wheel = zoom ladder. On window (not the canvas) so it also works over HUD panels and
+      // without pointer lock, but only attached while a battle runs (see gameActive): menus keep
+      // compositor-fast native scrolling. wheelGate (main3d) vetoes map/overlays -> no preventDefault.
+      this._onWheel = (e) => {
+         if (this.wheelGate && !this.wheelGate(e)) return;
+         e.preventDefault();          // also stops Ctrl+wheel / pinch page zoom mid-battle
          // Normalise the three deltaModes to "notches": a classic wheel click is ~100px or 3 lines.
-         const d = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY : e.deltaY / 100;
-         this.mouse.wheel += Math.max(-3, Math.min(3, d));
-      }, { passive: false });
+         let d = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY : e.deltaY / 100;
+         // A detented click reads 100-133 px depending on OS scaling (and Chrome coalesces clicks
+         // on slow frames): snap to whole clicks so one click is one zoom step. Touchpad deltas
+         // stay fractional.
+         if (Math.abs(d) >= 0.5) d = Math.sign(d) * Math.max(1, Math.round(Math.abs(d) - 0.1));
+         this.mouse.wheel += Math.max(-4, Math.min(4, d));
+      };
+   }
+
+   get gameActive() { return this._active; }
+   set gameActive(on) {
+      on = !!on;
+      if (on === this._active) return;
+      this._active = on;
+      if (on) window.addEventListener('wheel', this._onWheel, { passive: false });
+      else { window.removeEventListener('wheel', this._onWheel); this.mouse.wheel = 0; }
    }
 
    requestLock() {

@@ -21,13 +21,13 @@ import * as ai from './ai.js';
 import * as combat from './combat.js';
 import { getMission } from './missions.js';
 import { Menu3D } from './menu3d.js';
+import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
 const KN = WORLD.KN_TO_MS || 1 / 1.94384;     // m/s per knot (old sim: real knots)
 const ALIGN_TOL = 3 * DEG;                    // old sim: turret counts as aligned within this
 const FIRE_TOL = WORLD.FIRE_TOL || WORLD.ALIGN_TOL || ALIGN_TOL;
-const ZOOMS = [2, 4, 8, 16];
 const YAW_SENS = 0.0028;                      // rad/px at base FOV
 // Vertical: the view tilts VSENS rad/px (scaled by FOV) at the aim range -- screen-steady like the
 // yaw -- converted to a range step through camera3d.aimGain; RANGE_CAP bounds the log-range step
@@ -84,10 +84,11 @@ const cam3 = { yaw: 0, range: 3000, dist: 500, bino: false, zoom: 4, rangeMin: 1
 const view = { yaw: 0, logR: Math.log(3000) };   // raw (unsmoothed) mouse targets
 const frozen = { yaw: 0, range: 3000 };           // gun aim held during free look
 const ctl = {
-   telegraph: 0, rudder: 0, ammo: 'HE', mode: 'guns', spread: 'narrow', zoomIdx: 1,
+   telegraph: 0, rudder: 0, ammo: 'HE', mode: 'guns', spread: 'narrow',
    lockId: null, lead: true, mapOpen: false, board: false, help: false,
-   hold: { W: 0, S: 0, A: 0, D: 0 }, wheelAcc: 0,
+   hold: { W: 0, S: 0, A: 0, D: 0 },
 };
+const zoom = new ZoomLadder();          // wheel ladder: third-person distance <-> 2x..16x scope
 const aim = { point: { x: 0, y: 0 }, snapped: null, gunRange: 15000, flight: 0, yaw: 0, range: 3000, out: false };
 let consEmu = null;                   // old-sim consumable emulation
 let flightCal = null;                 // { k } calibrated from the sim's own shell durations
@@ -130,6 +131,11 @@ window.__turrets = () => turretCache.map(t => ({ state: t.state, reload: t.reloa
 window.__cons = () => consumables().map(c => ({ slot: c.slot, key: c.key, charges: c.charges, cd: c.cd, active: c.active }));
 window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
+window.__zoom3d = () => ({
+   level: zoom.level, tp: zoom.tp, bino: zoom.bino, zoom: zoom.zoom, dist: zoom.dist, distTarget: zoom.distTarget,
+   acc: zoom.acc, scopeT: renderer.cam?.scopeT ?? 0, fov: renderer.camera.fov,
+   cam: { x: renderer.camera.position.x, y: renderer.camera.position.y, z: renderer.camera.position.z },
+});
 let renderOn = true;
 window.__setRender = (on) => { renderOn = !!on; };
 // Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
@@ -349,7 +355,7 @@ function startGame(opts = {}) {
    // controls
    ctl.telegraph = P.telegraph ?? 0; ctl.rudder = P.rudderCmd ?? 0;
    ctl.ammo = P.ammo || 'HE'; ctl.mode = 'guns'; ctl.spread = P.torps?.spread || 'narrow';
-   ctl.zoomIdx = 1; ctl.lockId = null; ctl.mapOpen = false; ctl.board = false; ctl.wheelAcc = 0;
+   ctl.lockId = null; ctl.mapOpen = false; ctl.board = false;
    ctl.lead = difficulty !== 'hard';
    for (const k in ctl.hold) ctl.hold[k] = 0;
    consEmu = simv.newCons ? null : makeConsEmu(P);
@@ -369,7 +375,9 @@ function startGame(opts = {}) {
    cam3.rangeMax = Math.min(aim.gunRange * 1.12, Math.max(20000, aim.gunRange * 1.02));
    const R0 = clamp(aim.gunRange * 0.6, cam3.rangeMin, cam3.rangeMax);
    view.yaw = P.heading; view.logR = Math.log(R0);
-   cam3.yaw = view.yaw; cam3.range = R0; cam3.dist = Math.max(150, L * 2); cam3.bino = false; cam3.zoom = ZOOMS[ctl.zoomIdx];
+   cam3.yaw = view.yaw; cam3.range = R0; zoom.reset(L); cam3.dist = zoom.dist; cam3.bino = false; cam3.zoom = zoom.zoom;
+   // the last match may have ended in the scope: snap the lens back instead of blending out
+   if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; }
    cam3.freeLook = false; cam3.spectate = false;
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
@@ -412,6 +420,8 @@ function resume() {
    audio.resume();
 }
 input.onLockLost = () => { if (phase === 'playing') pause(); };
+// The battle wheel zooms only with no map / overlay up; otherwise the page keeps the event.
+input.wheelGate = () => phase === 'playing' && !ctl.mapOpen && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
    phase = 'menu';
@@ -462,20 +472,12 @@ function frameInput(dt) {
    // --- consumables
    for (const k of CONS_SLOTS) if (inp.tapped(k)) useConsumable(k);
 
-   // --- binoculars + wheel
-   if (inp.tapped('SHIFT')) { cam3.bino = !cam3.bino; audio.uiClick(); }
-   if (!ctl.mapOpen && inp.mouse.wheel) {
-      if (cam3.bino) {
-         ctl.wheelAcc += inp.mouse.wheel;
-         while (ctl.wheelAcc <= -1) { ctl.wheelAcc += 1; ctl.zoomIdx = Math.min(ZOOMS.length - 1, ctl.zoomIdx + 1); }
-         while (ctl.wheelAcc >= 1) { ctl.wheelAcc -= 1; ctl.zoomIdx = Math.max(0, ctl.zoomIdx - 1); }
-      } else {
-         const L = hullL(p);
-         cam3.dist = clamp(cam3.dist * Math.pow(1.12, inp.mouse.wheel), Math.max(150, L * 0.9), Math.max(600, L * 5));
-      }
-   }
-   if (Math.abs(ctl.wheelAcc) < 1 && !inp.mouse.wheel) ctl.wheelAcc *= 0.9;
-   cam3.zoom = ZOOMS[ctl.zoomIdx];
+   // --- zoom ladder (zoom3d.js): the wheel runs third-person distance -> 2x..16x scope, Shift
+   // jumps in/out on the same state. Only the camera moves: bearing and range stay put.
+   if (inp.tapped('SHIFT')) { zoom.toggle(); audio.uiClick(); }
+   if (!ctl.mapOpen && inp.mouse.wheel && zoom.wheel(inp.mouse.wheel)) audio.uiClick();
+   zoom.update(dt);
+   cam3.bino = zoom.bino; cam3.zoom = zoom.zoom; cam3.dist = zoom.dist;
 
    // --- free look (C or RMB): the camera roams, the guns hold the last aim
    const wantFree = inp.down('C') || inp.mouse.right;
@@ -988,6 +990,9 @@ function buildUi(dt) {
    ui.pxPerRad = H / (2 * Math.tan(fov * DEG / 2));
    ui.scopeT = renderer.cam?.scopeT || 0;
    ui.bino = cam3.bino; ui.zoom = cam3.zoom; ui.freeLook = cam3.freeLook;
+   // brief ladder cue after a zoom change (hud3d fades it out)
+   ui.zoomLevel = zoom.level; ui.zoomLadder = LADDER_LEN; ui.zoomTP = TP_STEPS;
+   ui.zoomCueA = clamp01(1.6 - zoom.sinceChange * 1.25);
    if (!p) return ui;
 
    // aim / reticle
