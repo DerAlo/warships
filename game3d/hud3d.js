@@ -52,7 +52,8 @@ export class Overlay3D {
    // third-person view, top = 16x) with the current rung and its name.
    _zoomCue(ui) {
       const g = this.g, n = ui.zoomLadder || 10, tp = ui.zoomTP ?? 5, lv = ui.zoomLevel || 0;
-      const x = Math.round(this.W / 2 - Math.min(this.W * 0.2, 230)) + 0.5, yB = this.H / 2 + 44;
+      // just outside the mil scale (at most W*0.2 each side), centred on the horizon line
+      const x = Math.round(Math.max(110, this.W * 0.3 - 30)) + 0.5, yB = this.H / 2 + 44;
       const yOf = (i) => yB - i * 9 - (i > tp ? 7 : 0);   // a gap between camera and scope rungs
       g.save();
       g.globalAlpha = clamp01(ui.zoomCueA) * 0.9;
