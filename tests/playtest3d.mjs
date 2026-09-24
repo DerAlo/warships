@@ -106,6 +106,7 @@ for (const [mission, ship] of pairs) {
    });
    const line = `${mission} ${ship} hand=${JSON.stringify(hand)} end=${JSON.stringify(st)} errors=${errors.length - e0}`;
    console.log(line); summary.push(line);
+   for (const e of [...new Set(errors.slice(e0))].slice(0, 3)) console.log('   !', e);
    // leave the match: end screen must come up
    await ev(() => { const w = window.__world(); if (w.phase === 'playing') w.end(true, 'Testende'); });
    await page.waitForTimeout(3500);
@@ -130,8 +131,10 @@ if (process.env.FLOW !== '0') {
       const ph = await ev(() => window.__phase());
       mems.push(await mem());
       await ev((win) => window.__world().end(win, win ? 'Alle Gegner versenkt.' : 'Ihr Schiff wurde versenkt.'), round !== 1);
-      await page.waitForTimeout(4500);
-      const rv = await resVisible();
+      // the results screen comes up ~2.5 s after the end (sinking/ending camera); poll instead of guessing
+      let rv = false;
+      for (let k = 0; k < 40 && !rv; k++) { await page.waitForTimeout(500); rv = await resVisible(); }
+      await page.waitForTimeout(1200);   // count-up animation
       console.log(`round ${round}: phase=${ph} results visible=${rv}`);
       if (round === 0) await shot('flow-results-win');
       if (round === 1) await shot('flow-results-loss');

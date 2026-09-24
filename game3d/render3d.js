@@ -6,7 +6,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { ChaseCamera } from './camera3d.js';
 import { HudCanvases3D } from './minimap3d.js';
-import { clamp } from './gfxcommon3d.js';
+import { clamp, ATM } from './gfxcommon3d.js';
 import { Sky, resolveEnv } from './sky3d.js';
 import { Ocean } from './water3d.js';
 import { Terrain } from './terrain3d.js';
@@ -131,6 +131,9 @@ export class Renderer3D {
       this.time += dt;
       this._envFrom(world);
       this.cam.update(world, dt, camState);
+      // optics cut through the haze (as in WoWs): at full binocular zoom the air is ~2.5x clearer,
+      // otherwise targets at gun range dissolve into the grey exactly when the player looks for them
+      if (this.env?.fogD50) ATM.uFogDist.value = this.env.fogD50 / Math.LN2 * (1 + 1.5 * clamp(this.cam.scopeT || 0, 0, 1));
       if (this.debugView) this._applyDebugView();
       this.camera.updateMatrixWorld();
       this.terrain.update(this.camera);

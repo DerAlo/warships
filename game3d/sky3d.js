@@ -13,9 +13,9 @@ const TIME_PRESET = {
 };
 const WEATHER = {
    clear:    { cover: 0.36, sunK: 1.00, grey: 0.00, dark: 1.00, glowK: 1.0, fogK: 1.00, rain: 0, sea: 0.35, vis: 0.9, disk: 1 },
-   overcast: { cover: 0.90, sunK: 0.28, grey: 0.70, dark: 0.80, glowK: 0.25, fogK: 0.55, rain: 0, sea: 0.5, vis: 0.65, disk: 0 },
-   rain:     { cover: 0.97, sunK: 0.16, grey: 0.85, dark: 0.55, glowK: 0.12, fogK: 0.36, rain: 0.6, sea: 0.65, vis: 0.45, disk: 0 },
-   storm:    { cover: 1.00, sunK: 0.10, grey: 0.92, dark: 0.36, glowK: 0.06, fogK: 0.28, rain: 1.0, sea: 0.95, vis: 0.35, disk: 0 },
+   overcast: { cover: 0.90, sunK: 0.28, grey: 0.70, dark: 0.80, glowK: 0.25, fogK: 0.70, rain: 0, sea: 0.5, vis: 0.65, disk: 0 },
+   rain:     { cover: 0.97, sunK: 0.16, grey: 0.85, dark: 0.55, glowK: 0.12, fogK: 0.50, rain: 0.6, sea: 0.65, vis: 0.45, disk: 0 },
+   storm:    { cover: 1.00, sunK: 0.10, grey: 0.92, dark: 0.36, glowK: 0.06, fogK: 0.35, rain: 1.0, sea: 0.95, vis: 0.35, disk: 0 },
 };
 
 // Turns the (possibly partial or missing) world.env into everything the renderer needs.
@@ -53,7 +53,8 @@ export function resolveEnv(env) {
    const sunI = T.sunI * W.sunK * (night ? 1 : smoothstep(-0.02, 0.12, el) * 0.8 + 0.2);
 
    // visual haze distance (m at which 50% of contrast is gone)
-   const d50 = Math.max(night ? 3500 : 6000, (3000 + 23000 * vis) * W.fogK * (night ? 0.55 : 1));
+   // tuned so a target at WoWs gun range (12-16 km) still reads through the binoculars in bad weather
+   const d50 = Math.max(night ? 5000 : 8000, (6000 + 30000 * vis) * W.fogK * (night ? 0.55 : 1));
    return {
       time, weather, night, seaState, visibility: vis,
       sunEl: el, sunAz: az, sunDir, lightDir,

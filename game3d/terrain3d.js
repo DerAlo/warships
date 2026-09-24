@@ -230,7 +230,7 @@ function rockGeometry() {
 }
 
 // ---------------- the terrain ----------------
-const LOD_TAN = Math.tan(THREE.MathUtils.degToRad(58) / 2);   // camera3d BASE_FOV: LOD distances are tuned at it
+const LOD_TAN = Math.tan(THREE.MathUtils.degToRad(55) / 2);   // camera3d BASE_FOV: LOD distances are tuned at it
 const _lodCam = { matrixWorld: null, zoom: 1 };
 const TREE_LOD = [3500, 8000];   // m: thinned forest beyond the first, none beyond the second (terrain colour carries it)
 const TREE_CELL = 1600;          // m: forest bucket size (per-bucket frustum and shadow culling)

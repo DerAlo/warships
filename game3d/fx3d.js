@@ -523,7 +523,7 @@ class Wakes {
 
    _new(kind) {
       const t = this.free.pop() || { px: new Float32Array(MAXP), pz: new Float32Array(MAXP), pt: new Float32Array(MAXP), ps: new Float32Array(MAXP), pd: new Float32Array(MAXP), head: 0, count: 0 };
-      t.head = 0; t.count = 0; t.kind = kind; t.live = false; t.fed = false; t.odo = 0; t.hx = NaN;
+      t.head = 0; t.count = 0; t.kind = kind; t.tk = 0; t.live = false; t.fed = false; t.odo = 0; t.hx = NaN;
       return t;
    }
 
@@ -537,8 +537,13 @@ class Wakes {
       // odometer gives the foam streaks a world-fixed along-track coordinate
       if (t.hx === t.hx) t.odo += Math.min(200, Math.hypot(x - t.hx, z - t.hz));
       t.fed = true; t.live = true; t.hx = x; t.hz = z; t.beam = beam; t.inten = inten; t.spd = spd;
+      // The look was tuned at real-time speeds; the sim runs ~5x time-compressed (2.6 m/s per knot).
+      // tk ages the trail faster in proportion so wake LENGTH, Kelvin spread and stern churn stay
+      // true to distance instead of turning into a 2 km white carpet.
+      const tk = clamp(spd / (kind === 0 ? 15 : 25), 1, 6);
+      t.tk = t.tk ? t.tk + (tk - t.tk) * 0.05 : tk;
       const last = t.count ? (t.head + MAXP - 1) % MAXP : -1;
-      const spacing = kind === 0 ? Math.max(5, spd * 0.4) : Math.max(4, spd * 0.25);
+      const spacing = (kind === 0 ? Math.max(5, spd * 0.4) : Math.max(4, spd * 0.25)) / Math.max(1, t.tk * 0.6);   // denser points: the trail is shorter now
       if (last < 0 || Math.hypot(x - t.px[last], z - t.pz[last]) >= spacing) {
          t.px[t.head] = x; t.pz[t.head] = z; t.pt[t.head] = time; t.ps[t.head] = spd * inten; t.pd[t.head] = t.odo;
          t.head = (t.head + 1) % MAXP;
@@ -552,9 +557,9 @@ class Wakes {
       for (const [key, t] of this.trails) {
          if (!t.fed) t.live = false;
          t.fed = false;
-         const life = t.kind === 0 ? 26 : 11;
+         const life = t.kind === 0 ? 26 : 11, tk = t.tk || 1;
          // retire points older than the lifetime
-         while (t.count && time - t.pt[(t.head + MAXP - t.count) % MAXP] > life) t.count--;
+         while (t.count && (time - t.pt[(t.head + MAXP - t.count) % MAXP]) * tk > life) t.count--;
          if (!t.count && !t.live) { this.trails.delete(key); this.free.push(t); continue; }
          const n = t.count + (t.live ? 1 : 0);
          if (n < 2) continue;
@@ -572,7 +577,8 @@ class Wakes {
             let dx = ax - bx, dz = az - bz;
             const dl = Math.hypot(dx, dz) || 1;
             dx /= dl; dz /= dl;
-            const age = Math.max(0, time - pt);
+            const age = Math.max(0, time - pt) * tk;
+            sp /= tk;
             const u = Math.min(1, age / life);
             // Kelvin spread, capped: past ~12 s the arms have faded and a huge fan only folds over itself in turns
             const hw = t.kind === 0 ? t.beam * 0.55 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
@@ -1435,7 +1441,10 @@ export class FX {
          const R = Math.max(10, Number(c.r) || 100);
          const life = Number.isFinite(c.life) ? c.life : 10;
          const aIn = Number.isFinite(c.age) ? clamp(c.age / 1.5, 0, 1) : 1;
-         const alpha = clamp(life / 5, 0, 1) * aIn * 0.7;
+         // camera inside the cloud (own smoke): thin it so the screen is not a grey wall, like WoWs does
+         const cd = cam ? Math.hypot(cam.x - c.c.x, cam.z - c.c.y) : 1e9;   // cam = camera position
+         const inside = 0.3 + 0.7 * clamp((cd - R * 0.6) / (R * 0.9), 0, 1);
+         const alpha = clamp(life / 5, 0, 1) * aIn * 0.7 * inside;
          if (alpha <= 0.01) continue;
          const Hs = clamp(R * 0.35, 18, 70);
          for (let i = 0; i < st.n; i++) {
