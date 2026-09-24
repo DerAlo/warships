@@ -473,9 +473,11 @@ void main() {
       float band = 1.0 - smoothstep(washW * 0.35, washW, m);
       float thr = 0.34 + 0.5 * u;
       float wash = band * smoothstep(thr, thr + 0.25, n) * pow(1.0 - u, 1.8);
-      float churn = (1.0 - smoothstep(0.0, 0.05, u)) * (1.0 - smoothstep(0.15, 0.7, m / max(vB.x, 1.0)));   // white water at the stern
+      float churn = (1.0 - smoothstep(0.0, 0.1, u)) * (1.0 - smoothstep(0.15, 0.7, m / max(vB.x, 1.0)));   // white water at the stern
+      // screw-race foam line down the centre: outlasts the wash so the track reads from far off
+      float centre = (1.0 - smoothstep(0.08, 0.5, m / max(washW, 1.0))) * pow(1.0 - u, 1.25) * smoothstep(0.22, 0.55, n + 0.35 * (1.0 - u));
       float arm = exp(-pow((as - 0.9) / 0.06, 2.0)) * (1.0 - smoothstep(0.03, 0.4, u)) * smoothstep(0.3, 0.7, n);
-      foam = (wash * 0.8 + churn * 0.9 + arm * 0.45) * vB.y;
+      foam = (wash * 0.8 + churn * 0.9 + arm * 0.45 + centre * 0.7) * vB.y;
       aer = band * (1.0 - u) * vB.y;           // aerated, lighter water under the foam
    } else {
       float core = 1.0 - smoothstep(0.15, 1.0, as);
@@ -959,22 +961,25 @@ export class FX {
    _splash(x, z, cal, big = false) {
       const P = this.puff;
       const k = clamp(cal / 380, 0.2, 1.8);
-      const H = (10 + cal * 0.1) * (big ? 1.4 : 1);
-      const W = 3 + cal * 0.028;
+      // column height ~ caliber: 380 mm ~65 m, 203 mm ~38 m, 127 mm ~27 m
+      const H = (8 + cal * 0.15) * (big ? 1.35 : 1);
+      const W = 3 + cal * 0.03;
       const y0 = this.ocean.heightAt(x, z, null);
       const fc = this.uFoamCol.value;
       const lum = this.night ? 0.35 : 1;
-      const nC = cal >= 250 ? 3 : cal >= 150 ? 2 : 1;
+      const nC = cal >= 250 ? 4 : cal >= 150 ? 3 : 2;
       for (let i = 0; i < nC; i++) {
          const p = P.t();
-         p.x = x + rr(-0.4, 0.4) * W; p.y = y0 - 1; p.z = z + rr(-0.4, 0.4) * W;
-         p.life = rr(2.2, 3.2) * (0.7 + k * 0.3); p.s0 = W * 0.5; p.s1 = W * rr(0.9, 1.2); p.grow = 4;
-         p.aspect = H / p.s1 * rr(0.75, 1.1);
-         p.r = p.g = p.b = 0.92 * lum; p.a = 0.95; p.fin = 0.02; p.fout = 0.3; p.shape = 2; p.lit = 1;
+         // first column is the narrow, tallest core; the others are wider and shorter around it
+         const core = i === 0;
+         p.x = x + (core ? 0 : rr(-0.45, 0.45) * W); p.y = y0 - 1; p.z = z + (core ? 0 : rr(-0.45, 0.45) * W);
+         p.life = rr(2.4, 3.4) * (0.7 + k * 0.3); p.s0 = W * 0.5; p.s1 = W * (core ? 0.8 : rr(0.95, 1.3)); p.grow = 4;
+         p.aspect = H / p.s1 * (core ? 1.1 : rr(0.55, 0.9));
+         p.r = p.g = p.b = lum; p.a = 1; p.fin = 0.02; p.fout = 0.3; p.shape = 2; p.lit = 1;
          P.emit();
       }
       // spray thrown up and out, then falling back
-      const nSp = Math.round(5 + 7 * k);
+      const nSp = Math.round(7 + 10 * k);
       const v0 = Math.sqrt(2 * 9.8 * H);
       for (let i = 0; i < nSp; i++) {
          const p = P.t();
@@ -1309,8 +1314,11 @@ export class FX {
          const camD = Math.hypot(r.x - cam.x, r.z - cam.z);
          const ch = Math.cos(r.hd), sh = Math.sin(r.hd);
          // ---- wake + bow wave ----
-         if (r.sinkT < 0.3) {
-            const inten = clamp(r.kn / 26, 0, 1) * (r.alive ? 1 : 1 - r.sinkT * 3);
+         // unspotted ships leave no wake either (it would give their position away); the trail
+         // is dropped once the model has faded so a re-spot starts a fresh one instead of a jump
+         if (!r.visible) { const t = this.wakes.trails.get(s); if (t) { this.wakes.trails.delete(s); this.wakes.free.push(t); } }
+         else if (r.sinkT < 0.3) {
+            const inten = clamp(r.kn / 26, 0, 1) * (r.alive ? 1 : 1 - r.sinkT * 3) * r.opacity;
             this.wakes.feed(s, 0, r.x - ch * d.L * 0.47, r.z - sh * d.L * 0.47, r.spd, d.B, inten, time);
             if (r.visible && r.kn > 3 && inten > 0.05) {
                this.decals.add(3, r.x + ch * d.L * 0.3, r.z + sh * d.L * 0.3, r.hd, d.B * 3, d.B * 3, 1, clamp(r.kn / 22, 0.2, 1) * r.opacity, 1, d.L * 0.46 / (d.B * 3), true);
@@ -1323,7 +1331,7 @@ export class FX {
          nf = Math.min(nf, r.fireSpots.length);
          if (nf > 0) {
             const lod = camD > 9000 ? 0.4 : 1;
-            r.fxFlame = (r.fxFlame || 0) + dt * nf * 12 * lod;
+            r.fxFlame = (r.fxFlame || 0) + dt * nf * 16 * lod;
             r.fxSmoke = (r.fxSmoke || 0) + dt * nf * 3.2 * lod;
             while (r.fxFlame >= 1) {
                r.fxFlame -= 1;
@@ -1331,15 +1339,18 @@ export class FX {
                ships.worldPoint(r, sp.x + rr(-2, 2), r.S.deckAt(sp.x) + 0.5, sp.z + rr(-1.5, 1.5), _p);
                const p = G.t();
                p.x = _p.x; p.y = _p.y; p.z = _p.z;
-               p.vx = rr(-1.5, 1.5); p.vy = rr(4, 9); p.vz = rr(-1.5, 1.5); p.drag = 0.5; p.grav = -2;
-               p.life = rr(0.5, 0.95); p.s0 = rr(3, 5.5); p.s1 = rr(1.5, 3); p.grow = 1;
+               // flame tongues sized to the ship: a battleship fire must read at 10+ km
+               const fk = clamp(d.B / 22, 0.7, 1.5);
+               p.vx = rr(-1.5, 1.5); p.vy = rr(5, 11) * fk; p.vz = rr(-1.5, 1.5); p.drag = 0.5; p.grav = -2;
+               p.life = rr(0.55, 1.05); p.s0 = rr(6, 10) * fk; p.s1 = rr(2.5, 4) * fk; p.grow = 1;
                p.r = 9; p.g = 3.6; p.b = 0.8; p.r1 = 3; p.g1 = 0.5; p.b1 = 0.08; p.fin = 0.12; p.fout = 0.4; p.shape = 1; p.rot = rr(0, TAU); p.spin = rr(-2, 2); p.wind = 0.3;
                G.emit();
             }
             while (r.fxSmoke >= 1) {
                r.fxSmoke -= 1;
                const sp = r.fireSpots[(r.fxSmokeI = ((r.fxSmokeI || 0) + 1) % nf)];
-               ships.worldPoint(r, sp.x, r.S.deckAt(sp.x) + 3, sp.z, _p);
+               // smoke starts above the flames so it does not smother them
+               ships.worldPoint(r, sp.x, r.S.deckAt(sp.x) + 7, sp.z, _p);
                const p = P.t();
                p.x = _p.x; p.y = _p.y; p.z = _p.z;
                p.vx = rr(-1, 1); p.vy = rr(6, 10); p.vz = rr(-1, 1); p.drag = 0.35; p.grav = -1.0;
@@ -1351,7 +1362,8 @@ export class FX {
          }
          // ---- funnel smoke (close ships only) ----
          if (r.alive && camD < 7000 && r.smoke.length) {
-            r.fxFun = (r.fxFun || 0) + dt * (1.2 + r.kn * 0.08) * r.smoke.length;
+            // dense, faint puffs overlap into one continuous plume instead of a chain of balls
+            r.fxFun = (r.fxFun || 0) + dt * (2.6 + r.kn * 0.12) * r.smoke.length;
             if (r.fxFun >= 1) {
                const n = ships.funnelTops(r, TOPS);
                while (r.fxFun >= 1) {
@@ -1360,9 +1372,9 @@ export class FX {
                   const p = P.t();
                   p.x = t.x; p.y = t.y; p.z = t.z;
                   p.vx = rr(-0.5, 0.5); p.vy = rr(3, 5); p.vz = rr(-0.5, 0.5); p.drag = 0.4; p.grav = -0.3;
-                  p.life = rr(5, 8); p.s0 = d.B * 0.12 + 1.5; p.s1 = d.B * 0.6 + 8; p.grow = 2;
-                  p.r = 0.3; p.g = 0.29; p.b = 0.28; p.r1 = 0.5; p.g1 = 0.5; p.b1 = 0.5;
-                  p.a = 0.32; p.fin = 0.05; p.fout = 0.3; p.shape = 1; p.lit = 1; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
+                  p.life = rr(6, 9); p.s0 = d.B * 0.16 + 2; p.s1 = d.B * 0.7 + 10; p.grow = 2;
+                  p.r = 0.3; p.g = 0.29; p.b = 0.28; p.r1 = 0.52; p.g1 = 0.52; p.b1 = 0.52;
+                  p.a = 0.22; p.fin = 0.05; p.fout = 0.3; p.shape = 1; p.lit = 1; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
                   P.emit();
                }
             }

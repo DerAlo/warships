@@ -41,6 +41,18 @@ for (const v of views) {
       else if (kind === 'bow') view = { pos: at(-0.55, len * 0.62, len * 0.1), look: at(0, len * 0.08, len * 0.06), fov: 50 };
       else if (kind === 'aft') view = { pos: at(-2.2, len * 0.6, len * 0.14), look: at(Math.PI, len * 0.1, len * 0.06), fov: 50 };
       else if (kind === 'q') view = { pos: at(-2.5, len * 0.85, len * 0.24), look: at(0, len * 0.05, len * 0.06), fov: 45 };
+      else if (kind === 'wake') {
+         // steam the ship ahead for 20 s of sim time (CPU only, no rendering) to lay a wake
+         const v = 30 * 0.5144;
+         s.speedKn = 30; s.speed = v;
+         for (let i = 0; i < 200; i++) {
+            P.x += Math.cos(h) * v * 0.1; P.y += Math.sin(h) * v * 0.1;
+            R.time += 0.1; w.time += 0.1;
+            R.ships.sync(w, 0.1, R.time, R.camera); R.fx.update(w, 0.1, R.time, R.camera, R.ships);
+         }
+         s.speed = 0;   // parked from here on; speedKn keeps the bow wave and foam alive
+         view = { pos: at(-0.8, len * 0.9, len * 0.32), look: at(Math.PI, len * 0.6, 0), fov: 55 };
+      }
       else if (kind === 'top') view = { pos: at(-1.2, len * 0.35, len * 0.55), look: [P.x, 0, P.y], fov: 55 };
       else if (kind === 'deck') view = { pos: at(-0.25, len * 0.62, len * 0.07), look: at(Math.PI, len * 0.1, len * 0.1), fov: 60 };
       else if (kind === 'fx' || kind === 'fire' || kind === 'sea') {
