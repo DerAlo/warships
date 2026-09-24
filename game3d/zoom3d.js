@@ -82,6 +82,10 @@ export class ZoomLadder {
          }
          this.acc = dir * rest;
       }
+      // touchpad fractions (0.04 + 0.04 + ...) drift by ulps: keep whole rungs exact
+      const r = Math.round(this.tp);
+      if (Math.abs(this.tp - r) < 1e-6) this.tp = r;
+      if (Math.abs(this.acc) < 1e-9) this.acc = 0;
       if (this.level !== lv0) this.sinceChange = 0;
       return this.bino !== bino0;
    }

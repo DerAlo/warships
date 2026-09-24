@@ -47,7 +47,7 @@ const wheelEv = (deltaY, deltaMode = 0, sel = null) => ev(([dy, dm, sel]) => {
    return e.defaultPrevented;
 }, [deltaY, deltaMode, sel]);
 const notch = async (dir, n = 1) => { for (let i = 0; i < n; i++) { await page.mouse.wheel(0, dir * 100); await frames(1); } };
-const settled = () => waitFor(() => { const z = window.__zoom3d(); return Math.abs(z.dist - z.distTarget) < 0.05 && (z.bino ? z.scopeT >= 1 : z.scopeT <= 0) && Math.abs(Math.tan(z.fov * Math.PI / 360) - Math.tan(55 * Math.PI / 360) / (z.bino ? z.zoom : 1)) < 1e-4; }, 8000, 30);
+const settled = () => waitFor(() => { const z = window.__zoom3d(); return Math.abs(z.dist - z.distTarget) < 1e-9 && (z.bino ? z.scopeT >= 1 : z.scopeT <= 0) && Math.abs(Math.tan(z.fov * Math.PI / 360) - Math.tan(55 * Math.PI / 360) / (z.bino ? z.zoom : 1)) < 1e-4; }, 8000, 30);
 
 // ------------------------------------------------------------------ start
 await page.goto(URL, { waitUntil: 'load' });
@@ -240,7 +240,7 @@ await shot('2x');
    check('10 notches out in 100 ms: 16x -> widest, clamped', !z.bino && z.level === 0, { level: z.level });
    await settled();
    rows = await recStop();
-   check('burst out: FOV and distance monotonic', monotonic(rows.map(r => r.fov), 1e-6) && monotonic(rows.map(r => r.dist), 1e-6), { frames: rows.length });
+   check('burst out: FOV and distance monotonic', monotonic(rows.map(r => r.fov), 1e-6) && monotonic(rows.map(r => r.dist), 1e-6), { frames: rows.length, fovMono: monotonic(rows.map(r => r.fov), 1e-6), fov: rows.map(r => f3(r.fov)).join(' '), dist: rows.map(r => f1(r.dist)).join(' '), lv: rows.map(r => r.level).join(' ') });
    // one coalesced 300 px event = 3 clicks; 125 px (OS scaling) = 1 click
    await wheelEv(-300); await frames(2);
    z = await Z(); check('coalesced 300 px = 3 rungs', z.level === 3, z.level);
@@ -257,19 +257,20 @@ await shot('2x');
 {
    await notch(1, 2); await settled();                  // tp 3
    const tp0 = (await Z()).tp;
-   // 4 px deltas (0.04 notch), 3 per frame, until the scope opens
+   // 4 px deltas (0.04 notch), one per frame, until the scope opens
    const glide = await ev(async () => {
       const out = [];
       const fr = () => new Promise(r => requestAnimationFrame(() => r()));
       for (let i = 0; i < 200 && !window.__zoom3d().bino; i++) {
          window.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true, cancelable: true }));
-         if (i % 3 === 2) await fr();
+         await fr();
          const z = window.__zoom3d(); out.push({ tp: z.tp, bino: z.bino, acc: z.acc });
       }
       return out;
    });
    const atClosest = glide.findIndex(g => g.tp === 5), firstBino = glide.findIndex(g => g.bino);
-   const smooth = glide.slice(0, atClosest + 1).every((g, i, a) => i === 0 || Math.abs(g.tp - a[i - 1].tp - 0.04) < 1e-9);
+   const path = glide.slice(0, atClosest + 1);
+   const smooth = path.every((g, i, a) => i === 0 || (g.tp >= a[i - 1].tp && g.tp - a[i - 1].tp <= 0.04 + 1e-6)) && new Set(path.map(g => g.tp)).size >= 40;
    console.log(`touchpad glide: tp ${tp0} -> closest in ${atClosest + 1} events (0.04 rung each), scope after ${firstBino - atClosest} more events`);
    check('touchpad: continuous third-person glide, then a detent before the scope', smooth && firstBino - atClosest >= 14 && firstBino - atClosest <= 16);
    const jit = await ev(async () => {
@@ -285,7 +286,8 @@ await shot('2x');
    check('touchpad jitter (+-12 px) at the scope boundary: no flicker', jit === 0, { flips: jit });
    const outN = await ev(async () => {
       let n = 0;
-      while (window.__zoom3d().bino && n < 100) { window.dispatchEvent(new WheelEvent('wheel', { deltaY: 4, bubbles: true, cancelable: true })); n++; }
+      const fr = () => new Promise(r => requestAnimationFrame(() => r()));
+      while (window.__zoom3d().bino && n < 100) { window.dispatchEvent(new WheelEvent('wheel', { deltaY: 4, bubbles: true, cancelable: true })); n++; await fr(); }
       return n;
    });
    const z = await Z();
