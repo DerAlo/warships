@@ -201,7 +201,7 @@ class ParticlePool {
       this.ax = new Float32Array(max * 3);   // explicit axis for immediate streaks
       this.imm = new Uint8Array(max);
       this.n = 0;
-      this.keys = new Float32Array(max);
+      this.keys = new Float64Array(max);
       this.ord = new Uint32Array(max);
       this.p = Object.assign({}, TPL_DEFAULT);
       const g = new THREE.InstancedBufferGeometry();
@@ -271,12 +271,15 @@ class ParticlePool {
       }
       const n = this.n;
       const ord = this.ord;
-      for (let i = 0; i < n; i++) ord[i] = i;
       if (!this.additive && n > 1) {
+         // back to front: (depth, index) packed into one double for the native numeric sort -- a
+         // comparator sort copies the whole array onto the JS heap every frame
          const keys = this.keys, cx = cam.x, cy = cam.y, cz = cam.z;
-         for (let i = 0; i < n; i++) { const o = i * S; const dx = d[o] - cx, dy = d[o + 1] - cy, dz = d[o + 2] - cz; keys[i] = dx * dx + dy * dy + dz * dz; }
-         ord.subarray(0, n).sort((a, b) => keys[b] - keys[a]);
-      }
+         for (let i = 0; i < n; i++) { const o = i * S; const dx = d[o] - cx, dy = d[o + 1] - cy, dz = d[o + 2] - cz; keys[i] = Math.floor(Math.min(1e10, dx * dx + dy * dy + dz * dz)) * 65536 + i; }
+         const v = keys.subarray(0, n);
+         v.sort();
+         for (let j = 0; j < n; j++) ord[j] = v[n - 1 - j] % 65536;
+      } else for (let i = 0; i < n; i++) ord[i] = i;
       const P = this.aPos.array, C = this.aCol.array, SZ = this.aSz.array, AX = this.aAx.array, M = this.aMs.array;
       for (let j = 0; j < n; j++) {
          const i = ord[j], o = i * S;

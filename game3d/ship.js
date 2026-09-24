@@ -11,6 +11,8 @@ const FLOOD_DUR = 40;
 const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, TR: 3.5, CV: 3.5 }; // s, yaw inertia
 const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
 const TWIST = { BB: 0.03, CA: 0.04, CL: 0.045, DD: 0.06, TR: 0.025, CV: 0.03 };   // rad/s, screws worked against each other
+const HULL_PROBES = [0.92, 0.45, 0, -0.45, -0.92];   // grounding probes along the keel (fraction of L/2)
+const _probe = { x: 0, y: 0 };
 const TORP_ARC = 65 * DEG;          // launchers train +-65 deg around the beam
 const MODULE_T = 25;                // s a knocked-out module stays down (damage control fixes it)
 const AMMO_NAMES = { AP: 'Panzersprenggranaten (AP)', HE: 'Sprenggranaten (HE)' };
@@ -114,7 +116,7 @@ export class Ship {
       const b = this.consumable('boost');
       return this.maxSpeedKn * WORLD.KN_TO_MS * (b && b.active ? (b.mult || 1.08) : 1);
    }
-   consumable(key) { return this.consumables.find(c => c.key === key) || null; }
+   consumable(key) { for (const c of this.consumables) if (c.key === key) return c; return null; }
    consumableActive(key) { const c = this.consumable(key); return !!(c && c.active); }
 
    // Fire every loaded turret that bears on the aim point within FIRE_TOL. aim: {x,y} (or a
@@ -381,8 +383,9 @@ export class Ship {
          if (o.kind !== 'island') continue;
          const R = (o.rMax || o.r * 1.6) + half + 20;
          if (dist2(o.c, this.pos) > R * R) continue;
-         for (const f of [0.92, 0.45, 0, -0.45, -0.92]) {
-            const p = { x: this.pos.x + c * half * f, y: this.pos.y + s * half * f };
+         for (const f of HULL_PROBES) {
+            const p = _probe;
+            p.x = this.pos.x + c * half * f; p.y = this.pos.y + s * half * f;
             const t = obstacleT(o, p);
             if (t >= 1) continue;
             const ang = Math.atan2(p.y - o.c.y, p.x - o.c.x);

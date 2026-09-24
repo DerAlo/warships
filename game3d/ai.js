@@ -483,11 +483,13 @@ function navPoint(g, c) { return { x: g.off + (c % g.N + 0.5) * NAV_CELL, y: g.o
 // Straight open water between a and b (coast margin as in avoidTerrain, AI arena limit)? With
 // minClear, the line beyond the first 800 m must also keep that grid clearance: a narrow channel
 // between a coast and the wall passes the plain test but often ends in a dead end.
+const _wl = { x: 0, y: 0 }, _cs = { x: 0, y: 0 };   // scratch points (these probes run thousands of times per second)
 function waterLine(w, a, b, margin = 1.12, minClear = 0) {
    const L = Math.sqrt(dist2(a, b)), n = Math.max(1, Math.ceil(L / 120)), lim = w.arena - 650;
    const g = minClear ? navGrid(w) : null;
+   const p = _wl;
    for (let k = 1; k <= n; k++) {
-      const p = { x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n };
+      p.x = a.x + (b.x - a.x) * k / n; p.y = a.y + (b.y - a.y) * k / n;
       if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) return false;
       for (const o of w.obstacles) if (obstacleT(o, p) < margin) return false;
       if (g && L * k / n > 800 && g.clear[navCell(g, p)] < minClear) return false;
@@ -600,7 +602,8 @@ function avoidTerrain(b, w, want) {
          om += (spd / turnR * r - om) * kYaw;
          hd += om * dt;
          x += Math.cos(hd) * ds; y += Math.sin(hd) * ds;
-         const p = { x, y };
+         const p = _cs;
+         p.x = x; p.y = y;
          if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) {
             // allow heading back inwards when already outside the limit; points are clamped to the
             // physical arena wall (ship.js) first: a hull pinned against the wall nose-first would
