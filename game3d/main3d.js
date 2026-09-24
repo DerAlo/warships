@@ -126,6 +126,15 @@ window.__setAim = (yawRel, range) => {
 };
 
 // ------------------------------------------------------------------ adapters (contract first, old sim second)
+// True if `k` is a plain data property of `o` (own or inherited). The new sim keeps getter-only
+// legacy read-outs (fireTimer, secTimer, torpTimer, boost) -- those must not select old-sim paths.
+function hasData(o, k) {
+   for (let x = o; x; x = Object.getPrototypeOf(x)) {
+      const d = Object.getOwnPropertyDescriptor(x, k);
+      if (d) return 'value' in d || typeof d.set === 'function';
+   }
+   return false;
+}
 function gunRangeOf(p) {
    return p?.cfg?.main?.range || p?.gunRange || p?.mainRange || 15000;
 }
@@ -297,7 +306,7 @@ function startGame(opts = {}) {
       newTorps: typeof P.fireTorpedoes === 'function',
       newCons: Array.isArray(P.consumables) && typeof P.useConsumable === 'function',
       newShells: false,
-      oldSecondaries: typeof P.fireSecondary === 'function' && 'secTimer' in P && !world.autoSecondaries,
+      oldSecondaries: typeof P.fireSecondary === 'function' && hasData(P, 'secTimer') && !world.autoSecondaries,
       botsInternal: !!world.aiInternal,
    };
    const build = renderer.buildWorld || renderer.buildObstacles;
@@ -615,7 +624,7 @@ function fireGuns() {
    if (d > aim.gunRange) ap = { x: p.pos.x + dx / d * aim.gunRange, y: p.pos.y + dy / d * aim.gunRange };
    const R = Math.min(d, aim.gunRange);
    let n = 0;
-   if (simv.newTurrets && !('fireTimer' in p)) {
+   if (simv.newTurrets && !hasData(p, 'fireTimer')) {
       const before = p.turrets.map(t => t.reload || 0);
       try { n = p.fireMain(world, ap) || 0; } catch (e) { n = 0; }
       p.turrets.forEach((t, i) => { if ((t.reload || 0) > before[i] + 1e-6 && st[i]?.state !== 'ready') window.__badFireCount++; });

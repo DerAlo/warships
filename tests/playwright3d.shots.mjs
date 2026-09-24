@@ -206,7 +206,9 @@ await shot('02-normal');   // (leaves the 3D render off until the next screensho
 {
    check('some turret becomes ready', await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 45000));
    // knock every mount off the aim bearing: none is aligned, so LMB must not fire
-   await ev(() => { for (const t of window.__world().player.turrets) t.bearing = (t.bearing || 0) + 1.6; });
+   await ev(() => { const w = window.__world(); for (const t of w.player.turrets) t.bearing = (t.bearing || 0) + 1.6; window.__knockT = w.time; });
+   // let a few sim steps run (fast frames can carry zero steps) so the HUD sees the new bearings
+   await waitFor(() => window.__world().time > window.__knockT + 0.1, 5000, 20);
    await frames(2);
    const st = (await turrets()).map(t => t.state);
    const f0 = await fired();
@@ -249,8 +251,8 @@ await shot('02-normal');   // (leaves the 3D render off until the next screensho
    // cruiser/destroyer tubes bear to the side, not over the bow
    await ev(() => {
       const p = window.__world().player;
-      if ('torpTimer' in p) p.torpTimer = 0;
-      for (const l of p.torps?.launchers || []) l.reload = 0;
+      if (p.torps?.launchers) for (const l of p.torps.launchers) l.reload = 0;
+      else if ('torpTimer' in p) try { p.torpTimer = 0; } catch (e) { /* getter-only read-out */ }
       window.__setAim?.(Math.PI / 2, 5000);
    });
    await frames(4);

@@ -91,7 +91,14 @@ function islandPath(g, o, mx, my, sc) {
 
 // Paint the battlefield into the square (x0, y0, size). opts: { intel, camYaw, camHfov,
 // gunRange, detectRange, aimPoint, big (tactical map: labels + names), torpFan }.
+// Everything (range rings, detection circles, labels) is clipped to the map square: the gun
+// range circle of a long-range ship easily reaches past the edge of the tactical map.
 export function paintMap(g, world, x0, y0, size, opts = {}) {
+   g.save();
+   g.beginPath(); g.rect(x0, y0, size, size); g.clip();
+   try { paintMapInner(g, world, x0, y0, size, opts); } finally { g.restore(); }
+}
+function paintMapInner(g, world, x0, y0, size, opts) {
    const A = arenaOf(world);
    const sc = size / (A * 2);
    const mx = (x) => x0 + (x + A) * sc, my = (y) => y0 + (y + A) * sc;
