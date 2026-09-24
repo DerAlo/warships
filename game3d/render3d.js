@@ -133,6 +133,7 @@ export class Renderer3D {
       this.cam.update(world, dt, camState);
       if (this.debugView) this._applyDebugView();
       this.camera.updateMatrixWorld();
+      this.terrain.update(this.camera);
       const flash = this.sky.update(dt, this.time, this.camera);
       if (this.sky.envRT && this.scene.environment !== this.sky.envRT.texture) this.scene.environment = this.sky.envRT.texture;
       this.ocean.update(this.time, this.camera, flash);

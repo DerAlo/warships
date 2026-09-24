@@ -8,7 +8,7 @@ const { chromium } = await import(process.env.PW_MODULE || 'playwright');
 import { mkdirSync } from 'node:fs';
 
 const URL = process.env.URL3D || 'http://localhost:5185/index-3d.html';
-const OUT = 'tests/shots';
+const OUT = process.env.SHOTS_OUT || 'tests/shots';
 mkdirSync(OUT, { recursive: true });
 const args = process.argv.slice(2);
 const envArg = (args.find(a => a.startsWith('--env=')) || '').slice(6);
@@ -29,7 +29,10 @@ if (envArg) {
    const [time, weather, sea] = envArg.split(':');
    await page.evaluate(([time, weather, sea]) => { window.__forceEnv = { time, weather, seaState: Number(sea || 0.4) }; }, [time, weather, sea]);
 }
-await page.click('#btn-play');
+// integrated build: menu3d may hide the play button behind a picker -> use the start hook
+const mission = (args.find(a => a.startsWith('--mission=')) || '').slice(10);
+const started = await page.evaluate((mission) => { if (typeof window.__start !== 'function') return false; window.__start(mission ? { mission } : {}); return true; }, mission);
+if (!started) await page.click('#btn-play');
 await page.waitForTimeout(400);
 if (envArg) {
    await page.evaluate(() => { const w = window.__world(); w.env = Object.assign({}, w.env || {}, window.__forceEnv); window.__renderer3d.buildWorld(w); });
@@ -107,8 +110,8 @@ for (const name of wanted) {
       return !!v;
    }, code);
    if (!ok) { console.log('skip', name); continue; }
-   await page.waitForTimeout(name === 'game' ? 200 : 900);
-   await page.screenshot({ path: `${OUT}/gfx-${name}${envArg ? '-' + envArg.replace(/:/g, '_') : ''}.png` });
+   await page.waitForTimeout(name === 'game' ? 200 : Number(process.env.SHOT_WAIT || 900));
+   await page.screenshot({ timeout: 240000, path: `${OUT}/gfx-${name}${envArg ? '-' + envArg.replace(/:/g, '_') : ''}.png` });
    console.log('shot', name);
 }
 const fps = await page.evaluate(() => new Promise(res => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1500) requestAnimationFrame(f); else res(n / ((performance.now() - t0) / 1000)); }; requestAnimationFrame(f); }));
