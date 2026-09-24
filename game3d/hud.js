@@ -117,17 +117,18 @@ export class Hud {
 
    toggleHelp(on) { this.el.help?.classList.toggle('hidden', !on); }
 
-   msg(text, cls = 'info') {
+   msg(text, cls = 'info', secs = 2.6) {
       const box = this.el.msgs;
       if (!box) return;
+      const ms = secs * 1000;
       // collapse repeats instead of stacking the same line
       const last = box.lastElementChild;
-      if (last && last.dataset.text === text) { last.classList.remove('fade'); void last.offsetWidth; clearTimeout(last._t); last._t = setTimeout(() => this._fade(last), 2600); return; }
+      if (last && last.dataset.text === text) { last.classList.remove('fade'); void last.offsetWidth; clearTimeout(last._t); last._t = setTimeout(() => this._fade(last), ms); return; }
       const d = document.createElement('div');
       d.className = 'msg ' + cls; d.textContent = text; d.dataset.text = text;
       box.appendChild(d);
       while (box.children.length > 4) box.firstElementChild.remove();
-      d._t = setTimeout(() => this._fade(d), 2600);
+      d._t = setTimeout(() => this._fade(d), ms);
    }
    _fade(d) { d.classList.add('fade'); setTimeout(() => d.remove(), 500); }
 

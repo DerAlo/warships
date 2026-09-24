@@ -16,12 +16,15 @@ import { Hud } from './hud.js';
 import { Overlay3D } from './hud3d.js';
 import { Audio } from './audio.js';
 import { World } from './state.js';
-import { updateBot } from './ai.js';
+// Namespace imports: a missing named export must not break module linking on either sim.
+import * as ai from './ai.js';
+import * as combat from './combat.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
 const KN = WORLD.KN_TO_MS || 1 / 1.94384;     // m/s per knot (old sim: real knots)
 const ALIGN_TOL = 3 * DEG;                    // old sim: turret counts as aligned within this
+const FIRE_TOL = WORLD.FIRE_TOL || WORLD.ALIGN_TOL || ALIGN_TOL;
 const ZOOMS = [2, 4, 8, 16];
 const YAW_SENS = 0.0028, RANGE_SENS = 0.0025; // rad/px and log(range)/px at base FOV
 const AIM_TAU = 0.035;                        // aim smoothing time constant (s)
@@ -113,6 +116,8 @@ window.__turrets = () => turretCache.map(t => ({ state: t.state, reload: t.reloa
 window.__cons = () => consumables().map(c => ({ slot: c.slot, key: c.key, charges: c.charges, cd: c.cd, active: c.active }));
 window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
+let renderOn = true;
+window.__setRender = (on) => { renderOn = !!on; };
 
 // ------------------------------------------------------------------ adapters (contract first, old sim second)
 function gunRangeOf(p) {
@@ -144,6 +149,10 @@ function flightTime(R) {
    try {
       if (typeof P.flightTime === 'function') return P.flightTime(R);
       if (typeof world.flightTime === 'function') return world.flightTime(P, R);
+      if (typeof combat.flightTime === 'function' && P.cfg?.main) {
+         const t = combat.flightTime(P.cfg.main, Math.max(1, R));
+         if (Number.isFinite(t)) return t;
+      }
    } catch (e) { /* fall through */ }
    if (flightCal) return flightCal.k * Math.pow(Math.max(1, R), 1.15);
    if (P.cfg?.main?.vShell && !simv.newShells) return R / P.cfg.main.vShell;
@@ -159,7 +168,9 @@ function computeTurrets(p) {
    for (const t of p.turrets) {
       let aligned, canBear, alive, reload, reloadMax;
       if (simv.newTurrets) {
-         aligned = !!t.aligned; canBear = t.canBear !== false; alive = t.alive !== false;
+         // "ready" must match what fireMain accepts (it tolerates FIRE_TOL > ALIGN_TOL)
+         aligned = !!t.aligned || (typeof t.err === 'number' && t.err <= FIRE_TOL);
+         canBear = t.canBear !== false; alive = t.alive !== false;
          reload = Math.max(0, t.reload || 0); reloadMax = t.reloadMax || reloadMaxOld;
       } else {
          // Old sim has no firing arcs: forward mounts can't shoot over the stern, aft mounts
@@ -182,26 +193,31 @@ function torpInfo(p) {
       const T = p.torps, L = T.launchers || [];
       if (!L.length) return null;
       const ready = L.filter(l => (l.reload || 0) <= 0);
-      const next = ready[0] || L.reduce((a, b) => ((a.reload || 0) < (b.reload || 0) ? a : b));
+      // the launcher the sim would use on this bearing (side/arc aware); null = no firing angle
+      const pick = typeof p.torpLauncherFor === 'function' ? p.torpLauncherFor(aim.yaw) : ready[0];
+      const next = pick || ready[0] || L.reduce((a, b) => ((a.reload || 0) < (b.reload || 0) ? a : b));
       const minReload = Math.min(...L.map(l => l.reload || 0));
-      return { range: T.range || 8000, speed: (T.speedKn || 60) * KN, tubes: next.tubes || 3,
-         readyCount: ready.length, total: L.length, reload: minReload, reloadMax: next.reloadMax || 60, spread: T.spread || ctl.spread };
+      return { range: T.range || p.cfg?.torp?.range || 8000, speed: T.speed || p.cfg?.torp?.speed || (T.speedKn || p.cfg?.torp?.speedKn || 60) * KN,
+         tubes: next.tubes || 3, readyCount: ready.length, total: L.length, canFire: !!pick, reload: minReload,
+         reloadMax: next.reloadMax || 60, spread: T.spread || ctl.spread };
    }
    const c = p.cfg?.torp;
    if (!c || typeof p.fireTorpedo !== 'function') return null;
    const r = Math.max(0, p.torpTimer || 0);
-   return { range: c.range, speed: c.speed, tubes: c.salvo || 3, readyCount: r <= 0 ? 1 : 0, total: 1,
+   return { range: c.range, speed: c.speed, tubes: c.salvo || 3, readyCount: r <= 0 ? 1 : 0, total: 1, canFire: r <= 0,
       reload: r, reloadMax: c.cd || 30, spread: ctl.spread };
 }
 function torpBearings(info, yaw) {
-   const gap = (info.spread === 'wide' ? 3.5 : 1.2) * DEG;
+   const gap = (info.spread === 'wide' ? 3.2 : 1.3) * DEG;   // same fan as ship.fireTorpedoes
    const n = info.tubes, out = [];
    for (let i = 0; i < n; i++) out.push(yaw + (i - (n - 1) / 2) * gap);
    return out;
 }
 
-// Unified consumable list for HUD + keys. Slots: R = damage control, T = repair,
-// Y/U = class specials (whatever else the ship carries, in order).
+// Unified consumable list for HUD + keys, WoWs slot order: R = damage control, then the
+// repair party, then the class specials in the ship's own order (a DD without repair party
+// gets smoke on T, boost on Y -- like the real game).
+const CONS_SLOTS = ['R', 'T', 'Y', 'U'];
 function consumables() {
    const p = P;
    if (!p) return [];
@@ -209,12 +225,9 @@ function consumables() {
       const list = p.consumables;
       const dc = list.find(c => c.key === 'damageControl');
       const rp = list.find(c => c.key === 'repair');
-      const other = list.filter(c => c !== dc && c !== rp);
-      const out = [];
-      const add = (c, slot) => { if (c) out.push({ slot, key: c.key, name: c.name || CONS_NAMES[c.key] || c.key, charges: c.charges, maxCharges: c.maxCharges,
-         cd: c.cd || 0, cdMax: c.cdMax || 1, active: !!c.active, t: c.t || 0, dur: c.dur || 1, src: c }); };
-      add(dc, 'R'); add(rp, 'T'); add(other[0], 'Y'); add(other[1], 'U');
-      return out;
+      const ordered = [dc, rp, ...list.filter(c => c !== dc && c !== rp)].filter(Boolean);
+      return ordered.slice(0, CONS_SLOTS.length).map((c, i) => ({ slot: CONS_SLOTS[i], key: c.key, name: c.name || CONS_NAMES[c.key] || c.key,
+         charges: c.charges, maxCharges: c.maxCharges, cd: c.cd || 0, cdMax: c.cdMax || 1, active: !!c.active, t: c.t || 0, dur: c.dur || 1, src: c }));
    }
    return consEmu || [];
 }
@@ -401,7 +414,8 @@ function frameInput(dt) {
       if (!ti) { audio.denied(); hud.msg('Keine Torpedos an Bord', 'warn'); }
       else if (ctl.mode === 'torp') {
          ctl.spread = ctl.spread === 'narrow' ? 'wide' : 'narrow';
-         if (p.torps) p.torps.spread = ctl.spread;
+         if (typeof p.setTorpSpread === 'function') p.setTorpSpread(ctl.spread);
+         else if (p.torps) p.torps.spread = ctl.spread;
          audio.uiClick();
          hud.msg('Torpedofächer: ' + (ctl.spread === 'wide' ? 'weit' : 'eng'), 'info');
       } else { ctl.mode = 'torp'; audio.ammoSwitch(); }
@@ -410,7 +424,7 @@ function frameInput(dt) {
    if (inp.tapped('X')) toggleLock();
 
    // --- consumables
-   for (const k of ['R', 'T', 'Y', 'U']) if (inp.tapped(k)) useConsumable(k);
+   for (const k of CONS_SLOTS) if (inp.tapped(k)) useConsumable(k);
 
    // --- binoculars + wheel
    if (inp.tapped('SHIFT')) { cam3.bino = !cam3.bino; audio.uiClick(); }
@@ -648,6 +662,7 @@ function fireTorps() {
    const ti = torpInfo(p);
    if (!ti) return 0;
    if (ti.readyCount <= 0) { audio.denied(); return 0; }
+   if (ti.canFire === false) { audio.denied(); hud.msg('Kein Schusswinkel – Torpedorohre zeigen zur Seite', 'warn'); return 0; }
    let n = 0;
    if (simv.newTorps) {
       try { n = p.fireTorpedoes(world, aim.yaw) || 0; } catch (e) { n = 0; }
@@ -738,8 +753,23 @@ function processEvents(dt) {
             break;
          }
          case 'spotted': if (mine) addRibbon('spotted'); break;
-         case 'cap': if (mine) addRibbon('cap'); if (e.text) hud.msg(e.text, 'good'); break;
-         case 'capLost': case 'objective': if (e.text) hud.msg(e.text, e.type === 'capLost' ? 'warn' : 'good'); break;
+         case 'cap': {
+            // no capper id in the event: credit the player if they sat inside the circle
+            const c = (world.caps || []).find(k => k.id === e.capId);
+            if (mine || (c && Math.hypot(c.pos.x - p.pos.x, c.pos.y - p.pos.y) <= (c.r || 0) * 1.05)) addRibbon('cap');
+            if (e.text) hud.msg(e.text, 'good');
+            break;
+         }
+         case 'capLost': if (e.text) hud.msg(e.text, 'warn'); break;
+         case 'module': if (onMe && e.text) hud.msg(e.text, 'warn'); break;
+         case 'objective': {
+            // mission radio + objective updates: longer on screen than combat notices
+            if (!e.text || e.end) break;
+            const bad = e.level === 'warn' || e.level === 'bad' || e.state === 'failed';
+            hud.msg(e.text, bad ? 'warn' : e.state === 'done' ? 'good' : 'radio', 6);
+            audio.radio?.();
+            break;
+         }
          default: break;
       }
    }
@@ -1052,7 +1082,7 @@ function frame() {
          while (acc >= SIM_DT && steps < 15) {
             snapshotPrev();
             applyControls(SIM_DT);
-            if (!simv.botsInternal) for (const b of world.bots) updateBot(b, world, SIM_DT);
+            if (!simv.botsInternal && ai.updateBot) for (const b of world.bots) ai.updateBot(b, world, SIM_DT);
             world.update(SIM_DT);
             acc -= SIM_DT; steps++;
          }
@@ -1074,7 +1104,10 @@ function frame() {
          applyInterp(alpha);
          try {
             cam3.spectate = !!(P && !P.alive && P.sinking);
-            renderer.render(world, dt, cam3);
+            // test hook: headless software-GL is slow, so control tests can skip the 3D draw
+            // (the camera rig still runs, keeping aim/projection exact)
+            if (renderOn) renderer.render(world, dt, cam3);
+            else if (renderer.cam?.update) { renderer.cam.update(world, dt, cam3); renderer.camera.updateMatrixWorld(); }
             if (phase === 'playing' || phase === 'paused') {
                const ui = buildUi(dt);
                miniT -= dt;

@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const URL = process.env.URL3D || 'http://localhost:5173/index-3d.html';
-const OUT = 'tests/shots';
+const OUT = process.env.OUT || 'tests/shots';
 mkdirSync(OUT, { recursive: true });
 
 const errors = [];
