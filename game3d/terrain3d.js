@@ -230,11 +230,16 @@ function rockGeometry() {
 }
 
 // ---------------- the terrain ----------------
+const LOD_TAN = Math.tan(THREE.MathUtils.degToRad(58) / 2);   // camera3d BASE_FOV: LOD distances are tuned at it
+const _lodCam = { matrixWorld: null, zoom: 1 };
+const TREE_LOD = [3500, 8000];   // m: thinned forest beyond the first, none beyond the second (terrain colour carries it)
+const TREE_CELL = 1600;          // m: forest bucket size (per-bucket frustum and shadow culling)
 export class Terrain {
    constructor() {
       this.group = new THREE.Group();
       this.fields = [];
       this.grids = [];
+      this.lods = [];
       this.depthTex = null;
       this.rect = null;
       this.mat = terrainMaterial();
@@ -250,10 +255,21 @@ export class Terrain {
       for (const c of this.group.children.slice()) {
          this.group.remove(c);
          if (c.isInstancedMesh) { c.dispose(); continue; }
+         // LODs: terrain levels own their index geometry; tree levels hold instanced meshes on shared clumps
+         if (c.isLOD) { c.traverse(o => { if (o.isInstancedMesh) o.dispose(); else if (o.isMesh) o.geometry.dispose(); }); continue; }
          if (c.geometry && c.geometry !== this.conifer && c.geometry !== this.broadleaf && c.geometry !== this.rockGeo) c.geometry.dispose();
       }
       if (this.depthTex) { this.depthTex.dispose(); this.depthTex = null; }
-      this.fields = []; this.grids = [];
+      this.fields = []; this.grids = []; this.lods = [];
+   }
+
+   // per-frame LOD pick. camera3d zooms the sniper scope by narrowing the FOV rather than via
+   // camera.zoom, so fold that magnification in here or scoped islands would stay coarse
+   update(camera) {
+      if (!this.lods.length) return;
+      _lodCam.matrixWorld = camera.matrixWorld;
+      _lodCam.zoom = Math.max(1, LOD_TAN / Math.tan(THREE.MathUtils.degToRad(camera.fov || 58) / 2));
+      for (const l of this.lods) l.update(_lodCam);
    }
 
    build(obstacles, env, arena) {
@@ -347,7 +363,7 @@ export class Terrain {
                const dry = smoothstep(-0.2, 0.6, nv2);
                let veg = mixc(PAL.grass, PAL.grassDry, dry * 0.7);
                const forestN = smoothstep(-0.05, 0.3, nv);
-               veg = mixc(veg, PAL.forest, forestN * 0.75 * (1 - smoothstep(0.55, 0.85, hN)));
+               veg = mixc(veg, PAL.forest, forestN * 0.92 * (1 - smoothstep(0.55, 0.85, hN)));   // strong: carries the forest read beyond TREE_LOD
                const rockK = Math.max(smoothstep(0.34, 0.58, slope + nv2 * 0.08), smoothstep(0.72, 0.95, hN + nv * 0.12));
                const rockC = mixc(PAL.rockWarm, PAL.rock, smoothstep(-0.3, 0.3, nv2));
                c = mixc(veg, rockC, rockK);
@@ -358,9 +374,13 @@ export class Terrain {
                // forest clumps on gentle, green, not-too-high ground
                if (f.kind === 'island' && ((i + j * 3) % 2 === 0) && slope < 0.42 && h > 5 && hN < 0.82 && h < 300) {
                   const dens = forestN * (1 - rockK);
-                  if (rnd() < dens * 0.55 * (step / 7) * (step / 7)) {
-                     const jx = x + (rnd() - 0.5) * step, jz = z + (rnd() - 0.5) * step;
-                     const rec = { x: jx, y: gridH(g, jx, jz) - 1.2, z: jz, s: 0.7 + rnd() * 0.6, r: rnd() * Math.PI * 2, vis: vis[k] };
+                  // coarse grids on big islands get several clumps per cell, or WoWs-scale forests turn to scattered dots
+                  for (let p = Math.min(3, dens * 0.55 * (step / 7) * (step / 7)); p > 0; p -= 1) {
+                     if (rnd() >= p) break;
+                     const jx = x + (rnd() - 0.5) * step * 1.6, jz = z + (rnd() - 0.5) * step * 1.6;
+                     const jh = gridH(g, jx, jz);
+                     if (jh < 4) continue;   // jitter must not wade into the surf
+                     const rec = { x: jx, y: jh - 1.2, z: jz, s: 0.7 + rnd() * 0.6, r: rnd() * Math.PI * 2, vis: vis[k] };
                      (hN > 0.35 || rnd() < 0.35 ? trees.con : trees.broad).push(rec);
                   }
                }
@@ -376,29 +396,51 @@ export class Terrain {
             else if (f.kind === 'island' && h > -1 && h < 2.5 && slope > 0.35 && rnd() < 0.05) rocks.push({ x, y: h - 0.6, z, s: 2 + rnd() * 5, r: rnd() * 6 });
          }
       }
-      const idx = [];
-      for (let j = 0; j < n - 1; j++) {
-         for (let i = 0; i < n - 1; i++) {
-            const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
-            if (H[a] < -7 && H[b] < -7 && H[c] < -7 && H[d] < -7) continue;
-            // flip the diagonal to follow ridges (less "staircase" on cliffs)
-            if (Math.abs(H[a] - H[d]) < Math.abs(H[b] - H[c])) { idx.push(a, c, d, a, d, b); }
-            else { idx.push(a, c, b, b, c, d); }
+      // index over every st-th grid vertex; LOD levels share one set of vertex attributes
+      const indexFor = (st) => {
+         const idx = [];
+         for (let j = 0; j + st < n; j += st) {
+            for (let i = 0; i + st < n; i += st) {
+               const a = j * n + i, b = a + st, c = a + n * st, d = c + st;
+               if (H[a] < -7 && H[b] < -7 && H[c] < -7 && H[d] < -7) continue;
+               // flip the diagonal to follow ridges (less "staircase" on cliffs)
+               if (Math.abs(H[a] - H[d]) < Math.abs(H[b] - H[c])) { idx.push(a, c, d, a, d, b); }
+               else { idx.push(a, c, b, b, c, d); }
+            }
          }
-      }
+         return idx;
+      };
+      const idx = indexFor(1);
       if (!idx.length) return null;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      geo.setAttribute('aSunVis', new THREE.BufferAttribute(sv, 1));
-      geo.setIndex(N > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
-      geo.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geo, this.mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      const attrs = {
+         position: new THREE.BufferAttribute(pos, 3), normal: new THREE.BufferAttribute(nrm, 3),
+         color: new THREE.BufferAttribute(col, 3), aSunVis: new THREE.BufferAttribute(sv, 1),
+      };
+      const meshFor = (ix) => {
+         const geo = new THREE.BufferGeometry();
+         for (const k in attrs) geo.setAttribute(k, attrs[k]);
+         geo.setIndex(N > 65535 ? new THREE.Uint32BufferAttribute(ix, 1) : new THREE.Uint16BufferAttribute(ix, 1));
+         geo.computeBoundingSphere();
+         const mesh = new THREE.Mesh(geo, this.mat);
+         mesh.castShadow = true;
+         mesh.receiveShadow = true;
+         return mesh;
+      };
+      const mesh = meshFor(idx);
       if (f.kind === 'island' && f.Rmax > 180) this._landmarks(f, g, mesh);
-      return mesh;
+      // big islands at WoWs scale carry up to ~260k triangles each: far ones drop to 1/4 and 1/16
+      if (n < 120) return mesh;
+      const lod = new THREE.LOD();
+      lod.position.set(f.cx, 0, f.cz);
+      lod.autoUpdate = false;   // picked in update() with the scope zoom
+      const d1 = Math.max(1800, f.Rmax * 2.5);
+      for (const [m, dist] of [[mesh, 0], [meshFor(indexFor(2)), d1], [meshFor(indexFor(4)), d1 * 2.5]]) {
+         m.position.set(-f.cx, 0, -f.cz);
+         lod.addLevel(m, dist);
+      }
+      lod.updateMatrixWorld(true);
+      this.lods.push(lod);
+      return lod;
    }
 
    // a lighthouse on a prominent coastal point: scale reference + WoWs flavour
@@ -430,37 +472,72 @@ export class Terrain {
    }
 
    _instances(trees, rocks) {
-      const MAXT = 7000;
-      const mk = (geo, mat, list, cap, sBase) => {
-         if (!list.length) return;
-         const cnt = Math.min(cap, list.length);
-         const im = new THREE.InstancedMesh(geo, mat, cnt);
-         const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
-         const c = new THREE.Color();
-         const stride = list.length / cnt;
-         for (let i = 0; i < cnt; i++) {
-            const t = list[Math.floor(i * stride)];
+      const MAXT = 14000;   // affordable now that only buckets within TREE_LOD[0] draw every tree
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
+      const c = new THREE.Color();
+      // list entries carry an origin offset (ox, oz) so bucketed forests can sit under a LOD at their centroid
+      const mk = (geo, mat, list, ox, oz, sMul) => {
+         if (!list.length) return null;
+         const im = new THREE.InstancedMesh(geo, mat, list.length);
+         list.forEach((t, i) => {
             e.set(0, t.r, 0); q.setFromEuler(e);
-            s.set(t.s * sBase, t.s * sBase * (0.9 + (i % 5) * 0.06), t.s * sBase);
-            p.set(t.x, t.y, t.z);
+            const h = Math.abs(Math.sin(t.x * 12.9898 + t.z * 78.233) * 43758.5453) % 1;   // stable per-tree jitter across LOD levels
+            s.set(t.s * sMul, t.s * sMul * (0.9 + h * 0.24), t.s * sMul);
+            p.set(t.x - ox, t.y, t.z - oz);
             m.compose(p, q, s);
             im.setMatrixAt(i, m);
             const v = t.vis === undefined ? 1 : 0.55 + 0.45 * t.vis;
-            const tint = 0.85 + ((i * 7919) % 100) / 100 * 0.3;
-            c.setRGB(v * tint, v * (0.95 + ((i * 104729) % 100) / 1000), v * tint * 0.95);
+            const tint = 0.85 + h * 0.3;
+            c.setRGB(v * tint, v * (0.95 + ((h * 997) % 1) * 0.1), v * tint * 0.95);
             im.setColorAt(i, c);
-         }
+         });
          im.instanceMatrix.needsUpdate = true;
          if (im.instanceColor) im.instanceColor.needsUpdate = true;
          im.castShadow = true; im.receiveShadow = true;
          im.computeBoundingSphere();
-         this.group.add(im);
+         return im;
+      };
+      const thin = (list, cnt) => {
+         const out = [], stride = list.length / Math.max(1, cnt);
+         for (let i = 0; i < cnt; i++) out.push(list[Math.floor(i * stride)]);
+         return out;
       };
       const total = trees.con.length + trees.broad.length;
       const k = total > MAXT ? MAXT / total : 1;
-      mk(this.conifer, this.treeMat, trees.con, Math.floor(trees.con.length * k), 1);
-      mk(this.broadleaf, this.treeMat, trees.broad, Math.floor(trees.broad.length * k), 1);
-      mk(this.rockGeo, this.rockMat, rocks, 1500, 1);
+      // bucket forests into cells: one giant instanced mesh can never be frustum-culled and pays full
+      // vertex cost for every tree in both the main and the shadow pass, even at 20 km
+      const cells = new Map();
+      const add = (list, key) => {
+         for (const t of thin(list, Math.floor(list.length * k))) {
+            const id = Math.floor(t.x / TREE_CELL) + ',' + Math.floor(t.z / TREE_CELL);
+            let b = cells.get(id);
+            if (!b) cells.set(id, b = { con: [], broad: [], sx: 0, sz: 0, n: 0 });
+            b[key].push(t); b.sx += t.x; b.sz += t.z; b.n++;
+         }
+      };
+      add(trees.con, 'con'); add(trees.broad, 'broad');
+      for (const b of cells.values()) {
+         const cx = b.sx / b.n, cz = b.sz / b.n;
+         const lod = new THREE.LOD();
+         lod.position.set(cx, 0, cz);
+         lod.autoUpdate = false;
+         const near = new THREE.Group(), mid = new THREE.Group();
+         for (const [geo, list] of [[this.conifer, b.con], [this.broadleaf, b.broad]]) {
+            const a = mk(geo, this.treeMat, list, cx, cz, 1);
+            if (a) near.add(a);
+            // mid distance: every third tree, fattened so canopy coverage reads the same from afar
+            const bm = mk(geo, this.treeMat, list.filter((_, i) => i % 3 === 0), cx, cz, 1.35);
+            if (bm) { bm.castShadow = false; mid.add(bm); }
+         }
+         lod.addLevel(near, 0);
+         lod.addLevel(mid, TREE_LOD[0]);
+         lod.addLevel(new THREE.Group(), TREE_LOD[1]);
+         lod.updateMatrixWorld(true);
+         this.lods.push(lod);
+         this.group.add(lod);
+      }
+      const rk = mk(this.rockGeo, this.rockMat, thin(rocks, Math.min(1500, rocks.length)), 0, 0, 1);
+      if (rk) this.group.add(rk);
    }
 
    _buildDepthMap(arena) {
