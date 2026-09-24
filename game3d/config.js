@@ -449,8 +449,9 @@ export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 6
 
 // Per-class display stats for the ship picker (menu3d.js). Ratings are 0..100 relative to the
 // playable line-up so the menu can draw bars without knowing the raw numbers.
-export function shipStats(key) {
-   const c = SHIPS[key];
+// cfgIn: optional modified copy (career modules/skills, progress3d.applyLoadout).
+export function shipStats(key, cfgIn) {
+   const c = cfgIn || SHIPS[key];
    if (!c) return null;
    const m = c.main, t = c.torp;
    const layout = {};

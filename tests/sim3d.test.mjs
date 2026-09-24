@@ -8,6 +8,7 @@ import { MISSIONS, MISSION_IDS, getMission, opStars } from '../game3d/missions.j
 import { SHIPS, WORLD } from '../game3d/config.js';
 import { flightTime, makeShell, resolveShells, resolveHit, weatherDispersion } from '../game3d/combat.js';
 import { obstacleT } from '../game3d/utils.js';
+import './progress3d.test.mjs';    // career progression tests run with this suite
 
 const DT = 1 / 60;
 

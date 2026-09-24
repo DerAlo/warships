@@ -1,6 +1,7 @@
 // game3d/state.js — the World: mission container, fixed-step update, spotting, capture points,
 // events/stats bookkeeping and the query surface used by AI, renderer and HUD.
-import { WORLD, DIFFICULTY, TUNE } from './config.js';
+import { WORLD, DIFFICULTY, TUNE, SHIPS } from './config.js';
+import { applyLoadout, calcRewards } from './progress3d.js';
 import { makeRng, dist2, clamp, makeLobes, segBlockedByIslands, pointSegDist, TAU } from './utils.js';
 import { Ship } from './ship.js';
 import { resolveShells, resolveTorpedoes } from './combat.js';
@@ -67,6 +68,7 @@ export class World {
       this._spotT = 0;
       this._byId = new Map();
       this.setEnv({});
+      this.loadout = opts.loadout || null;   // career modules + captain skills for the player ship (progress3d.js)
       setupMission(this, opts.mission || 'standard', opts.ship || null);
       this._updateSpotting();
    }
@@ -137,6 +139,7 @@ export class World {
       const ship = new Ship(this, cls, side, pos, heading, {
          hpMult: bot && side === 'enemy' ? d.botHP : 1,
          dmgMult: bot && side === 'enemy' ? d.botDmg : 1,
+         ...(!bot && this.loadout && SHIPS[cls] ? { cfg: applyLoadout(SHIPS[cls], this.loadout) } : null),
          ...opts,
       });
       this.ships.push(ship);
@@ -271,11 +274,9 @@ export class World {
       for (const o of this.mission ? this.mission.objectives : []) {
          if (o.state === 'active') o.state = victory && !o.optional ? 'done' : 'failed';
       }
-      const base = victory ? 1100 : 450;
-      const xp = Math.round((base + st.dmg * 0.018 + st.kills * 160 + st.citadels * 12 + st.caps * 120 +
-         st.spottingDmg * 0.008 + st.potential * 0.0015 + (this.player && this.player.alive ? 150 : 0)) * (d.rewardMult || 1));
-      const credits = Math.round(xp * 55 + st.dmg * 1.2 + st.kills * 9000);
-      this.result = { victory, reason, xp, credits, time: this.time, stats: { ...st } };
+      const rw = calcRewards({ victory, stats: st, rewardMult: d.rewardMult || 1, alive: !!(this.player && this.player.alive),
+         objectives: this.mission ? this.mission.objectives : [] });
+      this.result = { victory, reason, xp: rw.xp, credits: rw.credits, rewards: rw, time: this.time, stats: { ...st } };
       this.pushEvent('objective', { text: (victory ? 'SIEG — ' : 'NIEDERLAGE — ') + reason, level: victory ? 'win' : 'lose', end: true });
       this.log(null, (victory ? '🏆 ' : '💀 ') + reason, victory ? 'kill' : 'warn');
    }
@@ -356,7 +357,7 @@ export class World {
          for (const O of ships) {
             if (!O.alive || O.side === t.side) continue;
             const hyd = O.consumableActive('hydro') ? O.consumable('hydro').torpRange || 0 : 0;
-            const r = Math.max(t.detect || 1300, hyd);
+            const r = Math.max((t.detect || 1300) * (O.torpSpot || 1), hyd);
             if (dist2(O.pos, t.pos) < r * r) { vis = true; break; }
          }
          t.visibleToOpp = vis;

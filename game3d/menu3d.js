@@ -3,7 +3,9 @@
 // and hands the chosen { mission, ship, difficulty } to main3d via callbacks. Reads the menu
 // data the sim exports (MISSIONS, SHIP_STATS, SHIPS) and never touches the running world.
 import { MISSIONS, getMission, opStars } from './missions.js';
-import { SHIPS, SHIP_STATS, PLAYABLE } from './config.js';
+import { SHIPS, SHIP_STATS, PLAYABLE, shipStats } from './config.js';
+import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, MODULES, SKILLS, captainLevel, skillPointsFree, isUnlocked, canUnlock,
+   unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout } from './progress3d.js';
 import { classSvg } from './hud.js';
 
 const TYPE_LABEL = {
@@ -23,6 +25,9 @@ const STORE_KEY ='warships3d.progress.v1';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
+// module tier effects as short German text, e.g. "−5 % Nachladen · −4 % Streuung"
+const FX_LABEL = { reload: 'Nachladen', disp: 'Streuung', speed: 'Tempo', accel: 'Beschl.', rudder: 'Ruder', hp: 'HP', range: 'Reichweite' };
+const modFx = (tier) => Object.entries(tier || {}).map(([k, v]) => `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v) * 100)} % ${FX_LABEL[k] || k}`).join(' · ');
 const mmss = (s) => { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
 // ---------------------------------------------------------------- icons (inline SVG, no assets)
@@ -225,6 +230,34 @@ const CSS = `
    color:#e6f0fa; background:linear-gradient(180deg,#2d3a48,#1b2430); transition:filter .12s, transform .12s; }
 .m3r-btn:hover { filter:brightness(1.2); transform:translateY(-1px); }
 .m3r-btn.pri { border-color:rgba(255,190,120,.5); background:linear-gradient(180deg,#f07a2c,#b8420e); color:#fff; }
+/* career: captain button, locked cards, module + skill panels, reward breakdown */
+.m3-capt { cursor:pointer; position:relative; border:1px solid rgba(214,178,94,.45); border-radius:3px; padding:7px 10px; background:rgba(0,0,0,.3); color:#d6b25e; font:800 12px var(--font,"Segoe UI"); letter-spacing:1.5px; }
+.m3-capt:hover { border-color:#d6b25e; color:#fff; } .m3-capt b { color:#fff; margin-left:3px; }
+.m3-capt i { position:absolute; top:-7px; right:-7px; min-width:16px; height:16px; border-radius:8px; background:#ffc94a; color:#1b1300; font:900 10.5px/16px var(--font,"Segoe UI"); font-style:normal; letter-spacing:0; }
+.m3-card.lock .lk { flex-direction:column; gap:2px; background:rgba(4,10,18,.5); font-size:12px; font-weight:800; color:#8fd3ff; letter-spacing:.5px; }
+.m3-prog { margin-top:12px; padding-top:10px; border-top:1px solid rgba(150,190,230,.12); }
+.m3-mod { display:grid; grid-template-columns:92px 32px 1fr auto; align-items:center; gap:6px; font-size:11.5px; padding:3px 0; }
+.m3-mod .n { color:#b6cadb; font-weight:700; } .m3-mod .fx { color:#8fd3ff; font-size:10.5px; } .m3-mod .max { color:#7f9bb5; font-size:10.5px; font-weight:800; letter-spacing:1px; }
+.m3-pips { display:flex; gap:2px; } .m3-pips i { width:9px; height:5px; border-radius:1px; background:rgba(255,255,255,.12); } .m3-pips i.on { background:#ffd479; }
+.m3-buy { cursor:pointer; border:1px solid rgba(214,178,94,.5); border-radius:3px; padding:3px 8px; background:rgba(60,44,10,.5); color:#ffd479; font:800 11px var(--font,"Segoe UI"); font-variant-numeric:tabular-nums; }
+.m3-buy:hover:not(:disabled) { filter:brightness(1.25); } .m3-buy:disabled { opacity:.4; cursor:not-allowed; }
+.m3-buy.big { width:100%; padding:9px; font-size:13px; letter-spacing:1.5px; color:#cfeaff; border-color:rgba(143,211,255,.5); background:rgba(20,60,100,.5); }
+.m3-prog .hint { font-size:11px; color:#8aa3ba; margin-top:5px; text-align:center; }
+.m3-op .box.cap { max-width:760px; }
+.m3-op .box.cap .m3-bar { margin-top:10px; }
+.m3-skills { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:14px 0 4px; }
+.m3-op .m3-skill { position:relative; text-align:left; padding:8px 30px 8px 10px; letter-spacing:0; font-weight:400; display:flex; flex-direction:column; gap:2px; }
+.m3-skill b { font-size:13px; color:#e6f0fa; } .m3-skill span { font-size:11px; color:#9db4c8; }
+.m3-skill i { position:absolute; top:8px; right:9px; font-style:normal; font-weight:900; color:#ffd479; }
+.m3-op .m3-skill.on { border-color:#8fd3ff; background:rgba(40,96,146,.55); cursor:default; }
+.m3-op .m3-skill:disabled { opacity:.4; cursor:not-allowed; }
+.m3-op button.warn { border-color:rgba(230,110,90,.5); color:#ffb4a4; }
+.m3-confirm { margin-top:12px; padding:10px 12px; border:1px solid rgba(230,110,90,.5); border-radius:3px; background:rgba(60,14,10,.5); font-size:12.5px; color:#ffd8cf; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.m3-confirm span { flex:1; min-width:200px; }
+.m3r-rw { margin-top:12px; }
+.m3r-rw table { width:100%; border-collapse:collapse; font-size:12px; margin-top:2px; font-variant-numeric:tabular-nums; }
+.m3r-rw td { padding:2px 4px; color:#b6cadb; } .m3r-rw td.xp { text-align:right; color:#8fd3ff; } .m3r-rw td.cr { text-align:right; color:#ffd479; }
+.m3r-rw tr.sum td { border-top:1px solid rgba(150,190,230,.2); font-weight:800; color:#e6f0fa; }
 @media (max-width: 1000px) { .m3r-body { grid-template-columns:1fr; overflow:auto; } .m3r-title { font-size:44px; } .m3r-foot { flex-wrap:wrap; gap:14px; } }
 `;
 
@@ -244,6 +277,7 @@ export class Menu3D {
       injectStyle();
       this.root = root; this.resRoot = resultsRoot; this.cb = cb;
       this.progress = loadProgress();
+      this.profile = loadProfile();      // career: XP, credits, unlocks, modules, skills (progress3d.js)
       const sel = this.progress.sel || {};
       this.mission = getMission(sel.mission) ? sel.mission : MISSIONS[0].id;
       this.difficulty = ['easy', 'normal', 'hard'].includes(sel.difficulty) ? sel.difficulty : 'normal';
@@ -255,6 +289,7 @@ export class Menu3D {
       this.resRoot.innerHTML = '';
       this._onKey = (e) => {
          if (this.root.classList.contains('hidden')) return;
+         if (this._cap) { if (e.code === 'Escape') { e.preventDefault(); this._closeCaptain(); } return; }
          if (this._intro) {
             if (e.code === 'Enter') { e.preventDefault(); this._launch(); }
             else if (e.code === 'Escape') { e.preventDefault(); this._closeIntro(); }
@@ -274,17 +309,22 @@ export class Menu3D {
 
    get selection() { return { mission: this.mission, ship: this.ship, difficulty: this.difficulty }; }
    _allowed(mid = this.mission) { return getMission(mid)?.playableShips || PLAYABLE; }
+   // keep the selection valid: allowed in this mission and unlocked (op ships are never locked)
    _fixShip() {
       const allowed = this._allowed();
-      if (!allowed.includes(this.ship)) this.ship = getMission(this.mission)?.recommendedShip || allowed[0];
-      if (!allowed.includes(this.ship)) this.ship = allowed[0];
+      const ok = (k) => allowed.includes(k) && isUnlocked(this.profile, k);
+      if (ok(this.ship)) return;
+      const rec = getMission(this.mission)?.recommendedShip;
+      this.ship = ok(rec) ? rec : (allowed.find(ok) || allowed[0]);
    }
+   // loadout snapshot main3d hands to the World for the player ship
+   loadout(ship) { return loadoutFor(this.profile, ship); }
    _remember() { this.progress.sel = this.selection; saveProgress(this.progress); }
 
    // back to port: main3d drops the finished world first (onPort ends in show())
    _toPort() { this.hideResults(); if (this.cb.onPort) this.cb.onPort(); else this.show(); }
    show() { this.hideResults(); this.render(); this.root.classList.remove('hidden'); }
-   hide() { this._closeIntro(); this.root.classList.add('hidden'); }
+   hide() { this._closeIntro(); this._closeCaptain(); this.root.classList.add('hidden'); }
    hideResults() { this.resRoot.classList.add('hidden'); cancelAnimationFrame(this._countRaf); }
 
    selectMission(id) {
@@ -297,6 +337,7 @@ export class Menu3D {
    }
    start(opts) {
       const o = opts || this.selection;
+      if (!opts && !isUnlocked(this.profile, o.ship)) return;     // locked ship is only selected for viewing
       this._remember();
       // historical operations open with a briefing screen (skipped on "NOCHMAL")
       if (!opts && getMission(o.mission)?.group === 'ops') { this._openIntro(getMission(o.mission)); return; }
@@ -323,11 +364,66 @@ export class Menu3D {
       this.cb.onClick?.();
    }
 
+   // ------------------------------------------------------------ captain (skills, respec, profile reset)
+   _closeCaptain() { if (this._cap) { this._cap.remove(); this._cap = null; } this._capConfirm = false; }
+   _openCaptain(keepConfirm = false) {
+      const confirm = keepConfirm && this._capConfirm;
+      this._closeCaptain();
+      this._capConfirm = confirm;
+      const pf = this.profile, cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
+      const pct = cl.next ? Math.round((pf.totalXp - cl.cur) / (cl.next - cl.cur) * 100) : 100;
+      const el = document.createElement('div');
+      el.className = 'm3-op m3-cap';
+      el.innerHTML = `<div class="box cap">
+            <div class="k">KAPITÄN · FERTIGKEITEN</div>
+            <div class="t">Stufe ${cl.level}</div>
+            <div class="st">${fmtInt(pf.totalXp)} EP gesamt · ${cl.next ? `nächste Stufe bei ${fmtInt(cl.next)} EP` : 'Höchststufe erreicht'} · <b class="pts">${free}</b> freie Punkte · ${pf.battles} Gefechte</div>
+            <div class="m3-bar"><div class="b"><i style="width:${pct}%"></i></div></div>
+            <div class="m3-skills">${SKILLS.map(s => {
+               const has = pf.skills.includes(s.key);
+               return `<button class="m3-skill ${has ? 'on' : ''}" data-skill="${s.key}" ${!has && s.cost > free ? 'disabled' : ''}><b>${esc(s.name)}</b><span>${esc(s.desc)}</span><i>${s.cost}</i></button>`;
+            }).join('')}</div>
+            <div class="bt"><button class="warn" data-cap="reset">PROFIL ZURÜCKSETZEN</button><span style="flex:1"></span>
+               <button data-cap="respec" ${pf.skills.length ? '' : 'disabled'}>UMSCHULEN</button><button class="pri" data-cap="close">FERTIG</button></div>
+            ${confirm ? `<div class="m3-confirm"><span>Wirklich zurücksetzen? EP, Kreditpunkte, erforschte Schiffe, Module und Fertigkeiten gehen verloren. Orden und Missionssiege bleiben erhalten.</span>
+               <button data-cap="no">ABBRECHEN</button><button class="warn" data-cap="yes">ZURÜCKSETZEN</button></div>` : ''}
+         </div>`;
+      const act = (sel, fn) => el.querySelector(sel)?.addEventListener('click', () => { fn(); this.cb.onClick?.(); });
+      el.querySelectorAll('[data-skill]').forEach(b => b.addEventListener('click', () => {
+         if (learnSkill(pf, b.dataset.skill)) { this._saveProfile(); this.render(); this.cb.onClick?.(); }
+      }));
+      act('[data-cap="respec"]', () => { if (respecSkills(pf)) { this._saveProfile(); this.render(); } });
+      act('[data-cap="close"]', () => this._closeCaptain());
+      act('[data-cap="reset"]', () => { this._capConfirm = true; this._openCaptain(true); });
+      act('[data-cap="no"]', () => { this._capConfirm = false; this._openCaptain(); });
+      act('[data-cap="yes"]', () => {
+         this.profile = defaultProfile(); this._saveProfile();
+         delete this.progress.xp; delete this.progress.credits; saveProgress(this.progress);
+         this._closeCaptain(); this._fixShip(); this.render();
+      });
+      this.root.appendChild(el);
+      this._cap = el;
+   }
+
    render() {
       const m = getMission(this.mission) || MISSIONS[0];
-      const S = SHIP_STATS[this.ship];
+      const pf = this.profile, k0 = this.ship;
+      // stats as they will sail: modules + captain skills applied (same pipeline as the sim)
+      const S = SHIPS[k0] ? shipStats(k0, applyLoadout(SHIPS[k0], loadoutFor(pf, k0))) : null;
       const allowed = this._allowed();
       const pr = this.progress;
+      const shipLocked = !isUnlocked(pf, k0), cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
+      const prog = !S ? '' : shipLocked ? `<div class="m3-prog">
+            <div class="m3-h"><span>Forschung</span><span>${fmtInt(pf.xp)} EP verfügbar</span></div>
+            <button class="m3-buy big" data-act="unlock" ${canUnlock(pf, k0) ? '' : 'disabled'}>ERFORSCHEN · ${fmtInt(UNLOCK_XP[k0])} EP</button>
+            ${canUnlock(pf, k0) ? '' : `<div class="hint">Noch ${fmtInt(UNLOCK_XP[k0] - pf.xp)} EP benötigt</div>`}</div>`
+         : `<div class="m3-prog"><div class="m3-h"><span>Module</span><span>${fmtInt(pf.credits)} Kr.</span></div>
+            ${MODULES.map(d => {
+               const t = moduleTier(pf, k0, d.key), c = moduleCost(pf, k0, d.key);
+               return `<div class="m3-mod"><span class="n">${d.name}</span><span class="m3-pips">${d.tiers.map((_, i) => `<i class="${i < t ? 'on' : ''}"></i>`).join('')}</span>
+                  <span class="fx">${t ? modFx(d.tiers[t - 1]) : ''}</span>
+                  ${c ? `<button class="m3-buy" data-mod="${d.key}" ${pf.credits >= c ? '' : 'disabled'} title="Stufe ${t + 1}: ${modFx(d.tiers[t])}">${fmtInt(c)}</button>` : '<span class="max">MAX</span>'}</div>`;
+            }).join('')}</div>`;
       const medal = (n) => `<span class="m3-medal" title="Orden">${[1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}">✦</i>`).join('')}</span>`;
       const misItem = (x) => {
          const rec = pr.missions?.[x.id], done = rec?.won, op = x.group === 'ops';
@@ -371,23 +467,24 @@ export class Menu3D {
             <span>Gürtelpanzer</span><span>${S.belt} mm</span>
             <span>Abmessungen</span><span>${S.lengthM} × ${String(S.beamM).replace('.', ',')} m</span>
          </div>
-         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>` : '';
+         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>${prog}` : '';
       // fixed op ships (Duke of York, Washington ...) join the row only while their operation is selected
       const cards = [...PLAYABLE, ...allowed.filter(k => !PLAYABLE.includes(k))].map(k => {
-         const st = SHIP_STATS[k], ok = allowed.includes(k);
-         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'}" data-ship="${esc(k)}" title="${ok ? '' : 'In dieser Mission nicht verfügbar'}">
+         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !isUnlocked(pf, k);
+         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Gesperrt — mit EP erforschen' : '') : 'In dieser Mission nicht verfügbar'}">
             ${m.recommendedShip === k && ok ? '<span class="rec">EMPFOHLEN</span>' : ''}
             <div class="hd">${classSvg(st.type, 13)}<span>${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
             ${silhouetteSvg(k)}
-            ${ok ? '' : `<div class="lk">${icon('lock', 26)}</div>`}
+            ${ok ? (lk ? `<div class="lk">${icon('lock', 20)}<span>${fmtInt(UNLOCK_XP[k])} EP</span></div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}
          </div>`;
       }).join('');
       this.root.innerHTML = `
          <div class="m3-top">
             <div class="m3-logo">WARSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
-            <button class="m3-battle" data-act="battle">GEFECHT!</button>
+            <button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst erforschen"' : ''}>GEFECHT!</button>
             <div class="m3-right">
-               <div class="m3-purse"><span><b class="xp">${fmtInt(pr.xp)}</b> EP</span><span><b>${fmtInt(pr.credits)}</b> Kreditpunkte</span></div>
+               <div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b> EP</span><span><b>${fmtInt(pf.credits)}</b> Kreditpunkte</span></div>
+               <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button>
                <div class="m3-diff">${DIFFS.map(([k, l]) => `<button data-diff="${k}" class="${k === this.difficulty ? 'sel' : ''}">${l}</button>`).join('')}</div>
                <button class="m3-help" data-act="help" title="So kämpfst du">?</button>
             </div>
@@ -405,6 +502,14 @@ export class Menu3D {
       }));
       this.root.querySelector('[data-act="battle"]').addEventListener('click', () => this.start());
       this.root.querySelector('[data-act="help"]').addEventListener('click', () => this.cb.onHowTo?.());
+      this.root.querySelector('[data-act="captain"]').addEventListener('click', () => this._openCaptain());
+      this.root.querySelector('[data-act="unlock"]')?.addEventListener('click', () => {
+         if (unlockShip(pf, k0)) { this._saveProfile(); this.render(); this.cb.onClick?.(); }
+      });
+      this.root.querySelectorAll('[data-mod]').forEach(el => el.addEventListener('click', () => {
+         if (buyModule(pf, k0, el.dataset.mod)) { this._saveProfile(); this.render(); this.cb.onClick?.(); }
+      }));
+      if (this._cap) this._openCaptain(true);
       const selEl = this.root.querySelector('.m3-mis.sel');
       if (selEl && selEl.scrollIntoView) selEl.scrollIntoView({ block: 'nearest' });
    }
@@ -419,9 +524,18 @@ export class Menu3D {
       const m = getMission(opts.mission) || { name: world.mission?.name || 'Gefecht' };
       // bookkeeping: career totals + per-mission best
       const pr = this.progress;
-      pr.xp = (pr.xp || 0) + (res.xp || 0);
-      pr.credits = (pr.credits || 0) + (res.credits || 0);
+      delete pr.xp; delete pr.credits;            // career totals live in the profile now (progress3d.js)
       pr.missions = pr.missions || {};
+      // career: book the earnings once per finished world
+      const pf = this.profile, rw = res.rewards || { xp: res.xp || 0, credits: res.credits || 0, mult: 1, lines: [] };
+      const lvl0 = captainLevel(pf.totalXp).level, canBefore = PLAYABLE.filter(k => canUnlock(pf, k));
+      if (!world._careerBooked) { world._careerBooked = true; grantRewards(pf, rw); this._saveProfile(); }
+      const lvl1 = captainLevel(pf.totalXp).level, newShips = PLAYABLE.filter(k => canUnlock(pf, k) && !canBefore.includes(k));
+      const rwBox = `<div class="m3r-rw"><div class="m3-h"><span>Belohnung</span><span>${rw.mult && rw.mult !== 1 ? 'Schwierigkeit ×' + String(rw.mult).replace('.', ',') : ''}</span></div>
+         <table>${rw.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="xp">${fmtInt(l.xp)} EP</td><td class="cr">${fmtInt(l.credits)} Kr.</td></tr>`).join('')}
+         <tr class="sum"><td>Gesamt</td><td class="xp">${fmtInt(rw.xp)} EP</td><td class="cr">${fmtInt(rw.credits)} Kr.</td></tr></table>
+         ${lvl1 > lvl0 ? `<div class="m3r-medal">Kapitän erreicht Stufe ${lvl1} · +${lvl1 - lvl0} Fertigkeitspunkt${lvl1 - lvl0 > 1 ? 'e' : ''}</div>` : ''}
+         ${newShips.length ? `<div class="m3r-medal">Erforschbar: ${newShips.map(k => esc(SHIPS[k].name)).join(', ')}</div>` : ''}</div>`;
       const rec = pr.missions[opts.mission] || { won: false, best: 0, plays: 0 };
       rec.plays++; rec.won = rec.won || !!res.victory; rec.best = Math.max(rec.best, res.xp || 0);
       const isOp = m.group === 'ops', medal = isOp ? opStars(world) : 0;
@@ -457,7 +571,7 @@ export class Menu3D {
          </div>
          <div class="m3r-body">
             <div class="m3r-box"><div class="m3-h"><span>Persönliche Leistung</span></div><div class="m3r-grid">${tiles}</div>
-               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${objs ? `<div class="m3r-obj">${objs}</div>` : ''}
+               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${rwBox}${objs ? `<div class="m3r-obj">${objs}</div>` : ''}
                ${isOp && medal ? `<div class="m3r-medal">${'✦'.repeat(medal)} ${MEDAL[medal]} erhalten</div>` : ''}
                ${isOp && m.debrief ? `<div class="m3r-hist"><b>HISTORISCHER HINTERGRUND</b>${esc(m.debrief)}</div>` : ''}</div>
             <div class="m3r-box"><div class="m3r-teams">
@@ -477,7 +591,7 @@ export class Menu3D {
       this.resRoot.querySelector('[data-act="next"]').addEventListener('click', () => {
          this.hideResults();
          this.mission = next.id;
-         if (!next.playableShips.includes(this.ship)) this.ship = next.recommendedShip || next.playableShips[0];
+         this._fixShip();
          this._remember();
          this._toPort();
       });

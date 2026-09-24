@@ -344,7 +344,8 @@ function startGame(opts = {}) {
    const o = resolveOpts(opts || {});
    lastOpts = o;
    difficulty = o.difficulty;
-   world = new World(difficulty, { mission: o.mission, ship: o.ship, ...(o.seed != null ? { seed: o.seed } : {}) });
+   world = new World(difficulty, { mission: o.mission, ship: o.ship, loadout: menu?.loadout ? menu.loadout(o.ship) : null,
+      ...(o.seed != null ? { seed: o.seed } : {}) });
    menu?.hide(); menu?.hideResults();
    world.audio = audio;
    P = world.player;

@@ -19,7 +19,7 @@ const AMMO_NAMES = { AP: 'Panzersprenggranaten (AP)', HE: 'Sprenggranaten (HE)' 
 
 export class Ship {
    constructor(world, cls, side, pos, heading = 0, opts = {}) {
-      const cfg = SHIPS[cls];
+      const cfg = opts.cfg || SHIPS[cls];   // opts.cfg: career-modified copy (progress3d.applyLoadout)
       if (!cfg) throw new Error('Unknown ship class: ' + cls);
       this.world = world;
       this.id = world ? world._nextId++ : Math.floor(Math.random() * 1e9);
@@ -96,6 +96,8 @@ export class Ship {
       // ---- stats / AI scratch ----
       this.dmgDealt = 0; this.dmgTaken = 0; this.kills = 0; this.shotsFired = 0; this.hits = 0;
       this.ai = opts.ai || {};
+      // captain skills baked into the config at creation (1 = stock)
+      this.torpSpot = cfg.torpSpot || 1; this.fireDur = cfg.fireDur || 1; this.adrenaline = cfg.adrenaline || 0;
    }
 
    // ================= controls API =================
@@ -139,7 +141,8 @@ export class Ship {
             world.addShell(makeShell(world, this, muzzle, this.aimPoint, m, 'main', this.ammo));
             n++;
          }
-         t.reload = t.reloadMax;
+         // Adrenalinrausch: evaluated once per salvo, not per frame
+         t.reload = this.adrenaline ? t.reloadMax * (1 - this.adrenaline * (1 - this.hp / this.maxHP)) : t.reloadMax;
          world.addEffect('muzzle', { x: wp.x + cb * barrel, y: wp.y + sb * barrel }, 0.35, 10 + m.caliber * 0.07,
             { bearing: b, shipId: this.id, turret: t.idx, caliber: m.caliber, guns: t.guns, big: m.caliber >= 280, elev: t.elev });
       }
@@ -225,7 +228,7 @@ export class Ship {
    ignite(zone, shooter) {
       if (!this.alive || this.consumableActive('damageControl')) return false;
       if (this.fires.length >= WORLD.FIRE_MAX || this.fires.some(f => f.zone === zone)) return false;
-      const dur = FIRE_DUR[this.type] || 40;
+      const dur = (FIRE_DUR[this.type] || 40) * this.fireDur;
       this.fires.push({ zone, t: dur, dur, srcId: shooter ? shooter.id : null, mult: shooter ? shooter.dmgMult || 1 : 1 });
       if (this.world) this.world.onStatus(this, shooter, 'fire', zone);
       return true;
