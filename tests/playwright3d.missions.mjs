@@ -53,12 +53,17 @@ for (const mission of missions) {
    const ev = (fn, a) => page.evaluate(fn, a);
    const gl = () => ev(() => { const r = window.__renderer3d.renderer.info; return { calls: r.render.calls, prog: r.programs?.length, geo: r.memory.geometries, tex: r.memory.textures }; });
    const camState = () => ev(() => { const c = window.__cam3; return { yaw: +c.yaw.toFixed(4), range: Math.round(c.range), bino: c.bino, zoom: c.zoom, dist: Math.round(c.dist), ov: !!c.override }; });
+   // headless software GL renders ~1 fps: timed checks run with the 3D draw off (camera rig still runs)
+   const frames = (n) => ev(n => new Promise(r => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
    await ev(() => { window.__start({ difficulty: 'normal', mission: 'standard' }); window.__setRender(true); });
-   await page.waitForTimeout(800);
+   await frames(3);
    const g0 = await gl();
+   await ev(() => window.__setRender(false));
    // weather front rolls in over 3 s
    await ev(() => { const w = window.__world(); w.scheduleFront({ at: w.time, dur: 3, to: 'storm' }); });
    await page.waitForTimeout(4500);
+   await ev(() => window.__setRender(true)); await frames(3);
+   await ev(() => window.__setRender(false));
    const wx = await ev(() => { const e = window.__world().env; return { weather: e.weather, k: e.frontK, vis: +e.visibility.toFixed(2), cap: e.spotCap }; });
    const g1 = await gl();
    if (wx.weather !== 'storm' || wx.k !== 1) fail('front did not complete ' + JSON.stringify(wx));
@@ -95,7 +100,7 @@ for (const mission of missions) {
    if (!ph1.on || t1 !== t0) fail('photo mode must pause the sim ' + t0 + ' ' + t1);
    if (!(ph1.yaw !== ph0.yaw && ph1.dist > ph0.dist)) fail('photo orbit/zoom did not respond ' + JSON.stringify([ph0, ph1]));
    if (!hudHidden) fail('photo mode must hide the HUD and show the hint');
-   if (process.env.ATMO_SHOT) await page.screenshot({ path: `${OUT}/3d-photo-storm.png` });
+   if (process.env.ATMO_SHOT) { await ev(() => window.__setRender(true)); await frames(3); await page.screenshot({ path: `${OUT}/3d-photo-storm.png` }); await ev(() => window.__setRender(false)); }
    await page.keyboard.press('o');
    await page.waitForTimeout(200);
    const p1 = await camState();
@@ -104,11 +109,11 @@ for (const mission of missions) {
    console.log('photo mode ok', JSON.stringify(ph1));
    // night: salvos light the scene through the fixed light pool -> no new programs, flat calls
    await ev(() => { window.__start({ difficulty: 'normal', mission: 'night' }); window.__setRender(true); });
-   await page.waitForTimeout(800);
+   await frames(3);
    const n0 = await gl();
    for (let i = 0; i < 6; i++) { await page.mouse.down(); await page.waitForTimeout(80); await page.mouse.up(); await page.waitForTimeout(300); }
    await ev(() => { const w = window.__world(), p = w.player; window.__renderer3d.fx.starShell(p.pos.x + 800, p.pos.y); });
-   await page.waitForTimeout(600);
+   await frames(3);
    const n1 = await gl();
    const ft = await ev(() => new Promise(r => { const t = []; let last = performance.now(); const f = (now) => { t.push(now - last); last = now; if (t.length < 40) requestAnimationFrame(f); else r(+(t.slice(5).reduce((a, b) => a + b, 0) / 35).toFixed(1)); }; requestAnimationFrame(f); }));
    if (n1.prog !== n0.prog) fail(`night flashes compiled new programs ${n0.prog} -> ${n1.prog}`);

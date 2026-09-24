@@ -1183,7 +1183,7 @@ function startKillCam(v) {
    const p = P;
    if (!settings.killCam || kc.on || phase !== 'playing' || !p?.alive || ctl.mapOpen) return;
    if (fx.torpWarn.length || p.hp < p.maxHP * 0.25) return;   // never in obvious danger
-   kc.on = true; kc.t = 0; kc.ship = v; kc.hp0 = p.hp;
+   kc.on = true; kc.t = 0; kc.w0 = performance.now(); kc.ship = v; kc.hp0 = p.hp;
    kc.d = clamp(shipLen(v) * 2.4, 260, 700);
    kc.a0 = Math.atan2(p.pos.y - v.pos.y, p.pos.x - v.pos.x) + 0.6;
    cam3.override = kc.pose;
@@ -1208,7 +1208,8 @@ function killCamInput() {
 function tickKillCam(dt) {
    const p = P, v = kc.ship;
    kc.t += dt;
-   if (!v || !p?.alive || kc.t >= kc.dur || fx.torpWarn.length || p.hp < kc.hp0 - p.maxHP * 0.03) { endKillCam(); return; }
+   const wall = (performance.now() - kc.w0) / 1000;   // hard real-time cap: never hold the camera longer than dur
+   if (!v || !p?.alive || kc.t >= kc.dur || wall >= kc.dur || fx.torpWarn.length || p.hp < kc.hp0 - p.maxHP * 0.03) { endKillCam(); return; }
    const a = kc.a0 + kc.t * 0.22, d = kc.d * (1 - kc.t * 0.06), o = kc.pose;
    o.px = v.pos.x + Math.cos(a) * d; o.pz = v.pos.y + Math.sin(a) * d; o.py = d * 0.28;
    o.tx = v.pos.x; o.ty = 4; o.tz = v.pos.y;
