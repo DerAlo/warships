@@ -9,6 +9,16 @@ import { setupMission, updateMission } from './missions.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
+// weather-dependent part of world.env (explicit values in e win)
+function envWeather(time, weather, e) {
+   return {
+      seaState: e.seaState ?? ENV_SEA[weather] ?? 0.3,
+      visibility: e.visibility ?? (ENV_VIS[weather] ?? 1) * (time === 'night' ? 0.6 : time === 'day' ? 1 : 0.9),
+      wind: e.wind ?? (weather === 'storm' ? 1 : weather === 'rain' ? 0.6 : 0.3),
+      // hard ceiling on visual detection (m), gun bloom included -- WoWs "cyclone" rule
+      spotCap: e.spotCap ?? (weather === 'storm' ? 8000 : Infinity),
+   };
+}
 const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
 
 export class World {
@@ -67,14 +77,46 @@ export class World {
       const [az, el] = SUN[time] || SUN.day;
       this.env = {
          time, weather,
-         seaState: e.seaState ?? ENV_SEA[weather] ?? 0.3,
-         visibility: e.visibility ?? (ENV_VIS[weather] ?? 1) * (time === 'night' ? 0.6 : time === 'day' ? 1 : 0.9),
+         ...envWeather(time, weather, e),
          sunAzimuth: e.sunAzimuth ?? az, sunElevation: e.sunElevation ?? el,
-         wind: e.wind ?? (weather === 'storm' ? 1 : weather === 'rain' ? 0.6 : 0.3),
-         // hard ceiling on visual detection (m), gun bloom included -- WoWs "cyclone" rule
-         spotCap: e.spotCap ?? (weather === 'storm' ? 8000 : Infinity),
+         // dynamic weather: an optional front { at (s), dur (s), to, text } rolls in mid-battle;
+         // frontK = 0..1 blend (quantised, so the renderer re-resolves the sky only ~25 times)
+         front: null, frontK: 0,
       };
+      if (e.front) this.scheduleFront(e.front);
       return this.env;
+   }
+   // Schedule (or, with at <= world.time, start right away) a weather front. The blend drives
+   // visibility, sea state, wind, the spotting cap and (via combat.weatherDispersion) dispersion.
+   scheduleFront({ at = this.time, dur = 60, to = 'storm', text = null } = {}) {
+      const env = this.env;
+      env.front = {
+         at, dur: Math.max(1, dur), to, from: env.weather, text: text ?? (to === 'storm' ? 'Sturmfront zieht auf' : 'Regenfront zieht auf'),
+         announced: false,
+         base: { visibility: env.visibility, seaState: env.seaState, wind: env.wind, spotCap: env.spotCap },
+         target: envWeather(env.time, to, {}),
+      };
+      env.frontK = 0;
+      return env.front;
+   }
+   _updateWeather() {
+      const env = this.env, f = env.front;
+      if (!f || this.time < f.at) return;
+      if (!f.announced) {
+         f.announced = true;
+         this.message(f.text + ' – Sicht sinkt, Streuung steigt', 'warn');
+         this.pushEvent('weather', { text: f.text, to: f.to });
+      }
+      const k = Math.round(clamp((this.time - f.at) / f.dur, 0, 1) * 25) / 25;
+      if (k === env.frontK) return;
+      env.frontK = k;
+      const B = f.base, T = f.target, mix = (a, b) => a + (b - a) * k;
+      env.visibility = mix(B.visibility, T.visibility);
+      env.seaState = mix(B.seaState, T.seaState);
+      env.wind = mix(B.wind, T.wind);
+      // the spotting ceiling closes in from 20 km (or the old cap) to the storm cap
+      env.spotCap = T.spotCap === Infinity ? B.spotCap : Math.min(B.spotCap, mix(Math.min(B.spotCap, 20000), T.spotCap));
+      if (k >= 0.5) env.weather = f.to;
    }
    addIsland(o) {
       const isl = {
@@ -253,6 +295,7 @@ export class World {
       this._spotT -= dt;
       if (this._spotT <= 0) { this._spotT = WORLD.SPOT_DT; this._updateSpotting(); }
       this._updateCaps(dt);
+      this._updateWeather();
       if (this.phase === 'playing') updateMission(this, dt);
       if (this.ships.some(s => !s.alive && !s.sinking)) this.ships = this.ships.filter(s => s.alive || s.sinking);
       if (this._shake) { this._shake *= Math.pow(0.02, dt); if (this._shake < 0.02) this._shake = 0; }

@@ -104,7 +104,7 @@ export class Renderer3D {
 
    _envFrom(world) {
       const e = world.env;
-      const key = e ? `${e.time}|${e.weather}|${e.seaState}|${e.visibility}|${e.sunAzimuth}|${e.sunElevation}` : '';
+      const key = e ? `${e.time}|${e.weather}|${e.frontK || 0}|${e.seaState}|${e.visibility}|${e.sunAzimuth}|${e.sunElevation}` : '';
       if (key !== this._rawEnvKey) {
          this._rawEnvKey = key;
          const env = resolveEnv(e);
@@ -155,7 +155,7 @@ export class Renderer3D {
          exposure: env.exposure * (1 + flash * 0.8),
          bloom: env.night ? 0.2 : 0.12,
          bloomThreshold: env.night ? 1.0 : 1.6,
-         saturation: env.weather === 'storm' ? 0.85 : env.weather === 'rain' ? 0.92 : 1.08,
+         saturation: env.frontK > 0 ? 1.08 - Math.max(0, (env.waterGrey ?? 0) - 0.25) * 0.66 : env.weather === 'storm' ? 0.85 : env.weather === 'rain' ? 0.92 : 1.08,
          contrast: 1.05,
          vignette: 0.3,
          time: this.time,

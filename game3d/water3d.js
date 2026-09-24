@@ -33,10 +33,12 @@ vec3 waveDisp(vec2 p, float dist, float damp) {
 float waveHeight(vec2 p, float dist) { return waveDisp(p, dist, 1.0).y; }
 `;
 
-export function makeWaves(seaState, windDir) {
+// lamSea: sea state that sets the wavelengths (a weather front keeps them and only raises the
+// amplitude, so the wave field grows instead of re-phasing -- no visible pop per step)
+export function makeWaves(seaState, windDir, lamSea = seaState) {
    const s = clamp(seaState, 0, 1);
    const rnd = mulberry32(1337);
-   const L0 = 30 + 90 * s;
+   const L0 = 30 + 90 * clamp(lamSea, 0, 1);
    const steep = 0.10 + 0.14 * s;
    const ratios = [1.0, 0.77, 0.61, 0.47, 0.36, 0.27, 0.2, 0.14];
    const spread = [0, 0.45, -0.38, 0.8, -0.7, 1.2, -1.05, 0.25];
@@ -355,9 +357,9 @@ export class Ocean {
       this.setSea(0.35, 0.9);
    }
 
-   setSea(seaState, windDir) {
+   setSea(seaState, windDir, lamSea = seaState) {
       this.seaState = seaState;
-      this.waves = makeWaves(seaState, windDir);
+      this.waves = makeWaves(seaState, windDir, lamSea);
       let sum = 0;
       this.waves.forEach((w, i) => {
          this.uniforms.uWaveA.value[i].set(w.dx, w.dz, w.k, w.w);
@@ -380,10 +382,11 @@ export class Ocean {
       const hz = env.horizon, zn = env.zenith;
       U.uSkyAmb.value.setRGB((hz[0] + zn[0]) * 0.5, (hz[1] + zn[1]) * 0.5, (hz[2] + zn[2]) * 0.5).multiplyScalar(0.75);
       // storms: greyer, greener water; night: nearly black body colour (reflections carry it)
-      const g = env.weather === 'storm' ? 0.6 : env.weather === 'rain' ? 0.4 : env.weather === 'overcast' ? 0.25 : 0;
+      const g = env.waterGrey ?? (env.weather === 'storm' ? 0.6 : env.weather === 'rain' ? 0.4 : env.weather === 'overcast' ? 0.25 : 0);
       U.uDeep.value.setRGB(0.006 + 0.01 * g, 0.05 - 0.005 * g, 0.085 - 0.03 * g);
       U.uShallow.value.setRGB(0.03 + 0.02 * g, 0.32 - 0.1 * g, 0.30 - 0.12 * g);
-      if (env.seaState !== this.seaState || env.windDir !== this._wind) { this._wind = env.windDir; this.setSea(env.seaState, env.windDir); }
+      if (!(env.frontK > 0)) this._lamSea = env.seaState;
+      if (env.seaState !== this.seaState || env.windDir !== this._wind) { this._wind = env.windDir; this.setSea(env.seaState, env.windDir, env.frontK > 0 ? (this._lamSea ?? env.seaState) : env.seaState); }
    }
 
    setDepthMap(tex, rect) {

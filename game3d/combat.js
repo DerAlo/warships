@@ -37,6 +37,19 @@ export function arcAlt(H, h0, u) { return h0 * (1 - u) + H * ARC_A * u * (1 - u 
 export function apPenAt(gun, R) { return gun.ap ? gun.ap.pen * (1 - 0.45 * clamp01(R / gun.range)) : 0; }
 
 // ---------------- shells ----------------
+// Gun dispersion multiplier from the weather (rain / storm spray and wind). A weather front
+// (env.front, see World._updateWeather) blends from its start weather to the target weather.
+const WX_DISP = { storm: 1.12, rain: 1.05 };
+export function weatherDispersion(env) {
+   if (!env) return 1;
+   const f = env.front;
+   if (f && env.frontK > 0) {
+      const a = WX_DISP[f.from] || 1, b = WX_DISP[f.to] || 1;
+      return a + (b - a) * env.frontK;
+   }
+   return WX_DISP[env.weather] || 1;
+}
+
 export function makeShell(world, shooter, muzzle, aim, gun, kind, ammo) {
    const rng = world.rng;
    let dx = aim.x - muzzle.x, dy = aim.y - muzzle.y;
@@ -46,8 +59,7 @@ export function makeShell(world, shooter, muzzle, aim, gun, kind, ammo) {
    R0 = Math.min(R0, gun.range);       // beyond max range the shells simply fall at max range
    // dispersion ellipse: horizontal (across the line of fire) > vertical (along it)
    const frac = clamp01(R0 / gun.range);
-   const weather = world.env && (world.env.weather === 'storm' ? 1.12 : world.env.weather === 'rain' ? 1.05 : 1);
-   const dH = gun.dispH * (0.2 + 0.8 * frac) * (weather || 1);
+   const dH = gun.dispH * (0.2 + 0.8 * frac) * weatherDispersion(world.env);
    const eh = truncGauss(rng, gun.sigma || 1.8) * dH;
    const ev = truncGauss(rng, gun.sigma || 1.8) * dH * (gun.vRatio || 0.55);
    const ix = muzzle.x + ux * (R0 + ev) - uy * eh;

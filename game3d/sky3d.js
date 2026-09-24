@@ -24,7 +24,15 @@ export function resolveEnv(env) {
    const e = env || {};
    const time = TIME_PRESET[e.time] ? e.time : 'day';
    const weather = WEATHER[e.weather] ? e.weather : 'clear';
-   const T = TIME_PRESET[time], W = WEATHER[weather];
+   const T = TIME_PRESET[time];
+   // dynamic weather front (world.env.front/frontK): blend the presets from -> to
+   const fr = e.front && WEATHER[e.front.to] ? e.front : null;
+   const fk = fr ? clamp(Number(e.frontK) || 0, 0, 1) : 0;
+   const W0 = fk > 0 && WEATHER[fr.from] ? WEATHER[fr.from] : WEATHER[weather];
+   let W = W0;
+   if (fk > 0) { const W1 = WEATHER[fr.to]; W = {}; for (const k in W0) W[k] = W0[k] + (W1[k] - W0[k]) * fk; }
+   const GREY = { clear: 0, overcast: 0.25, rain: 0.4, storm: 0.6 }, EXPO = { storm: 1.15, rain: 1.08 };
+   const wx = (tbl, dflt) => fk > 0 ? (tbl[fr.from] ?? dflt) + ((tbl[fr.to] ?? dflt) - (tbl[fr.from] ?? dflt)) * fk : (tbl[weather] ?? dflt);
    let el = Number.isFinite(e.sunElevation) ? e.sunElevation : (env ? T.el : 0.38);
    const az = Number.isFinite(e.sunAzimuth) ? e.sunAzimuth : T.az;
    const night = time === 'night' || el < -0.05;
@@ -61,11 +69,11 @@ export function resolveEnv(env) {
       zenith: zen, horizon: hor, glow, sunColor: sunCol, sunIntensity: sunI,
       cloudCover: W.cover, cloudDark: W.dark, sunDisk: night ? 0 : W.disk, stars: night ? (weather === 'clear' ? 1 : weather === 'overcast' ? 0.15 : 0) : 0,
       moon: night && weather !== 'rain' && weather !== 'storm' ? 1 : 0,
-      rain: W.rain, lightning: weather === 'storm', fogD50: d50,
-      exposure: T.exposure * (weather === 'storm' ? 1.15 : weather === 'rain' ? 1.08 : 1),
+      rain: W.rain, lightning: fk > 0 ? fr.to === 'storm' && fk > 0.6 : weather === 'storm', fogD50: d50,
+      exposure: T.exposure * wx(EXPO, 1), waterGrey: wx(GREY, 0), frontK: fk,
       windDir: Number.isFinite(e.windDir) ? e.windDir : az + 2.4,
       windSpeed: 4 + seaState * 12,
-      key: [time, weather, seaState.toFixed(2), vis.toFixed(2), el.toFixed(3), az.toFixed(3)].join('|'),
+      key: [time, weather, fk.toFixed(2), seaState.toFixed(2), vis.toFixed(2), el.toFixed(3), az.toFixed(3)].join('|'),
    };
 }
 function mixA(a, b, t) { return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)]; }

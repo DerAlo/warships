@@ -241,7 +241,7 @@ const DEFS = [
       briefing: 'Ein britischer Kampfverband wurde vor dem Nordkap gemeldet. Unser Verband aus zwei Schlachtschiffen, ' +
          'drei Kreuzern und zwei Zerstörern stellt ihn zwischen den Schären. Vernichten Sie alle feindlichen Schiffe. ' +
          'Nutzen Sie die Inseln als Deckung und bleiben Sie in der Nähe Ihrer Verbündeten.',
-      env: { time: 'day', weather: 'overcast' }, type: 'annihilation', playableShips: null, recommendedShip: 'Bismarck',
+      env: { time: 'day', weather: 'overcast', front: { at: 150, dur: 50, to: 'storm' } }, type: 'annihilation', playableShips: null, recommendedShip: 'Bismarck',
       arena: 12000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
@@ -270,7 +270,7 @@ const DEFS = [
       briefing: 'Drei strategische Seegebiete – A, B und C – entscheiden über die Kontrolle der Fjordausfahrt. ' +
          'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
          'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
-      env: { time: 'day', weather: 'clear' }, type: 'domination', playableShips: null, recommendedShip: 'Hipper',
+      env: { time: 'day', weather: 'clear', front: { at: 240, dur: 60, to: 'rain', text: 'Regenböen ziehen auf' } }, type: 'domination', playableShips: null, recommendedShip: 'Hipper',
       arena: 11000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [

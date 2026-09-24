@@ -6,7 +6,7 @@ import assert from 'node:assert';
 import { World } from '../game3d/state.js';
 import { MISSIONS, MISSION_IDS, getMission } from '../game3d/missions.js';
 import { SHIPS, WORLD } from '../game3d/config.js';
-import { flightTime, makeShell, resolveShells, resolveHit } from '../game3d/combat.js';
+import { flightTime, makeShell, resolveShells, resolveHit, weatherDispersion } from '../game3d/combat.js';
 import { obstacleT } from '../game3d/utils.js';
 
 const DT = 1 / 60;
@@ -336,4 +336,55 @@ test('AI: a battleship stopped nose-on to a coast works itself free and goes rou
    }
    assert.ok(far > 2500, `bot got clear of the coast (${far.toFixed(0)} m)`);
    assert.ok(!bb.grounded, 'not aground at the end');
+});
+
+test('dynamic weather: a storm front raises dispersion and cuts visibility deterministically', () => {
+   const run = () => {
+      const w = blank(3);
+      w.setEnv({ time: 'day', weather: 'clear' });
+      const p = w.spawn('Hipper', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });
+      w.update(DT);
+      const clear = { vis: w.env.visibility, disp: weatherDispersion(w.env), det: p.detectRange };
+      w.scheduleFront({ at: 10, dur: 20, to: 'storm' });
+      const ev0 = w.events.length ? w.events[w.events.length - 1].seq : 0;
+      const log = [];
+      for (let i = 0; i < 9 * 60; i++) w.update(DT);
+      log.push(w.env.frontK);
+      for (let i = 0; i < 11 * 60; i++) w.update(DT);
+      log.push(w.env.frontK, weatherDispersion(w.env));
+      const evs = w.events.filter(e => e.seq > ev0);
+      for (let i = 0; i < 12 * 60; i++) w.update(DT);
+      return { w, p, clear, log, evs };
+   };
+   const { w, p, clear, log, evs } = run();
+   assert.strictEqual(clear.disp, 1);
+   assert.strictEqual(log[0], 0, 'nothing changes before the front arrives');
+   assert.ok(log[1] > 0.3 && log[1] < 0.7, 'half way through the front: ' + log[1]);
+   assert.ok(log[2] > 1 && log[2] < 1.12, 'dispersion blends: ' + log[2]);
+   assert.ok(evs.some(e => e.type === 'weather'), 'front announced as an event');
+   assert.ok(evs.some(e => e.type === 'objective' && /Sturmfront/.test(e.text)), 'HUD radio message');
+   assert.strictEqual(w.env.frontK, 1);
+   assert.strictEqual(w.env.weather, 'storm');
+   assert.ok(Math.abs(weatherDispersion(w.env) - 1.12) < 1e-9, 'full storm dispersion');
+   assert.ok(w.env.visibility < clear.vis * 0.8, 'visibility drops');
+   assert.ok(w.env.spotCap <= 8000, 'storm spotting cap');
+   assert.ok(p.detectRange < clear.det, `ship detectability drops: ${p.detectRange} < ${clear.det}`);
+   // deterministic: same inputs -> identical weather
+   const b = run();
+   assert.deepStrictEqual(b.log, log);
+   assert.strictEqual(b.w.env.visibility, w.env.visibility);
+});
+
+test('dynamic weather: a storm widens the real shell spread', () => {
+   const spread = (weather) => {
+      const w = blank(7);
+      w.setEnv({ time: 'day', weather });
+      const bb = w.spawn('Bismarck', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });
+      const g = bb.cfg.main, R = g.range * 0.8;
+      let sy = 0;
+      for (let i = 0; i < 600; i++) sy += makeShell(w, bb, { x: 0, y: 0 }, { x: R, y: 0 }, g, 'main', 'AP').target.y ** 2;
+      return Math.sqrt(sy / 600);
+   };
+   const c = spread('clear'), s = spread('storm');
+   assert.ok(s > c * 1.06 && s < c * 1.2, `storm spread ${s} vs clear ${c}`);
 });
