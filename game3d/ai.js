@@ -7,10 +7,12 @@
 //   patrol       [{x,y}] waypoints to loop
 //   escortId     ship id to stay close to; escortIdPlayer: escort the player
 //   huntId       preferred target id (navigates towards it even when unseen)
+//   press        with huntId: fight other targets on the move and keep closing on the hunted ship
+//                (raiders; otherwise they duel the escort at long range and never reach the convoy)
 //   capId        preferred capture point (domination)
 //   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
 //   aggro        >1 closes range more eagerly
-import { WORLD } from './config.js';
+import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
 
@@ -27,6 +29,9 @@ export function updateBots(world, dt) {
 }
 // Legacy per-bot entry point (old main3d loop). World.update already runs every bot.
 export function updateBot() {}
+// Bot skill. The autopilot player (balance runs only) always plays at normal skill, so a sweep
+// over difficulties measures the enemies and not a captain who aims worse on easy.
+const skill = (b, w) => (b.isPlayer && w.autoPlayer ? DIFFICULTY.normal : w.difficulty);
 
 function init(b, w) {
    const ai = b.ai;
@@ -59,7 +64,7 @@ function init(b, w) {
 function think(b, w, dt) {
    const ai = b.ai;
    if (!ai._init) init(b, w);
-   const d = w.difficulty;
+   const d = skill(b, w);
    ai.targetT -= dt;
    if (ai.targetT <= 0 || (ai.target && (!ai.target.alive || !w.canSee(b.side, ai.target)))) {
       ai.targetT = TARGET_DT * (0.8 + w.rng() * 0.4);
@@ -101,7 +106,7 @@ function pickTarget(b, w) {
    return best;
 }
 function newAimError(b, w) {
-   let e = w.difficulty.aimErr * (b.ai.salvoCount > 1 ? 0.75 : 1.2);   // first salvos are ranging shots
+   let e = skill(b, w).aimErr * (b.ai.salvoCount > 1 ? 0.75 : 1.2);   // first salvos are ranging shots
    if (b.ai.target && b.ai.target === w.player && !w.autoPlayer) e *= w.difficulty.vsPlayer || 1;
    b.ai.aimErr = { r: gaussR(w.rng) * e, l: gaussR(w.rng) * e * 0.5 };
 }
@@ -198,7 +203,13 @@ function decide(b, w, d) {
          if (dd > cap.r * 0.5) goal = cap.pos;
          tel = dd > cap.r ? 4 : 2;
       } else if (tgt) {
-         ({ want, tel } = engage(b, w, tgt, d, threat));
+         const hunt = ai.press && ai.huntId != null ? w.shipById(ai.huntId) : null;
+         if (hunt && hunt.alive && tgt !== hunt && dist2(b.pos, hunt.pos) > 5000 * 5000 && dist2(b.pos, tgt.pos) > 4000 * 4000) {
+            // turrets keep working on the escort while the hull closes the convoy, angled a little
+            goal = hunt.pos;
+            want = Math.atan2(hunt.pos.y - b.pos.y, hunt.pos.x - b.pos.x) + ai.angSide * 15 * DEG;
+            tel = 4;
+         } else ({ want, tel } = engage(b, w, tgt, d, threat));
       } else {
          // nothing visible: head for the last known enemy position / hunted ship / enemy centroid
          goal = searchGoal(b, w);
@@ -755,7 +766,7 @@ function torpedoes(b, w, dt) {
    const ip = interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel);
    if (!ip || ip.t * tc.speed > tc.range * 0.95) return;
    // light error so spreads are not laser-perfect
-   const brg = Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) + gaussR(w.rng) * w.difficulty.aimErr * 1.5;
+   const brg = Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) + gaussR(w.rng) * skill(b, w).aimErr * 1.5;
    // never through friendlies
    for (const o of w.ships) {
       if (o === b || !o.alive || o.side !== b.side) continue;

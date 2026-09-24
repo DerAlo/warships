@@ -465,15 +465,18 @@ const DEFS = [
             { c: P(2500, 3200), r: 380, height: 70, seed: 405, lobes: 3, rough: 0.9 },
          ]);
          const S = w._script;
-         // Heavy seas: the Home Fleet's gunlayers struggle too (the player cannot dodge with a jammed rudder)
-         w.difficulty = { ...w.difficulty, aimErr: w.difficulty.aimErr * 1.4 };
+         // Heavy seas: the Home Fleet's gunlayers struggle too (the player cannot dodge with a jammed
+         // rudder). Below hard more so: at x1.4 Rodney's 406 mm sank the autopilot Bismarck in 6/6 normal runs.
+         w.difficulty = { ...w.difficulty, aimErr: w.difficulty.aimErr * (w.difficulty.key === 'hard' ? 1.4 : 1.8) };
          const p = add(w, pickShip(this, shipKey), 'player', P(0, 0), 0.8, { isPlayer: true, telegraph: 2 });
          p.hp = Math.round(p.maxHP * 0.85);
          p.modules.rudder = 60;           // jammed: DC (R) frees it early
          p.rudder = -0.55; p.rudderCmd = -1;
          S.kgv = add(w, 'KGV', 'enemy', P(-9000, -9500), 0.9, { name: 'King George V', telegraph: 4 });
          S.rodney = add(w, 'Rodney', 'enemy', P(-10200, -7600), 0.8, { name: 'HMS Rodney', telegraph: 4 });
-         later(S, 100, () => {
+         // Cossack's spread was a third of the hull in every autopilot run at 100 s, before the rudder
+         // drill and the first salvoes were even done -- the first torpedo attack now comes later
+         later(S, 150, () => {
             w.message('Zerstörer Cossack läuft zum Torpedoangriff an!', 'warn');
             add(w, 'Jervis', 'enemy', P(9500, 2500), Math.PI, { name: 'HMS Cossack', minDist: 10000 });
          });
@@ -483,9 +486,12 @@ const DEFS = [
             add(w, 'Norfolk', 'enemy', P(4000, 10500), -1.8, { name: 'HMS Dorsetshire', minDist: 12000 });
          });
          later(S, 300, () => {
-            w.message('Weitere Zerstörer: Maori und Zulu!', 'warn');
+            // the second destroyer of this wave only on hard (two more torpedo boats sank the autopilot
+            // Bismarck in every normal run)
+            const hard = w.difficulty.key === 'hard';
+            w.message(hard ? 'Weitere Zerstörer: Maori und Zulu!' : 'Weiterer Zerstörer: Maori!', 'warn');
             add(w, 'Jervis', 'enemy', P(10500, 4000), Math.PI, { name: 'HMS Maori', minDist: 11000 });
-            add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Zulu', minDist: 11000 });
+            if (hard) add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Zulu', minDist: 11000 });
          });
          objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (10:00)');
          objective(w, 'bbs', 'Oder: Versenken Sie King George V und Rodney (0/2)');
@@ -567,10 +573,11 @@ const DEFS = [
          add(w, 'Fiji', 'enemy', P(-9200, 4500), -0.2, { ai: { escortId: S.transports[0].id } });
          add(w, 'Jervis', 'enemy', P(-9700, 7300), -0.2, { ai: { escortId: S.transports[1].id } });
          if (w.difficulty.key === 'hard') add(w, 'Jervis', 'enemy', P(-12000, 5200), -0.2, { ai: { escortId: S.transports[4].id } });
-         // huntId: the raiders go for the freighters, not the escorts (the player's only matters for
-         // the autopilot); the heavy cover arrives after 6 min so the first strike can land
-         add(w, pickShip(this, shipKey), 'player', P(-3000, -9000), 1.2, { isPlayer: true, ai: { huntId: S.transports[2].id } });
-         add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau', ai: { huntId: S.transports[0].id } });
+         // huntId + press: the raiders go for the freighters and fight the escort on the way instead of
+         // duelling it at long range (the player's only matters for the autopilot); the heavy cover
+         // arrives after 6 min so the first strike can land
+         add(w, pickShip(this, shipKey), 'player', P(-3000, -9000), 1.2, { isPlayer: true, ai: { huntId: S.transports[2].id, press: true } });
+         add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau', ai: { huntId: S.transports[0].id, press: true } });
          later(S, 360, () => {
             w.message('HMS Rodney und HMS Sussex nähern sich aus Osten!', 'warn');
             add(w, 'Rodney', 'enemy', P(12000, 2500), Math.PI, { name: 'HMS Rodney', minDist: 12000 });
