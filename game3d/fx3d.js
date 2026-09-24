@@ -852,7 +852,7 @@ export class FX {
       this.lights = [];
       for (let i = 0; i < 4; i++) {
          const l = new THREE.PointLight(0xffaa66, 0, 450, 2);
-         l.userData = { t: 0, dur: 1, peak: 0 };
+         l.userData = { t: 0, dur: 1, peak: 0, hold: false };
          scene.add(l);
          this.lights.push(l);
       }
@@ -872,6 +872,7 @@ export class FX {
       this.timeScale = 1;
       this.windX = 3; this.windZ = 1;
       this.night = false;
+      this.nightFlash = 0; this._camX = 0; this._camZ = 0;
    }
 
    setEnv(env) {
@@ -914,6 +915,8 @@ export class FX {
          P.emit();
       }
       this.decals.add(2, x, z, heading, Math.max(B * 2.5, 40), Math.max(B * 5, 90), 45, 0.9, 2, clamp(L / B * 0.45, 1, 4));
+      // wide oil sheen that spreads and fades long after the wreck is gone (pooled decal)
+      this.decals.add(2, x, z, heading + 0.3, Math.max(B * 3, 50), Math.max(B * 9, 160), 120, 0.4, 1.4, clamp(L / B * 0.35, 1, 3), false, 0.7);
       this._light(x, 20, z, 6e6, 1.4, 1, 0.6, 0.3);
    }
 
@@ -925,15 +928,31 @@ export class FX {
       }
    }
 
-   _light(x, y, z, peak, dur, r, g, b) {
+   // hold: flat-topped profile (star shells) instead of a quick quadratic fade; range: cutoff (m)
+   _light(x, y, z, peak, dur, r, g, b, hold = false, range = 0) {
       let best = this.lights[0];
       for (const l of this.lights) if (l.intensity < best.intensity) best = l;
       if (best.intensity > peak) return;
       best.position.set(x, y, z);
       best.color.setRGB(r, g, b);
-      best.userData.t = 0; best.userData.dur = dur; best.userData.peak = peak;
+      best.userData.t = 0; best.userData.dur = dur; best.userData.peak = peak; best.userData.hold = hold;
       best.intensity = peak;
-      best.distance = Math.sqrt(peak) * 0.9;
+      best.distance = range || Math.sqrt(peak) * 0.9;
+   }
+
+   // Illumination round: a parachute flare drifting down over (x, z) for ~9 s, lighting a
+   // ~1 km disc through the shared light pool (constant light count -> no shader recompiles).
+   starShell(x, z) {
+      const G = this.glow, H = 320, life = 9;
+      for (let i = 0; i < 2; i++) {
+         const p = G.t();
+         p.x = x; p.y = H; p.z = z; p.vx = 0; p.vy = -9; p.vz = 0; p.drag = 0; p.grav = 0;
+         p.life = life; p.s0 = i ? 60 : 14; p.s1 = i ? 45 : 10; p.grow = 1;
+         p.r = i ? 1.4 : 9; p.g = i ? 1.2 : 8; p.b = i ? 0.9 : 6; p.r1 = p.r * 0.6; p.g1 = p.g * 0.6; p.b1 = p.b * 0.5;
+         p.a = i ? 0.35 : 1; p.fin = 0.03; p.fout = 0.15; p.shape = 0;
+         G.emit();
+      }
+      this._light(x, H - 50, z, 6e5, life, 1, 0.93, 0.8, true, 1500);
    }
 
    _muzzleNow(x, y, z, dx, dy, dz, cal) {
@@ -979,7 +998,14 @@ export class FX {
          const rx = x + dx * len * 0.6, rz = z + dz * len * 0.6;
          this.decals.add(1, rx, rz, 0, cal * 0.04, cal * 0.2, 1.3, 0.8, 3);
       }
-      this._light(x + dx * 8, y + 3, z + dz * 8, 1.4e4 * k * k + 2e3, 0.16, 1, 0.62, 0.3);
+      // at night the flash lights up the own ship and the sea around it
+      if (this.night) {
+         this._light(x + dx * 10, y + 10, z + dz * 10, 1.1e5 * k * k + 1.5e4, 0.24, 1, 0.6, 0.28);
+         // a nearby salvo also briefly brightens the whole (hazy) night scene
+         const cd = Math.hypot(x - this._camX, z - this._camZ);
+         if (cd < 2500) this.nightFlash = Math.min(1, this.nightFlash + 0.35 * k * (1 - cd / 2500));
+      }
+      else this._light(x + dx * 8, y + 3, z + dz * 8, 1.4e4 * k * k + 2e3, 0.16, 1, 0.62, 0.3);
    }
 
    _splash(x, z, cal, big = false) {
@@ -1088,6 +1114,8 @@ export class FX {
 
    // ---------- per-frame ----------
    update(world, dt, time, camera, ships) {
+      this._camX = camera.position.x; this._camZ = camera.position.z;
+      this.nightFlash *= Math.exp(-dt * 10);
       this.frame++;
       this.time = time;
       this.shipsRef = ships;
@@ -1123,7 +1151,8 @@ export class FX {
          const u = l.userData;
          if (l.intensity <= 0) continue;
          u.t += dt;
-         l.intensity = u.t >= u.dur ? 0 : u.peak * Math.pow(1 - u.t / u.dur, 2);
+         const f = u.t / u.dur;
+         l.intensity = f >= 1 ? 0 : u.hold ? u.peak * (1 - f * f * f) * (0.9 + 0.1 * Math.sin(u.t * 23)) : u.peak * (1 - f) * (1 - f);
       }
       this.glow.update(dt, cam, this.windX, this.windZ);
       this.puff.update(dt, cam, this.windX, this.windZ);

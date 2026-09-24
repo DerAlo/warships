@@ -208,6 +208,10 @@
    .sens-row { display: block; margin-top: 18px; font-size: 13px; color: var(--hud-dim); }
    .sens-row span { float: right; color: #fff; }
    .sens-row input { display: block; width: 100%; margin-top: 8px; accent-color: #ffd36b; }
+   .sens-row.check-row input { display: inline-block; width: auto; margin: 0 8px 0 0; vertical-align: -2px; }
+   #photo-hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20; pointer-events: none;
+      background: rgba(6, 14, 22, 0.62); color: #e8f1f8; font: 13px/1.4 system-ui, sans-serif; letter-spacing: 0.04em;
+      padding: 7px 16px; border-radius: 6px; white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
    .howto-body { text-align: left; max-width: 640px; margin: 10px auto 0; line-height: 1.6; font-size: 14px; }
    .howto-body p { margin-top: 8px; } .howto-body b { color: var(--gold); }
    #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #04070d; z-index: 30; color: var(--hud-dim); font-family: var(--mono); }
@@ -314,6 +318,7 @@
             <div><span class="k">X / L</span><span class="d">Ziel erfassen · Vorhaltemarker</span></div>
             <div><span class="k">R / T / Y / U</span><span class="d">Verbrauchsgüter</span></div>
             <div><span class="k">M / Tab / H</span><span class="d">Karte · Übersicht · Hilfe</span></div>
+            <div><span class="k">O</span><span class="d">Fotomodus: Pause, freie Kamera (ziehen + Mausrad)</span></div>
          </div>
          <div class="diff-row">
             <div class="chip" data-diff="easy">Einfach</div>
@@ -376,10 +381,20 @@
          <label class="sens-row">Mausempfindlichkeit <span id="sens-val">100 %</span>
             <input type="range" id="sens" min="30" max="250" step="5" value="100">
          </label>
-         <div class="hint">P oder Esc setzt fort.</div>
+         <label class="sens-row">Musik <span id="vol-music-val">50 %</span>
+            <input type="range" id="vol-music" min="0" max="100" step="5" value="50">
+         </label>
+         <label class="sens-row">Effekte <span id="vol-sfx-val">100 %</span>
+            <input type="range" id="vol-sfx" min="0" max="100" step="5" value="100">
+         </label>
+         <label class="sens-row check-row"><input type="checkbox" id="opt-killcam" checked> Versenkungs-Kamera</label>
+         <div class="hint">P oder Esc setzt fort · O: Fotomodus</div>
       </div>
    </div>
 </div>
+
+<!-- Photo mode hint (main3d.js toggles it) -->
+<div id="photo-hint" class="hidden">📷 FOTOMODUS · Ziehen: Kamera drehen · Mausrad: Abstand · O / Esc: zurück</div>
 
 <script type="module" src="game3d/main3d.js"></script>
 </body>

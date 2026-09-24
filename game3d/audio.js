@@ -12,7 +12,10 @@ export class Audio {
       this.ctx = null;
       this.muted = false;
       this.volume = 0.7;
+      this.musicVol = 0.5;       // settings: music bus 0..1
+      this.sfxVol = 1;           // settings: effects bus (guns, alerts, sea, engine) 0..1
       this._voices = 0;
+      this._mLevel = -2; this._nextBeat = 0; this._beat = 0;
    }
 
    // Call from any user gesture; safe to call repeatedly.
@@ -27,10 +30,14 @@ export class Audio {
          this.comp.attack.value = 0.004; this.comp.release.value = 0.25;
          this.master = ctx.createGain();
          this.master.gain.value = this.muted ? 0 : this.volume;
-         this.comp.connect(this.master); this.master.connect(ctx.destination);
+         this.master.connect(ctx.destination);
+         // effects and music get their own volume buses (pause-menu sliders)
+         this.fxOut = ctx.createGain(); this.fxOut.gain.value = this.sfxVol; this.fxOut.connect(this.master);
+         this.music = ctx.createGain(); this.music.gain.value = this.musicVol; this.music.connect(this.master);
+         this.comp.connect(this.fxOut);
          this.sfx = ctx.createGain(); this.sfx.gain.value = 1; this.sfx.connect(this.comp);
-         this.ui = ctx.createGain(); this.ui.gain.value = 0.55; this.ui.connect(this.master);
-         this.amb = ctx.createGain(); this.amb.gain.value = 0; this.amb.connect(this.master);
+         this.ui = ctx.createGain(); this.ui.gain.value = 0.55; this.ui.connect(this.fxOut);
+         this.amb = ctx.createGain(); this.amb.gain.value = 0; this.amb.connect(this.fxOut);
          this._white = this._makeNoise(2.5, 'white');
          this._brown = this._makeNoise(4, 'brown');
          this._shaper = ctx.createWaveShaper();
@@ -38,6 +45,7 @@ export class Audio {
          this._shaper.connect(this.sfx);
          this._buildAmbient();
          this._buildEngine();
+         this._buildMusic();
       } catch (e) { this.ctx = null; /* audio unavailable -- game runs silent */ }
    }
 
@@ -46,6 +54,15 @@ export class Audio {
    setMuted(m) {
       this.muted = m;
       if (this.master) this.master.gain.setTargetAtTime(m ? 0 : this.volume, this.ctx.currentTime, 0.05);
+   }
+
+   setVolumes(music, sfx) {
+      this.musicVol = Math.max(0, Math.min(1, music));
+      this.sfxVol = Math.max(0, Math.min(1, sfx));
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      this.music.gain.setTargetAtTime(this.musicVol, t, 0.05);
+      this.fxOut.gain.setTargetAtTime(this.sfxVol, t, 0.05);
    }
 
    _makeNoise(sec, kind) {
@@ -294,5 +311,87 @@ export class Audio {
       this._noise(0, 0.12, { freq: 2600, type: 'bandpass', q: 1.5, gain: 0.12, bus: this.ui });
       this._tone(0.1, 1046, 0.09, { gain: 0.1, type: 'square', bus: this.ui });
       this._tone(0.2, 1318, 0.12, { gain: 0.1, type: 'square', bus: this.ui });
+   }
+
+   // ---- alert cues: short, distinct synthesized signals (HUD shows the German text) ----
+   alert(kind) {
+      if (!this._voice(1.2)) return;
+      const bus = this.ui;
+      switch (kind) {
+         case 'torp':      // "Torpedos voraus!": fast high triple beep
+            for (let i = 0; i < 3; i++) this._tone(i * 0.11, 1480, 0.08, { gain: 0.2, type: 'square', bus });
+            break;
+         case 'fire':      // "Feuer an Bord!": falling two-tone, twice
+            for (let i = 0; i < 2; i++) {
+               this._tone(i * 0.34, 880, 0.14, { gain: 0.15, type: 'square', bus });
+               this._tone(i * 0.34 + 0.15, 620, 0.16, { gain: 0.15, type: 'square', bus });
+            }
+            break;
+         case 'flood':     // "Wassereinbruch!": low gurgling sweeps
+            this._tone(0, 420, 0.28, { gain: 0.2, type: 'sine', slideTo: 170, bus });
+            this._tone(0.3, 420, 0.28, { gain: 0.2, type: 'sine', slideTo: 170, bus });
+            this._noise(0, 0.6, { freq: 500, type: 'lowpass', gain: 0.18, buf: this._brown, bus });
+            break;
+         case 'citadel':   // "Zitadelle getroffen!": harsh klaxon
+            for (let i = 0; i < 3; i++) this._tone(i * 0.2, i % 2 ? 392 : 523, 0.18, { gain: 0.14, type: 'sawtooth', bus });
+            break;
+         case 'kill':      // "Gegner versenkt": rising major triad
+            [523, 659, 784, 1046].forEach((f, i) => this._tone(i * 0.09, f, i === 3 ? 0.5 : 0.16, { gain: 0.14, type: 'triangle', bus }));
+            break;
+         case 'storm':     // front rolling in: distant thunder
+            this._noise(0, 3, { freq: 220, type: 'lowpass', gain: 0.5, buf: this._brown, attack: 0.6, sweepTo: 70 });
+            break;
+         default: this._tone(0, 1000, 0.15, { gain: 0.14, type: 'triangle', bus });
+      }
+   }
+
+   // ---- dynamic music: a synthesized ambient bed; intensity follows the combat state ----
+   _buildMusic() {
+      const ctx = this.ctx;
+      this._padF = ctx.createBiquadFilter(); this._padF.type = 'lowpass'; this._padF.frequency.value = 260; this._padF.Q.value = 0.8;
+      this._padG = ctx.createGain(); this._padG.gain.value = 0;
+      this._padF.connect(this._padG); this._padG.connect(this.music);
+      // A minor drone (A1 E2 A2 C3) + a Bb tension voice that only sounds at low HP
+      const voices = [[55, 'triangle', 0.5], [82.41, 'sawtooth', 0.18], [110, 'triangle', 0.35], [130.81, 'sine', 0.3]];
+      this._mOsc = [];
+      for (const [f, type, g] of voices) {
+         const o = ctx.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 8;
+         const gn = ctx.createGain(); gn.gain.value = g;
+         o.connect(gn); gn.connect(this._padF); o.start();
+         this._mOsc.push(o);
+      }
+      const tense = ctx.createOscillator(); tense.type = 'sawtooth'; tense.frequency.value = 116.54;
+      this._tenseG = ctx.createGain(); this._tenseG.gain.value = 0;
+      tense.connect(this._tenseG); this._tenseG.connect(this._padF); tense.start();
+      // slow filter swell
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05;
+      const lfoG = ctx.createGain(); lfoG.gain.value = 90;
+      lfo.connect(lfoG); lfoG.connect(this._padF.frequency); lfo.start();
+   }
+
+   // level: -1 off (menu/pause), 0 calm, 1 enemies spotted, 2 heavy fire, 3 low HP.
+   // Gains/filters only move on a level change; the pulse is scheduled ~150 ms ahead.
+   updateMusic(level) {
+      if (!this.ctx || !this._padG) return;
+      const ctx = this.ctx, t = ctx.currentTime;
+      if (level !== this._mLevel) {
+         this._mLevel = level;
+         const on = level >= 0;
+         this._padG.gain.setTargetAtTime(on ? [0.05, 0.065, 0.08, 0.085][level] : 0, t, on ? 2 : 0.4);
+         this._padF.frequency.setTargetAtTime([240, 380, 650, 520][level] ?? 200, t, 2.5);
+         this._tenseG.gain.setTargetAtTime(level === 3 ? 0.22 : 0, t, 1.5);
+      }
+      const bpm = [0, 0, 64, 104, 118][level + 1] || 0;
+      if (!bpm || this.musicVol <= 0) { this._nextBeat = 0; return; }
+      if (this._nextBeat < t) this._nextBeat = t + 0.05;
+      const bus = this.music;
+      while (this._nextBeat < t + 0.15) {
+         const w = this._nextBeat - t, b = this._beat++;
+         // low timpani-like pulse, accent on the bar
+         this._tone(w, b % 4 === 0 ? 62 : 55, 0.45, { gain: b % 4 === 0 ? 0.3 : 0.18, type: 'sine', slideTo: 38, attack: 0.01, bus });
+         if (level >= 2 && b % 2 === 1) this._noise(w, 0.08, { freq: 5200, type: 'highpass', gain: 0.05, bus });
+         if (level === 3 && b % 8 === 6) this._tone(w, 233.08, 0.9, { gain: 0.05, type: 'triangle', slideTo: 220, bus });
+         this._nextBeat += 60 / bpm;
+      }
    }
 }

@@ -5,7 +5,7 @@
 // Key names are normalised to short ids ('W', 'SHIFT', 'TAB', '1', ...). Letters are read from
 // e.key (layout-aware) so a German QWERTZ keyboard's printed "Y" really is the Y action --
 // by physical code it would be KeyZ. Digits and special keys use e.code (Shift+1 = '!').
-const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H',
+const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H', 'O',
    '1', '2', '3', '4', 'P', 'SHIFT', 'TAB', 'SPACE', 'CTRL']);
 
 export class Input3D {
@@ -21,6 +21,7 @@ export class Input3D {
       // wheel: notches (+ = scroll toward the user = zoom out), fractional for touchpads.
       this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false };
       this.locked = false;
+      this.noLock = false;       // main3d: photo mode uses plain drag, no pointer lock
       this._hadLock = false;
       this.onLockLost = null;    // callback: pointer lock dropped (Esc / alt-tab) while playing
       this._bind();
@@ -94,7 +95,7 @@ export class Input3D {
    }
 
    requestLock() {
-      if (!this.gameActive || document.pointerLockElement === this.canvas) return;
+      if (!this.gameActive || this.noLock || document.pointerLockElement === this.canvas) return;
       try {
          const ret = this.canvas.requestPointerLock({ unadjustedMovement: true });
          if (ret && typeof ret.catch === 'function') {

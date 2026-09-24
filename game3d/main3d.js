@@ -97,12 +97,17 @@ const fx = {
    seq: 0, oldEvIdx: 0, lastHits: 0, lastDmg: 0, lastHp: 0, spotted: false,
    ribbons: new Map(), dmg: 0, feed: [], msgs: [], shellSeen: new Set(), effSeen: new WeakSet(),
    whistled: new Set(), torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0,
+   heat: 0, music: -1, musicHold: 0, alertT: { torp: 0, fire: 0, flood: 0, citadel: 0 }, starT: -99,
 };
 // Player settings (per browser). sens scales both mouse axes.
 const SETTINGS_KEY = 'warships3d.settings.v1';
-const settings = { sens: 1 };
+const settings = { sens: 1, music: 0.5, sfx: 1, killCam: true };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* private mode */ }
 settings.sens = clamp(Number(settings.sens) || 1, 0.3, 2.5);
+settings.music = clamp(Number.isFinite(Number(settings.music)) ? Number(settings.music) : 0.5, 0, 1);
+settings.sfx = clamp(Number.isFinite(Number(settings.sfx)) ? Number(settings.sfx) : 1, 0, 1);
+settings.killCam = settings.killCam !== false;
+audio.setVolumes(settings.music, settings.sfx);
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
 let turretCache = [];
 let lastMarkers = [];
@@ -138,6 +143,11 @@ window.__zoom3d = () => ({
 });
 let renderOn = true;
 window.__setRender = (on) => { renderOn = !!on; };
+// atmosphere hooks: kill camera on a ship, photo mode state, music level
+window.__killCam = (id) => { const v = id != null ? shipById(id) : world?.ships.find(s => s.side !== P?.side); if (v) startKillCam(v); return kc.on; };
+window.__killCamOn = () => kc.on;
+window.__photo = () => ({ on: phase === 'photo', yaw: photo.yaw, pitch: photo.pitch, dist: photo.dist });
+window.__music = () => fx.music;
 // Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
 window.__setAim = (yawRel, range) => {
    if (!P) return;
@@ -362,7 +372,10 @@ function startGame(opts = {}) {
    flightCal = null;
    intel = { lastKnown: new Map() };
    Object.assign(fx, { seq: 0, oldEvIdx: world.events?.length || 0, lastHits: P.shotsHit || 0, lastDmg: P.dmgDealt || 0,
-      lastHp: P.hp, spotted: false, dmg: 0, feed: [], msgs: [], torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0 });
+      lastHp: P.hp, spotted: false, dmg: 0, feed: [], msgs: [], torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0,
+      heat: 0, music: -1, musicHold: 0, starT: -99 });
+   for (const k in fx.alertT) fx.alertT[k] = 0;
+   endKillCam(); cam3.override = null;
    fx.ribbons = new Map(); fx.shellSeen = new Set(); fx.effSeen = new WeakSet(); fx.whistled = new Set();
    if (Array.isArray(world.events)) for (const e of world.events) if (e.seq > fx.seq) fx.seq = e.seq;
    fired = { shots: 0, salvos: 0, torps: 0 };
@@ -404,6 +417,7 @@ function endGame() {
 let pausedAt = 0;
 function pause() {
    if (phase !== 'playing') return;
+   endKillCam();
    phase = 'paused';
    pausedAt = performance.now();
    input.gameActive = false;
@@ -421,9 +435,10 @@ function resume() {
 }
 input.onLockLost = () => { if (phase === 'playing') pause(); };
 // The battle wheel zooms only with no map / overlay up; otherwise the page keeps the event.
-input.wheelGate = () => phase === 'playing' && !ctl.mapOpen && !document.querySelector('.overlay:not(.hidden)');
+input.wheelGate = () => (phase === 'photo' || (phase === 'playing' && !ctl.mapOpen)) && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
+   endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
    phase = 'menu';
    input.gameActive = false;
    input.releaseLock();
@@ -640,7 +655,7 @@ function applyControls(dt) {
 
    turretCache = computeTurrets(p);
 
-   if (phase !== 'playing' || ctl.mapOpen) return;
+   if (phase !== 'playing' || ctl.mapOpen || kc.on) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps)
    if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked)) fireGuns();
    if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
@@ -686,6 +701,7 @@ function fireGuns() {
    if (n > 0) {
       fired.shots += n; fired.salvos++;
       audio.mainGun(mainCaliber(p), n, 0);
+      fx.heat += 0.4;
       calibrateFlight(R);
    }
    return n;
@@ -786,13 +802,19 @@ function processEvents(dt) {
       switch (e.type) {
          case 'pen': case 'citadel': case 'overpen': case 'ricochet': case 'shatter': case 'he': case 'sec': case 'torp': case 'fire': case 'flood':
             if (mine) { addRibbon(e.type); fx.dmg += e.dmg || 0; }
-            if (onMe && e.type !== 'fire' && e.type !== 'flood') audio.hit((e.dmg || 0) > p.maxHP * 0.05);
-            if (onMe && e.type === 'fire') { audio.fireStart(); hud.msg('Feuer an Bord!', 'warn'); }
-            if (onMe && e.type === 'flood') hud.msg('Wassereinbruch!', 'warn');
+            if (onMe && e.type !== 'fire' && e.type !== 'flood') { audio.hit((e.dmg || 0) > p.maxHP * 0.05); fx.heat += 1; }
+            if (onMe && e.type === 'fire') { audio.fireStart(); alertCue('fire', 'Feuer an Bord!'); }
+            if (onMe && e.type === 'flood') alertCue('flood', 'Wassereinbruch!');
+            if (onMe && (e.type === 'citadel' || (e.dmg || 0) > p.maxHP * 0.12)) alertCue('citadel', e.type === 'citadel' ? 'Zitadelle getroffen!' : 'Schwerer Treffer!');
             break;
          case 'kill': case 'sunk': {
             const v = shipById(e.dstId), k = shipById(e.srcId);
-            if (e.type === 'kill' && mine) addRibbon('kill');
+            if (e.type === 'kill' && mine) {
+               addRibbon('kill');
+               hud.msg('Gegner versenkt', 'good');
+               audio.alert('kill');
+               if (v) startKillCam(v);
+            }
             if (v && !fx.whistled.has('sunk' + v.id)) {
                fx.whistled.add('sunk' + v.id);
                feed(k, v);
@@ -800,7 +822,17 @@ function processEvents(dt) {
             }
             break;
          }
-         case 'spotted': if (mine) addRibbon('spotted'); break;
+         case 'spotted': {
+            if (mine) addRibbon('spotted');
+            // night: an illumination round bursts over a freshly spotted enemy (visual only)
+            const v = world.env?.time === 'night' && world.time - fx.starT > 10 ? shipById(e.dstId) : null;
+            if (v && renderer.fx?.starShell && Math.hypot(v.pos.x - p.pos.x, v.pos.y - p.pos.y) < 12000) {
+               fx.starT = world.time;
+               renderer.fx.starShell(v.pos.x + Math.cos(v.heading) * 250, v.pos.y + Math.sin(v.heading) * 250);
+            }
+            break;
+         }
+         case 'weather': audio.alert('storm'); break;
          case 'cap': {
             // no capper id in the event: credit the player if they sat inside the circle
             const c = (world.caps || []).find(k => k.id === e.capId);
@@ -918,7 +950,7 @@ function pollAudio(dt) {
       if (side !== p.side && !fx.whistled.has(id)) {
          const d = Math.hypot(s.pos.x - lx, s.pos.y - ly);
          const falling = s.dur ? (s.age || 0) > s.dur * 0.6 : true;
-         if (d < 420 && falling) { fx.whistled.add(id); audio.whistle(0); }
+         if (d < 420 && falling) { fx.whistled.add(id); audio.whistle(0); fx.heat += 0.5; }
       }
    }
    for (const v of salvos.values()) {
@@ -938,6 +970,8 @@ function pollAudio(dt) {
    }
    // torpedo warning ping + spotted alarm
    fx.torpPingT -= dt;
+   if (fx.torpWarn.length && !fx.hadTorpWarn) alertCue('torp', 'Torpedos voraus!');
+   fx.hadTorpWarn = fx.torpWarn.length > 0;
    if (fx.torpWarn.length && fx.torpPingT <= 0) { audio.torpWarning(); fx.torpPingT = 1.3; }
    const sp = p.alive && playerSpotted(p);
    if (sp && !fx.spotted) { audio.spottedAlarm(); hud.msg('Du wurdest entdeckt!', 'warn'); }
@@ -1112,6 +1146,122 @@ function buildUi(dt) {
    return ui;
 }
 
+// ------------------------------------------------------------------ alerts + dynamic music
+// Distinct synthesized cue + HUD text; each kind at most every 3 s (fires/floods re-trigger).
+function alertCue(kind, text) {
+   if (world.time - (fx.alertT[kind] ?? -99) < 3) return;
+   fx.alertT[kind] = world.time;
+   hud.msg(text, 'warn');
+   audio.alert(kind);
+}
+// -1 off (menu/pause/photo), 0 calm, 1 enemies spotted, 2 heavy fire, 3 low HP. Rising is
+// immediate, falling waits 6 s so the music does not flap.
+function updateMusic(dt) {
+   let lvl = -1;
+   const p = P;
+   if (phase === 'playing' && p && p.alive && world.phase === 'playing') {
+      fx.heat = Math.max(0, fx.heat - dt * 0.3);
+      lvl = 0;
+      const r2 = (aim.gunRange * 1.3) ** 2;
+      for (const s of world.ships) {
+         if (s.alive && s.side !== p.side && s.spotted && (s.pos.x - p.pos.x) ** 2 + (s.pos.y - p.pos.y) ** 2 < r2) { lvl = 1; break; }
+      }
+      if (fx.heat > 2.5) lvl = 2;
+      if (p.hp < p.maxHP * 0.3) lvl = 3;
+   }
+   if (lvl >= fx.music || lvl < 0) { fx.music = lvl; fx.musicHold = 6; }
+   else if ((fx.musicHold -= dt) <= 0) { fx.music = lvl; fx.musicHold = 6; }
+   audio.updateMusic(fx.music);
+}
+
+// ------------------------------------------------------------------ kill camera
+// ~2 s cut to an enemy the player just sank. Any key/click/wheel skips it (key taps still act),
+// a torpedo warning or a fresh hit aborts it, the guns hold fire meanwhile. The chase rig is
+// frozen while cam3.override is set, so camera, zoom and aim resume exactly as they were.
+const kc = { on: false, t: 0, dur: 2.2, ship: null, a0: 0, hp0: 0, d: 400, pose: { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 40 } };
+function startKillCam(v) {
+   const p = P;
+   if (!settings.killCam || kc.on || phase !== 'playing' || !p?.alive || ctl.mapOpen) return;
+   if (fx.torpWarn.length || p.hp < p.maxHP * 0.25) return;   // never in obvious danger
+   kc.on = true; kc.t = 0; kc.ship = v; kc.hp0 = p.hp;
+   kc.d = clamp(shipLen(v) * 2.4, 260, 700);
+   kc.a0 = Math.atan2(p.pos.y - v.pos.y, p.pos.x - v.pos.x) + 0.6;
+   cam3.override = kc.pose;
+   tickKillCam(0);
+   hud.show(false);
+   overlay.clear();
+}
+function endKillCam() {
+   if (!kc.on) return;
+   kc.on = false; kc.ship = null;
+   cam3.override = null;
+   input.mouse.dx = 0; input.mouse.dy = 0; input.mouse.wheel = 0;
+   if (phase === 'playing' || phase === 'paused') hud.show(true);
+}
+// before frameInput: mouse aim is frozen, clicks only skip
+function killCamInput() {
+   const m = input.mouse;
+   const skip = input.pressed.size > 0 || m.clicked || m.wheel || m.right;
+   m.dx = 0; m.dy = 0; m.wheel = 0; m.clicked = false;
+   if (skip) endKillCam();
+}
+function tickKillCam(dt) {
+   const p = P, v = kc.ship;
+   kc.t += dt;
+   if (!v || !p?.alive || kc.t >= kc.dur || fx.torpWarn.length || p.hp < kc.hp0 - p.maxHP * 0.03) { endKillCam(); return; }
+   const a = kc.a0 + kc.t * 0.22, d = kc.d * (1 - kc.t * 0.06), o = kc.pose;
+   o.px = v.pos.x + Math.cos(a) * d; o.pz = v.pos.y + Math.sin(a) * d; o.py = d * 0.28;
+   o.tx = v.pos.x; o.ty = 4; o.tz = v.pos.y;
+}
+
+// ------------------------------------------------------------------ photo mode
+// O: sim paused, HUD hidden, free orbit around the own ship (drag = rotate, wheel = distance).
+// O / Esc returns to the exact previous view (cam3 is never touched, only overridden).
+const photo = { yaw: 0, pitch: 0.3, dist: 600, cx: 0, cz: 0, pose: { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 45 } };
+function enterPhoto() {
+   if (phase !== 'playing' || !P) return;
+   endKillCam();
+   phase = 'photo';
+   photo.cx = P.pos.x; photo.cz = P.pos.y;
+   photo.yaw = (renderer.cam?.pose?.yaw ?? cam3.yaw) + Math.PI;
+   photo.pitch = 0.28;
+   photo.dist = clamp(hullL(P) * 2.2, 220, 1500);
+   cam3.override = photo.pose;
+   input.noLock = true;
+   input.releaseLock();
+   input.mouse.down = false;
+   hud.show(false);
+   overlay.clear();
+   $('photo-hint')?.classList.remove('hidden');
+   audio.updateEngine(0, 1, true);
+   tickPhoto();
+}
+function exitPhoto() {
+   if (phase !== 'photo') return;
+   phase = 'playing';
+   cam3.override = null;
+   input.noLock = false;
+   input.mouse.dx = 0; input.mouse.dy = 0; input.mouse.wheel = 0; input.mouse.down = false; input.mouse.clicked = false;
+   $('photo-hint')?.classList.add('hidden');
+   hud.show(true);
+   input.requestLock();
+   audio.resume();
+}
+function tickPhoto() {
+   const m = input.mouse;
+   if (m.down || m.right) {
+      photo.yaw += clamp(m.dx, -2000, 2000) * 0.005;
+      photo.pitch = clamp(photo.pitch + clamp(m.dy, -2000, 2000) * 0.004, 0.02, 1.45);
+   }
+   if (m.wheel) photo.dist = clamp(photo.dist * Math.pow(1.15, m.wheel), 60, 6000);
+   m.clicked = false;
+   const o = photo.pose, cp = Math.cos(photo.pitch);
+   o.tx = photo.cx; o.ty = 12; o.tz = photo.cz;
+   o.px = photo.cx - Math.cos(photo.yaw) * cp * photo.dist;
+   o.pz = photo.cz - Math.sin(photo.yaw) * cp * photo.dist;
+   o.py = 12 + Math.sin(photo.pitch) * photo.dist;
+}
+
 // ------------------------------------------------------------------ main loop
 let lastT = performance.now() / 1000;
 let miniT = 0;
@@ -1126,11 +1276,15 @@ function frame() {
    try {
       // Esc both drops the pointer lock (-> pause) and may arrive as a key tap in the same frame:
       // that tap must not resume the pause it just caused.
-      if (world && input.tapped('P')) {
+      if (world && phase === 'photo') {
+         if (input.tapped('P') || input.tapped('O')) exitPhoto();
+         else tickPhoto();
+      } else if (world && input.tapped('P')) {
          if (phase === 'playing') pause();
          else if (phase === 'paused' && performance.now() - pausedAt > 400) resume();
-      }
+      } else if (world && phase === 'playing' && input.tapped('O') && !kc.on) enterPhoto();
       if (phase === 'playing' && world) {
+         if (kc.on) killCamInput();
          frameInput(dt);
          tickConsEmu(dt);
          acc += dt;
@@ -1155,6 +1309,8 @@ function frame() {
          }
       }
 
+      if (kc.on) tickKillCam(dt);
+      updateMusic(dt);
       const alpha = phase === 'playing' ? clamp01(acc / SIM_DT) : 1;
       if (world) {
          applyInterp(alpha);
@@ -1162,9 +1318,10 @@ function frame() {
             cam3.spectate = !!(P && !P.alive && P.sinking);
             // test hook: headless software-GL is slow, so control tests can skip the 3D draw
             // (the camera rig still runs, keeping aim/projection exact)
-            if (renderOn) renderer.render(world, dt, cam3);
+            // photo mode freezes the whole scene (particles, waves) for the picture
+            if (renderOn) renderer.render(world, phase === 'photo' ? 0 : dt, cam3);
             else if (renderer.cam?.update) { renderer.cam.update(world, dt, cam3); renderer.camera.updateMatrixWorld(); }
-            if (phase === 'playing' || phase === 'paused') {
+            if ((phase === 'playing' && !kc.on) || phase === 'paused') {
                const ui = buildUi(dt);
                miniT -= dt;
                if (miniT <= 0) { minimap.draw(world, ui.mapOpts); miniT = 1 / 30; }
@@ -1221,6 +1378,25 @@ click('btn-quit', toMenu);
       sl.addEventListener('input', () => { settings.sens = clamp(Number(sl.value) / 100, 0.3, 2.5); show(); saveSettings(); });
    }
    show();
+}
+{
+   const bind = (id, key, fn) => {
+      const sl = $(id), lab = $(id + '-val');
+      const show = () => { if (lab) lab.textContent = Math.round(settings[key] * 100) + ' %'; };
+      if (sl) {
+         sl.value = String(Math.round(settings[key] * 100));
+         sl.addEventListener('input', () => { settings[key] = clamp(Number(sl.value) / 100, 0, 1); show(); fn(); saveSettings(); });
+      }
+      show();
+   };
+   const vol = () => audio.setVolumes(settings.music, settings.sfx);
+   bind('vol-music', 'music', vol);
+   bind('vol-sfx', 'sfx', vol);
+   const kcBox = $('opt-killcam');
+   if (kcBox) {
+      kcBox.checked = settings.killCam;
+      kcBox.addEventListener('change', () => { settings.killCam = kcBox.checked; saveSettings(); });
+   }
 }
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };

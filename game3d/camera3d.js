@@ -85,6 +85,9 @@ export class ChaseCamera {
       const p = world?.player;
       const cs = camState && typeof camState.range === 'number' ? camState : null;
 
+      // kill camera / photo mode: main3d supplies a free pose; nothing in the chase rig (scope
+      // blend, zoom smoothing, stored aim pose) advances, so the old view resumes exactly
+      if (cs && cs.override) { this._override(cs.override); return; }
       if (!p || !cs || (!p.alive && !p.sinking && !cs.spectate)) { this._spectator(world, dt, cs); return; }
 
       // ---- binocular blend + zoom smoothing (log space: 2x->16x feels even) ----
@@ -165,6 +168,19 @@ export class ChaseCamera {
 
       this._storePose(camX, camY, camZ, Ax, hA, Az, fov, yaw);
       if (this.sun?.target) { this.sun.target.position.set(px, 0, pz); this.sun.target.updateMatrixWorld(); }
+   }
+
+   // o: { px, py, pz, tx, ty, tz, fov } (world metres, degrees)
+   _override(o) {
+      const cam = this.camera;
+      const ground = this.terrain?.heightAt ? Math.max(0, this.terrain.heightAt(o.px, o.pz) || 0) : 0;
+      const y = Math.max(o.py, ground + 12);
+      const fov = o.fov || BASE_FOV;
+      if (Math.abs(cam.fov - fov) > 1e-3) { cam.fov = fov; cam.updateProjectionMatrix(); }
+      cam.position.set(o.px, y, o.pz);
+      cam.lookAt(o.tx, o.ty, o.tz);
+      cam.updateMatrixWorld();
+      if (this.sun?.target) { this.sun.target.position.set(o.tx, 0, o.tz); this.sun.target.updateMatrixWorld(); }
    }
 
    // No live player (menu background / sunk): slow cinematic orbit.
