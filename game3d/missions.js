@@ -575,6 +575,7 @@ const DEFS = [
    // ------------------------------------------------------------ op 1: Denmark Strait
    {
       id: 'rheinuebung', group: 'ops', name: 'Unternehmen Rheinübung', subtitle: 'Dänemarkstraße · 24. Mai 1941',
+      fleet: { own: 'Bismarck, Prinz Eugen', foe: 'HMS Hood, HMS Prince of Wales · später Norfolk, Suffolk' },
       briefing: 'Mai 1941: Bismarck und Prinz Eugen sollen durch die Dänemarkstraße in den Atlantik ausbrechen und britische Geleitzüge angreifen. ' +
          'Im Morgengrauen zwischen Packeis und Nebelbänken laufen ihnen der Schlachtkreuzer HMS Hood und das neue Schlachtschiff HMS Prince of Wales entgegen. ' +
          'Versenken Sie die Hood und schalten Sie die Prince of Wales aus – oder brechen Sie nach Süden in den Atlantik durch.',
@@ -651,6 +652,7 @@ const DEFS = [
    // ------------------------------------------------------------ op 2: Guadalcanal
    {
       id: 'guadalcanal', group: 'ops', name: 'Nachtschlacht vor Guadalcanal', subtitle: 'Ironbottom Sound · 14./15. November 1942',
+      fleet: { own: 'Washington, South Dakota, 4 Zerstörer', foe: 'Kirishima, Atago, Zerstörer mit Long-Lance-Torpedos' },
       briefing: 'Kurz vor Mitternacht läuft ein japanischer Verband um das Schlachtschiff Kirishima in den Ironbottom Sound, um das Flugfeld Henderson Field auf Guadalcanal zu beschießen. ' +
          'Konteradmiral Lee stellt sich mit Washington, South Dakota und vier Zerstörern entgegen. ' +
          'Wehren Sie die Zerstörer mit ihren gefürchteten Long-Lance-Torpedos ab, versenken Sie die Kirishima und retten Sie das Flugfeld. Ihr SG-Radar sieht weiter als jeder Ausguck.',
@@ -752,6 +754,7 @@ const DEFS = [
    // ------------------------------------------------------------ op 3: North Cape
    {
       id: 'nordkap', group: 'ops', name: 'Schlacht am Nordkap', subtitle: 'Nordmeer · 26. Dezember 1943',
+      fleet: { own: 'Duke of York, Jamaica · Force 1: Belfast, Norfolk, Sheffield', foe: 'Scharnhorst' },
       briefing: 'Polarnacht vor dem Nordkap: Die Scharnhorst hat den Angriff auf den Geleitzug JW 55B abgebrochen und läuft mit hoher Fahrt zurück zum Altafjord. ' +
          'Admiral Fraser steht mit der Duke of York, dem Kreuzer Jamaica und vier Zerstörern südwestlich von ihr, die Kreuzer von Force 1 halten von Norden Fühlung. ' +
          'Ein Sturm zieht auf: Finden Sie die Scharnhorst mit dem Radar, bremsen Sie sie und versenken Sie sie, bevor sie die norwegische Küste erreicht.',
@@ -884,6 +887,7 @@ export const MISSIONS = DEFS.map(d => ({
    playableShips: d.playableShips ? [...d.playableShips] : [...PLAYABLE], recommendedShip: d.recommendedShip,
    timeLimit: d.timeLimit, arena: d.arena, stars: d.stars || 2,   // stars = difficulty 1..3 for the menu
    group: d.group || 'battle', debrief: d.debrief || '',          // 'ops' = Historische Operationen
+   fleet: d.fleet ? { ...d.fleet } : null,
 }));
 export const MISSION_IDS = DEFS.map(d => d.id);
 export function getMission(id) { return MISSIONS.find(m => m.id === id) || null; }

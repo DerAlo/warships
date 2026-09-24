@@ -2,7 +2,7 @@
 // Self-contained UI component: injects its own <style>, renders into the #menu / #end overlays
 // and hands the chosen { mission, ship, difficulty } to main3d via callbacks. Reads the menu
 // data the sim exports (MISSIONS, SHIP_STATS, SHIPS) and never touches the running world.
-import { MISSIONS, getMission } from './missions.js';
+import { MISSIONS, getMission, opStars } from './missions.js';
 import { SHIPS, SHIP_STATS, PLAYABLE } from './config.js';
 import { classSvg } from './hud.js';
 
@@ -41,6 +41,7 @@ const ICON = {
    check: '<path d="M4.5 12.5 9.5 17.5 19.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 const icon = (k, size = 18) => `<svg class="m3-ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor">${ICON[k] || ''}</svg>`;
+const MEDAL = ['', 'Bronzeorden', 'Silberorden', 'Goldorden'];
 const stars = (n) => '<span class="m3-stars">' + [1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}">★</i>`).join('') + '</span>';
 
 // Side-view silhouette straight from the sim's hull config (bow to the right), scaled so the
@@ -127,6 +128,21 @@ const CSS = `
 .m3-mis .s { font-size:11.5px; color:#9db4c8; margin-top:2px; }
 .m3-mis .row { display:flex; align-items:center; gap:8px; margin-top:6px; font-size:11px; color:#b6cadb; }
 .m3-mis .tag { padding:1px 6px; border-radius:2px; background:rgba(255,255,255,.07); letter-spacing:.5px; font-weight:700; }
+.m3-sec { margin:10px 2px 2px; padding-top:8px; border-top:1px solid rgba(214,178,94,.35); font-size:11px; letter-spacing:2.5px; font-weight:800; color:#d6b25e; text-transform:uppercase; }
+.m3-mis.op { border-color:rgba(214,178,94,.22); }
+.m3-medal { margin-left:auto; color:#d6b25e; font-weight:800; letter-spacing:1px; }
+.m3-medal i { font-style:normal; opacity:.25; } .m3-medal i.on { opacity:1; }
+.m3-op { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; background:rgba(2,6,12,.72); }
+.m3-op .box { max-width:620px; margin:16px; padding:24px 28px; border-radius:4px; background:linear-gradient(180deg, rgba(20,30,42,.97), rgba(8,14,22,.97)); border:1px solid rgba(214,178,94,.45); box-shadow:0 0 40px rgba(0,0,0,.6); }
+.m3-op .k { font-size:11px; letter-spacing:3px; font-weight:800; color:#d6b25e; }
+.m3-op .t { font-size:26px; font-weight:900; margin:4px 0 2px; }
+.m3-op .st { color:#9db4c8; font-size:13px; }
+.m3-op p { font-size:14px; line-height:1.6; color:#d4e0ec; margin:14px 0; }
+.m3-op .fl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:12.5px; color:#b6cadb; }
+.m3-op .fl b { color:#7f9bb5; font-size:11px; letter-spacing:1.5px; text-transform:uppercase; }
+.m3-op .bt { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; }
+.m3-op button { cursor:pointer; border:1px solid rgba(150,190,230,.3); border-radius:3px; padding:9px 18px; font:800 13px var(--font,"Segoe UI"); letter-spacing:1.5px; color:#cfe0f0; background:rgba(0,0,0,.3); }
+.m3-op button.pri { background:linear-gradient(180deg,#c9a14a,#8a6a24); color:#fff; border-color:#d6b25e; }
 .m3-mis .done { margin-left:auto; color:#6dff9e; display:flex; align-items:center; gap:3px; font-weight:700; }
 .m3-stars i { font-style:normal; color:rgba(255,255,255,.18); font-size:12px; } .m3-stars i.on { color:#ffc94a; }
 .m3-brief { align-self:start; max-width:640px; justify-self:center; width:100%; padding:18px 22px; border-radius:4px;
@@ -188,6 +204,9 @@ const CSS = `
 .m3r-rib div { font-size:11.5px; padding:4px 8px; border-radius:2px; background:linear-gradient(180deg,#2c4a66,#1b3048); border:1px solid rgba(150,200,240,.25); }
 .m3r-rib div b { color:#ffd479; margin-left:4px; }
 .m3r-obj { margin-top:12px; font-size:12.5px; display:flex; flex-direction:column; gap:4px; }
+.m3r-hist { margin-top:12px; padding:10px 12px; border-left:3px solid #d6b25e; background:rgba(214,178,94,.07); font-size:12.5px; line-height:1.5; color:#d4e0ec; }
+.m3r-hist b { display:block; font-size:11px; letter-spacing:2px; color:#d6b25e; margin-bottom:4px; }
+.m3r-medal { font-size:13px; font-weight:800; color:#d6b25e; letter-spacing:1px; margin-top:10px; }
 .m3r-obj .done { color:#8dffb0; } .m3r-obj .failed { color:#ff8f82; } .m3r-obj .active { color:#c9d8e6; }
 .m3r-teams { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .m3r-teams table { width:100%; border-collapse:collapse; font-size:12px; }
@@ -236,6 +255,11 @@ export class Menu3D {
       this.resRoot.innerHTML = '';
       this._onKey = (e) => {
          if (this.root.classList.contains('hidden')) return;
+         if (this._intro) {
+            if (e.code === 'Enter') { e.preventDefault(); this._launch(); }
+            else if (e.code === 'Escape') { e.preventDefault(); this._closeIntro(); }
+            return;
+         }
          if (e.code === 'Enter') { e.preventDefault(); this.start(); }
          else if (e.code === 'ArrowDown' || e.code === 'ArrowUp') {
             e.preventDefault();
@@ -260,7 +284,7 @@ export class Menu3D {
    // back to port: main3d drops the finished world first (onPort ends in show())
    _toPort() { this.hideResults(); if (this.cb.onPort) this.cb.onPort(); else this.show(); }
    show() { this.hideResults(); this.render(); this.root.classList.remove('hidden'); }
-   hide() { this.root.classList.add('hidden'); }
+   hide() { this._closeIntro(); this.root.classList.add('hidden'); }
    hideResults() { this.resRoot.classList.add('hidden'); cancelAnimationFrame(this._countRaf); }
 
    selectMission(id) {
@@ -274,7 +298,29 @@ export class Menu3D {
    start(opts) {
       const o = opts || this.selection;
       this._remember();
+      // historical operations open with a briefing screen (skipped on "NOCHMAL")
+      if (!opts && getMission(o.mission)?.group === 'ops') { this._openIntro(getMission(o.mission)); return; }
       this.cb.onStart?.({ mission: o.mission, ship: o.ship, difficulty: o.difficulty || this.difficulty });
+   }
+   _launch() { this._closeIntro(); this.cb.onStart?.({ ...this.selection }); }
+   _closeIntro() { if (this._intro) { this._intro.remove(); this._intro = null; } }
+   _openIntro(m) {
+      this._closeIntro();
+      const el = document.createElement('div');
+      el.className = 'm3-op';
+      el.innerHTML = `<div class="box">
+            <div class="k">HISTORISCHE OPERATION</div>
+            <div class="t">${esc(m.name)}</div>
+            <div class="st">${esc(m.subtitle)} · ${esc(TIME_LABEL[m.env.time] || m.env.time)} · ${esc(WEATHER_LABEL[m.env.weather] || m.env.weather)}</div>
+            <p>${esc(m.briefing)}</p>
+            ${m.fleet ? `<div class="fl"><b>Eigene Kräfte</b><span>${esc(m.fleet.own)}</span><b>Gegner</b><span>${esc(m.fleet.foe)}</span></div>` : ''}
+            <div class="bt"><button data-op="back">ZURÜCK</button><button class="pri" data-op="go">IN DIE SCHLACHT</button></div>
+         </div>`;
+      el.querySelector('[data-op="back"]').addEventListener('click', () => { this._closeIntro(); this.cb.onClick?.(); });
+      el.querySelector('[data-op="go"]').addEventListener('click', () => this._launch());
+      this.root.appendChild(el);
+      this._intro = el;
+      this.cb.onClick?.();
    }
 
    render() {
@@ -282,15 +328,19 @@ export class Menu3D {
       const S = SHIP_STATS[this.ship];
       const allowed = this._allowed();
       const pr = this.progress;
-      const misList = MISSIONS.map(x => {
-         const done = pr.missions?.[x.id]?.won;
-         return `<div class="m3-mis ${x.id === m.id ? 'sel' : ''}" data-mis="${esc(x.id)}">
+      const medal = (n) => `<span class="m3-medal" title="Orden">${[1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}">✦</i>`).join('')}</span>`;
+      const misItem = (x) => {
+         const rec = pr.missions?.[x.id], done = rec?.won, op = x.group === 'ops';
+         return `<div class="m3-mis ${op ? 'op' : ''} ${x.id === m.id ? 'sel' : ''}" data-mis="${esc(x.id)}">
             <div class="n">${esc(x.name)}</div>
             <div class="s">${esc(x.subtitle)}</div>
             <div class="row"><span class="tag">${esc(TYPE_LABEL[x.type] || x.type)}</span>${icon(x.env.time, 15)}${x.env.weather !== 'clear' ? icon(x.env.weather, 15) : ''}
-               ${stars(x.stars)}${done ? `<span class="done">${icon('check', 13)}Sieg</span>` : ''}</div>
+               ${stars(x.stars)}${op ? medal(rec?.stars || 0) : done ? `<span class="done">${icon('check', 13)}Sieg</span>` : ''}</div>
          </div>`;
-      }).join('');
+      };
+      const ops = MISSIONS.filter(x => x.group === 'ops');
+      const misList = MISSIONS.filter(x => x.group !== 'ops').map(misItem).join('') +
+         (ops.length ? `<div class="m3-sec">Historische Operationen</div>${ops.map(misItem).join('')}` : '');
       const envChip = `${icon(m.env.time, 16)}${esc(TIME_LABEL[m.env.time] || m.env.time)} · ${esc(WEATHER_LABEL[m.env.weather] || m.env.weather)}`;
       const brief = `
          <div class="t">${esc(m.name)}</div>
@@ -322,7 +372,8 @@ export class Menu3D {
             <span>Abmessungen</span><span>${S.lengthM} × ${String(S.beamM).replace('.', ',')} m</span>
          </div>
          <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>` : '';
-      const cards = PLAYABLE.map(k => {
+      // fixed op ships (Duke of York, Washington ...) join the row only while their operation is selected
+      const cards = [...PLAYABLE, ...allowed.filter(k => !PLAYABLE.includes(k))].map(k => {
          const st = SHIP_STATS[k], ok = allowed.includes(k);
          return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'}" data-ship="${esc(k)}" title="${ok ? '' : 'In dieser Mission nicht verfügbar'}">
             ${m.recommendedShip === k && ok ? '<span class="rec">EMPFOHLEN</span>' : ''}
@@ -342,7 +393,7 @@ export class Menu3D {
             </div>
          </div>
          <div class="m3-main">
-            <div class="m3-col"><div class="m3-h"><span>Operationen</span><span>${Object.values(pr.missions || {}).filter(x => x.won).length}/${MISSIONS.length}</span></div><div class="m3-list">${misList}</div></div>
+            <div class="m3-col"><div class="m3-h"><span>Missionen</span><span>${Object.values(pr.missions || {}).filter(x => x.won).length}/${MISSIONS.length}</span></div><div class="m3-list">${misList}</div></div>
             <div class="m3-brief">${brief}</div>
             <div class="m3-col"><div class="m3-h"><span>Schiff</span></div><div class="m3-ship">${shipPanel}</div></div>
          </div>
@@ -373,6 +424,8 @@ export class Menu3D {
       pr.missions = pr.missions || {};
       const rec = pr.missions[opts.mission] || { won: false, best: 0, plays: 0 };
       rec.plays++; rec.won = rec.won || !!res.victory; rec.best = Math.max(rec.best, res.xp || 0);
+      const isOp = m.group === 'ops', medal = isOp ? opStars(world) : 0;
+      if (isOp) rec.stars = Math.max(rec.stars || 0, medal);
       pr.missions[opts.mission] = rec;
       saveProgress(pr);
 
@@ -404,7 +457,9 @@ export class Menu3D {
          </div>
          <div class="m3r-body">
             <div class="m3r-box"><div class="m3-h"><span>Persönliche Leistung</span></div><div class="m3r-grid">${tiles}</div>
-               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${objs ? `<div class="m3r-obj">${objs}</div>` : ''}</div>
+               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${objs ? `<div class="m3r-obj">${objs}</div>` : ''}
+               ${isOp && medal ? `<div class="m3r-medal">${'✦'.repeat(medal)} ${MEDAL[medal]} erhalten</div>` : ''}
+               ${isOp && m.debrief ? `<div class="m3r-hist"><b>HISTORISCHER HINTERGRUND</b>${esc(m.debrief)}</div>` : ''}</div>
             <div class="m3r-box"><div class="m3r-teams">
                <div><div class="m3-h"><span class="m3-ally">Eigenes Team</span></div><table>${head}${allies.map(row).join('')}</table></div>
                <div><div class="m3-h"><span class="m3-enemy">Gegner</span></div><table>${head}${enemies.map(row).join('')}</table></div>

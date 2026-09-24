@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { World } from '../game3d/state.js';
-import { MISSIONS, MISSION_IDS, getMission } from '../game3d/missions.js';
+import { MISSIONS, MISSION_IDS, getMission, opStars } from '../game3d/missions.js';
 import { SHIPS, WORLD } from '../game3d/config.js';
 import { flightTime, makeShell, resolveShells, resolveHit, weatherDispersion } from '../game3d/combat.js';
 import { obstacleT } from '../game3d/utils.js';
@@ -387,4 +387,84 @@ test('dynamic weather: a storm widens the real shell spread', () => {
    };
    const c = spread('clear'), s = spread('storm');
    assert.ok(s > c * 1.06 && s < c * 1.2, `storm spread ${s} vs clear ${c}`);
+});
+
+// ---------------------------------------------------------------- historical operations
+const OPS = { rheinuebung: 'Bismarck', guadalcanal: 'Washington', nordkap: 'DukeOfYork' };
+const byName = (w, n) => w.ships.find(s => s.name === n);
+const sink = (s, by) => s.takeDamage(s.hp + 1, by, 'citadel');
+function runTo(w, t) { while (w.phase === 'playing' && w.time < t) w.update(DT); }
+
+test('historical operations: menu data, fixed ships, valid worlds on every difficulty', () => {
+   for (const [id, cls] of Object.entries(OPS)) {
+      const m = getMission(id);
+      assert.strictEqual(m.group, 'ops', id);
+      assert.ok(m.debrief.length > 80 && m.briefing.length > 80 && m.fleet, `${id} briefing/debrief`);
+      assert.deepStrictEqual(m.playableShips, [cls]);
+      for (const diff of ['easy', 'normal', 'hard']) {
+         const w = new World(diff, { mission: id, seed: 5 });
+         assert.strictEqual(w.player.cls, cls, `${id} player ship`);
+         assert.ok(w.mission.objectives.filter(o => !o.optional).length >= 1, `${id} objectives`);
+         assert.ok(w.mission.zones.length >= 1, `${id} zones`);
+         for (const z of w.mission.zones) {
+            assert.ok(Math.abs(z.x) + z.r < w.arena && Math.abs(z.y) + z.r < w.arena, `${id} zone ${z.label} inside the arena`);
+            for (const o of w.obstacles) assert.ok(obstacleT(o, z) > 1.05, `${id} zone ${z.label} on open water`);
+         }
+         for (const s of w.ships) for (const o of w.obstacles) assert.ok(obstacleT(o, s.pos) > 1, `${id} ${s.name} spawned on land`);
+      }
+   }
+});
+
+test('Rheinübung: Hood + Prince of Wales -> victory, breakthrough -> victory, medal stars', () => {
+   let w = new World('normal', { mission: 'rheinuebung', seed: 3 });
+   sink(byName(w, 'HMS Hood'), w.player);
+   assert.strictEqual(w.phase, 'playing');
+   sink(byName(w, 'HMS Prince of Wales'), w.player);
+   assert.strictEqual(w.phase, 'won');
+   assert.strictEqual(opStars(w), 2);            // Prinz Eugen survived; gold needs hard
+   assert.ok(!w.mission.objectives.some(o => o.id === 'break'));
+   w = new World('hard', { mission: 'rheinuebung', seed: 3 });
+   sink(byName(w, 'HMS Hood'), w.player); sink(byName(w, 'HMS Prince of Wales'), w.player);
+   assert.strictEqual(opStars(w), 3);
+   // break out into the Atlantic instead
+   w = new World('normal', { mission: 'rheinuebung', seed: 3 });
+   const ex = w.mission.zones[0];
+   w.player.pos.x = ex.x; w.player.pos.y = ex.y; w.update(DT);
+   assert.strictEqual(w.phase, 'won');
+   assert.strictEqual(w.mission.objectives.find(o => o.id === 'hood').state, 'failed');
+   // Bismarck sunk -> loss, no medal
+   w = new World('normal', { mission: 'rheinuebung', seed: 3 });
+   sink(w.player, byName(w, 'HMS Hood'));
+   assert.strictEqual(w.phase, 'lost');
+   assert.strictEqual(opStars(w), 0);
+});
+
+test('Guadalcanal: Kirishima arrives by radar, sinking her wins, shelling Henderson Field loses', () => {
+   let w = new World('normal', { mission: 'guadalcanal', seed: 3 });
+   assert.ok(!byName(w, 'Kirishima'));
+   runTo(w, 61);
+   const k = byName(w, 'Kirishima');
+   assert.ok(k && w.mission.objectives.some(o => o.id === 'kiri'));
+   sink(k, w.player);
+   assert.strictEqual(w.phase, 'won');
+   w = new World('normal', { mission: 'guadalcanal', seed: 3 });
+   runTo(w, 61);
+   const k2 = byName(w, 'Kirishima'), h = w.mission.zones.find(z => z.label === 'Henderson Field');
+   k2.pos.x = h.x; k2.pos.y = h.y; w.update(DT);
+   assert.strictEqual(w.phase, 'playing');       // shelling takes time
+   w._script.bomb = w._script.bombMax - 0.001; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+});
+
+test('Nordkap: sinking Scharnhorst wins, reaching the fjord or the time limit loses', () => {
+   let w = new World('normal', { mission: 'nordkap', seed: 3 });
+   sink(byName(w, 'Scharnhorst'), w.player);
+   assert.strictEqual(w.phase, 'won');
+   w = new World('normal', { mission: 'nordkap', seed: 3 });
+   const s = byName(w, 'Scharnhorst'), ex = w.mission.zones[0];
+   s.pos.x = ex.x; s.pos.y = ex.y; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+   w = new World('normal', { mission: 'nordkap', seed: 3 });
+   w.timeLeft = 0.001; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
 });

@@ -7,6 +7,7 @@
 import { WORLD } from './config.js';
 
 const TAU = Math.PI * 2;
+const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
 export const COL = {
    ally: '#5dff8c', enemy: '#ff5a4d', self: '#ffffff', neutral: '#d8e6f2',
    allyDim: 'rgba(93,255,140,0.45)', enemyDim: 'rgba(255,90,77,0.4)',
@@ -152,6 +153,20 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       g.fillStyle = col; g.font = `bold ${big ? 16 : Math.max(9, Math.round(size / 26))}px Segoe UI, sans-serif`;
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(c.id || '?', x, y + 1);
+   }
+
+   // scripted mission zones (breakthrough goal / area the enemy must not reach)
+   const zones = world.mission && world.mission.zones;
+   if (zones) for (let i = 0; i < zones.length; i++) {
+      const z = zones[i], x = mx(z.x), y = my(z.y), r = Math.max(6, z.r * sc);
+      const col = z.kind === 'goal' ? COL.ally : COL.enemy;
+      g.fillStyle = z.kind === 'goal' ? 'rgba(93,255,140,0.10)' : 'rgba(255,90,77,0.11)';
+      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      g.strokeStyle = col; g.lineWidth = 1.4;
+      g.setLineDash(ZONE_DASH); g.stroke(); g.setLineDash(NO_DASH);
+      g.fillStyle = col; g.font = `bold ${big ? 13 : Math.max(8, Math.round(size / 32))}px Segoe UI, sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(z.label, x, y);
    }
 
    // smoke
