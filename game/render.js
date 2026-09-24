@@ -116,12 +116,18 @@ export class Renderer {
       g.addColorStop(1, 'rgba(40,130,150,0)');
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.45, 0, TAU); ctx.fill();
-      // sand shoals under the water
-      ctx.fillStyle = 'rgba(215,200,150,0.15)';
+      // sand shoals under the water: soft-edged, so they read as depth, not as shapes
       for (const sh of art.shoals) {
-         ctx.beginPath();
-         ctx.ellipse(c.x + sh.x * z, c.y + sh.y * z, sh.rx * z, sh.ry * z, sh.rot, 0, TAU);
-         ctx.fill();
+         ctx.save();
+         ctx.translate(c.x + sh.x * z, c.y + sh.y * z);
+         ctx.rotate(sh.rot);
+         ctx.scale(1, sh.ry / sh.rx);
+         const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, sh.rx * z);
+         sg.addColorStop(0, 'rgba(215,205,160,0.20)');
+         sg.addColorStop(1, 'rgba(215,205,160,0)');
+         ctx.fillStyle = sg;
+         ctx.beginPath(); ctx.arc(0, 0, sh.rx * z, 0, TAU); ctx.fill();
+         ctx.restore();
       }
       // rocks: dark body, lit top-left rim, a lick of foam where the swell breaks
       for (const rk of art.rocks) {
@@ -134,13 +140,15 @@ export class Renderer {
             });
             ctx.closePath();
          };
-         ctx.fillStyle = 'rgba(225,245,250,0.10)';
-         ctx.beginPath(); ctx.arc(x + rk.size * z * 0.15, y + rk.size * z * 0.15, rk.size * z * 1.2, 0, TAU); ctx.fill();
          path(); ctx.fillStyle = '#34423d'; ctx.fill();
          ctx.save(); path(); ctx.clip();
          ctx.fillStyle = 'rgba(150,165,150,0.55)';
          ctx.beginPath(); ctx.arc(x - rk.size * z * 0.35, y - rk.size * z * 0.35, rk.size * z * 0.7, 0, TAU); ctx.fill();
          ctx.restore();
+         // swell breaking on the weather side of the rock
+         ctx.strokeStyle = 'rgba(230,248,255,0.35)';
+         ctx.lineWidth = 1.2;
+         ctx.beginPath(); ctx.arc(x, y, rk.size * z * 1.25, Math.PI * 0.75, Math.PI * 1.55); ctx.stroke();
       }
       // broken surf line marking the danger edge, gently pulsing
       ctx.lineCap = 'round';

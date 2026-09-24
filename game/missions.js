@@ -96,9 +96,10 @@ export const MISSIONS = [
       waves: [
          { at: 30, msg: '🎧 Hydrophon: Schraubengeräusche! U-Boote — Wasserbomben mit [C]',
             bots: [{ cls: 'SUB', pos: { x: 2800, y: 1100 } }, { cls: 'SUB', pos: { x: -2600, y: 400 } }] },
+         // mission 3 of 9: the final pack is one boat lighter than it was so the curve keeps rising
          { when: 'cleared', msg: '⚠ Das ganze Rudel greift an!',
             bots: [{ cls: 'DD', pos: { x: 0, y: -3000 } }, { cls: 'TB', pos: { x: -2900, y: -1000 } },
-               { cls: 'TB', pos: { x: 2900, y: -1400 } }, { cls: 'TB', pos: { x: 3100, y: -1000 } }, { cls: 'SUB', pos: { x: 0, y: -2600 } }] },
+               { cls: 'TB', pos: { x: 3000, y: -1200 } }, { cls: 'SUB', pos: { x: 0, y: -2600 } }] },
       ],
       objectives: [{ type: 'sinkAll', text: 'Das Wolfsrudel vernichten' }],
       stars: [{ type: 'hp', min: 0.5 }, { type: 'stat', key: 'torpHitsTaken', max: 2, text: 'Höchstens 2 Torpedotreffer erlitten' }],
