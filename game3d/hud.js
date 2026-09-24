@@ -15,6 +15,11 @@ const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
 const fmtKm = (m) => (m / 1000).toFixed(1).replace('.', ',') + ' km';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mmss = (t) => { t = Math.max(0, Math.floor(t)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+// Per-frame writes go through these: assigning textContent / an inline style dirties style and
+// layout even when the value is unchanged, so only real changes reach the DOM.
+const setText = (el, s) => { if (el && el._txt !== s) { el._txt = s; el.textContent = s; } };
+const setStyle = (el, k, v) => { if (el && el['_st' + k] !== v) { el['_st' + k] = v; el.style[k] = v; } };
+const setVar = (el, k, v) => { if (el && el['_st' + k] !== v) { el['_st' + k] = v; el.style.setProperty(k, v); } };
 
 // Class glyphs (same shapes as the minimap icons) as inline SVG.
 export function classSvg(type, size = 12) {
@@ -170,7 +175,7 @@ export class Hud {
       if (slow) this._t = 0.2;
 
       if (slow) { this._rosters(world); this._score(world); this._objectives(world); this._board(ui); }
-      if (e.timer) e.timer.textContent = world.timeLeft != null ? mmss(world.timeLeft) : mmss(world.time);
+      setText(e.timer, world.timeLeft != null ? mmss(world.timeLeft) : mmss(world.time));
 
       // spotted eye
       e.eye?.classList.toggle('on', !!ui.spotted);
@@ -178,25 +183,23 @@ export class Hud {
       // ship card
       const hpF = clamp01(p.hp / (p.maxHP || 1));
       this._hpLag = hpF > this._hpLag ? hpF : this._hpLag + (hpF - this._hpLag) * Math.min(1, dt * 1.6);
-      if (e.hpFill) {
-         e.hpFill.style.width = (hpF * 100).toFixed(1) + '%';
-         e.hpFill.style.background = hpF > 0.6 ? '#7cf29a' : hpF > 0.3 ? '#ffc94a' : '#ff5a4d';
-      }
-      if (e.hpLag) e.hpLag.style.width = (this._hpLag * 100).toFixed(1) + '%';
-      if (e.hpText) e.hpText.textContent = fmtInt(p.hp) + ' / ' + fmtInt(p.maxHP);
-      if (e.speed) e.speed.textContent = Math.round(ui.speedKn) + ' kn';
+      setStyle(e.hpFill, 'width', (hpF * 100).toFixed(1) + '%');
+      setStyle(e.hpFill, 'background', hpF > 0.6 ? '#7cf29a' : hpF > 0.3 ? '#ffc94a' : '#ff5a4d');
+      setStyle(e.hpLag, 'width', (this._hpLag * 100).toFixed(1) + '%');
+      setText(e.hpText, fmtInt(p.hp) + ' / ' + fmtInt(p.maxHP));
+      setText(e.speed, Math.round(ui.speedKn) + ' kn');
       this._silhouette(ui);
 
       this._consumables(ui.cons || []);
       this._weapons(ui);
-      if (e.dmg) e.dmg.innerHTML = `<span>Schaden</span> ${fmtInt(ui.dmg)}`;
+      if (e.dmg && e.dmg._v !== Math.round(ui.dmg || 0)) { e.dmg._v = Math.round(ui.dmg || 0); e.dmg.innerHTML = `<span>Schaden</span> ${fmtInt(ui.dmg)}`; }
 
       // telegraph + rudder
       for (const s of this._teleSteps) s.classList.toggle('on', +s.dataset.n === ui.telegraph);
-      if (e.teleName) e.teleName.textContent = ui.teleName || '';
-      if (e.rudderName) e.rudderName.textContent = ui.rudderName || '';
-      if (e.rudderCmd) e.rudderCmd.style.left = (50 + ui.rudder * 25) + '%';
-      if (e.rudderAct) e.rudderAct.style.left = (50 + clamp01((ui.rudderActual + 1) / 2) * 100 - 50) + '%';
+      setText(e.teleName, ui.teleName || '');
+      setText(e.rudderName, ui.rudderName || '');
+      setStyle(e.rudderCmd, 'left', (50 + ui.rudder * 25) + '%');
+      setStyle(e.rudderAct, 'left', (clamp01((ui.rudderActual + 1) / 2) * 100).toFixed(1) + '%');
 
       // lock panel
       this._lock(ui);
@@ -242,10 +245,10 @@ export class Hud {
          a = allies.filter(s => s.alive).length; b = enemies.filter(s => s.alive).length;
          fa = allies.length ? a / allies.length : 0; fb = enemies.length ? b / enemies.length : 0;
       }
-      if (e.scoreA) e.scoreA.textContent = String(a);
-      if (e.scoreE) e.scoreE.textContent = String(b);
-      if (e.fillA) e.fillA.style.width = (fa * 50).toFixed(1) + '%';
-      if (e.fillE) e.fillE.style.width = (fb * 50).toFixed(1) + '%';
+      setText(e.scoreA, String(a));
+      setText(e.scoreE, String(b));
+      setStyle(e.fillA, 'width', (fa * 50).toFixed(1) + '%');
+      setStyle(e.fillE, 'width', (fb * 50).toFixed(1) + '%');
       // capture points
       if (e.caps) {
          const caps = world.caps || [];
@@ -347,20 +350,21 @@ export class Hud {
                <div class="cchg"></div>
                <div class="ctime"></div>
             </div>`).join('');
-         this._consEls = [...box.querySelectorAll('.cslot')];
+         this._consEls = [...box.querySelectorAll('.cslot')].map(el => ({ el, chg: el.querySelector('.cchg'), time: el.querySelector('.ctime') }));
       }
       list.forEach((c, i) => {
-         const el = this._consEls?.[i];
-         if (!el) return;
+         const ce = this._consEls?.[i];
+         if (!ce) return;
+         const el = ce.el;
          const empty = c.charges !== Infinity && c.charges <= 0 && !c.active;
          const cooling = !c.active && c.cd > 0;
          el.classList.toggle('active', !!c.active);
          el.classList.toggle('cooling', cooling);
          el.classList.toggle('empty', empty);
          const frac = c.active ? clamp01(c.t / (c.dur || 1)) : cooling ? clamp01(c.cd / (c.cdMax || 1)) : 0;
-         el.style.setProperty('--cd', (frac * 100).toFixed(1) + '%');
-         el.querySelector('.cchg').textContent = c.charges === Infinity ? '∞' : String(Math.max(0, c.charges));
-         el.querySelector('.ctime').textContent = c.active ? Math.ceil(c.t) + 's' : cooling ? Math.ceil(c.cd) + 's' : '';
+         setVar(el, '--cd', (frac * 100).toFixed(1) + '%');
+         setText(ce.chg, c.charges === Infinity ? '∞' : String(Math.max(0, c.charges)));
+         setText(ce.time, c.active ? Math.ceil(c.t) + 's' : cooling ? Math.ceil(c.cd) + 's' : '');
       });
    }
 
@@ -374,20 +378,21 @@ export class Hud {
          const sel = ui.mode === 'guns' && ui.ammo === type;
          el.classList.toggle('sel', sel);
          el.classList.toggle('loaded', sel && !!r.anyReady);
-         el.querySelector('.wstat').textContent = sel ? mainTxt : '';
-         el.querySelector('.wbar i').style.width = (sel ? (r.frac ?? 1) * 100 : 0).toFixed(1) + '%';
+         setText(el._stat || (el._stat = el.querySelector('.wstat')), sel ? mainTxt : '');
+         setStyle(el._bar || (el._bar = el.querySelector('.wbar i')), 'width', (sel ? (r.frac ?? 1) * 100 : 0).toFixed(1) + '%');
       }
       const ti = ui.torpInfo;
       tp.classList.toggle('sel', ui.mode === 'torp');
       tp.classList.toggle('none', !ti);
+      const tStat = tp._stat || (tp._stat = tp.querySelector('.wstat')), tBar = tp._bar || (tp._bar = tp.querySelector('.wbar i'));
       if (ti) {
          const ready = ti.readyCount > 0;
          tp.classList.toggle('loaded', ready && ui.mode === 'torp');
-         tp.querySelector('.wstat').textContent = (ready ? `bereit ${ti.readyCount}/${ti.total}` : ti.reload.toFixed(0) + ' s') + ' · ' + (ti.spread === 'wide' ? 'weit' : 'eng');
-         tp.querySelector('.wbar i').style.width = ((ready ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1))) * 100).toFixed(1) + '%';
+         setText(tStat, (ready ? `bereit ${ti.readyCount}/${ti.total}` : ti.reload.toFixed(0) + ' s') + ' · ' + (ti.spread === 'wide' ? 'weit' : 'eng'));
+         setStyle(tBar, 'width', ((ready ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1))) * 100).toFixed(1) + '%');
       } else {
-         tp.querySelector('.wstat').textContent = 'keine';
-         tp.querySelector('.wbar i').style.width = '0%';
+         setText(tStat, 'keine');
+         setStyle(tBar, 'width', '0%');
       }
    }
 
