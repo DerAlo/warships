@@ -6,6 +6,8 @@ import { updateBot } from '../game/ai.js';
 import { angleOf, angleDelta, sub, dist, clamp, TAU } from '../game/utils.js';
 import { WORLD } from '../game/config.js';
 import { MISSIONS, SURVIVAL, missionById } from '../game/missions.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 const DT = 1 / 60;
 
@@ -165,7 +167,7 @@ function controlPlayer(w, dt) {
    // secondaries and AA fire on their own (ship.js)
 }
 
-function play(difficulty, maxSec = 600, missionId = null, seed = null) {
+export function play(difficulty, maxSec = 600, missionId = null, seed = null) {
    const m = missionId ? missionById(missionId) : null;
    const w = new World(difficulty, m && m.survival ? (seed ?? 1) : null, m);
    const t0 = Date.now();
@@ -232,8 +234,10 @@ function play(difficulty, maxSec = 600, missionId = null, seed = null) {
 // `node tests/play.mjs`             -> one detailed free battle per difficulty (kill timeline)
 // `node tests/play.mjs <N>`         -> N free battles per difficulty, aggregated win-rate + stats
 // `node tests/play.mjs missions [N] [diff]` -> every campaign mission + survival, N runs each
-// `node tests/play.mjs m5 [N] [diff]` -> one mission in detail (N=1) or aggregated
-const arg = process.argv[2] || '1';
+// `node tests/play.mjs m5 [N] [diff]` -> one mission in detail (N=1) or aggregated ('daily' = today's challenge)
+// importable (export play) -- the CLI runner only runs when this file is the entry point
+const isMain = !!process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+const arg = isMain ? (process.argv[2] || '1') : 'none';
 const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 
 function detail(s) {
@@ -262,12 +266,12 @@ if (arg === 'missions') {
       for (let i = 0; i < N; i++) runs.push(play(diff, m.survival ? 480 : 600, m.id, 1 + i));
       aggregate(`${m.id} ${m.title} (${diff})`, runs);
    }
-} else if (/^m\d+$|^survival$/.test(arg)) {
+} else if (/^m\d+$|^survival$|^daily$/.test(arg)) {
    const N = Math.max(1, parseInt(process.argv[3] || '1', 10));
    const diff = process.argv[4] || 'normal';
    if (N === 1) { console.log(`\n=== ${arg} (${diff}) ===`); detail(play(diff, 600, arg)); }
    else aggregate(`${arg} (${diff})`, Array.from({ length: N }, (_, i) => play(diff, 600, arg, 1 + i)));
-} else {
+} else if (arg !== 'none') {
    const N = Math.max(1, parseInt(arg, 10));
    if (N === 1) {
       for (const diff of ['easy', 'normal', 'hard']) { console.log(`\n=== ${diff.toUpperCase()} ===`); detail(play(diff)); }

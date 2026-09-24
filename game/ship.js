@@ -423,7 +423,8 @@ export class Ship {
       const max = opts.maxTurrets || Infinity;
       const spreadMult = opts.spreadMult || 1;
       const salvoMult = (this.side === 'enemy' && world.difficulty) ? world.difficulty.salvoMult : 1;
-      const reload = gun.reload * (opts.reloadMult || 1);
+      // boss rapid-salvo phase (boss.js) shortens the reload for a few seconds
+      const reload = gun.reload * (opts.reloadMult || 1) * (this.rapidT > 0 ? this.rapidMult || 1 : 1);
       const rangeSigma = HANDLING.rangeSigma * this._aimScale(world) * spreadMult * ((world.env && world.env.dispersion) || 1);
       let fired = 0, n = 0;
       for (const t of this.turrets) {

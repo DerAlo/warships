@@ -7,7 +7,8 @@
 //   env        'clear' | 'night' | 'storm' (config ENV) ; squalls: rain cells for storms
 //   bots       initial enemies   [{cls, pos, heading?, tag?, path?, exit?, speedMult?, name?}]
 //   allies     AI ships on the player's side (same spec)
-//   waves      [{at: s} | {when: 'cleared'} | {when: 'hp', tag, below} + bots/allies/msg]
+//   waves      [{at: s} | {when: 'cleared'} | {when: 'hp', tag, below} | {when: 'sunk', tag} + bots/allies/msg,
+//               heal: fraction of the missing hull patched on arrival (boss intros)]
 //   mines      [{x, y}] pre-laid contact mines ; minefields [{c, r, n}] expand to mines
 //   zones      map markers [{c, r, label, kind: 'exit' | 'goal'}]
 //   objectives [{type: 'sinkAll' | 'sink' | 'intercept' | 'escort' | 'survive', ...}]
@@ -100,8 +101,14 @@ export const MISSIONS = [
          { when: 'cleared', msg: '⚠ Das ganze Rudel greift an!',
             bots: [{ cls: 'DD', pos: { x: 0, y: -3000 } }, { cls: 'TB', pos: { x: -2900, y: -1000 } },
                { cls: 'TB', pos: { x: 3000, y: -1200 } }, { cls: 'SUB', pos: { x: 0, y: -2600 } }] },
+         // chapter finale: the boss steams in once the pack is gone; escorts answer its call
+         { when: 'cleared', heal: 0.5, msg: '👑 BOSS: Schlachtkreuzer Hood läuft aus Norden an! (Notreparatur)',
+            bots: [{ cls: 'HOOD', pos: { x: 300, y: -3100 }, heading: Math.PI / 2, tag: 'boss' }] },
+         { when: 'hp', tag: 'boss', below: 0.66, msg: '⚠ Hood ruft Zerstörer zu Hilfe!',
+            bots: [{ cls: 'DD', pos: { x: -2900, y: -2400 } }, { cls: 'DD', pos: { x: 3000, y: -2300 } }] },
       ],
-      objectives: [{ type: 'sinkAll', text: 'Das Wolfsrudel vernichten' }],
+      boss: 'HOOD',
+      objectives: [{ type: 'sinkAll', text: 'Das Wolfsrudel vernichten' }, { type: 'sink', tag: 'boss', text: 'Schlachtkreuzer Hood versenken' }],
       stars: [{ type: 'hp', min: 0.5 }, { type: 'stat', key: 'torpHitsTaken', max: 2, text: 'Höchstens 2 Torpedotreffer erlitten' }],
       hints: [
          { at: 2, text: '⚠ Torpedoboote sind flink und zerbrechlich — Sekundärbatterie und HE helfen' },
@@ -170,7 +177,14 @@ export const MISSIONS = [
          { cls: 'DD', pos: { x: 1600, y: -1300 } },
          { cls: 'DD', pos: { x: 2200, y: -700 } },
       ],
-      objectives: [{ type: 'sink', tag: 'carrier', text: 'Flugzeugträger versenken' }],
+      waves: [
+         { when: 'sunk', tag: 'carrier', heal: 0.6, msg: '👑 BOSS: Schlachtschiff Rodney rächt den Träger! (Notreparatur)',
+            bots: [{ cls: 'RODNEY', pos: { x: 3300, y: -900 }, heading: Math.PI * 0.85, tag: 'boss' }] },
+         { when: 'hp', tag: 'boss', below: 0.6, msg: '⚠ Rodney ruft Kreuzer zu Hilfe!',
+            bots: [{ cls: 'LC', pos: { x: 3300, y: 1200 } }, { cls: 'LC', pos: { x: 1200, y: -3300 } }] },
+      ],
+      boss: 'RODNEY',
+      objectives: [{ type: 'sink', tag: 'carrier', text: 'Flugzeugträger versenken' }, { type: 'sink', tag: 'boss', text: 'Schlachtschiff Rodney versenken' }],
       stars: [{ type: 'hp', min: 0.5 }, { type: 'stat', key: 'planesDown', min: 10, text: 'Mindestens 10 Flugzeuge abgeschossen' }],
       hints: [
          { at: 2, text: '✈ Die Flak feuert automatisch — Flugzeuge in Reichweite werden abgeschossen' },
@@ -253,6 +267,7 @@ export const MISSIONS = [
          { when: 'hp', tag: 'boss', below: 0.75, msg: '⚠ Zwei Kreuzer eilen dem Leviathan zu Hilfe!', bots: [{ cls: 'LC', pos: { x: 3300, y: -600 } }, { cls: 'LC', pos: { x: 2600, y: -3200 } }] },
          { when: 'hp', tag: 'boss', below: 0.4, msg: '⚠ Leviathan ruft Verstärkung — Torpedoboote!', bots: [{ cls: 'TB', pos: { x: 3300, y: -3000 } }, { cls: 'TB', pos: { x: 3500, y: -2600 } }, { cls: 'TB', pos: { x: 3000, y: -3300 } }] },
       ],
+      boss: 'BOSS',
       objectives: [{ type: 'sink', tag: 'boss', text: 'Leviathan versenken' }],
       stars: [{ type: 'hp', min: 0.4 }, { type: 'alliesAlive', text: 'Beide Begleitschiffe überleben' }],
       hints: [
@@ -261,6 +276,16 @@ export const MISSIONS = [
       ],
    },
 ];
+
+// Three chapters of three missions; the last mission of each ends in a boss battle whose win
+// earns a medal (progress.js) that toughens the Bismarck's hull for the rest of the campaign.
+export const CHAPTERS = [
+   { num: 1, title: 'Nordmeer', missions: ['m1', 'm2', 'm3'], medal: 'Bronzener Anker' },
+   { num: 2, title: 'Atlantik', missions: ['m4', 'm5', 'm6'], medal: 'Silberner Anker' },
+   { num: 3, title: 'Letzte Fahrt', missions: ['m7', 'm8', 'm9'], medal: 'Goldener Anker' },
+];
+export function chapterOf(id) { return CHAPTERS.find(c => c.missions.includes(id)) || null; }
+export const MEDAL_HULL = 0.05;   // +5 % hull per medal in campaign missions
 
 // ---------- survival ----------
 // Endless escalating waves around a mid-sized archipelago. A wave is bought from a point budget
@@ -277,20 +302,21 @@ export const SURVIVAL = {
 };
 
 // point cost per class and the wave from which it may appear
-const SURV_POOL = [
+export const SURV_POOL = [
    { cls: 'TB', cost: 1, from: 1 }, { cls: 'DD', cost: 2, from: 1 }, { cls: 'LC', cost: 3, from: 2 },
    { cls: 'SUB', cost: 3, from: 3 }, { cls: 'ML', cost: 2, from: 4 }, { cls: 'HC', cost: 4, from: 4 },
    { cls: 'EB', cost: 6, from: 5 }, { cls: 'CV', cost: 7, from: 7 },
 ];
-export const SURV_POINTS = { TB: 60, DD: 120, LC: 180, SUB: 200, ML: 100, HC: 260, EB: 400, CV: 450, BOSS: 1500, TR: 40 };
+export const SURV_POINTS = { TB: 60, DD: 120, LC: 180, SUB: 200, ML: 100, HC: 260, EB: 400, CV: 450, BOSS: 1500, HOOD: 1000, RODNEY: 1200, TR: 40 };
 
 // Composition of survival wave n (1-based), spawned on a ring around `center`.
-export function survivalWave(n, center, seed = n * 7919) {
+// `obstacles` lets other generators (daily.js) reuse the budget/spawn logic on their own map.
+export function survivalWave(n, center, seed = n * 7919, obstacles = SURVIVAL.obstacles, pool = SURV_POOL) {
    const rng = makeRng(seed);
    const out = [];
    if (n % 10 === 0) out.push({ cls: 'BOSS', tag: 'boss' });
    let budget = Math.round(3 + n * 2.3);
-   const pool = SURV_POOL.filter(p => p.from <= n);
+   pool = pool.filter(p => p.from <= n);
    let guard = 0;
    while (budget > 0 && guard++ < 40) {
       const fits = pool.filter(p => p.cost <= budget);
@@ -309,7 +335,7 @@ export function survivalWave(n, center, seed = n * 7919) {
       const lim = 3500;
       const pos = { x: Math.max(-lim, Math.min(lim, center.x + Math.cos(a) * r)), y: Math.max(-lim, Math.min(lim, center.y + Math.sin(a) * r)) };
       // never spawn on (or hugging) an island or reef: push the spot out past the shoreline
-      for (const o of SURVIVAL.obstacles) {
+      for (const o of obstacles) {
          const dx = pos.x - o.c.x, dy = pos.y - o.c.y, dd = Math.hypot(dx, dy) || 1, need = o.r + 220;
          if (dd < need) { pos.x = o.c.x + dx / dd * need; pos.y = o.c.y + dy / dd * need; }
       }

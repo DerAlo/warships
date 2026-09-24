@@ -6,6 +6,7 @@ import { sub, add, fromAngle, angleOf, angleDelta, dist, clamp, approachAngle, r
 import { WORLD, VISION, COMBAT, FLARE } from './config.js';
 import { beltIncidence } from './combat.js';
 import { launchSquadron } from './air.js';
+import { updateBoss, bossSteer } from './boss.js';
 
 const NO_AI = {};
 
@@ -162,7 +163,7 @@ export function updateBot(bot, world, dt) {
    }
 
    consumableLogic(bot, world, ai, k, underFire, dt);
-   if (ai.boss) bossLogic(bot, world, k, dt);
+   if (ai.boss) updateBoss(bot, world, k, dt);
    if (world.env.night && ai.role === 'cruiser') nightFlares(bot, world, k, dt);
 
    let steer = { heading: bot.heading, throttle: 0.6 };
@@ -287,6 +288,7 @@ export function updateBot(bot, world, dt) {
    }
 
    if (bot.asw) steer = aswLogic(bot, world, steer, dt);
+   if (ai.boss) steer = bossSteer(bot) || steer;
    steer = avoidObstacles(bot, world, steer);
 
    // loose formation on the squad's battleship (swarms hunt on their own)
@@ -433,24 +435,6 @@ function aswLogic(bot, world, steer, dt) {
    const goal = add(s.pos, { x: s.vel.x * 1.5, y: s.vel.y * 1.5 });
    if (dist(bot.pos, goal) < 140 && bot._dcT <= 0) { world.dropDepthCharges(bot); bot._dcT = 7; }
    return { heading: angleOf(sub(goal, bot.pos)), throttle: 1 };
-}
-
-// Boss: every so often a telegraphed heavy salvo -- red rings on the water, then impact.
-// Below half health it enrages: shorter interval, more rings.
-function bossLogic(bot, world, k, dt) {
-   const B = bot.cfg.barrage;
-   if (!B) return;
-   const p2 = bot.hp < bot.maxHP * 0.5;
-   if (p2 && !bot.enraged) {
-      bot.enraged = true;
-      if (world.director) world.director.say(`⚠ ${bot.name} wütet — schwere Salven in schneller Folge!`, 'warn', 6);
-   }
-   bot.barrageT = (bot.barrageT ?? B.every * 0.5) - dt;
-   if (bot.barrageT > 0 || !k || !k.seen || dist(bot.pos, k.pos) > bot.cfg.main.range) return;
-   bot.barrageT = p2 ? B.everyP2 : B.every;
-   // aimed where the target will be when the shells land, so holding course is fatal
-   const at = { x: k.pos.x + k.vel.x * B.delay * 0.8, y: k.pos.y + k.vel.y * B.delay * 0.8 };
-   world.addBarrage(bot, at, B, p2 ? B.countP2 : B.count);
 }
 
 // cruisers at night light up a lost contact with star shells
