@@ -131,7 +131,7 @@ export function resolveShells(world, dt) {
                for (const ship of cand) {
                   const lp = toLocal(ship, p);
                   const zone = hitZone(ship, lp, a, toLocal(ship, prevP), prevA);
-                  if (zone) { resolveHit(world, s, ship, zone, lp, p); s.alive = false; break; }
+                  if (zone) { resolveHit(world, s, ship, zone, lp, p, a); s.alive = false; break; }
                }
                if (!s.alive) break;
             }
@@ -168,7 +168,7 @@ const HIT_TEXT = {
    shatter: 'Nicht durchschlagen', he: 'Sprenggranate', sec: 'Sekundärtreffer', torp: 'Torpedotreffer',
 };
 
-export function resolveHit(world, s, ship, zone, lp, p) {
+export function resolveHit(world, s, ship, zone, lp, p, alt) {
    const cfg = ship.cfg, ar = cfg.armor, hull = cfg.hull;
    const shooter = s.shooter && s.shooter.alive !== undefined ? s.shooter : world.shipById(s.ownerId);
    const rng = world.rng;
@@ -200,9 +200,13 @@ export function resolveHit(world, s, ship, zone, lp, p) {
          else {
             const residual = pen - (overmatch ? plate : eff);
             const armThr = s.caliber / WORLD.FUSE_DIV;
-            const inCit = ar.citLen > 0 && Math.abs(lp.x) <= ar.citLen * hull.L / 2 && (zone === 'belt' || zone === 'deck');
+            // side hits above the citadel roof (alt = impact height over the waterline) only pen the upper hull
+            const overCit = zone === 'belt' && alt !== undefined && alt > hull.deckH * (ar.citH ?? 0.45);
+            const inCit = ar.citLen > 0 && Math.abs(lp.x) <= ar.citLen * hull.L / 2 && (zone === 'belt' || zone === 'deck') && !overCit;
             if (inCit) {
-               const citEff = ar.cit / Math.max(0.2, cosT);
+               // turtleback (German designs): flat shells meet the sloped citadel deck at a steep angle
+               const slope = zone === 'belt' && ar.turtle ? ar.turtle : 1;
+               const citEff = ar.cit / Math.max(0.2, cosT * slope);
                const armed = plate >= armThr || ar.cit >= armThr;
                if (residual >= citEff) type = armed ? 'citadel' : 'overpen';
                else type = plate >= armThr || ar.cit >= armThr ? 'pen' : 'overpen';

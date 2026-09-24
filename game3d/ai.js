@@ -11,7 +11,7 @@
 //   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
 //   aggro        >1 closes range more eagerly
 import { WORLD } from './config.js';
-import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, interceptPoint, gaussR } from './utils.js';
+import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
@@ -115,18 +115,35 @@ function decide(b, w, d) {
    // stuck on a coast or rammed: back off for a few seconds
    if (ai.reverseT > 0) {
       ai.reverseT -= DECIDE_DT;
-      ai.tel = -1; ai.rudderOverride = ai.revRudder;
+      ai.tel = -1;
+      // pre-set the rudder for the turn toward the escape heading: a rudder shift takes up to 15 s, so
+      // flipping it for the astern leg would leave it on the wrong side once the ship goes ahead again
+      const dh = ai.escapeHeading == null ? 0 : angleDelta(b.heading, ai.escapeHeading);
+      ai.rudderOverride = Math.abs(dh) > 0.15 ? (dh > 0 ? 2 : -2) : ai.revRudder;
+      if (ai.reverseT <= 0 || Math.abs(dh) < 0.35) {
+         ai.reverseT = 0;
+         // fresh progress window, otherwise the slow re-acceleration re-triggers the reverse forever
+         ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
+      }
       return;
    }
    ai.rudderOverride = null;
    if ((b.grounded || (Math.abs(b.speed) < 1.5 && b.telegraph > 0)) && w.time > 5) ai.stuckT += DECIDE_DT;
    else ai.stuckT = Math.max(0, ai.stuckT - DECIDE_DT);
    // no net progress for 10 s while ordered ahead (rubbing along a coast / pinned in a pocket)
+   // (only counts if the hull touched ground in the window: accelerating out of a reverse or a tight
+   // turn in open water also shows little net progress)
+   if (b.grounded) ai.touchT = w.time;
    if (!ai.progPos || w.time - ai.progT > 10) {
-      if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12) ai.stuckT = 99;
+      if (ai.progPos && b.telegraph >= 2 && !ai.route && dist2(b.pos, ai.progPos) < 350 * 350 && w.time > 12 &&
+         w.time - (ai.touchT ?? -99) < 10) ai.stuckT = 99;
       ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
    }
-   if (ai.stuckT > 3) { ai.stuckT = 0; ai.reverseT = 6; ai.revRudder = w.rng() < 0.5 ? 2 : -2; return; }
+   if (ai.stuckT > 3) {
+      ai.stuckT = 0; ai.reverseT = 8; ai.revRudder = w.rng() < 0.5 ? 2 : -2;
+      ai.escapeHeading = escapeHeading(b, w);
+      return;
+   }
 
    // mission retreat (permanent) or generic break-off to repair
    if (ai.retreatBelow && hpF < ai.retreatBelow) ai.retreating = true;
@@ -187,6 +204,18 @@ function decide(b, w, d) {
    ai.desired = want;
    ai.tel = tel;
    checkTorpedoes(b, w, d);
+}
+
+// Heading away from the nearest coast (or the last desired heading in open water).
+function escapeHeading(b, w) {
+   let best = null, bd = Infinity;
+   for (const o of w.obstacles) {
+      if (o.kind !== 'island') continue;
+      const d = Math.sqrt(dist2(b.pos, o.c)) - obstacleRadiusAt(o, Math.atan2(b.pos.y - o.c.y, b.pos.x - o.c.x));
+      if (d < bd) { bd = d; best = o; }
+   }
+   if (best && bd < 1500) return Math.atan2(b.pos.y - best.c.y, b.pos.x - best.c.x);
+   return b.ai.desired != null ? b.ai.desired : b.heading + Math.PI;
 }
 
 // Combat manoeuvring: close in angled, fight in the preferred band showing an angled broadside,
@@ -366,7 +395,9 @@ function steer(b, dt) {
    if (ai.rudderOverride != null) { b.setRudder(ai.rudderOverride); return; }
    const lead = b.cfg.rudderShift * 0.7 + 1.2;
    let err = angleDelta(b.heading + b.omega * lead, ai.desired);
-   if (b.speed < 0) err = -err;
+   // astern steering only while ordered astern: a ship still backing after a reverse order already
+   // wants the rudder laid for the coming ahead leg (rudder shifts are slow)
+   if (b.speed < 0 && b.telegraph < 0) err = -err;
    const a = Math.abs(err);
    b.setRudder(a > 25 * DEG ? Math.sign(err) * 2 : a > 6 * DEG ? Math.sign(err) : a > 1.5 * DEG ? Math.sign(err) * (b.type === 'DD' ? 1 : 0) : 0);
 }

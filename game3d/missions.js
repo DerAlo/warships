@@ -434,13 +434,15 @@ const DEFS = [
             { c: P(2500, 3200), r: 380, height: 70, seed: 405, lobes: 3, rough: 0.9 },
          ]);
          const S = w._script;
+         // Heavy seas: the Home Fleet's gunlayers struggle too (the player cannot dodge with a jammed rudder)
+         w.difficulty = { ...w.difficulty, aimErr: w.difficulty.aimErr * 1.4 };
          const p = add(w, pickShip(this, shipKey), 'player', P(0, 0), 0.8, { isPlayer: true, telegraph: 2 });
          p.hp = Math.round(p.maxHP * 0.85);
          p.modules.rudder = 60;           // jammed: DC (R) frees it early
          p.rudder = -0.55; p.rudderCmd = -1;
          S.kgv = add(w, 'KGV', 'enemy', P(-9000, -9500), 0.9, { name: 'King George V', telegraph: 4 });
          S.rodney = add(w, 'Rodney', 'enemy', P(-10200, -7600), 0.8, { name: 'HMS Rodney', telegraph: 4 });
-         later(S, 45, () => {
+         later(S, 100, () => {
             w.message('Zerstörer Cossack läuft zum Torpedoangriff an!', 'warn');
             add(w, 'Jervis', 'enemy', P(9500, 2500), Math.PI, { name: 'HMS Cossack', minDist: 10000 });
          });
