@@ -16,7 +16,8 @@ import { Hud } from './hud.js';
 import { Overlay3D } from './hud3d.js';
 import { Audio } from './audio.js';
 import { World } from './state.js';
-import { updateBot } from './ai.js';
+import { flightTime as simFlightTime } from './combat.js';
+import { Menu3D } from './menu3d.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -37,6 +38,7 @@ const CONS_NAMES = {
    boost: 'Maschinen-Boost', hydro: 'Hydroakustik', radar: 'Radar', spotter: 'Aufklärer', fighter: 'Jäger',
 };
 const OLD_BEAM = { DD: 13, LC: 18, HC: 22, EB: 36, Bismarck: 36 };
+const CONS_SLOTS = ['R', 'T', 'Y', 'U'];
 
 // ------------------------------------------------------------------ setup
 const scene3d = $('scene3d');
@@ -141,10 +143,7 @@ function mainCaliber(p) { return p?.turrets?.[0]?.caliber || p?.cfg?.main?.calib
 // old constant-velocity shells > WoWs-like default curve.
 function flightTime(R) {
    if (!P) return 0;
-   try {
-      if (typeof P.flightTime === 'function') return P.flightTime(R);
-      if (typeof world.flightTime === 'function') return world.flightTime(P, R);
-   } catch (e) { /* fall through */ }
+   if (P.cfg?.main?.tMax) return simFlightTime(P.cfg.main, Math.max(1, R));
    if (flightCal) return flightCal.k * Math.pow(Math.max(1, R), 1.15);
    if (P.cfg?.main?.vShell && !simv.newShells) return R / P.cfg.main.vShell;
    return 15 * Math.pow(Math.max(1, R) / 20000, 1.15);
@@ -182,10 +181,13 @@ function torpInfo(p) {
       const T = p.torps, L = T.launchers || [];
       if (!L.length) return null;
       const ready = L.filter(l => (l.reload || 0) <= 0);
-      const next = ready[0] || L.reduce((a, b) => ((a.reload || 0) < (b.reload || 0) ? a : b));
+      // the launcher that would actually fire along the aim bearing (sim picks per side/arc)
+      const bearing = typeof p.torpLauncherFor === 'function' ? p.torpLauncherFor(aim.yaw) : ready[0];
+      const next = bearing || ready[0] || L.reduce((a, b) => ((a.reload || 0) < (b.reload || 0) ? a : b));
       const minReload = Math.min(...L.map(l => l.reload || 0));
-      return { range: T.range || 8000, speed: (T.speedKn || 60) * KN, tubes: next.tubes || 3,
-         readyCount: ready.length, total: L.length, reload: minReload, reloadMax: next.reloadMax || 60, spread: T.spread || ctl.spread };
+      return { range: T.range || 8000, speed: T.speed || (T.speedKn || 60) * KN, tubes: next.tubes || 3,
+         readyCount: ready.length, total: L.length, canFire: !!bearing, reload: minReload, reloadMax: next.reloadMax || 60,
+         spread: T.spread || ctl.spread };
    }
    const c = p.cfg?.torp;
    if (!c || typeof p.fireTorpedo !== 'function') return null;
@@ -194,7 +196,7 @@ function torpInfo(p) {
       reload: r, reloadMax: c.cd || 30, spread: ctl.spread };
 }
 function torpBearings(info, yaw) {
-   const gap = (info.spread === 'wide' ? 3.5 : 1.2) * DEG;
+   const gap = (info.spread === 'wide' ? 3.2 : 1.3) * DEG;   // same fan as ship.fireTorpedoes
    const n = info.tubes, out = [];
    for (let i = 0; i < n; i++) out.push(yaw + (i - (n - 1) / 2) * gap);
    return out;
@@ -206,15 +208,12 @@ function consumables() {
    const p = P;
    if (!p) return [];
    if (simv.newCons) {
+      // WoWs binds the slots in the ship's slot order: damage control first, then R/T/Y/U.
       const list = p.consumables;
       const dc = list.find(c => c.key === 'damageControl');
-      const rp = list.find(c => c.key === 'repair');
-      const other = list.filter(c => c !== dc && c !== rp);
-      const out = [];
-      const add = (c, slot) => { if (c) out.push({ slot, key: c.key, name: c.name || CONS_NAMES[c.key] || c.key, charges: c.charges, maxCharges: c.maxCharges,
-         cd: c.cd || 0, cdMax: c.cdMax || 1, active: !!c.active, t: c.t || 0, dur: c.dur || 1, src: c }); };
-      add(dc, 'R'); add(rp, 'T'); add(other[0], 'Y'); add(other[1], 'U');
-      return out;
+      const ordered = dc ? [dc, ...list.filter(c => c !== dc)] : list;
+      return ordered.slice(0, CONS_SLOTS.length).map((c, i) => ({ slot: CONS_SLOTS[i], key: c.key, name: c.name || CONS_NAMES[c.key] || c.key,
+         charges: c.charges, maxCharges: c.maxCharges, cd: c.cd || 0, cdMax: c.cdMax || 1, active: !!c.active, t: c.t || 0, dur: c.dur || 1, src: c }));
    }
    return consEmu || [];
 }
@@ -262,12 +261,31 @@ function tickConsEmu(dt) {
 }
 
 // ------------------------------------------------------------------ game lifecycle
+// opts: { mission, ship | shipClass, difficulty, seed }. Missing fields fall back to the test
+// hooks (window.__mission / __ship), the query string (?mission=&ship=) and then the menu selection.
+function resolveOpts(opts) {
+   const q = new URLSearchParams(location.search);
+   const sel = menu?.selection || {};
+   const o = {
+      mission: opts.mission || window.__mission || q.get('mission') || sel.mission || 'standard',
+      ship: opts.ship || opts.shipClass || window.__ship || q.get('ship') || null,
+      difficulty: opts.difficulty || q.get('difficulty') || sel.difficulty || difficulty,
+   };
+   const m = getMission(o.mission) || getMission('standard');
+   o.mission = m.id;
+   if (!o.ship && sel.mission === o.mission) o.ship = sel.ship;
+   // an unknown ship key would silently fall back inside the sim; pick the mission's own choice instead
+   if (!o.ship || !SHIPS[o.ship]) o.ship = m.recommendedShip || m.playableShips?.[0] || 'Bismarck';
+   if (opts.seed != null) o.seed = opts.seed;
+   return o;
+}
+
 function startGame(opts = {}) {
-   if (opts.difficulty) difficulty = opts.difficulty;
-   const wopts = {};
-   if (opts.mission) wopts.mission = opts.mission;
-   if (opts.ship) wopts.ship = opts.ship;
-   world = new World(difficulty, wopts);
+   const o = resolveOpts(opts || {});
+   lastOpts = o;
+   difficulty = o.difficulty;
+   world = new World(difficulty, { mission: o.mission, ship: o.ship, ...(o.seed != null ? { seed: o.seed } : {}) });
+   menu?.hide(); menu?.hideResults();
    world.audio = audio;
    P = world.player;
    simv = {
@@ -326,24 +344,9 @@ function endGame() {
    phase = 'ended';
    input.gameActive = false;
    input.releaseLock();
-   const p = P;
-   const won = world.result ? !!world.result.victory : world.phase === 'won';
-   const st = world.stats || {};
-   $('end-emoji').textContent = won ? '🏆' : '⚓';
-   $('end-title').textContent = won ? 'SIEG' : 'NIEDERLAGE';
-   $('end-sub').textContent = world.result?.reason || (won ? 'Alle feindlichen Schiffe versenkt.' : (p?.name || 'Dein Schiff') + ' ist gesunken.');
-   const kills = st.kills ?? world.killCount ?? 0;
-   const dmg = st.dmg ?? p?.dmgDealt ?? 0;
-   $('stat-kills').textContent = String(kills);
-   $('stat-dmg').textContent = Math.round(dmg).toLocaleString('de-DE');
-   const m = Math.floor(world.time / 60), s = Math.floor(world.time % 60);
-   $('stat-time').textContent = m + ':' + String(s).padStart(2, '0');
-   const hits = st.hits ?? p?.shotsHit, shots = st.shotsFired ?? p?.shotsFired;
-   $('stat-hits').textContent = hits != null && shots ? `${hits} / ${shots}` : '—';
-   $('stat-cit').textContent = String(st.citadels ?? fx.ribbons.get('citadel') ?? 0);
-   $('stat-xp').textContent = world.result?.xp != null ? Math.round(world.result.xp).toLocaleString('de-DE') : Math.round(dmg / 20 + kills * 300 + (won ? 800 : 0)).toLocaleString('de-DE');
-   $('end').classList.remove('hidden');
    hud.show(false);
+   for (const id of ['pause', 'howto']) $(id)?.classList.add('hidden');
+   menu.showResults(world, lastOpts || resolveOpts({}), { ribbons: fx.ribbons, ribbonNames: RIBBON_NAMES });
 }
 
 function pause() {
@@ -369,9 +372,9 @@ function toMenu() {
    input.gameActive = false;
    input.releaseLock();
    world = null; P = null;
-   for (const id of ['end', 'pause']) $(id).classList.add('hidden');
-   $('menu').classList.remove('hidden');
+   for (const id of ['pause', 'howto']) $(id)?.classList.add('hidden');
    hud.show(false);
+   menu.show();
 }
 
 // ------------------------------------------------------------------ frame-level input
@@ -648,6 +651,7 @@ function fireTorps() {
    const ti = torpInfo(p);
    if (!ti) return 0;
    if (ti.readyCount <= 0) { audio.denied(); return 0; }
+   if (ti.canFire === false) { audio.denied(); hud.msg('Torpedos: kein Schusswinkel', 'warn'); return 0; }
    let n = 0;
    if (simv.newTorps) {
       try { n = p.fireTorpedoes(world, aim.yaw) || 0; } catch (e) { n = 0; }
@@ -1052,7 +1056,6 @@ function frame() {
          while (acc >= SIM_DT && steps < 15) {
             snapshotPrev();
             applyControls(SIM_DT);
-            if (!simv.botsInternal) for (const b of world.bots) updateBot(b, world, SIM_DT);
             world.update(SIM_DT);
             acc -= SIM_DT; steps++;
          }
@@ -1114,21 +1117,15 @@ function emptyWorld() {
 
 // ------------------------------------------------------------------ UI wiring
 const click = (id, fn) => $(id)?.addEventListener('click', fn);
-click('btn-play', () => startGame({}));
-click('btn-how', () => { $('howto').classList.remove('hidden'); audio.init(); audio.uiClick(); });
+const showHowTo = () => { $('howto').classList.remove('hidden'); audio.init(); audio.uiClick(); };
+menu = new Menu3D($('menu'), $('end'), {
+   onStart: (o) => startGame(o),
+   onHowTo: showHowTo,
+   onClick: () => { audio.init(); audio.uiClick(); },
+});
 click('btn-how-close', () => { $('howto').classList.add('hidden'); audio.uiClick(); });
-click('btn-again', () => startGame({}));
-click('btn-menu', toMenu);
 click('btn-resume', resume);
 click('btn-quit', toMenu);
-document.querySelectorAll('.chip[data-diff]').forEach(ch => {
-   ch.addEventListener('click', () => {
-      document.querySelectorAll('.chip[data-diff]').forEach(c => c.classList.remove('sel'));
-      ch.classList.add('sel');
-      difficulty = ch.dataset.diff;
-      audio.init(); audio.uiClick();
-   });
-});
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };
 window.addEventListener('pointerdown', gesture);
@@ -1141,9 +1138,9 @@ window.addEventListener('error', (e) => {
    document.body.appendChild(el);
 });
 
-// A mission/ship picker (menu3d.js, sim workstream) can start a match through this.
+// Test/automation entry point: startGame3D({ mission, ship, difficulty }).
 window.startGame3D = startGame;
 
 $('loading')?.remove();
-$('menu').classList.remove('hidden');
+menu.show();
 requestAnimationFrame(frame);
