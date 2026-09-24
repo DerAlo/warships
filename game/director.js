@@ -111,6 +111,13 @@ export class Director {
          if (this.breakT <= 0) {
             this.inBreak = false;
             this.wave++;
+            // survival runs for dozens of waves: drop sunk hulls (in place -- other code holds the
+            // arrays) so the per-tick ship loops stay short
+            for (const arr of [w.bots, w.ships]) {
+               let j = 0;
+               for (const s of arr) if (s.alive || s === p) arr[j++] = s;
+               arr.length = j;
+            }
             const specs = survivalWave(this.wave, p.pos, (w.seed || 1) * 131 + this.wave * 7919);
             // later waves also get sturdier hulls so the budget growth is not the only escalation
             const hpMult = Math.min(1.8, 1 + 0.04 * (this.wave - 1));

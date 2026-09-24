@@ -8,9 +8,7 @@ function buildTile() {
    const c = document.createElement('canvas');
    c.width = c.height = TILE;
    const g = c.getContext('2d');
-    // base deep water — gradient must be vertically seamless (first == last stop)
-    // or every tile row shows a hard seam line. Brighter + more saturated than before
-    // so the sea reads as living water, not a flat dark field.
+   // base deep water -- vertically seamless gradient (first == last stop)
    const grad = g.createLinearGradient(0, 0, 0, TILE);
    grad.addColorStop(0, '#0e3350');
    grad.addColorStop(0.5, '#124062');
@@ -18,39 +16,54 @@ function buildTile() {
    g.fillStyle = grad;
    g.fillRect(0, 0, TILE, TILE);
 
-    // layered sine wave ripples (foam highlights) — deterministic so the tile is seamless
    let seed = 1337;
    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-   for (let pass = 0; pass < 3; pass++) {
-      const scale = pass === 0 ? 64 : pass === 1 ? 32 : 16;
-      const amp = pass === 0 ? 0.5 : pass === 1 ? 0.35 : 0.2;
-      for (let y = 0; y < TILE; y += scale) {
-         for (let x = 0; x < TILE; x += scale) {
-            const phase = Math.sin((x / TILE) * Math.PI * 2 * (pass + 1) + y * 0.05) * 0.5 + 0.5;
-            const n = rnd();
-            if (n > 0.80) {
-                // a short foam crest — denser + brighter than before
-               const len = scale * (0.5 + n * 0.6);
-               g.strokeStyle = `rgba(200,235,255,${(0.09 + phase * amp * 0.35).toFixed(3)})`;
-               g.lineWidth = 1 + pass * 0.5;
-               g.beginPath();
-               const ox = x + (rnd() - 0.5) * scale, oy = y + (rnd() - 0.5) * scale;
-               g.moveTo(ox, oy);
-               g.lineTo(ox + Math.cos(phase * 6) * len, oy + Math.sin(phase * 6) * len * 0.5);
-               g.stroke();
-             }
-         }
-       }
-    }
-    // subtle caustic glow blobs — a touch stronger for depth shimmer
+   // every feature is drawn at its 3x3 wrapped copies so nothing is clipped at the tile border
+   // (clipped blobs showed up as a faint square grid across the sea)
+   const wrapped = (fn) => { for (const dx of [-TILE, 0, TILE]) for (const dy of [-TILE, 0, TILE]) fn(dx, dy); };
+   // swell: broad soft light/dark bands, gives the water body
+   for (let i = 0; i < 14; i++) {
+      const x = rnd() * TILE, y = rnd() * TILE, r = 60 + rnd() * 110, dark = rnd() < 0.45;
+      wrapped((dx, dy) => {
+         const rg = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+         rg.addColorStop(0, dark ? 'rgba(4,20,36,0.16)' : 'rgba(120,190,240,0.07)');
+         rg.addColorStop(1, 'rgba(0,0,0,0)');
+         g.fillStyle = rg;
+         g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+      });
+   }
+   // wave crests: short curved strokes, all roughly across the wind so the sea has a grain
+   // instead of random scratches
+   const WIND = -0.35;
+   for (let i = 0; i < 150; i++) {
+      const x = rnd() * TILE, y = rnd() * TILE;
+      const big = rnd() < 0.25;
+      const len = big ? 18 + rnd() * 22 : 7 + rnd() * 12;
+      const a = WIND + (rnd() - 0.5) * 0.5, bend = (rnd() - 0.3) * len * 0.35;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const alpha = big ? 0.10 + rnd() * 0.08 : 0.05 + rnd() * 0.07;
+      wrapped((dx, dy) => {
+         const x0 = x + dx - ca * len / 2, y0 = y + dy - sa * len / 2;
+         const x1 = x + dx + ca * len / 2, y1 = y + dy + sa * len / 2;
+         g.strokeStyle = `rgba(205,235,255,${alpha.toFixed(3)})`;
+         g.lineWidth = big ? 1.6 : 1;
+         g.beginPath();
+         g.moveTo(x0, y0);
+         g.quadraticCurveTo(x + dx - sa * bend, y + dy + ca * bend, x1, y1);
+         g.stroke();
+      });
+   }
+   // caustic glints for a little shimmer
    for (let i = 0; i < 16; i++) {
-      const x = rnd() * TILE, y = rnd() * TILE, r = 20 + rnd() * 50;
-      const rg = g.createRadialGradient(x, y, 0, x, y, r);
-      rg.addColorStop(0, `rgba(130,195,245,${0.07})`);
-      rg.addColorStop(1, 'rgba(130,195,245,0)');
-      g.fillStyle = rg;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    }
+      const x = rnd() * TILE, y = rnd() * TILE, r = 20 + rnd() * 45;
+      wrapped((dx, dy) => {
+         const rg = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
+         rg.addColorStop(0, 'rgba(130,195,245,0.06)');
+         rg.addColorStop(1, 'rgba(130,195,245,0)');
+         g.fillStyle = rg;
+         g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+      });
+   }
    return c;
 }
 
@@ -70,13 +83,15 @@ export class Ocean {
       ctx.fillStyle = PALETTE.seaDeep;
       ctx.fillRect(0, 0, w, h);
 
-       // parallax-scroll the tile in world space. zoom is px/meter; the tile represents TILE meters.
-      const ts = TILE * zoom;
+       // scroll the tile with the world: a camera move of d meters shifts it by d*zoom px. The
+      // wrap modulus must be the pattern's own period (TILE px) -- wrapping at TILE*zoom made the
+      // water jump sideways every few hundred meters.
+      const ts = TILE;
        // Slow time-based "current" drift so the sea stays alive even when the ship holds
        // station. Must be defined in WORLD METERS/s and scaled by zoom like everything else --
        // this used to be raw SCREEN px/s (driftX = time*6), so at the default 0.42 zoom the
        // water visibly crept at ~14 m/s (faster than most ships!) independent of the world,
-       // and zooming out via M made it worse still. Now it's ~1.5 m/s of true current, always.
+       // Now it is ~1.5 m/s of true current, always.
       const driftX = this.time * 1.5 * zoom, driftY = this.time * 0.9 * zoom;
        // pattern origin sits at screen (w/2 - offx); for the tile to be world-anchored
        // its phase must be (X - w/2 + offx)/ts == worldX/TILE  =>  offx = +cx*zoom

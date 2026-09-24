@@ -116,8 +116,8 @@ export class Hud {
       e.knText.textContent = Math.round(kn) + ' kn';
       e.speedReadout.textContent = Math.round(kn) + ' kn';
       e.speedFill.style.width = (clamp01(Math.abs(p.speed) / p.maxSpeed) * 100).toFixed(1) + '%';
-      let deg = Math.round((p.heading * 180 / Math.PI) % 360);
-      if (deg < 0) deg += 360;
+      // nautical course (N = 0°, O = 90°); world angle 0 points east
+      const deg = Math.round(((p.heading * 180 / Math.PI + 90) % 360 + 360) % 360) % 360;
       e.headingReadout.textContent = deg + '°';
 
       // damage modules

@@ -131,7 +131,8 @@ function resolveHit(world, ship, shell, imp) {
    const res = ship.applyImpact({ dmg, source: shell.kind === 'sec' ? 'secondary' : r.outcome === 'CITADEL' ? 'citadel' : 'main',
       firing: r.fire, flooding: false, mod: Math.floor(Math.random() * 6),
       dmgMult: (by && by.dmgMult) || 1, by });
-   if (by) by.shotsHit++;
+   // accuracy is main-battery hits per main shell fired (secondaries are not counted as shots)
+   if (by && shell.kind === 'main') by.shotsHit++;
 
    const big = r.outcome === 'CITADEL';
    world.addExplosion(shell.pos, big);

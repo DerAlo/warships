@@ -748,45 +748,45 @@ export class Renderer {
    _compass(world) {
       const g = this.compassCtx;
       if (!g) return;
-      // fixed CSS size (index.html: #compass 220×42); backing store is dpr-scaled in main.resize()
-      const W = 220, H = 42;
+      // fixed CSS size (index.html: #compass 220×42); backing store is dpr-scaled in main.resize().
+      // A heading tape: own course in the middle, ±90° either side, nautical bearings (N = 0°).
+      const W = 220, H = 42, cx = W / 2, PX = W / 180;
       g.clearRect(0, 0, W, H);
-      const cx = W / 2, cy = H / 2;
       const p = world.player;
-      const heading = p ? p.heading : 0;
-      // ticks every 15°, majors every 90°
-      for (let deg = 0; deg < 360; deg += 15) {
-         const a = deg * DEG - heading;
-         const major = deg % 90 === 0;
-         const x1 = cx + Math.cos(a) * (W / 2 - 6);
-         const y1 = cy + Math.sin(a) * (H / 2 - 14);
-         const x2 = cx + Math.cos(a) * (W / 2 - (major ? 16 : 10));
-         const y2 = cy + Math.sin(a) * (H / 2 - (major ? 14 : 10));
-         g.strokeStyle = major ? 'rgba(207,232,255,0.9)' : 'rgba(207,232,255,0.35)';
-         g.lineWidth = major ? 2 : 1;
-         g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      const hdg = ((p ? p.heading : 0) / DEG + 90 + 360) % 360;   // world 0 = east -> nautical 90
+      const rel = (b) => ((b - hdg + 540) % 360) - 180;            // -180..180 from own course
+      const NAMES = { 0: 'N', 45: 'NO', 90: 'O', 135: 'SO', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+      g.textAlign = 'center';
+      for (let b = 0; b < 360; b += 15) {
+         const d = rel(b);
+         if (Math.abs(d) > 92) continue;
+         const x = cx + d * PX, major = b % 45 === 0;
+         g.globalAlpha = 1 - Math.abs(d) / 110;
+         g.strokeStyle = major ? 'rgba(207,232,255,0.9)' : 'rgba(207,232,255,0.4)';
+         g.lineWidth = major ? 1.6 : 1;
+         g.beginPath(); g.moveTo(x, H - 4); g.lineTo(x, H - (major ? 13 : 8)); g.stroke();
          if (major) {
-            // world angle 0 = east, +90deg = south (Y+ down), so majors read O/S/W/N
-            const lbl = ['O', 'S', 'W', 'N'][deg / 90];
-            g.fillStyle = 'rgba(207,232,255,0.85)';
-            g.font = 'bold 11px "SF Mono", monospace';
-            g.textAlign = 'center';
-            g.fillText(lbl, cx + Math.cos(a) * (W / 2 - 26), cy + Math.sin(a) * (H / 2 - 22) + 4);
+            g.fillStyle = b % 90 === 0 ? '#e6f3ff' : 'rgba(207,232,255,0.7)';
+            g.font = (b % 90 === 0 ? 'bold 12px' : '10px') + ' "SF Mono", Consolas, monospace';
+            g.fillText(NAMES[b], x, H - 16);
          }
       }
-      // center marker (ship heading)
+      g.globalAlpha = 1;
+      // own course: marker + readout
       g.fillStyle = '#ffd479';
-      g.beginPath();
-      g.moveTo(cx, cy - 6); g.lineTo(cx - 4, cy + 4); g.lineTo(cx + 4, cy + 4);
-      g.closePath(); g.fill();
-      // enemy bearings
+      g.beginPath(); g.moveTo(cx, H - 2); g.lineTo(cx - 4, H - 9); g.lineTo(cx + 4, H - 9); g.closePath(); g.fill();
+      g.font = 'bold 10px "SF Mono", Consolas, monospace';
+      g.fillText(String(Math.round(hdg) % 360).padStart(3, '0') + '°', cx, 10);
+      // enemy bearings: dots on the tape, edge arrows for contacts behind the beam
       for (const s of world.ships) {
          if (!shown(s) || s.side === 'player' || !p) continue;
-         const a = angleOf(sub(s.pos, p.pos)) - heading;
-         const x = cx + Math.cos(a) * (W / 2 - 20);
-         const y = cy + Math.sin(a) * (H / 2 - 18);
+         const d = rel((angleOf(sub(s.pos, p.pos)) / DEG + 90 + 360) % 360);
          g.fillStyle = '#ff5a4d';
-         g.beginPath(); g.arc(x, y, 3, 0, TAU); g.fill();
+         if (Math.abs(d) <= 90) { g.beginPath(); g.arc(cx + d * PX, 17, 3, 0, TAU); g.fill(); }
+         else {
+            const x = d > 0 ? W - 5 : 5, k = d > 0 ? -1 : 1;
+            g.beginPath(); g.moveTo(x, 17); g.lineTo(x + k * 6, 13); g.lineTo(x + k * 6, 21); g.closePath(); g.fill();
+         }
       }
    }
 }

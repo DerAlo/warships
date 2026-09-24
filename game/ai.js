@@ -28,10 +28,10 @@ function kite(target, from, side, prefRange) {
    return { heading: perp - side * clamp(radial * 1.1, -0.9, 0.9), throttle: 1 };
 }
 
-// Obstacle + arena-edge avoidance (highest priority). Steers TANGENTIALLY around an obstacle
-// (radial "point away" flips sides as the ship passes the centre and oscillates at these turn
-// radii). Buffer uses maxSpeed so a collision-stalled ship keeps an honest margin, and is capped
-// so avoidance stays a local correction instead of overriding combat steering map-wide.
+// Obstacle + arena-edge avoidance (highest priority). When an island lies across the wanted
+// course, steer TANGENTIALLY round it (radial "point away" flips sides as the ship passes the
+// centre and oscillates at these turn radii). Buffer uses maxSpeed so a collision-stalled ship
+// keeps an honest margin, and is capped so avoidance stays a local correction.
 function avoidObstacles(bot, world, steer) {
    const turnRadius = bot.maxSpeed / Math.max(0.05, bot.cfg.turnRate || 0.2);
    const speedBuf = clamp(turnRadius * 1.1, 300, 550);
@@ -40,14 +40,25 @@ function avoidObstacles(bot, world, steer) {
       const d = dist(bot.pos, o.c);
       // reefs only slow a ship down: skirt them, don't give them an island's berth
       const buf = o.r + (o.kind === 'reef' ? 150 : speedBuf);
-      if (d < buf) {
-         const toObs = angleOf(sub(o.c, bot.pos));
-         const perpCW = toObs + Math.PI / 2, perpCCW = toObs - Math.PI / 2;
-         const dir = Math.abs(angleDelta(bot.heading, perpCW)) < Math.abs(angleDelta(bot.heading, perpCCW)) ? perpCW : perpCCW;
-         const w = 1 - d / buf;
-         if (!best || w > best.w) best = { heading: dir, throttle: 0.7, w };
-      }
+      if (d >= buf) continue;
+      const toObs = angleOf(sub(o.c, bot.pos));
+      // only an obstacle in the way matters. The old rule forced a tangent course whenever a ship
+      // was near an island, whatever it wanted -- so ships orbited islands for minutes.
+      const cover = Math.asin(Math.min(1, (o.r + 60) / Math.max(d, 1)));
+      if (Math.abs(angleDelta(steer.heading, toObs)) > cover + 0.35) continue;
+      const w = 1 - d / buf;
+      if (best && w <= best.w) continue;
+      // round it on the side of the wanted course; sticky per island so it doesn't dither when
+      // the goal lies dead behind it
+      const perpCW = toObs + Math.PI / 2, perpCCW = toObs - Math.PI / 2;
+      let side = bot._avoidObs === o ? bot._avoidSide
+         : (Math.abs(angleDelta(steer.heading, perpCW)) < Math.abs(angleDelta(steer.heading, perpCCW)) ? 1 : -1);
+      // hugging the shore: bias outward so the turning circle clears the rocks
+      const push = clamp(1 - (d - o.r) / 160, 0, 1) * 0.6;
+      best = { o, side, w, heading: toObs + side * (Math.PI / 2 + push),
+         throttle: Math.min(steer.throttle ?? 1, d - o.r < 160 ? 0.7 : 1) };
    }
+   if (best) { bot._avoidObs = best.o; bot._avoidSide = best.side; } else bot._avoidObs = null;
    const edgeBuf = clamp(turnRadius * 1.3, 400, 700);
    const edgeD = WORLD.ARENA - Math.max(Math.abs(bot.pos.x), Math.abs(bot.pos.y));
    if (edgeD < edgeBuf) {
@@ -366,8 +377,17 @@ function sideTowardOpenSpace(bot, world, k) {
 function drive(bot, world, steer) {
    steer = avoidObstacles(bot, world, steer);
    steer = applySeparation(bot, world, steer);
-   bot.helm = clamp(angleDelta(bot.heading, steer.heading) * 2.2, -1, 1);
-   bot.throttleIn = clamp(steer.throttle, -1, 1);
+   let helm = clamp(angleDelta(bot.heading, steer.heading) * 2.2, -1, 1);
+   let thr = clamp(steer.throttle, -1, 1);
+   // pinned on a shore with no way on (a ship cannot turn at a standstill): back off astern with
+   // the rudder reversed for a few seconds, then try again
+   if (world.time < (bot._reverseUntil || 0)) { thr = -1; helm = -helm; }
+   else if (Math.abs(thr) > 0.25 && Math.abs(bot.speed) < bot.maxSpeed * 0.06) {
+      if (bot._slowSince == null) bot._slowSince = world.time;
+      if (world.time - bot._slowSince > 3) { bot._reverseUntil = world.time + 4; bot._slowSince = null; }
+   } else bot._slowSince = null;
+   bot.helm = helm;
+   bot.throttleIn = thr;
 }
 
 // guns only at a spotted target inside range (support roles don't area-fire)
@@ -381,7 +401,12 @@ function lightGuns(bot, world, k, ai, dt) {
 function pathGoal(bot) {
    if (bot.path && bot.pathIdx < bot.path.length) {
       const wp = bot.path[bot.pathIdx];
-      if (dist(bot.pos, wp) < 220) {
+      const ni = bot.pathIdx + 1 < bot.path.length ? bot.pathIdx + 1 : (bot.loop ? 0 : -1);
+      const next = ni >= 0 ? bot.path[ni] : bot.exit;
+      // reached -- or already past it (island avoidance pushed it wide): turning back just to touch
+      // the point made convoys loop around islands
+      const passed = next && dist(bot.pos, wp) < 700 && dist(bot.pos, next) < dist(wp, next) - 60;
+      if (dist(bot.pos, wp) < 220 || passed) {
          bot.pathIdx++;
          if (bot.pathIdx >= bot.path.length && bot.loop) bot.pathIdx = 0;
       }

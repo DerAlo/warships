@@ -231,7 +231,7 @@ function play(difficulty, maxSec = 600, missionId = null, seed = null) {
 // ---- runner ----
 // `node tests/play.mjs`             -> one detailed free battle per difficulty (kill timeline)
 // `node tests/play.mjs <N>`         -> N free battles per difficulty, aggregated win-rate + stats
-// `node tests/play.mjs missions [N]` -> every campaign mission + survival on normal, N runs each
+// `node tests/play.mjs missions [N] [diff]` -> every campaign mission + survival, N runs each
 // `node tests/play.mjs m5 [N] [diff]` -> one mission in detail (N=1) or aggregated
 const arg = process.argv[2] || '1';
 const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
@@ -256,10 +256,11 @@ function aggregate(label, runs) {
 
 if (arg === 'missions') {
    const N = Math.max(1, parseInt(process.argv[3] || '1', 10));
+   const diff = process.argv[4] || 'normal';
    for (const m of [...MISSIONS, SURVIVAL]) {
       const runs = [];
-      for (let i = 0; i < N; i++) runs.push(play('normal', m.survival ? 480 : 600, m.id, 1 + i));
-      aggregate(`${m.id} ${m.title}`, runs);
+      for (let i = 0; i < N; i++) runs.push(play(diff, m.survival ? 480 : 600, m.id, 1 + i));
+      aggregate(`${m.id} ${m.title} (${diff})`, runs);
    }
 } else if (/^m\d+$|^survival$/.test(arg)) {
    const N = Math.max(1, parseInt(process.argv[3] || '1', 10));

@@ -95,7 +95,7 @@ export const MISSIONS = [
       ],
       waves: [
          { at: 30, msg: '🎧 Hydrophon: Schraubengeräusche! U-Boote — Wasserbomben mit [C]',
-            bots: [{ cls: 'SUB', pos: { x: 2600, y: 900 } }, { cls: 'SUB', pos: { x: -2600, y: 400 } }] },
+            bots: [{ cls: 'SUB', pos: { x: 2800, y: 1100 } }, { cls: 'SUB', pos: { x: -2600, y: 400 } }] },
          { when: 'cleared', msg: '⚠ Das ganze Rudel greift an!',
             bots: [{ cls: 'DD', pos: { x: 0, y: -3000 } }, { cls: 'TB', pos: { x: -2900, y: -1000 } },
                { cls: 'TB', pos: { x: 2900, y: -1400 } }, { cls: 'TB', pos: { x: 3100, y: -1000 } }, { cls: 'SUB', pos: { x: 0, y: -2600 } }] },
@@ -117,7 +117,7 @@ export const MISSIONS = [
          { cls: 'EB', pos: { x: 1900, y: -1600 } },
          { cls: 'HC', pos: { x: 1200, y: -2300 } },
          { cls: 'LC', pos: { x: 2500, y: -500 } },
-         { cls: 'DD', pos: { x: 800, y: -900 } },
+         { cls: 'DD', pos: { x: 1100, y: -1150 } },
          { cls: 'DD', pos: { x: 2600, y: -2400 } },
       ],
       waves: [
@@ -141,7 +141,7 @@ export const MISSIONS = [
          battery(FORT_B, { x: -600, y: 1600 }),
          battery(FORT_C, { x: -1800, y: 400 }),
          { cls: 'ML', pos: { x: 400, y: -600 }, path: [{ x: -800, y: 600 }, { x: 900, y: 1500 }, { x: 1200, y: -400 }], loop: true },
-         { cls: 'ML', pos: { x: -1400, y: -1400 }, path: [{ x: -2400, y: 500 }, { x: -600, y: -1000 }], loop: true },
+         { cls: 'ML', pos: { x: -1400, y: -1400 }, path: [{ x: -2500, y: 300 }, { x: -2100, y: -1200 }, { x: -600, y: -1100 }, { x: -2100, y: -1200 }], loop: true },
          { cls: 'DD', pos: { x: 800, y: -2000 } },
          { cls: 'DD', pos: { x: 3000, y: -300 } },
       ],
@@ -208,7 +208,8 @@ export const MISSIONS = [
       zones: [{ c: { x: 3300, y: -3100 }, r: 400, label: 'SAMMELPUNKT', kind: 'goal' }],
       allies: (() => {
          const exit = { x: 3300, y: -3100, r: 400 };
-         const path = [{ x: -1600, y: 1800 }, { x: -300, y: 700 }, { x: 1000, y: -900 }, { x: 2300, y: -2200 }];
+         // threads the gap between the three central islands instead of running over them
+         const path = [{ x: -1600, y: 1800 }, { x: -300, y: 700 }, { x: 800, y: 450 }, { x: 1250, y: -700 }, { x: 2400, y: -1300 }];
          const tr = (x, y, n) => ({ cls: 'TR', pos: { x, y }, heading: -0.8, tag: 'escort', path, exit, speedMult: 0.95, hpMult: 2.8, name: 'Frachter ' + n });
          return [
             tr(-2350, 2500, 'Anna'), tr(-2650, 2800, 'Berta'), tr(-2800, 2300, 'Clara'), tr(-3050, 2650, 'Dora'),
@@ -305,6 +306,11 @@ export function survivalWave(n, center, seed = n * 7919) {
       const r = 2500 + rng() * 500;
       const lim = 3500;
       const pos = { x: Math.max(-lim, Math.min(lim, center.x + Math.cos(a) * r)), y: Math.max(-lim, Math.min(lim, center.y + Math.sin(a) * r)) };
+      // never spawn on (or hugging) an island or reef: push the spot out past the shoreline
+      for (const o of SURVIVAL.obstacles) {
+         const dx = pos.x - o.c.x, dy = pos.y - o.c.y, dd = Math.hypot(dx, dy) || 1, need = o.r + 220;
+         if (dd < need) { pos.x = o.c.x + dx / dd * need; pos.y = o.c.y + dy / dd * need; }
+      }
       return { ...spec, pos };
    });
 }

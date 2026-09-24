@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../game/state.js';
 import { updateBot } from '../game/ai.js';
-import { MISSIONS, SURVIVAL, missionById, nextMission } from '../game/missions.js';
+import { MISSIONS, SURVIVAL, missionById, nextMission, survivalWave } from '../game/missions.js';
 import { angleOf, sub, dist, fromAngle, angleDelta, clamp } from '../game/utils.js';
 
 const DT = 1 / 60;
@@ -155,4 +155,71 @@ test('mission chain: next mission follows in order', () => {
    assert.equal(nextMission('m1').id, 'm2');
    assert.equal(nextMission(MISSIONS[MISSIONS.length - 1].id), null);
    assert.ok(MISSIONS.length >= 8);
+});
+
+// ---- navigation: nothing spawns on an island and scripted routes do not run over one ----
+function segGap(o, a, b) {
+   const vx = b.x - a.x, vy = b.y - a.y;
+   const t = clamp(((o.c.x - a.x) * vx + (o.c.y - a.y) * vy) / (vx * vx + vy * vy || 1), 0, 1);
+   return Math.hypot(a.x + vx * t - o.c.x, a.y + vy * t - o.c.y) - o.r;
+}
+test('missions: spawns clear of islands, routes pass between them', () => {
+   for (const m of MISSIONS) {
+      const specs = [m.player, ...(m.bots || []), ...(m.allies || [])];
+      for (const wv of m.waves || []) specs.push(...(wv.bots || []), ...(wv.allies || []));
+      for (const s of specs) {
+         if (!s || !s.pos || s.cls === 'CB') continue;   // coastal batteries sit on the shore on purpose
+         for (const o of m.obstacles || []) {
+            assert.ok(dist(s.pos, o.c) - o.r > 0, `${m.id}: ${s.cls} spawns inside ${o.kind} at ${o.c.x},${o.c.y}`);
+            if (!s.path || o.kind !== 'island') continue;
+            const pts = [s.pos, ...s.path, ...(s.loop ? [s.path[0]] : s.exit ? [s.exit] : [])];
+            for (let i = 0; i + 1 < pts.length; i++) assert.ok(segGap(o, pts[i], pts[i + 1]) > 60, `${m.id}: ${s.cls} route leg ${i} crosses island ${o.c.x},${o.c.y}`);
+         }
+      }
+   }
+   for (let n = 1; n <= 25; n++) for (const s of survivalWave(n, { x: (n % 5 - 2) * 900, y: 0 }, n * 31)) {
+      if (!s.pos) continue;
+      for (const o of SURVIVAL.obstacles) assert.ok(dist(s.pos, o.c) > o.r + 150, `survival wave ${n}: ${s.cls} spawns on ${o.kind}`);
+   }
+});
+
+test('m8: the convoy reaches the rendezvous without circling islands', () => {
+   const w = new World('normal', 3, missionById('m8'));
+   for (const b of w.bots) b.alive = false;             // pure navigation: no attackers
+   w.director.waves.forEach(x => { x.done = true; });
+   while (w.time < 230 && w.phase === 'playing') {
+      const p = w.player; p.hp = p.maxHP;
+      const lead = w.allies.find(a => a.alive && a.tag);
+      if (lead) {
+         p.helm = clamp(angleDelta(p.heading, angleOf(sub(lead.pos, p.pos))) * 2, -1, 1);
+         p.throttleIn = dist(lead.pos, p.pos) > 600 ? 1 : 0.3;
+      }
+      tick(w, false);
+   }
+   assert.equal(w.phase, 'won');
+   assert.ok(w.allies.filter(a => a.tag === 'escort' && a.arrived).length === 4, 'all four freighters arrive');
+});
+
+test('AI: a bot with a goal behind an island gets round it', () => {
+   const w = new World('normal', 3, missionById('m4'));
+   for (const b of w.bots) b.alive = false;
+   const o = w.obstacles[0];
+   const bot = w.spawnBot({ cls: 'TR', pos: { x: o.c.x - o.r - 700, y: o.c.y }, heading: 0, path: [], exit: { x: o.c.x + o.r + 900, y: o.c.y, r: 200 } }, 'enemy');
+   bot.pathIdx = 0;
+   while (w.time < 90 && bot.alive) { w.player.hp = w.player.maxHP; updateBot(bot, w, DT); w.update(DT); w.events.length = 0; }
+   assert.ok(!bot.alive && bot.escaped, 'the transport got round the island to its exit');
+});
+
+test('accuracy counts main-battery hits only', () => {
+   const w = new World('normal', 3, missionById('m1'));
+   const p = w.player, tgt = w.bots[0];
+   // a secondary shell and a main shell landing right on the target
+   for (const kind of ['sec', 'main']) {
+      const gun = kind === 'sec' ? p.cfg.sec : p.cfg.main;
+      const s = w.spawnShell(p, { x: tgt.pos.x - 5, y: tgt.pos.y }, { x: 1, y: 0 }, gun, kind, 10);
+      s.age = s.arcDur;   // already on the way down
+      w.update(DT);
+      w.events.length = 0;
+   }
+   assert.equal(p.shotsHit, 1, 'only the main-battery shell counts toward accuracy');
 });
