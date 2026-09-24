@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>3D Grafik-Labor</title>
+<style>html, body { margin: 0; height: 100%; background: #000; overflow: hidden; } canvas { width: 100%; height: 100%; display: block; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Graphics lab: the real Renderer3D on a fake, static world (no sim, no islands unless asked),
+// so ship models and effects can be screenshotted fast and deterministically.
+// Query: ?env=time:weather:sea  &islands=1  &fleet=all|Bismarck,Hood,...
+import { Renderer3D } from '../game3d/render3d.js';
+import * as CFG from '../game3d/config.js';
+
+const q = new URLSearchParams(location.search);
+const SHIPS = CFG.SHIPS || {};
+const canvas = document.getElementById('c');
+const R = new Renderer3D(canvas);
+const fit = () => R.resize(innerWidth, innerHeight);
+addEventListener('resize', fit); fit();
+
+let id = 1;
+function mkShip(cls, side, x, y, heading) {
+   const cfg = SHIPS[cls] || {};
+   const tdefs = cfg.main?.turrets || cfg.turrets || [];
+   const cal = cfg.main?.caliber || cfg.caliber || 203;
+   const turrets = tdefs.map(t => ({ off: { x: t.off?.x ?? t.x ?? 0, y: t.off?.y ?? t.y ?? 0 }, guns: t.guns || 2, caliber: t.caliber || cal,
+      bearing: (t.arcC || 0) + (t.arcC ? 0.25 : -0.35), elev: 0.06, reload: 0, alive: true }));
+   return { id: id++, cls, cfg, side, isPlayer: false, name: cfg.name || cls, pos: { x, y }, heading, speed: 0, speedKn: 0,
+      alive: true, spotted: true, hp: 1, maxHP: 1, turrets, fires: [], floods: [], ammo: 'HE', torps: cfg.torp ? { launchers: cfg.torp.launchers || [] } : null };
+}
+
+const keys = Object.keys(SHIPS);
+const fleetQ = q.get('fleet') || 'all';
+const fleet = fleetQ === 'all' ? keys : fleetQ.split(',').filter(k => SHIPS[k]);
+const ships = fleet.map((k, i) => mkShip(k, i % 2 ? 'enemy' : 'player', 0, i * 90, 0));
+if (ships[0]) ships[0].isPlayer = true;
+const [time, weather, sea] = (q.get('env') || 'day:clear:0.35').split(':');
+const world = {
+   arena: 12000, time: 0, phase: 'playing', player: ships[0], ships, bots: ships.slice(1),
+   env: { time, weather, seaState: Number(sea || 0.35), visibility: 1 },
+   obstacles: q.get('islands') ? [
+      { kind: 'island', c: { x: 2600, y: -2200 }, r: 1500, lobes: 6, height: 320, seed: 11 },
+      { kind: 'island', c: { x: -3200, y: 1800 }, r: 900, lobes: 5, height: 160, seed: 23 },
+      { kind: 'reef', c: { x: 900, y: 1400 }, r: 260, lobes: 4, seed: 5 },
+   ] : [],
+   shells: [], torpedoes: [], smokeClouds: [], effects: [], events: [], caps: [], planes: [],
+   isSpotted: () => true, inSmoke: () => false,
+};
+ships.forEach(s => { s.world = world; });
+R.buildWorld(world);
+R.debugView = { pos: [-300, 40, 200], look: [0, 10, 200], fov: 50 };
+let last = performance.now();
+window.__lab = { R, world, ships, frames: 0, paused: false };
+function frame() {
+   requestAnimationFrame(frame);
+   const now = performance.now();
+   const dt = Math.min(0.1, (now - last) / 1000); last = now;
+   if (!window.__lab.paused) { world.time += dt; R.render(world, dt, null); window.__lab.frames++; }
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
