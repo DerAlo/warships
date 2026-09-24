@@ -372,7 +372,10 @@ export class World {
             const wa = b.maxHP / (a.maxHP + b.maxHP), wb = 1 - wa;
             a.pos.x += hit.nx * hit.depth * wa; a.pos.y += hit.ny * hit.depth * wa;
             b.pos.x -= hit.nx * hit.depth * wb; b.pos.y -= hit.ny * hit.depth * wb;
-            a.speed *= 0.985; b.speed *= 0.985;
+            // friction only for the part of each hull's motion that drives into the other: a glancing
+            // or T-bone contact must not pin a ship that is trying to slide off or pull away
+            const into = (s, sg) => clamp(-(Math.cos(s.heading) * hit.nx + Math.sin(s.heading) * hit.ny) * sg * Math.sign(s.speed), 0.1, 1);
+            a.speed *= 1 - 0.015 * into(a, 1); b.speed *= 1 - 0.015 * into(b, -1);
          }
       }
    }

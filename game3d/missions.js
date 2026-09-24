@@ -33,6 +33,8 @@ function nextName(w, cls, side) {
 const P = (x, y) => ({ x, y });
 // Push a spawn / waypoint position out of any island (with margin).
 function safePos(w, p, margin = 1.3) {
+   const lim = w.arena - 600;
+   const ok = q => Math.abs(q.x) <= lim && Math.abs(q.y) <= lim && w.obstacles.every(o => obstacleT(o, q) >= margin);
    const q = { x: p.x, y: p.y };
    for (let k = 0; k < 3; k++) {
       for (const o of w.obstacles) {
@@ -42,8 +44,19 @@ function safePos(w, p, margin = 1.3) {
          q.x = o.c.x + Math.cos(a) * r; q.y = o.c.y + Math.sin(a) * r;
       }
    }
-   const lim = w.arena - 600;
    q.x = Math.max(-lim, Math.min(lim, q.x)); q.y = Math.max(-lim, Math.min(lim, q.y));
+   if (ok(q)) return q;
+   // the clamp put it back on land (a coast running into the arena wall, e.g. a reinforcement
+   // slid into a corner): nearest open water on growing rings, map-centre side first
+   for (let r = 300; r <= 9000; r += 300) {
+      let best = null, bd = Infinity;
+      for (let k = 0; k < 32; k++) {
+         const a = k * TAU / 32, c = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r };
+         const d = c.x * c.x + c.y * c.y;
+         if (d < bd && ok(c)) { bd = d; best = c; }
+      }
+      if (best) return best;
+   }
    return q;
 }
 // Reinforcements (minDist): slide the spawn point away from the nearest opposing ship so nothing
@@ -326,9 +339,12 @@ const DEFS = [
          const S = w._script;
          S.exit = { x: 8800, y: -700, r: 1400 };
          S.transports = [];
+         // two columns 800 m apart, each on its own lane of the route: a single shared track funnels
+         // all five hulls into one waypoint where they ram and lock each other
          for (let i = 0; i < 5; i++) {
-            const t = add(w, 'Transport', 'player', P(-8000 - i * 600, 850 + (i % 2) * 550), 0,
-               { telegraph: 4, speedKn: 14, nation: 'de', hpMult: 2.5, ai: { route, routeIdx: 0, passive: true, convoy: true } });
+            const lane = i % 2 ? 400 : -400;
+            const t = add(w, 'Transport', 'player', P(-8000 - i * 600, 1150 + lane), 0,
+               { telegraph: 4, speedKn: 14, nation: 'de', hpMult: 2.5, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true } });
             S.transports.push(t);
          }
          add(w, shipKey, 'player', P(-6800, 2300), 0, { isPlayer: true });
@@ -403,7 +419,8 @@ const DEFS = [
          add(w, 'Hipper', 'player', P(-7400, -1700), 0.25, { name: 'Prinz Eugen', ai: { escortIdPlayer: true } });
          add(w, pickShip(this, shipKey), 'player', P(-8400, -2000), 0.25, { isPlayer: true });
          S.hood = add(w, 'Hood', 'enemy', P(6500, 6200), -2.35, { name: 'HMS Hood', telegraph: 4, ai: { aggro: 1.2 } });
-         S.pow = add(w, 'KGV', 'enemy', P(7500, 6700), -2.35, { name: 'HMS Prince of Wales', telegraph: 4, ai: { retreatBelow: 0.35, retreatTo: P(12500, 12500) } });
+         // breaks off to the east wall: the SE corner is taken by the island, a retreat into it ends aground
+         S.pow = add(w, 'KGV', 'enemy', P(7500, 6700), -2.35, { name: 'HMS Prince of Wales', telegraph: 4, ai: { retreatBelow: 0.35, retreatTo: P(12500, 4500) } });
          later(S, 210, () => {
             w.message('Norfolk und Suffolk schließen von achtern auf!', 'warn');
             add(w, 'Norfolk', 'enemy', P(-12000, -4800), 0.2, { name: 'HMS Norfolk', minDist: 13000 });
@@ -543,8 +560,9 @@ const DEFS = [
          S.transports = [];
          // light, half-laden freighters (hpMult): four kills must be possible while the escort still fights
          for (let i = 0; i < 6; i++) {
-            S.transports.push(add(w, 'Transport', 'enemy', P(-10800 + (i >> 1) * -700, 5600 + (i & 1) * 700), -0.2,
-               { telegraph: 4, speedKn: 9, hpMult: 0.7 * w.difficulty.botHP, ai: { route, routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
+            const lane = i & 1 ? 400 : -400;   // two columns, one lane each (see the escort mission)
+            S.transports.push(add(w, 'Transport', 'enemy', P(-10800 + (i >> 1) * -700, 5950 + lane), -0.2,
+               { telegraph: 4, speedKn: 9, hpMult: 0.7 * w.difficulty.botHP, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
          }
          add(w, 'Fiji', 'enemy', P(-9200, 4500), -0.2, { ai: { escortId: S.transports[0].id } });
          add(w, 'Jervis', 'enemy', P(-9700, 7300), -0.2, { ai: { escortId: S.transports[1].id } });

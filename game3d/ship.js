@@ -10,6 +10,7 @@ const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, TR: 60, CV: 45 };   // s (a b
 const FLOOD_DUR = 40;
 const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, TR: 3.5, CV: 3.5 }; // s, yaw inertia
 const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
+const TWIST = { BB: 0.03, CA: 0.04, CL: 0.045, DD: 0.06, TR: 0.025, CV: 0.03 };   // rad/s, screws worked against each other
 const TORP_ARC = 65 * DEG;          // launchers train +-65 deg around the beam
 const MODULE_T = 25;                // s a knocked-out module stays down (damage control fixes it)
 const AMMO_NAMES = { AP: 'Panzersprenggranaten (AP)', HE: 'Sprenggranaten (HE)' };
@@ -342,7 +343,11 @@ export class Ship {
       const rate = accelerating ? acc : acc * 1.4;
       this.speed = approach(this.speed, target, rate * dt);
       // yaw: turning circle radius at full rudder, needs way on the ship
-      const omegaT = (this.speed / cfg.turnR) * this.rudder;
+      // `twist` (AI only, set while backing off a coast): twin screws worked against each other turn
+      // a hull that has no way on. The rudder alone needs way, and a heavy ship nose-on to a coast
+      // backed and went ahead again for the rest of the match without ever coming round
+      const twist = this.twist ? this.twist * (TWIST[this.type] || 0.03) * clamp01(1 - Math.abs(this.speed) / (vmax * 0.35)) : 0;
+      const omegaT = (this.speed / cfg.turnR) * this.rudder + twist;
       this.omega += (omegaT - this.omega) * (1 - Math.exp(-dt / (YAW_TAU[this.type] || 2)));
       this.heading = (((this.heading + this.omega * dt) % TAU) + TAU) % TAU;
       this.heel += ((-this.omega * Math.abs(this.speed) * 0.006) - this.heel) * (1 - Math.exp(-dt / 1.5));
@@ -387,6 +392,8 @@ export class Ship {
          }
       }
       if (this.grounded) { this.speed *= Math.pow(0.03, dt); this.omega *= Math.pow(0.3, dt); }
+      // a coast running into the wall must not push a hull squeezed in between out of the arena
+      this.pos.x = clamp(this.pos.x, -A, A); this.pos.y = clamp(this.pos.y, -A, A);
    }
 
    _updateTurrets(dt) {

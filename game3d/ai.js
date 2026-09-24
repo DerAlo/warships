@@ -110,24 +110,28 @@ function newAimError(b, w) {
 function decide(b, w, d) {
    const ai = b.ai, hpF = b.hp / b.maxHP;
    const tgt = ai.target;
-   let want = b.heading, tel = 3;
+   let want = b.heading, tel = 3, goal = null;
 
    // stuck on a coast or rammed: back off for a few seconds
    if (ai.reverseT > 0) {
       ai.reverseT -= DECIDE_DT;
-      ai.tel = -1;
-      // pre-set the rudder for the turn toward the escape heading: a rudder shift takes up to 15 s, so
-      // flipping it for the astern leg would leave it on the wrong side once the ship goes ahead again
+      // back off for ~8 s, then hold with no way on while the screws twist the bow round
+      ai.tel = ai.reverseT > 10 ? -1 : 0;
+      // the side is fixed when the reverse starts: nose-on to a coast the escape heading is ~180 deg
+      // off, and re-picking the shorter side every decision flip-flopped rudder and twist.
+      // Astern the rudder acts the other way round, so it is laid against the turn while backing.
       const dh = ai.escapeHeading == null ? 0 : angleDelta(b.heading, ai.escapeHeading);
-      ai.rudderOverride = Math.abs(dh) > 0.15 ? (dh > 0 ? 2 : -2) : ai.revRudder;
-      if (ai.reverseT <= 0 || Math.abs(dh) < 0.35) {
-         ai.reverseT = 0;
+      const side = ai.escSide || 1;
+      ai.rudderOverride = b.speed < -1 ? -side * 2 : side * 2;
+      b.twist = side;
+      if (ai.reverseT <= 0 || Math.abs(dh) < 0.6) {
+         ai.reverseT = 0; b.twist = 0;
          // fresh progress window, otherwise the slow re-acceleration re-triggers the reverse forever
          ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
       }
       return;
    }
-   ai.rudderOverride = null;
+   ai.rudderOverride = null; b.twist = 0;
    if ((b.grounded || (Math.abs(b.speed) < 1.5 && b.telegraph > 0)) && w.time > 5) ai.stuckT += DECIDE_DT;
    else ai.stuckT = Math.max(0, ai.stuckT - DECIDE_DT);
    // no net progress for 10 s while ordered ahead (rubbing along a coast / pinned in a pocket)
@@ -140,8 +144,10 @@ function decide(b, w, d) {
       ai.progPos = { x: b.pos.x, y: b.pos.y }; ai.progT = w.time;
    }
    if (ai.stuckT > 3) {
-      ai.stuckT = 0; ai.reverseT = 8; ai.revRudder = w.rng() < 0.5 ? 2 : -2;
+      ai.stuckT = 0; ai.reverseT = 18;
       ai.escapeHeading = escapeHeading(b, w);
+      const dh = angleDelta(b.heading, ai.escapeHeading);
+      ai.escSide = Math.abs(dh) < 2.6 ? Math.sign(dh) || 1 : (w.rng() < 0.5 ? 1 : -1);
       return;
    }
 
@@ -159,7 +165,7 @@ function decide(b, w, d) {
    } else if (ai.route) {
       const pt = ai.route[Math.min(ai.routeIdx, ai.route.length - 1)];
       if (dist2(b.pos, pt) < 700 * 700 && ai.routeIdx < ai.route.length - 1) ai.routeIdx++;
-      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x);
+      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x); goal = pt;
       if (ai.zigzag) want += Math.sin(w.time / 20 + ai.zigPhase) * 25 * DEG;
       tel = 4;
       if (threat.near && ai.convoy && d.smarts > 0.5) want += clamp(angleDelta(want, threat.away), -0.5, 0.5);
@@ -167,11 +173,11 @@ function decide(b, w, d) {
       ai.patrolIdx = ai.patrolIdx || 0;
       const pt = ai.patrol[ai.patrolIdx % ai.patrol.length];
       if (dist2(b.pos, pt) < 500 * 500) ai.patrolIdx++;
-      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x);
+      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x); goal = pt;
       tel = b.telegraph || 1;
    } else if (ai.retreating) {
       const to = ai.retreatTo || { x: b.pos.x + Math.cos(threat.away) * 5000, y: b.pos.y + Math.sin(threat.away) * 5000 };
-      want = Math.atan2(to.y - b.pos.y, to.x - b.pos.x);
+      want = Math.atan2(to.y - b.pos.y, to.x - b.pos.x); goal = to;
       tel = 4;
    } else if (ai.breakOff) {
       want = threat.away; tel = 4;
@@ -184,22 +190,25 @@ function decide(b, w, d) {
          const pt = { x: esc.pos.x + Math.cos(side) * 1100 + Math.cos(esc.heading) * 600, y: esc.pos.y + Math.sin(side) * 1100 + Math.sin(esc.heading) * 600 };
          const dd = Math.sqrt(dist2(b.pos, pt));
          want = dd > 400 ? Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x) : esc.heading;
+         if (dd > 400) goal = pt;
          tel = dd > 1500 ? 4 : dd > 500 ? 3 : Math.max(1, esc.telegraph);
       } else if (cap && !(ai.role === 'dd' && exposed(b, w)) && (!tgt || ai.role === 'dd' || dist2(b.pos, tgt.pos) > ai.pref[1] ** 2)) {
          const dd = Math.sqrt(dist2(b.pos, cap.pos));
          want = dd > cap.r * 0.5 ? Math.atan2(cap.pos.y - b.pos.y, cap.pos.x - b.pos.x) : b.heading + 0.6 * ai.angSide;
+         if (dd > cap.r * 0.5) goal = cap.pos;
          tel = dd > cap.r ? 4 : 2;
       } else if (tgt) {
          ({ want, tel } = engage(b, w, tgt, d, threat));
       } else {
          // nothing visible: head for the last known enemy position / hunted ship / enemy centroid
-         const goal = searchGoal(b, w);
+         goal = searchGoal(b, w);
          want = Math.atan2(goal.y - b.pos.y, goal.x - b.pos.x);
          tel = 3;
       }
    }
 
    want = separation(b, w, want);
+   want = navDetour(b, w, want, goal);
    want = avoidTerrain(b, w, want);
    // tight water: slow down so the rudder has time to bite before the coast arrives
    if (ai.avoidLevel >= 2 && tel > 2) tel = 2;
@@ -222,6 +231,13 @@ function escapeHeading(b, w) {
       ax = b.pos.x - best.c.x; ay = b.pos.y - best.c.y;
       const m = Math.hypot(ax, ay) || 1;
       ax /= m; ay /= m;
+   }
+   // locked hull to hull with another ship (two freighters of a convoy line pushing into each
+   // other): turn away from it, the desired heading usually points straight back into it
+   for (const o of w.ships) {
+      if (o === b || !o.alive) continue;
+      const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y, d = Math.hypot(dx, dy) || 1;
+      if (d < (b.cfg.hull.L + o.cfg.hull.L) * 0.6) { ax += dx / d; ay += dy / d; }
    }
    // at the arena wall (alone or pinned between a coast and it): "away from the island" or the
    // last desired heading points at the wall, so escape inwards and along the wall on the side the
@@ -336,11 +352,214 @@ function threatVector(b, w) {
    return { near, toward, away: toward + Math.PI };
 }
 
+// ---------------------------------------------------------------- coarse path planning
+// The look-ahead steering in avoidTerrain is local: behind a long island, or in a dead-end bay
+// whose exit points away from the goal, every candidate heading scores badly and the bot grinds
+// back and forth. When the straight way to its goal is blocked, a coarse A* over a water grid
+// supplies a waypoint round the headland instead. Cells near land cost extra, so paths keep to
+// open water and stay out of the narrow pockets where a coast runs into the arena wall.
+const NAV_CELL = 300;
+function navGrid(w) {
+   const g0 = w._nav;
+   if (g0 && g0.arena === w.arena && g0.nObs === w.obstacles.length) return g0;
+   const N = Math.ceil(2 * w.arena / NAV_CELL), off = -w.arena, lim = w.arena - 450;
+   const blocked = new Uint8Array(N * N);
+   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const x = off + (i + 0.5) * NAV_CELL, y = off + (j + 0.5) * NAV_CELL;
+      let bl = Math.abs(x) > lim || Math.abs(y) > lim;
+      // ~300 m off every coast: the grid only has to find the way round, avoidTerrain keeps the
+      // hull off the rocks
+      for (let k = 0; !bl && k < w.obstacles.length; k++) {
+         const o = w.obstacles[k], dx = x - o.c.x, dy = y - o.c.y;
+         if (Math.hypot(dx, dy) - obstacleRadiusAt(o, Math.atan2(dy, dx)) < 300) bl = true;
+      }
+      blocked[j * N + i] = bl ? 1 : 0;
+   }
+   // clearance: cells (Chebyshev) to the nearest blocked cell, by multi-source BFS
+   const clear = new Uint8Array(N * N).fill(255), q = new Int32Array(N * N);
+   let qh = 0, qt = 0;
+   for (let c = 0; c < N * N; c++) if (blocked[c]) { clear[c] = 0; q[qt++] = c; }
+   while (qh < qt) {
+      const c = q[qh++], ci = c % N, cj = (c / N) | 0, nd = clear[c] + 1;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+         const i = ci + di, j = cj + dj;
+         if (i < 0 || j < 0 || i >= N || j >= N) continue;
+         const n = j * N + i;
+         if (clear[n] > nd) { clear[n] = nd; q[qt++] = n; }
+      }
+   }
+   // pockets: narrow water more than 3 cells (~900 m) from open water -- deep in a channel between
+   // a long island and the arena wall, or in a bay. A heavy hull cannot turn round in there, so
+   // the AI keeps out unless it is already inside (avoidTerrain) and paths avoid them.
+   const reach = new Uint8Array(N * N).fill(255);
+   qh = qt = 0;
+   for (let c = 0; c < N * N; c++) if (clear[c] >= 3) { reach[c] = 0; q[qt++] = c; }
+   while (qh < qt) {
+      const c = q[qh++], ci = c % N, cj = (c / N) | 0, nd = reach[c] + 1;
+      if (nd > 6) continue;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+         const i = ci + di, j = cj + dj;
+         if (i < 0 || j < 0 || i >= N || j >= N) continue;
+         const n = j * N + i;
+         if (!blocked[n] && reach[n] > nd) { reach[n] = nd; q[qt++] = n; }
+      }
+   }
+   const pocket = new Uint8Array(N * N);
+   for (let c = 0; c < N * N; c++) pocket[c] = !blocked[c] && reach[c] > 3 ? 1 : 0;
+   return (w._nav = { arena: w.arena, nObs: w.obstacles.length, N, off, blocked, clear, pocket });
+}
+function navCell(g, p) {
+   const i = clamp(Math.floor((p.x - g.off) / NAV_CELL), 0, g.N - 1), j = clamp(Math.floor((p.y - g.off) / NAV_CELL), 0, g.N - 1);
+   return j * g.N + i;
+}
+// nearest cell with at least `minClear` clearance (ring search), or -1
+function navFree(g, c, minClear = 1, maxR = 12) {
+   if (g.clear[c] >= minClear) return c;
+   const N = g.N, ci = c % N, cj = (c / N) | 0;
+   for (let r = 1; r <= maxR; r++) {
+      let best = -1, bd = Infinity;
+      for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+         if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+         const i = ci + di, j = cj + dj;
+         if (i < 0 || j < 0 || i >= N || j >= N || g.clear[j * N + i] < minClear) continue;
+         const d = di * di + dj * dj;
+         if (d < bd) { bd = d; best = j * N + i; }
+      }
+      if (best >= 0) return best;
+   }
+   return minClear > 1 && maxR === 12 ? navFree(g, c, 1) : -1;
+}
+// A* (8-neighbour, no corner cutting, near-land cells cost extra). Cell indices start..goal or null.
+function navPath(w, from, to) {
+   const g = navGrid(w), N = g.N;
+   const s = navFree(g, navCell(g, from)), t = navFree(g, navCell(g, to), 3);
+   if (s < 0 || t < 0) return null;
+   if (s === t) return [s];
+   const ti = t % N, tj = (t / N) | 0;
+   const h = c => { const dx = Math.abs(c % N - ti), dy = Math.abs(((c / N) | 0) - tj); return Math.max(dx, dy) + 0.414 * Math.min(dx, dy); };
+   const cost = new Float32Array(N * N).fill(Infinity), prev = new Int32Array(N * N).fill(-1);
+   const heap = [];   // binary min-heap of [f, cell]
+   const push = e => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= e[0]) break; heap[i] = heap[p]; i = p; } heap[i] = e; };
+   const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+         let i = 0;
+         for (;;) {
+            const l = 2 * i + 1, r = l + 1;
+            let m = i, mv = last[0];
+            if (l < heap.length && heap[l][0] < mv) { m = l; mv = heap[l][0]; }
+            if (r < heap.length && heap[r][0] < mv) m = r;
+            if (m === i) break;
+            heap[i] = heap[m]; i = m;
+         }
+         heap[i] = last;
+      }
+      return top;
+   };
+   cost[s] = 0; push([h(s), s]);
+   while (heap.length) {
+      const [f, c] = pop();
+      if (c === t) break;
+      if (f - h(c) > cost[c] + 1e-3) continue;   // stale entry
+      const ci = c % N, cj = (c / N) | 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+         if (!di && !dj) continue;
+         const i = ci + di, j = cj + dj;
+         if (i < 0 || j < 0 || i >= N || j >= N) continue;
+         const n = j * N + i;
+         if (g.blocked[n]) continue;
+         if (di && dj && (g.blocked[cj * N + i] || g.blocked[j * N + ci])) continue;
+         const cl = g.clear[n];
+         const nc = cost[c] + (di && dj ? 1.414 : 1) * (cl >= 3 ? 1 : cl === 2 ? 1.6 : 2.4) * (g.pocket[n] ? 4 : 1);
+         if (nc < cost[n]) { cost[n] = nc; prev[n] = c; push([nc + h(n), n]); }
+      }
+   }
+   if (prev[t] < 0) return null;
+   const path = [t];
+   for (let c = t; c !== s; c = prev[c]) path.push(prev[c]);
+   return path.reverse();
+}
+function navPoint(g, c) { return { x: g.off + (c % g.N + 0.5) * NAV_CELL, y: g.off + (((c / g.N) | 0) + 0.5) * NAV_CELL }; }
+// Straight open water between a and b (coast margin as in avoidTerrain, AI arena limit)? With
+// minClear, the line beyond the first 800 m must also keep that grid clearance: a narrow channel
+// between a coast and the wall passes the plain test but often ends in a dead end.
+function waterLine(w, a, b, margin = 1.12, minClear = 0) {
+   const L = Math.sqrt(dist2(a, b)), n = Math.max(1, Math.ceil(L / 120)), lim = w.arena - 650;
+   const g = minClear ? navGrid(w) : null;
+   for (let k = 1; k <= n; k++) {
+      const p = { x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n };
+      if (Math.abs(p.x) > lim || Math.abs(p.y) > lim) return false;
+      for (const o of w.obstacles) if (obstacleT(o, p) < margin) return false;
+      if (g && L * k / n > 800 && g.clear[navCell(g, p)] < minClear) return false;
+   }
+   return true;
+}
+function navDetour(b, w, want, goal) {
+   const ai = b.ai;
+   const lim = w.arena - 1000, g = navGrid(w);
+   let gp = goal || { x: b.pos.x + Math.cos(want) * 6000, y: b.pos.y + Math.sin(want) * 6000 };
+   gp = { x: clamp(gp.x, -lim, lim), y: clamp(gp.y, -lim, lim) };
+   // a heading-only wish (kiting, breaking off, angling) that runs into a corner where a coast meets
+   // the wall, or into a narrow bay, aims for the nearest open water instead: heavy hulls that
+   // follow it in there cannot turn round again. (Explicit goals -- routes, caps, retreat points --
+   // stay exact, missions test for arrival.)
+   // Only a nearby relocation (a pocket is a few cells): a probe point deep inside a big island must
+   // not jump to the nearest water on its far side -- that sent cruisers round into the dead-end
+   // channel between an island and the wall. Then walk the wish ray back toward the ship instead.
+   let moved = false;
+   if (!goal) {
+      const gc = navCell(g, gp);
+      if (g.clear[gc] < 3 || g.pocket[gc]) {
+         let c = navFree(g, gc, 3, 6);
+         for (let k = 5700; c < 0 && k >= 900; k -= 300) {
+            const p = { x: clamp(b.pos.x + Math.cos(want) * k, -lim, lim), y: clamp(b.pos.y + Math.sin(want) * k, -lim, lim) };
+            const pc = navCell(g, p);
+            if (g.clear[pc] >= 3) c = pc;
+         }
+         if (c >= 0 && c !== gc) { gp = navPoint(g, c); moved = true; }
+      }
+   }
+   ai.navGoal = gp;
+   const dg = Math.sqrt(dist2(b.pos, gp));
+   if (dg < 400) { ai.navWp = null; return want; }
+   const direct = moved ? Math.atan2(gp.y - b.pos.y, gp.x - b.pos.x) : want;
+   // plain steering while the straight way ahead is open water and the hull is not boxed in
+   if (ai.avoidLevel < 2) {
+      ai.lineT = (ai.lineT || 0) - DECIDE_DT;
+      if (ai.lineT <= 0) {
+         ai.lineT = 1.2;
+         const probe = Math.min(dg, 3500);
+         ai.lineOk = waterLine(w, b.pos, { x: b.pos.x + (gp.x - b.pos.x) / dg * probe, y: b.pos.y + (gp.y - b.pos.y) / dg * probe }, 1.12, 2);
+      }
+      if (ai.lineOk) { ai.navWp = null; return direct; }
+   }
+   ai.navT = (ai.navT || 0) - DECIDE_DT;
+   if (ai.navT <= 0 || !ai.navWp) {
+      ai.navT = 2.4;
+      const path = navPath(w, b.pos, gp);
+      ai.navWp = null;
+      if (path && path.length > 1) {
+         // furthest path cell within ~4 km that is reachable in a straight line
+         let wp = navPoint(g, path[Math.min(2, path.length - 1)]);
+         for (let k = Math.min(path.length - 1, 14); k > 2; k--) {
+            const p = navPoint(g, path[k]);
+            if (waterLine(w, b.pos, p, 1.05)) { wp = p; break; }
+         }
+         ai.navWp = wp;
+      }
+   }
+   if (!ai.navWp) return want;
+   if (dist2(b.pos, ai.navWp) < 450 * 450) ai.navT = 0;   // reached: next leg on the next decision
+   return Math.atan2(ai.navWp.y - b.pos.y, ai.navWp.x - b.pos.x);
+}
+
 // Keep ~800 m between friendly hulls so the AI does not stack into one torpedo lane.
 function separation(b, w, want) {
    let px = 0, py = 0;
    for (const o of w.ships) {
       if (o === b || !o.alive || o.side !== b.side) continue;
+      // a freighter keeps station in its column; the escorts give way to it, not the reverse
+      if (b.ai.convoy && !o.ai?.convoy) continue;
       const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y;
       const d2 = dx * dx + dy * dy;
       const R = 650 + (b.cfg.hull.L + o.cfg.hull.L);
@@ -351,7 +570,9 @@ function separation(b, w, want) {
    if (!px && !py) return want;
    const m = Math.hypot(px, py);
    const ax = Math.cos(want) + px / m * Math.min(1.2, m * 2), ay = Math.sin(want) + py / m * Math.min(1.2, m * 2);
-   return Math.atan2(ay, ax);
+   const out = Math.atan2(ay, ax);
+   // a slow freighter swinging 60 deg out of line only rams the next column
+   return b.ai.convoy ? want + clamp(angleDelta(want, out), -0.5, 0.5) : out;
 }
 
 // Pick the candidate heading nearest to `want` whose look-ahead line is clear of land and the
@@ -366,6 +587,8 @@ function avoidTerrain(b, w, want) {
    const turnR = b.cfg.turnR || 700, spd = Math.max(Math.abs(b.speed), 8);
    const shift = b.cfg.rudderShift || 8, lead = shift * 0.7 + 1.2, tau = b.type === 'BB' ? 3.2 : 2;
    const n = 14;
+   // pockets (see navGrid) count as land unless the hull is already in one or follows a route
+   const g = navGrid(w), pk = !b.ai.route && !g.pocket[navCell(g, b.pos)] ? g.pocket : null;
    // number of look-ahead steps that stay clear (n = the whole path)
    const clearSteps = (h, L) => {
       const ds = L / n, dt = ds / spd, kYaw = 1 - Math.exp(-dt / tau);
@@ -387,6 +610,7 @@ function avoidTerrain(b, w, want) {
             if (ay > Math.abs(b.pos.y) + 1 && ay > lim) return k - 1;
          }
          for (const o of near) if (obstacleT(o, p) < 1.12) return k - 1;
+         if (pk && pk[navCell(g, p)]) return k - 1;
       }
       // already outside the limit: the path must end further in, or a nose-into-the-wall heading
       // passes (its clamped points never get further out than the pinned hull)

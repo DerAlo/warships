@@ -317,3 +317,23 @@ test('detection: gun bloom reaches gun range, storms cap spotting, long islands 
    assert.ok(obstacleT(isl, { x: 0, y: isl.rMax * 1.1 }) > 2, 'broadside of a long island is open water');
    assert.ok(obstacleT(isl, { x: 0, y: 0 }) < 1);
 });
+
+test('AI: a battleship stopped nose-on to a coast works itself free and goes round', () => {
+   const w = blank(5);
+   w.addIsland({ c: { x: 0, y: 0 }, r: 1300, height: 200, seed: 7, lobes: 5 });
+   const isl = w.obstacles[w.obstacles.length - 1];
+   let y = 0;
+   while (obstacleT(isl, { x: 0, y }) < 1.05) y += 20;
+   // the enemy it hunts waits beyond the island, so the way there leads round the coast
+   w.spawn('Bismarck', 'player', { x: 0, y: -9000 }, 0, { isPlayer: true, telegraph: 0, speedFrac: 0 });
+   const bb = w.spawn('KGV', 'enemy', { x: 0, y: y + 120 }, -Math.PI / 2, { telegraph: 0, speedFrac: 0 });
+   bb.speed = 0;
+   const start = { ...bb.pos };
+   let far = 0;
+   for (let i = 0; i < 60 * 300; i++) {
+      w.update(DT);
+      far = Math.max(far, Math.hypot(bb.pos.x - start.x, bb.pos.y - start.y));
+   }
+   assert.ok(far > 2500, `bot got clear of the coast (${far.toFixed(0)} m)`);
+   assert.ok(!bb.grounded, 'not aground at the end');
+});
