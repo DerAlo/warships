@@ -8,7 +8,8 @@ export class Input {
       this.gameActive = false;   // set by main.js while playing — gates preventDefault so menu buttons stay keyboard-reachable
       this.keys = new Set();
       this.pressed = new Set();       // edge: went down since last poll
-      this.mouse = { x: 0, y: 0, down: false, right: false, rightPressed: false, moved: false };
+      this.released = new Set();      // edge: went up since last poll (T = release to launch)
+      this.mouse = { x: 0, y: 0, down: false, right: false, leftPressed: false, rightPressed: false, moved: false };
       this._bind();
       this._poll = false;
    }
@@ -20,10 +21,11 @@ export class Input {
             if (!this.keys.has(k)) this.pressed.add(k);
             this.keys.add(k);
          } else {
+            if (this.keys.has(k)) this.released.add(k);
             this.keys.delete(k);
          }
          // prevent page scroll / context menu during play only — in menus, keys must still activate buttons
-         if (this.gameActive && [' ', 'w','a','s','d','q','e','r','t','f','m','p','escape','shift'].includes((e.key||'').toLowerCase()))
+         if (this.gameActive && [' ', 'w','a','s','d','q','e','r','t','f','p','1','2','c','g','escape','shift'].includes((e.key||'').toLowerCase()))
             e.preventDefault();
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
@@ -42,7 +44,7 @@ export class Input {
       this.canvas.addEventListener('mousemove', toXY);
       this.canvas.addEventListener('mousedown', (e) => {
          toXY(e);
-         if (e.button === 0) this.mouse.down = true;
+         if (e.button === 0) { this.mouse.down = true; this.mouse.leftPressed = true; }
          if (e.button === 2) { this.mouse.right = true; this.mouse.rightPressed = true; }
       });
       window.addEventListener('mouseup', (e) => {
@@ -54,7 +56,7 @@ export class Input {
          const t = e.touches[0]; const r = this.canvas.getBoundingClientRect();
          this.mouse.x = t.clientX - r.left;
          this.mouse.y = t.clientY - r.top;
-         this.mouse.down = true;
+         this.mouse.down = true; this.mouse.leftPressed = true;
       }, { passive: true });
       this.canvas.addEventListener('touchend', () => { this.mouse.down = false; });
    }
@@ -71,7 +73,10 @@ export class Input {
          if (code === 'KeyF') return 'F';
          if (code === 'KeyT') return 'T';
          if (code === 'KeyR') return 'R';
-         if (code === 'KeyM') return 'M';
+         if (code === 'KeyC') return 'C';
+         if (code === 'KeyG') return 'G';
+         if (code === 'Digit1' || code === 'Numpad1') return '1';
+         if (code === 'Digit2' || code === 'Numpad2') return '2';
          if (code === 'KeyP' || code === 'Escape') return 'P';
          if (code === 'ShiftLeft' || code === 'ShiftRight') return 'SHIFT';
          if (code === 'Space') return 'SPACE';
@@ -84,15 +89,16 @@ export class Input {
    }
 
    // Called once per tick BEFORE reading; consumes edges.
-   endFrame() { this.pressed.clear(); this.mouse.rightPressed = false; this.mouse.moved = false; }
+   endFrame() { this.pressed.clear(); this.released.clear(); this.mouse.leftPressed = false; this.mouse.rightPressed = false; this.mouse.moved = false; }
 
    down(k) { return this.keys.has(k); }
    tapped(k) { return this.pressed.has(k); }
-   // analog helm: A/Q = port (turn left, CCW+), D/E = starboard
+   releasedKey(k) { return this.released.has(k); }
+   // helm: A = port, D = starboard (Q/E are weapon/consumable keys now)
    helmAxis() {
       let h = 0;
-      if (this.down('A') || this.down('Q')) h -= 1;
-      if (this.down('D') || this.down('E')) h += 1;
+      if (this.down('A')) h -= 1;
+      if (this.down('D')) h += 1;
       return h;
    }
    // throttle: W = ahead(+1), S = astern(-1)

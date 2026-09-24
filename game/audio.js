@@ -111,4 +111,21 @@ export class Audio {
       this._tone(60, 1.8, 0.5, 'sine', 20);
    }
    uiClick() { this._tone(880, 0.06, 0.1, 'triangle'); }
+   // --- feedback cues: short, distinct, never louder than the guns ---
+   citadel() { this._noiseHit(0.5, 2600, 0.35, 'highpass'); this._tone(1320, 0.18, 0.14, 'triangle'); setTimeout(() => this._tone(1760, 0.28, 0.12, 'triangle'), 90); }
+   ribbon() { this._tone(1180, 0.09, 0.07, 'triangle'); }
+   kill() { [784, 988, 1175].forEach((f, i) => setTimeout(() => this._tone(f, 0.22, 0.12, 'triangle'), i * 110)); }
+   reloaded() { this._noiseHit(0.08, 3000, 0.12, 'highpass'); setTimeout(() => this._noiseHit(0.1, 2200, 0.14, 'highpass'), 70); }
+   torpReady() { this._tone(520, 0.12, 0.08, 'sine'); setTimeout(() => this._tone(780, 0.16, 0.08, 'sine'), 120); }
+   // campaign cues
+   sonar() { this._tone(1480, 0.5, 0.06, 'sine', 1400); setTimeout(() => this._tone(1480, 0.7, 0.025, 'sine', 1390), 420); }
+   airRaid() { this._tone(420, 0.9, 0.07, 'sawtooth', 700); setTimeout(() => this._tone(700, 0.9, 0.07, 'sawtooth', 420), 850); }
+   alarm() { [0, 1, 2].forEach(i => setTimeout(() => this._tone(740, 0.14, 0.1, 'square', 600), i * 190)); }
+   diveWarn() { this._tone(1600, 1.1, 0.05, 'sine', 500); }
+   waveClear() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this._tone(f, 0.25, 0.1, 'triangle'), i * 120)); }
+   escaped() { this._tone(330, 0.4, 0.1, 'triangle', 220); setTimeout(() => this._tone(220, 0.5, 0.1, 'triangle', 160), 300); }
+   reinforce() { this._tone(392, 0.2, 0.08, 'triangle'); setTimeout(() => this._tone(311, 0.35, 0.08, 'triangle'), 200); }
+   victory() { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => this._tone(f, 0.35, 0.11, 'triangle'), i * 140)); }
+   defeat() { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => this._tone(f, 0.45, 0.1, 'sawtooth'), i * 220)); }
+   spotted() { this._tone(990, 0.1, 0.1, 'square'); setTimeout(() => this._tone(990, 0.1, 0.1, 'square'), 160); }
 }

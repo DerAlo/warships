@@ -1,14 +1,17 @@
 // game/render.js — the whole visual layer: sea, obstacles, ships (2.5D), projectiles, FX, HUD canvases.
 // Draw order: ocean -> obstacles -> wakes -> torpedoes -> shell shadows -> ships -> smoke ->
 //             effects (explosions/splashes/fire) -> shells (in air) -> AA tracers -> damage numbers -> reticle.
-import { add, sub, scale, fromAngle, angleOf, clamp, clamp01, TAU, DEG } from './utils.js';
-import { WORLD, PALETTE, TUNE, SHIPS } from './config.js';
+import { add, sub, scale, fromAngle, angleOf, angleDelta, clamp, clamp01, dist, TAU, DEG } from './utils.js';
+import { WORLD, PALETTE, VISION, HANDLING } from './config.js';
+import { ENEMY_COL, ALLY_COL, ALLY_DECK, drawTurret, drawDetail, drawSub, drawBattery, drawZones, drawMines, drawDepthCharges,
+   drawBombs, drawBarrages, drawSonar, drawFlares, drawAircraft, drawNight, drawStorm, drawMinimapExtras } from './render-campaign.js';
 
-const DIMS = {
-   DD: { L: 120, beam: 13 }, LC: { L: 170, beam: 18 }, HC: { L: 205, beam: 22 },
-   EB: { L: 251, beam: 36 }, Bismarck: { L: 251, beam: 36 },
-};
-const dimsOf = (cls) => DIMS[cls] || { L: 180, beam: 20 };
+// hull footprint straight from the ship class (config.js L/beam)
+const dimsOf = (s) => ({ L: s.cfg.L || 180, beam: s.cfg.beam || 20 });
+// Enemies are drawn only while spotted; hidden ones leave a fading "last known position" ghost.
+const shown = (s) => s.alive && (s.side !== 'enemy' || s.visible);
+const ghostAge = (world, s) => (s.alive && s.side === 'enemy' && !s.visible && s.lastKnown) ? world.time - s.lastKnown.t : Infinity;
+const HIT_COL = { CITADEL: '#ffd23a', PEN: '#ffffff', HE: '#ffae5a', RICOCHET: '#8fb0cc', OVERPEN: '#d0d6de', TORP: '#7fe0ff' };
 
 export class Renderer {
    constructor(sceneCanvas, fxCanvas, cam, ocean) {
@@ -20,6 +23,7 @@ export class Renderer {
       this.compassCtx = null;
       this._smokeSprite = makeSmokeSprite();
       this._glowSprite = makeGlowSprite();
+      this._overlay = {};   // night mask canvas cache (render-campaign.js)
    }
 
    setHudCanvases(minimap, compass) {
@@ -35,15 +39,30 @@ export class Renderer {
 
       this.ocean.render(ctx, cam);
       this._obstacles(ctx, world);
+      if (world.zones.length) drawZones(ctx, cam, world);
       this._wakes(ctx, world);
+      if (world.mines.length) drawMines(ctx, cam, world);
+      if (world.depthCharges.length) drawDepthCharges(ctx, cam, world);
       this._torpedoes(ctx, world);
       this._shellShadows(ctx, world);
-      for (const s of world.ships) if (s.alive && cam.visible(s.pos, 400)) this._ship(ctx, world, s);
+      this._ghosts(ctx, world);
+      for (const s of world.ships) if (shown(s) && cam.visible(s.pos, 400)) this._ship(ctx, world, s);
+      if (world.sonarPings.length) drawSonar(ctx, cam, world);
       this._smoke(ctx, world);
       this._effects(ctx, world);
+      if (world.env.storm) drawStorm(ctx, cam, world);
+      if (world.env.night) drawNight(ctx, cam, world, this._overlay);
+      // telegraphs and flares must read through darkness, smoke and rain
+      if (world.bombs.length) drawBombs(ctx, cam, world);
+      if (world.barrages.length) drawBarrages(ctx, cam, world);
+      if (world.flares.length) drawFlares(ctx, cam, world, this._glowSprite);
       this._shells(ctx, world);
       this._aaTracers(ctx, world);
+      if (world.aircraft.length) drawAircraft(ctx, cam, world);
+      this._labels(ctx, world);
       this._damageNumbers(ctx, world);
+      this._hitMarks(ctx, world, dt);
+      this._torpFan(ctx, world);
       this._reticle(ctx, world);
 
       // fx layer: screen-space vignette pulse when under heavy fire
@@ -61,6 +80,87 @@ export class Renderer {
    }
 
    // ================= OBSTACLES =================
+   // reef look: turquoise shallows, sand shoals, scattered rocks and broken surf. The layout is
+   // generated once per reef (in meters, seeded by position) so it is stable and zoom-proof.
+   _reefLayout(o) {
+      this._reefArt = this._reefArt || new WeakMap();
+      let art = this._reefArt.get(o);
+      if (art) return art;
+      let seed = (Math.floor(o.c.x * 7 + o.c.y * 13) >>> 0) || 1;
+      const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      const shoals = [], rocks = [], surf = [];
+      for (let i = 0; i < 4; i++) {
+         const a = rnd() * TAU, d = rnd() * o.r * 0.45;
+         shoals.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, rx: o.r * (0.25 + rnd() * 0.25), ry: o.r * (0.15 + rnd() * 0.18), rot: rnd() * Math.PI });
+      }
+      const n = 8 + Math.floor(rnd() * 5);
+      for (let i = 0; i < n; i++) {
+         const a = rnd() * TAU, d = Math.sqrt(rnd()) * o.r * 0.75, size = o.r * (0.06 + rnd() * 0.11);
+         const pts = [];
+         const k = 5 + Math.floor(rnd() * 3);
+         for (let j = 0; j < k; j++) { const t = (j / k) * TAU; pts.push({ a: t, r: size * (0.65 + rnd() * 0.45) }); }
+         rocks.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, pts, size });
+      }
+      for (let i = 0; i < 7; i++) surf.push({ a: (i / 7) * TAU + rnd() * 0.5, len: 0.35 + rnd() * 0.45, rr: 0.82 + rnd() * 0.16, ph: rnd() * TAU });
+      art = { shoals, rocks, surf };
+      this._reefArt.set(o, art);
+      return art;
+   }
+
+   _reef(ctx, o, c, r, time) {
+      const z = this.cam.zoom, art = this._reefLayout(o);
+      // shallow water: bright turquoise core fading into the deep blue
+      const g = ctx.createRadialGradient(c.x, c.y, r * 0.2, c.x, c.y, r * 1.45);
+      g.addColorStop(0, 'rgba(95,210,195,0.42)');
+      g.addColorStop(0.55, 'rgba(60,170,170,0.22)');
+      g.addColorStop(1, 'rgba(40,130,150,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.45, 0, TAU); ctx.fill();
+      // sand shoals under the water: soft-edged, so they read as depth, not as shapes
+      for (const sh of art.shoals) {
+         ctx.save();
+         ctx.translate(c.x + sh.x * z, c.y + sh.y * z);
+         ctx.rotate(sh.rot);
+         ctx.scale(1, sh.ry / sh.rx);
+         const sg = ctx.createRadialGradient(0, 0, 0, 0, 0, sh.rx * z);
+         sg.addColorStop(0, 'rgba(215,205,160,0.20)');
+         sg.addColorStop(1, 'rgba(215,205,160,0)');
+         ctx.fillStyle = sg;
+         ctx.beginPath(); ctx.arc(0, 0, sh.rx * z, 0, TAU); ctx.fill();
+         ctx.restore();
+      }
+      // rocks: dark body, lit top-left rim, a lick of foam where the swell breaks
+      for (const rk of art.rocks) {
+         const x = c.x + rk.x * z, y = c.y + rk.y * z;
+         const path = () => {
+            ctx.beginPath();
+            rk.pts.forEach((p, i) => {
+               const px = x + Math.cos(p.a) * p.r * z, py = y + Math.sin(p.a) * p.r * z;
+               i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+            });
+            ctx.closePath();
+         };
+         path(); ctx.fillStyle = '#34423d'; ctx.fill();
+         ctx.save(); path(); ctx.clip();
+         ctx.fillStyle = 'rgba(150,165,150,0.55)';
+         ctx.beginPath(); ctx.arc(x - rk.size * z * 0.35, y - rk.size * z * 0.35, rk.size * z * 0.7, 0, TAU); ctx.fill();
+         ctx.restore();
+         // swell breaking on the weather side of the rock
+         ctx.strokeStyle = 'rgba(230,248,255,0.35)';
+         ctx.lineWidth = 1.2;
+         ctx.beginPath(); ctx.arc(x, y, rk.size * z * 1.25, Math.PI * 0.75, Math.PI * 1.55); ctx.stroke();
+      }
+      // broken surf line marking the danger edge, gently pulsing
+      ctx.lineCap = 'round';
+      for (const sf of art.surf) {
+         const al = 0.22 + 0.18 * Math.sin(time * 1.3 + sf.ph);
+         ctx.strokeStyle = `rgba(230,248,255,${al.toFixed(3)})`;
+         ctx.lineWidth = 1.6;
+         ctx.beginPath(); ctx.arc(c.x, c.y, r * sf.rr, sf.a, sf.a + sf.len); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+   }
+
    _obstacles(ctx, world) {
       const cam = this.cam;
       for (const o of world.obstacles) {
@@ -68,25 +168,7 @@ export class Renderer {
          const c = cam.w2s(o.c);
          const r = o.r * cam.zoom;
          if (o.kind === 'reef') {
-            // shallow water halo
-            const g = ctx.createRadialGradient(c.x, c.y, r * 0.4, c.x, c.y, r * 1.5);
-            g.addColorStop(0, 'rgba(90,190,170,0.30)');
-            g.addColorStop(0.6, 'rgba(60,150,140,0.14)');
-            g.addColorStop(1, 'rgba(60,150,140,0)');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.5, 0, TAU); ctx.fill();
-            // reef rocks
-            ctx.fillStyle = '#2e4a44';
-            for (let i = 0; i < 9; i++) {
-               const a = (i / 9) * TAU + o.c.x * 0.01;
-               const rr = r * (0.35 + 0.45 * ((i * 37) % 10) / 10);
-               const x = c.x + Math.cos(a) * rr * 0.55, y = c.y + Math.sin(a) * rr * 0.55;
-               ctx.beginPath(); ctx.arc(x, y, rr * 0.42, 0, TAU); ctx.fill();
-            }
-            // foam edge
-            ctx.strokeStyle = 'rgba(220,245,255,0.5)';
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.72, 0, TAU); ctx.stroke();
+            this._reef(ctx, o, c, r, world.time);
          } else {
             // island with irregular lobes
             ctx.save();
@@ -121,7 +203,7 @@ export class Renderer {
    _wakes(ctx, world) {
       const cam = this.cam;
       for (const s of world.ships) {
-         if (!s.alive || !cam.visible(s.pos, 500)) continue;
+         if (!shown(s) || !cam.visible(s.pos, 500)) continue;
          const sp = Math.abs(s.speed);
          if (sp < 2) continue;
          const k = clamp01(sp / 20);
@@ -154,17 +236,26 @@ export class Renderer {
    // ================= SHIPS =================
    _ship(ctx, world, s) {
       const cam = this.cam;
-      const d = dimsOf(s.cls);
+      const d = dimsOf(s);
       const z = cam.zoom;
       const c = cam.w2s(s.pos);
       const L = d.L * z, B = d.beam * z;
       const enemy = s.side === 'enemy';
-      const hullCol = enemy ? '#5a4a44' : s.color;
-      const deckCol = enemy ? '#6e5a50' : PALETTE.deck;
+      const ally = s.side === 'player' && !s.human;
+      const kind = s.cfg.draw || '';
+      const hullCol = enemy ? (ENEMY_COL[kind] || '#5a4a44') : ally ? ALLY_COL : s.color;
+      const deckCol = enemy ? (kind === 'boss' ? '#5a3a34' : '#6e5a50') : ally ? ALLY_DECK : PALETTE.deck;
 
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(s.heading);
+      if (kind === 'cb' || kind === 'sub') {
+         if (kind === 'cb') drawBattery(ctx, s, L, B, z, hullCol, world.time);
+         else drawSub(ctx, s, L, B, z, hullCol, world.time);
+         this._shipDamage(ctx, world, s, L * 0.6, B);
+         ctx.restore();
+         return;
+      }
 
       // drop shadow (offset down-right in screen space => rotate back)
       ctx.save();
@@ -203,6 +294,40 @@ export class Renderer {
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(L * 0.42, 0); ctx.lineTo(-L * 0.42, 0); ctx.stroke();
 
+      if (kind) drawDetail(ctx, s, kind, L, B, z, hullCol, deckCol, world.time);
+      else this._classicDeck(ctx, s, L, B, z, hullCol, deckCol);
+
+      // hit flash
+      if (s.hitFlash > 0) {
+         ctx.globalAlpha = s.hitFlash * 0.55;
+         ctx.fillStyle = '#fff';
+         hullPath(ctx, L, B);
+         ctx.fill();
+         ctx.globalAlpha = 1;
+      }
+      this._shipDamage(ctx, world, s, L, B);
+      ctx.restore();
+
+      // boost flame (screen space)
+      if (s.boost && s.boost.active) {
+         ctx.save();
+         ctx.translate(c.x, c.y);
+         ctx.rotate(s.heading + Math.PI);
+         ctx.translate(L * 0.5, 0);
+         const fl = 14 + Math.random() * 10;
+         const g = ctx.createLinearGradient(0, 0, fl, 0);
+         g.addColorStop(0, 'rgba(120,200,255,0.9)');
+         g.addColorStop(1, 'rgba(120,200,255,0)');
+         ctx.fillStyle = g;
+         ctx.beginPath();
+         ctx.moveTo(0, -4); ctx.lineTo(fl, 0); ctx.lineTo(0, 4);
+         ctx.closePath(); ctx.fill();
+         ctx.restore();
+      }
+   }
+
+   // the original generic warship deck: superstructure, bridge, funnel, gun houses
+   _classicDeck(ctx, s, L, B, z, hullCol, deckCol) {
       // superstructure block (midships)
       const sw = L * 0.16, sh = B * 0.42;
       ctx.fillStyle = darken(deckCol, 14);
@@ -214,38 +339,11 @@ export class Renderer {
       ctx.fillStyle = '#222a30';
       ctx.beginPath(); ctx.arc(-sw * 0.15, 0, Math.max(2, B * 0.10), 0, TAU); ctx.fill();
 
-      // turrets
-      for (const t of s.turrets) {
-         const tx = t.off.x * z, ty = t.off.y * z;
-         const tr = Math.max(2.5, B * 0.16);
-         ctx.save();
-         ctx.translate(tx, ty);
-         ctx.rotate(t.bearing);
-         // barrels
-         ctx.strokeStyle = darken(hullCol, 30);
-         ctx.lineWidth = Math.max(1.2, tr * 0.28);
-         const bl = tr * 2.6;
-         for (const bo of [-tr * 0.35, tr * 0.35]) {
-            ctx.beginPath(); ctx.moveTo(tr * 0.3, bo); ctx.lineTo(bl, bo); ctx.stroke();
-         }
-         // turret base
-         ctx.fillStyle = darken(hullCol, 12);
-         ctx.beginPath(); ctx.arc(0, 0, tr, 0, TAU); ctx.fill();
-         ctx.fillStyle = lighten(hullCol, 8);
-         ctx.beginPath(); ctx.arc(0, 0, tr * 0.62, 0, TAU); ctx.fill();
-         ctx.restore();
-      }
+      for (const t of s.turrets) drawTurret(ctx, t, z, B, hullCol);
+   }
 
-      // hit flash
-      if (s.hitFlash > 0) {
-         ctx.globalAlpha = s.hitFlash * 0.55;
-         ctx.fillStyle = '#fff';
-         hullPath(ctx, L, B);
-         ctx.fill();
-         ctx.globalAlpha = 1;
-      }
-
-      // fires & floods on deck
+   // fires & floods on deck (ship-local frame)
+   _shipDamage(ctx, world, s, L, B) {
       for (let i = 0; i < s.fires.length; i++) {
          const f = s.fires[i];
          const fx = ((f.mod % 3) - 1) * L * 0.18, fy = (f.mod % 2 ? 1 : -1) * B * 0.18;
@@ -257,40 +355,132 @@ export class Renderer {
          ctx.fillStyle = 'rgba(90,170,255,0.5)';
          ctx.beginPath(); ctx.ellipse(fx, fy, 5, 3.5, 0, 0, TAU); ctx.fill();
       }
+   }
 
-      ctx.restore();
-
-      // ---- screen-space labels (no rotation) ----
-      if (z > 0.18) {
-         // name + hp bar for enemies
-         if (enemy) {
-            const bw = Math.max(46, L * 0.7);
-            const bx = c.x - bw / 2, by = c.y - L * 0.5 - 14;
-            ctx.font = '10px "SF Mono", monospace';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'rgba(255,180,160,0.9)';
-            ctx.fillText(s.name, c.x, by - 3);
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillRect(bx, by, bw, 4);
-            ctx.fillStyle = '#ff5a4d';
-            ctx.fillRect(bx, by, bw * clamp01(s.hp / s.maxHP), 4);
-         }
-         // boost flame
-         if (s.boost.active) {
-            ctx.save();
-            ctx.translate(c.x, c.y);
-            ctx.rotate(s.heading + Math.PI);
-            const fl = 14 + Math.random() * 10;
-            const g = ctx.createLinearGradient(0, 0, fl, 0);
-            g.addColorStop(0, 'rgba(120,200,255,0.9)');
-            g.addColorStop(1, 'rgba(120,200,255,0)');
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.moveTo(0, -4); ctx.lineTo(fl, 0); ctx.lineTo(0, 4);
-            ctx.closePath(); ctx.fill();
-            ctx.restore();
-         }
+   // Name + HP bar over every AI ship, drawn after the night/storm overlays so they stay legible.
+   // Enemies red, allies green; mission targets (tagged) get a gold marker.
+   _labels(ctx, world) {
+      const cam = this.cam, z = cam.zoom;
+      ctx.font = '10px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      for (const s of world.ships) {
+         if (s.human || !shown(s) || !cam.visible(s.pos, 200)) continue;
+         const enemy = s.side === 'enemy';
+         const d = dimsOf(s);
+         const c = cam.w2s(s.pos);
+         const boss = s.cfg.draw === 'boss';
+         const span = Math.max(d.L, d.beam * 1.3) * z;
+         const bw = boss ? Math.max(110, span * 0.8) : Math.max(46, span * 0.7);
+         const bx = c.x - bw / 2, by = c.y - span * 0.5 - 14;
+         const target = !!s.tag;
+         ctx.fillStyle = enemy ? (target ? 'rgba(255,214,121,0.95)' : 'rgba(255,180,160,0.9)') : 'rgba(170,255,190,0.92)';
+         ctx.fillText((target && enemy ? '◆ ' : '') + s.name, c.x, by - 3);
+         ctx.fillStyle = 'rgba(0,0,0,0.55)';
+         ctx.fillRect(bx, by, bw, boss ? 6 : 4);
+         ctx.fillStyle = enemy ? '#ff5a4d' : '#5ad07a';
+         ctx.fillRect(bx, by, bw * clamp01(s.hp / s.maxHP), boss ? 6 : 4);
       }
+   }
+
+   // ================= GHOSTS (last known position of hidden enemies) =================
+   _ghosts(ctx, world) {
+      const cam = this.cam;
+      for (const s of world.ships) {
+         const age = ghostAge(world, s);
+         if (age > VISION.ghostTime) continue;
+         const lk = s.lastKnown;
+         if (!cam.visible(lk.pos, 300)) continue;
+         const d = dimsOf(s);
+         const c = cam.w2s(lk.pos);
+         const L = d.L * cam.zoom, B = d.beam * cam.zoom;
+         const a = 0.55 * (1 - age / VISION.ghostTime) + 0.1;
+         ctx.save();
+         ctx.translate(c.x, c.y);
+         ctx.rotate(lk.heading);
+         ctx.globalAlpha = a;
+         ctx.setLineDash([4, 4]);
+         ctx.strokeStyle = '#ff9a8a';
+         ctx.lineWidth = 1.5;
+         hullPath(ctx, L, B);
+         ctx.stroke();
+         ctx.setLineDash([]);
+         // course arrow: where it was heading when it vanished
+         ctx.beginPath(); ctx.moveTo(L * 0.55, 0); ctx.lineTo(L * 0.9, 0); ctx.stroke();
+         ctx.restore();
+         ctx.globalAlpha = a;
+         ctx.font = '10px "SF Mono", monospace';
+         ctx.textAlign = 'center';
+         ctx.fillStyle = '#ffb4a8';
+         ctx.fillText(`? ${s.name} · ${Math.round(age)} s`, c.x, c.y - L * 0.5 - 8);
+         ctx.globalAlpha = 1;
+      }
+      // secondary focus marker (RMB)
+      const p = world.player;
+      const f = p && p.secFocus;
+      if (f && f.alive && f.visible) {
+         const c = cam.w2s(f.pos);
+         const r = dimsOf(f).L * cam.zoom * 0.62 + 6;
+         ctx.strokeStyle = 'rgba(255,212,121,0.8)';
+         ctx.lineWidth = 1.5;
+         ctx.setLineDash([6, 5]);
+         ctx.beginPath(); ctx.arc(c.x, c.y, r, world.time * 0.8, world.time * 0.8 + TAU); ctx.stroke();
+         ctx.setLineDash([]);
+      }
+   }
+
+   // ================= HIT MARKERS (player hits, fed by hud.onEvents) =================
+   _hitMarks(ctx, world, dt) {
+      const marks = world._hitMarks;
+      if (!marks || !marks.length) return;
+      const cam = this.cam;
+      for (let i = marks.length - 1; i >= 0; i--) {
+         const m = marks[i];
+         m.age += dt;
+         if (m.age > 0.7) { marks.splice(i, 1); continue; }
+         const c = cam.w2s(m.pos);
+         const t = m.age / 0.7;
+         const r = (m.big ? 14 : 9) * (1 + t * 0.6);
+         ctx.globalAlpha = 1 - t;
+         ctx.strokeStyle = HIT_COL[m.outcome] || '#fff';
+         ctx.lineWidth = m.big ? 3 : 2;
+         ctx.beginPath();
+         ctx.moveTo(c.x - r, c.y - r); ctx.lineTo(c.x - r * 0.35, c.y - r * 0.35);
+         ctx.moveTo(c.x + r, c.y - r); ctx.lineTo(c.x + r * 0.35, c.y - r * 0.35);
+         ctx.moveTo(c.x - r, c.y + r); ctx.lineTo(c.x - r * 0.35, c.y + r * 0.35);
+         ctx.moveTo(c.x + r, c.y + r); ctx.lineTo(c.x + r * 0.35, c.y + r * 0.35);
+         ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+   }
+
+   // ================= TORPEDO FAN PREVIEW (hold T) =================
+   _torpFan(ctx, world) {
+      const p = world.player;
+      if (!world._torpPreview || !p || !p.alive || !p.cfg.torp) return;
+      const cam = this.cam;
+      const bearing = angleOf(p.aim);
+      const l = p.launcherFor(bearing);
+      const T = p.cfg.torp;
+      const origin = l ? p.launcherPos(l) : p.pos;
+      const ready = l && l.cd <= 0;
+      const col = !l ? 'rgba(255,90,80,0.55)' : ready ? 'rgba(124,255,154,0.75)' : 'rgba(170,190,210,0.5)';
+      const o = cam.w2s(origin);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash(ready ? [10, 6] : [3, 7]);
+      for (const a of p.torpFan(bearing)) {
+         const e = cam.w2s(add(origin, fromAngle(a, T.range)));
+         ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      const lbl = !l ? 'Kein Werfer — Breitseite zeigen' : ready ? `Torpedos ${l.label} · ${p.torpSpread === 'wide' ? 'weit' : 'eng'}` : `${l.label} lädt: ${Math.ceil(l.cd)} s`;
+      const tip = cam.w2s(add(origin, fromAngle(bearing, Math.min(T.range, 700))));
+      ctx.font = 'bold 11px "SF Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#000';
+      ctx.fillText(lbl, tip.x + 1, tip.y - 11);
+      ctx.fillStyle = col;
+      ctx.fillText(lbl, tip.x, tip.y - 12);
    }
 
    // ================= SMOKE =================
@@ -475,8 +665,10 @@ export class Renderer {
          if (!cam.visible(d.pos, 50)) continue;
          const c = cam.w2s(d.pos);
          const a = clamp01(d.life / 0.5);
-         const col = d.type === 'fire' ? '#ffb24d' : d.type === 'torp' ? '#7fd8ff' : '#ffcf6b';
-         ctx.font = 'bold 13px "SF Mono", monospace';
+         const col = d.type === 'fire' ? '#ffb24d' : d.type === 'torp' ? '#7fd8ff' : d.type === 'cit' ? '#ff8a6b' : '#ffcf6b';
+         // bigger for heavy hits, with a short pop when a merged salvo adds to it
+         const px = Math.round((d.amount >= 2000 ? 16 : 13) * (1 + 0.25 * (d.pop || 0)));
+         ctx.font = `bold ${px}px "SF Mono", monospace`;
          ctx.globalAlpha = a;
          ctx.fillStyle = '#000';
          ctx.fillText(d.text, c.x + 1, c.y - 10 + 1);
@@ -513,7 +705,9 @@ export class Renderer {
       // aim point (mouse)
       if (world._aimPoint) {
          const a = cam.w2s(world._aimPoint);
-         ctx.strokeStyle = 'rgba(255,212,121,0.9)';
+         const range = dist(p.pos, world._aimPoint);
+         const outOfRange = range > p.cfg.main.range;
+         ctx.strokeStyle = outOfRange ? 'rgba(255,90,80,0.9)' : 'rgba(255,212,121,0.9)';
          ctx.lineWidth = 1.5;
          const r = 10;
          ctx.beginPath();
@@ -527,6 +721,32 @@ export class Renderer {
          ctx.setLineDash([3, 6]);
          ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(a.x, a.y); ctx.stroke();
          ctx.setLineDash([]);
+         // loaded ammo + range + one pip per turret (green: loaded & on target, amber: loaded
+         // but still training / out of arc, grey: reloading)
+         const ap = p.ammo === 'AP';
+         ctx.font = 'bold 11px "SF Mono", monospace';
+         ctx.textAlign = 'left';
+         ctx.fillStyle = '#000';
+         ctx.fillText(p.ammo || '', a.x + 15, a.y - 3);
+         ctx.fillStyle = ap ? '#8fc8ff' : '#ffae5a';
+         ctx.fillText(p.ammo || '', a.x + 14, a.y - 4);
+         ctx.font = '10px "SF Mono", monospace';
+         ctx.fillStyle = outOfRange ? '#ff6a5a' : 'rgba(207,232,255,0.85)';
+         ctx.fillText((range / 1000).toFixed(1) + ' km' + (outOfRange ? ' ✕' : ''), a.x + 14, a.y + 9);
+         const n = p.turrets.length;
+         for (let i = 0; i < n; i++) {
+            const t = p.turrets[i];
+            const x = a.x - (n - 1) * 5 + i * 10, y = a.y + 18;
+            ctx.fillStyle = t.cd > 0 ? 'rgba(140,150,160,0.6)' : t.aligned ? '#7CFF9A' : '#ffd479';
+            if (t.cd > 0) {
+               // reload progress as a pie
+               ctx.beginPath(); ctx.moveTo(x, y);
+               ctx.arc(x, y, 3.5, -Math.PI / 2, -Math.PI / 2 + TAU * clamp01(1 - t.cd / (t.cdMax || 1)));
+               ctx.closePath(); ctx.fill();
+               ctx.strokeStyle = 'rgba(140,150,160,0.6)'; ctx.lineWidth = 1;
+               ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.stroke();
+            } else { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, TAU); ctx.fill(); }
+         }
       }
    }
 
@@ -555,6 +775,7 @@ export class Renderer {
          g.fillStyle = 'rgba(180,180,180,0.35)';
          g.beginPath(); g.arc(mx(cl.c.x), my(cl.c.y), Math.max(2, cl.r * sc), 0, TAU); g.fill();
       }
+      drawMinimapExtras(g, world, mx, my, sc);
       // torpedoes
       for (const t of world.torpedoes) {
          g.fillStyle = t.owner === 'player' ? '#8fdcff' : '#ff9a8a';
@@ -562,12 +783,19 @@ export class Renderer {
       }
       // ships
       for (const s of world.ships) {
-         if (!s.alive) continue;
+         const age = ghostAge(world, s);
+         if (age <= VISION.ghostTime) {
+            g.strokeStyle = `rgba(255,110,90,${0.25 + 0.5 * (1 - age / VISION.ghostTime)})`;
+            g.lineWidth = 1;
+            g.beginPath(); g.arc(mx(s.lastKnown.pos.x), my(s.lastKnown.pos.y), 3.5, 0, TAU); g.stroke();
+            continue;
+         }
+         if (!shown(s)) continue;
          const x = mx(s.pos.x), y = my(s.pos.y);
          g.save();
          g.translate(x, y);
          g.rotate(s.heading);
-         g.fillStyle = s.side === 'player' ? '#7CFF9A' : '#ff5a4d';
+         g.fillStyle = s.human ? '#ffffff' : s.side === 'player' ? '#7CFF9A' : '#ff5a4d';
          g.beginPath();
          g.moveTo(5, 0); g.lineTo(-3.5, -3); g.lineTo(-3.5, 3);
          g.closePath(); g.fill();
@@ -576,7 +804,7 @@ export class Renderer {
       // player view cone
       const p = world.player;
       if (p && p.alive) {
-         g.strokeStyle = 'rgba(124,255,154,0.5)';
+         g.strokeStyle = 'rgba(255,255,255,0.55)';
          g.beginPath(); g.arc(mx(p.pos.x), my(p.pos.y), 7, 0, TAU); g.stroke();
       }
    }
@@ -585,45 +813,45 @@ export class Renderer {
    _compass(world) {
       const g = this.compassCtx;
       if (!g) return;
-      // fixed CSS size (index.html: #compass 220×42); backing store is dpr-scaled in main.resize()
-      const W = 220, H = 42;
+      // fixed CSS size (index.html: #compass 220×42); backing store is dpr-scaled in main.resize().
+      // A heading tape: own course in the middle, ±90° either side, nautical bearings (N = 0°).
+      const W = 220, H = 42, cx = W / 2, PX = W / 180;
       g.clearRect(0, 0, W, H);
-      const cx = W / 2, cy = H / 2;
       const p = world.player;
-      const heading = p ? p.heading : 0;
-      // ticks every 15°, majors every 90°
-      for (let deg = 0; deg < 360; deg += 15) {
-         const a = deg * DEG - heading;
-         const major = deg % 90 === 0;
-         const x1 = cx + Math.cos(a) * (W / 2 - 6);
-         const y1 = cy + Math.sin(a) * (H / 2 - 14);
-         const x2 = cx + Math.cos(a) * (W / 2 - (major ? 16 : 10));
-         const y2 = cy + Math.sin(a) * (H / 2 - (major ? 14 : 10));
-         g.strokeStyle = major ? 'rgba(207,232,255,0.9)' : 'rgba(207,232,255,0.35)';
-         g.lineWidth = major ? 2 : 1;
-         g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      const hdg = ((p ? p.heading : 0) / DEG + 90 + 360) % 360;   // world 0 = east -> nautical 90
+      const rel = (b) => ((b - hdg + 540) % 360) - 180;            // -180..180 from own course
+      const NAMES = { 0: 'N', 45: 'NO', 90: 'O', 135: 'SO', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+      g.textAlign = 'center';
+      for (let b = 0; b < 360; b += 15) {
+         const d = rel(b);
+         if (Math.abs(d) > 92) continue;
+         const x = cx + d * PX, major = b % 45 === 0;
+         g.globalAlpha = 1 - Math.abs(d) / 110;
+         g.strokeStyle = major ? 'rgba(207,232,255,0.9)' : 'rgba(207,232,255,0.4)';
+         g.lineWidth = major ? 1.6 : 1;
+         g.beginPath(); g.moveTo(x, H - 4); g.lineTo(x, H - (major ? 13 : 8)); g.stroke();
          if (major) {
-            // world angle 0 = east, +90deg = south (Y+ down), so majors read O/S/W/N
-            const lbl = ['O', 'S', 'W', 'N'][deg / 90];
-            g.fillStyle = 'rgba(207,232,255,0.85)';
-            g.font = 'bold 11px "SF Mono", monospace';
-            g.textAlign = 'center';
-            g.fillText(lbl, cx + Math.cos(a) * (W / 2 - 26), cy + Math.sin(a) * (H / 2 - 22) + 4);
+            g.fillStyle = b % 90 === 0 ? '#e6f3ff' : 'rgba(207,232,255,0.7)';
+            g.font = (b % 90 === 0 ? 'bold 12px' : '10px') + ' "SF Mono", Consolas, monospace';
+            g.fillText(NAMES[b], x, H - 16);
          }
       }
-      // center marker (ship heading)
+      g.globalAlpha = 1;
+      // own course: marker + readout
       g.fillStyle = '#ffd479';
-      g.beginPath();
-      g.moveTo(cx, cy - 6); g.lineTo(cx - 4, cy + 4); g.lineTo(cx + 4, cy + 4);
-      g.closePath(); g.fill();
-      // enemy bearings
+      g.beginPath(); g.moveTo(cx, H - 2); g.lineTo(cx - 4, H - 9); g.lineTo(cx + 4, H - 9); g.closePath(); g.fill();
+      g.font = 'bold 10px "SF Mono", Consolas, monospace';
+      g.fillText(String(Math.round(hdg) % 360).padStart(3, '0') + '°', cx, 10);
+      // enemy bearings: dots on the tape, edge arrows for contacts behind the beam
       for (const s of world.ships) {
-         if (!s.alive || s.side === 'player') continue;
-         const a = angleOf(sub(s.pos, p.pos)) - heading;
-         const x = cx + Math.cos(a) * (W / 2 - 20);
-         const y = cy + Math.sin(a) * (H / 2 - 18);
+         if (!shown(s) || s.side === 'player' || !p) continue;
+         const d = rel((angleOf(sub(s.pos, p.pos)) / DEG + 90 + 360) % 360);
          g.fillStyle = '#ff5a4d';
-         g.beginPath(); g.arc(x, y, 3, 0, TAU); g.fill();
+         if (Math.abs(d) <= 90) { g.beginPath(); g.arc(cx + d * PX, 17, 3, 0, TAU); g.fill(); }
+         else {
+            const x = d > 0 ? W - 5 : 5, k = d > 0 ? -1 : 1;
+            g.beginPath(); g.moveTo(x, 17); g.lineTo(x + k * 6, 13); g.lineTo(x + k * 6, 21); g.closePath(); g.fill();
+         }
       }
    }
 }

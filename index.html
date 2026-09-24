@@ -44,7 +44,62 @@
    .mod.flood { color: #7fd8ff; border-color: #3aa0ff; background: rgba(0,40,90,.4); }
    .mod.disabled { opacity: .35; }
 
-   #ammo-panel { right: 18px; bottom: 18px; width: 300px; }
+   #weapons-panel { right: 18px; bottom: 18px; width: 300px; }
+   .wrow { display:flex; align-items:center; gap:8px; margin-top: 8px; }
+   .wrow .lbl { font-size: 10px; width: 64px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; }
+   .ammo-chip { flex:1; text-align:center; font-size: 12px; font-weight: 800; padding: 4px 0; border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.35); color: var(--hud-dim); }
+   .ammo-chip small { font-weight: 400; opacity: .7; margin-left: 4px; }
+   .ammo-chip.sel.ap { color: #fff; border-color: #6fb6ff; background: rgba(40,110,200,.45); box-shadow: 0 0 10px rgba(80,160,255,.45); }
+   .ammo-chip.sel.he { color: #fff; border-color: #ff9a4d; background: rgba(200,90,20,.45); box-shadow: 0 0 10px rgba(255,140,60,.45); }
+   #turret-pips { flex:1; display:flex; gap: 6px; }
+   .pip { flex:1; height: 22px; border-radius: 5px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.14);
+      position: relative; overflow: hidden; font-size: 10px; text-align:center; line-height: 22px; color: #fff; }
+   .pip > i { position:absolute; left:0; bottom:0; width:100%; background: rgba(120,160,200,.35); }
+   .pip > span { position: relative; }
+   .pip.ready > i { background: rgba(90,230,130,.45); }
+   .pip.ready.bear { border-color: var(--good); box-shadow: 0 0 8px rgba(124,255,154,.5); }
+   .launchers { flex:1; display:flex; gap:6px; }
+   .launcher { flex:1; position:relative; height: 20px; border-radius: 5px; background: rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.14);
+      overflow:hidden; font-size: 10px; line-height: 20px; text-align:center; }
+   .launcher > i { position:absolute; left:0; top:0; bottom:0; background: rgba(120,160,200,.3); }
+   .launcher.ready > i { background: rgba(90,230,130,.4); }
+   .launcher.ready { border-color: rgba(124,255,154,.5); }
+   .launcher > span { position:relative; }
+   #sec-line { font-size: 10px; color: var(--hud-dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+   #sec-line.focus { color: var(--gold); }
+
+   #cons-panel { left: 50%; transform: translateX(-50%); bottom: 74px; display:flex; gap: 8px; padding: 8px; }
+   .cons { width: 62px; height: 56px; border-radius: 8px; position: relative; overflow: hidden; text-align:center;
+      background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.14); }
+   .cons .ico { font-size: 20px; line-height: 30px; position: relative; margin-top: 4px; }
+   .cons .key { position:absolute; left: 4px; top: 2px; font-size: 10px; font-weight: 800; color: var(--gold); }
+   .cons .chg { position:absolute; right: 4px; top: 2px; font-size: 10px; color: #fff; }
+   .cons .st { position: relative; font-size: 10px; color: var(--hud-dim); }
+   .cons > i { position:absolute; left:0; bottom:0; width:100%; background: rgba(0,0,0,.6); }
+   .cons.ready { border-color: rgba(124,255,154,.55); }
+   .cons.ready .st { color: var(--good); }
+   .cons.active { border-color: #6fd0ff; box-shadow: 0 0 12px rgba(110,200,255,.55); }
+   .cons.active .st { color: #9fe0ff; }
+   .cons.active > i { background: rgba(110,200,255,.25); }
+   .cons.empty { opacity: .35; }
+
+   #ribbons { position:absolute; left: 50%; top: 64%; transform: translateX(-50%); display:flex; flex-direction: column; align-items:center; gap: 4px; }
+   .ribbon { font-family: var(--font); font-weight: 900; font-size: 15px; letter-spacing: 2px; padding: 3px 14px; border-radius: 4px;
+      background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.2); color: #fff; text-shadow: 0 1px 4px #000;
+      animation: ribbonIn .18s ease-out; transition: opacity .4s; }
+   .ribbon b { color: var(--gold); margin-left: 6px; }
+   .ribbon.cit { color: #ffe27a; border-color: #ffc93a; background: rgba(90,60,0,.6); font-size: 18px; }
+   .ribbon.ric { color: #9fb8d0; }
+   .ribbon.over { color: #cfd6de; }
+   .ribbon.fire { color: #ffae5a; border-color: #ff7a2d; }
+   .ribbon.flood { color: #7fd8ff; border-color: #3aa0ff; }
+   .ribbon.kill { color: #7CFF9A; border-color: #3ad06a; font-size: 20px; background: rgba(0,60,20,.6); }
+   .ribbon.fade { opacity: 0; }
+   @keyframes ribbonIn { from { transform: scale(1.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+   #dmg-counter { position:absolute; right: 18px; bottom: 212px; text-align: right; font-size: 11px; color: var(--hud-dim);
+      text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 1px 3px #000; }
+   #dmg-counter b { display:block; font-size: 22px; color: #fff; letter-spacing: 0; }
    .salvo-row { display:flex; align-items:center; gap:8px; margin-top: 8px; }
    .salvo-row .lbl { font-size: 10px; width: 78px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; }
    .salvo-row .bar { flex: 1; margin-top: 0; }
@@ -54,9 +109,11 @@
    #status-panel { left: 50%; transform: translateX(-50%); top: 14px; text-align:center; min-width: 220px; }
    #status-line { font-family: var(--font); font-weight: 700; font-size: 15px; letter-spacing: 1px; }
    #objectives { font-size: 11px; color: var(--hud-dim); margin-top: 4px; }
-   #detect-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #ff6a5a;
-      text-shadow: 0 0 8px rgba(255,90,70,.6); }
-   #detect-status.hidden { display: none; }
+   #vis-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: var(--hud-dim); }
+   #vis-status.spotted { color: #ff6a5a; text-shadow: 0 0 8px rgba(255,90,70,.6); }
+   #vis-status.bloom { color: #ffae5a; text-shadow: 0 0 8px rgba(255,150,60,.6); }
+   #vis-status.smoke { color: #9fe0ff; text-shadow: 0 0 8px rgba(110,200,255,.6); }
+   #vis-status.stealth { color: var(--good); }
    #anchor-status { font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; color: #6ab8ff;
       text-shadow: 0 0 8px rgba(90,170,255,.6); }
    #anchor-status.hidden { display: none; }
@@ -75,7 +132,10 @@
    #siren.on { opacity: 1; animation: sirenPulse 1s infinite; }
    @keyframes sirenPulse { 0%,100%{opacity:.15} 50%{opacity:.6} }
 
-   #log { left: 18px; top: 18px; width: 260px; max-height: 150px; overflow: hidden; font-size: 11px; display:flex; flex-direction: column; gap:2px; justify-content: flex-end; }
+   #log { left: 18px; top: 18px; width: 260px; font-size: 11px; }
+   /* bottom-anchored and clipped at the top: fade old lines out instead of cutting glyphs in half */
+   #log .log-in { max-height: 128px; overflow: hidden; display:flex; flex-direction: column; gap:2px; justify-content: flex-end;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px); mask-image: linear-gradient(to bottom, transparent 0, #000 22px); }
    #log .l { opacity:.9; text-shadow: 0 1px 3px #000; }
    #log .l.dmg { color:#ffcf6b; } #log .l.kill { color:#7CFF9A; font-weight:700; }
    #log .l.warn { color:#ff6a5a; }
@@ -90,7 +150,7 @@
       background: linear-gradient(180deg,#fff, #8fb6de); -webkit-background-clip: text; background-clip: text; color: transparent;
       text-shadow: 0 2px 30px rgba(120,180,255,.25); }
    .subtitle { color: var(--hud-dim); margin-top: 6px; font-size: 14px; letter-spacing: 1px; }
-   .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 26px; margin: 26px auto; max-width: 560px; text-align: left; font-size: 13px; }
+   .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 26px; margin: 22px auto; max-width: 660px; text-align: left; font-size: 13px; }
    .controls-grid .k { color: var(--gold); font-family: var(--mono); font-weight: 700; }
    .controls-grid .d { color: var(--hud); }
    .btn-row { display: flex; gap: 14px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
@@ -104,11 +164,85 @@
       background: rgba(0,0,0,.3); color: var(--hud-dim); cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: .5px; }
    .chip.sel { color: #fff; background: rgba(60,150,230,.35); border-color: #5aa0e0; box-shadow: 0 0 16px rgba(70,150,230,.4); }
    .result-emoji { font-size: 60px; margin-bottom: 6px; }
-   .stats-grid { display:grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 22px auto; max-width: 520px; }
+   .stats-grid { display:grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin: 22px auto; max-width: 520px; }
    .stat { background: rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px; }
    .stat .v { font-size: 24px; font-weight: 900; color:#fff; }
    .stat .l { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing:1px; margin-top: 3px; }
    .hint { color: var(--hud-dim); font-size: 12px; margin-top: 16px; }
+   /* ---- mission objectives / banner (HUD) ---- */
+   #mission-title { font-size: 10px; color: var(--hud-dim); letter-spacing: 2px; text-transform: uppercase; }
+   #mission-title:empty { display: none; }
+   .obj { font-size: 12px; color: var(--hud); margin-top: 3px; }
+   .obj .pg { color: var(--gold); margin-left: 6px; font-weight: 700; }
+   .obj.done { color: var(--good); }
+   .obj.failed { color: var(--danger); text-decoration: line-through; }
+   #banner { position:absolute; left:50%; top: 19%; transform: translateX(-50%); font-family: var(--font); font-weight: 800;
+      font-size: 19px; letter-spacing: .5px; padding: 8px 22px; border-radius: 8px; background: rgba(0,0,0,.6);
+      border: 1px solid rgba(255,255,255,.18); color: #fff; text-shadow: 0 1px 4px #000; transition: opacity .35s;
+      opacity: 0; max-width: 78vw; text-align:center; }
+   #banner.on { opacity: 1; animation: ribbonIn .22s ease-out; }
+   #banner.warn { border-color: rgba(255,120,90,.65); color: #ffd6cc; box-shadow: 0 0 24px rgba(255,90,60,.25); }
+   #banner.info { border-color: rgba(143,182,222,.5); color: #e2f1ff; font-size: 16px; font-weight: 700; }
+   #banner.kill { border-color: #3ad06a; color: #c4ffd4; }
+   .cons.off { display: none; }
+
+   /* ---- mission select ---- */
+   .overlay.scroll { align-items: flex-start; overflow-y: auto; padding: 3vh 0; }
+   .card.wide { width: min(1220px, 96vw); padding: 24px 28px; text-align: left; margin: auto; }
+   .menu-head { display:flex; align-items:flex-end; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+   .menu-head .title { font-size: 40px; }
+   .menu-meta { text-align:right; font-family: var(--mono); color: var(--hud-dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+   .menu-meta b { display:block; color: var(--gold); font-size: 22px; letter-spacing: 2px; }
+   .menu-body { display:grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 20px; }
+   .mission-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-content: start; }
+   .mcard { position:relative; pointer-events:auto; cursor:pointer; border-radius: 10px; overflow:hidden;
+      border: 1px solid rgba(255,255,255,.1); background: rgba(0,0,0,.32); transition: transform .08s, border-color .15s, box-shadow .15s; }
+   .mcard canvas { display:block; width:100%; height: 70px; }
+   .mcard .mc-body { padding: 6px 9px 8px; }
+   .mcard .mc-num { position:absolute; left: 7px; top: 5px; font-family: var(--mono); font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px #000; }
+   .mcard .mc-title { font-weight: 800; font-size: 14px; color: #fff; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+   .mcard .mc-tag { font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+   .mcard .mc-stars { position:absolute; right: 7px; top: 3px; font-size: 14px; letter-spacing: 1px; color: rgba(255,255,255,.28); text-shadow: 0 1px 3px #000; }
+   .mcard .mc-stars .on { color: var(--gold); }
+   .mcard:hover { transform: translateY(-2px); border-color: rgba(143,182,222,.55); }
+   .mcard.sel { border-color: #5aa0e0; box-shadow: 0 0 18px rgba(70,150,230,.45); background: rgba(30,70,110,.38); }
+   .mcard.locked { cursor: not-allowed; }
+   .mcard.locked:hover { transform: none; }
+   .mcard.locked canvas, .mcard.locked .mc-body { filter: grayscale(1) brightness(.45); }
+   .mcard.locked::after { content: '🔒'; position:absolute; left: 50%; top: 35px; transform: translate(-50%,-50%); font-size: 22px; }
+   .mcard.mode .mc-title { color: var(--gold); }
+   .mcard.boss .mc-title { color: #ff9a8a; }
+   .brief { background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 16px 18px; display:flex; flex-direction: column; min-height: 100%; }
+   .brief-tag { font-family: var(--mono); font-size: 11px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 2px; }
+   .brief-title { font-size: 26px; font-weight: 900; color: #fff; letter-spacing: 1px; margin-top: 2px; }
+   .brief-text { font-size: 13.5px; line-height: 1.5; color: var(--hud); margin-top: 8px; }
+   .brief-sec { font-family: var(--mono); font-size: 10px; color: var(--hud-dim); text-transform: uppercase; letter-spacing: 2px; margin-top: 12px; }
+   .brief ul { list-style: none; margin-top: 3px; font-size: 12.5px; }
+   .brief li { padding: 1px 0; }
+   .brief li.ok { color: var(--gold); }
+   .enemy-chips { display:flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+   .echip { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(198,90,74,.18); border: 1px solid rgba(255,120,100,.35); color: #ffc4b8; }
+   .echip.ally { background: rgba(74,208,122,.14); border-color: rgba(124,255,154,.35); color: #b8ffcc; }
+   .echip.env { background: rgba(90,140,220,.16); border-color: rgba(143,182,222,.45); color: #d4e8ff; }
+   .brief .spacer { flex: 1; min-height: 8px; }
+   .brief .diff-row { justify-content: flex-start; margin-top: 12px; }
+   .brief .btn-row { justify-content: flex-start; margin-top: 14px; flex-wrap: nowrap; gap: 10px; }
+   .brief button.play { padding: 11px 14px; font-size: 14px; letter-spacing: .5px; white-space: nowrap; }
+   .brief #btn-play { flex: 1; }
+   .menu-foot { margin-top: 14px; color: var(--hud-dim); font-size: 12px; text-align: center; }
+   .menu-foot a { color: var(--hud); }
+   @media (max-width: 960px) { .menu-body { grid-template-columns: 1fr; } .mission-grid { grid-template-columns: repeat(2, 1fr); } }
+
+   /* ---- end screen ---- */
+   .end-mission { font-family: var(--mono); font-size: 12px; color: var(--hud-dim); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+   .end-stars { font-size: 44px; letter-spacing: 8px; margin-top: 8px; color: rgba(255,255,255,.15); }
+   .end-stars span.on { color: var(--gold); text-shadow: 0 0 20px rgba(255,212,121,.6); display: inline-block; animation: starPop .45s ease-out backwards; }
+   .end-stars span:nth-child(2) { animation-delay: .25s; } .end-stars span:nth-child(3) { animation-delay: .5s; }
+   @keyframes starPop { from { transform: scale(2.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+   .end-crit { list-style:none; margin: 6px auto 0; max-width: 460px; text-align:left; font-size: 13px; }
+   .end-crit li { padding: 2px 0; color: var(--hud-dim); }
+   .end-crit li.ok { color: var(--good); }
+   .end-record { color: var(--gold); font-weight: 800; letter-spacing: 1px; margin-top: 8px; min-height: 18px; }
    #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#04070d; z-index:30; color:var(--hud-dim); font-family:var(--mono); }
 </style>
 </head>
@@ -123,9 +257,10 @@
       <div id="log" class="hud-panel"></div>
 
       <div id="status-panel" class="hud-panel">
+         <div id="mission-title"></div>
          <div id="status-line">Zur See</div>
          <div id="objectives">Ziele: 0 / 0 versenkt</div>
-         <div id="detect-status" class="hidden">👁 GESICHTET</div>
+         <div id="vis-status" class="stealth">UNENTDECKT</div>
          <div id="anchor-status" class="hidden">⚓ ANKER-WENDE</div>
       </div>
 
@@ -145,13 +280,30 @@
          </div>
       </div>
 
-      <div id="ammo-panel" class="hud-panel">
-         <div class="ship-name" style="font-size:13px">Munition</div>
-         <div class="salvo-row"><span class="lbl">Haupt-28cm</span><div class="bar"><i id="ammo-main" style="width:100%"></i></div><span class="n ready" id="ammo-main-n">READY</span></div>
-         <div class="salvo-row"><span class="lbl">Sekundär</span><div class="bar"><i id="ammo-sec" style="width:100%"></i></div><span class="n" id="ammo-sec-n">—</span></div>
-         <div class="salvo-row"><span class="lbl">Torpedos</span><div class="bar"><i id="ammo-torp" style="width:100%"></i></div><span class="n" id="ammo-torp-n">0/0</span></div>
-         <div class="salvo-row"><span class="lbl">Turbo</span><div class="bar"><i id="ammo-turbo" style="width:100%"></i></div><span class="n" id="ammo-turbo-n">READY</span></div>
+      <div id="weapons-panel" class="hud-panel">
+         <div class="ship-name" style="font-size:13px">Bewaffnung</div>
+         <div class="wrow"><span class="lbl">Munition</span>
+            <div class="ammo-chip ap" id="ammo-ap">AP<small>[1]</small></div>
+            <div class="ammo-chip he" id="ammo-he">HE<small>[2]</small></div></div>
+         <div class="wrow"><span class="lbl">Türme</span><div id="turret-pips"></div></div>
+         <div class="wrow"><span class="lbl">Torpedos</span>
+            <div class="launchers"><div class="launcher" id="tl-port"><i></i><span>BB</span></div><div class="launcher" id="tl-stbd"><i></i><span>StB</span></div></div>
+            <span id="torp-spread" style="font-size:10px;width:52px;text-align:right;color:var(--hud-dim)">eng [Q]</span></div>
+         <div class="wrow"><span class="lbl">Sekundär</span><span id="sec-line">frei</span></div>
       </div>
+
+      <div id="cons-panel" class="hud-panel">
+         <div class="cons" id="cons-repair"><i></i><span class="key">R</span><span class="chg"></span><div class="ico">🔧</div><div class="st"></div></div>
+         <div class="cons" id="cons-dc"><i></i><span class="key">E</span><span class="chg"></span><div class="ico">🧯</div><div class="st"></div></div>
+         <div class="cons" id="cons-smoke"><i></i><span class="key">F</span><span class="chg"></span><div class="ico">🌫</div><div class="st"></div></div>
+         <div class="cons" id="cons-boost"><i></i><span class="key">⇧</span><span class="chg"></span><div class="ico">⚡</div><div class="st"></div></div>
+         <div class="cons" id="cons-dcharge"><i></i><span class="key">C</span><span class="chg"></span><div class="ico">💣</div><div class="st"></div></div>
+         <div class="cons" id="cons-flare"><i></i><span class="key">G</span><span class="chg"></span><div class="ico">✨</div><div class="st"></div></div>
+      </div>
+
+      <div id="banner"></div>
+      <div id="ribbons"></div>
+      <div id="dmg-counter">Schaden<b id="dmg-total">0</b></div>
 
       <div id="compass" class="hud-panel"><canvas id="compass-canvas" width="440" height="84"></canvas></div>
    </div>
@@ -159,66 +311,102 @@
    <!-- Loading -->
    <div id="loading">Lade Ozean…</div>
 
-   <!-- Main menu -->
-   <div id="menu" class="overlay hidden">
-      <div class="card">
-         <div class="title">WARSCHIFFE</div>
-         <div class="subtitle">Du bist die <b>BISMARCK</b> — versenke alle feindlichen Schiffe.</div>
-         <div class="controls-grid">
-            <div><span class="k">W / S</span> <span class="d">Voll voraus / voll achteraus</span></div>
-            <div><span class="k">A / D</span> <span class="d">Ruder links / rechts</span></div>
-            <div><span class="k">Maus</span> <span class="d">Zielrichtung / Salve abgeben (klick&halten)</span></div>
-            <div><span class="k">Rechtsklick</span> <span class="d">Sekundär- & Flakfeuer</span></div>
-            <div><span class="k">Q / E</span> <span class="d">Ruder (Zusatzsteuerung)</span></div>
-            <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: hart bremsen + enger drehen)</span></div>
-            <div><span class="k">Shift</span> <span class="d">Turbo (kurzer Schub, Cooldown)</span></div>
-            <div><span class="k">F</span> <span class="d">Rauch (Tarndetekt)</span></div>
-            <div><span class="k">T</span> <span class="d">Torpedosalve abfeuern</span></div>
-            <div><span class="k">R</span> <span class="d">Reparatur (Feuer/Flut löschen)</span></div>
-            <div><span class="k">M</span> <span class="d">Karte / Minimap-Fokus</span></div>
-            <div><span class="k">P / Esc</span> <span class="d">Pause</span></div>
+   <!-- Main menu: mission select -->
+   <div id="menu" class="overlay scroll hidden">
+      <div class="card wide">
+         <div class="menu-head">
+            <div>
+               <div class="title">WARSCHIFFE</div>
+               <div class="subtitle">Der Feldzug der <b>BISMARCK</b> — neun Einsätze und ein Endlos-Modus.</div>
+            </div>
+            <div class="menu-meta">Sterne<b id="star-total">0 / 27</b></div>
          </div>
-         <div class="diff-row">
-            <div class="chip sel" data-diff="easy">Einfach</div>
-            <div class="chip" data-diff="normal">Normal</div>
-            <div class="chip" data-diff="hard">Schwer</div>
+         <div class="menu-body">
+            <div class="mission-grid" id="mission-grid"></div>
+            <div class="brief" id="brief">
+               <div class="brief-tag" id="brief-tag">Einsatz 1</div>
+               <div class="brief-title" id="brief-title">Jungfernfahrt</div>
+               <div class="brief-text" id="brief-text"></div>
+               <div class="brief-sec">Missionsziel</div>
+               <ul id="brief-obj"></ul>
+               <div class="brief-sec" id="brief-stars-h">Sterne</div>
+               <ul id="brief-stars"></ul>
+               <div class="brief-sec">Lage</div>
+               <div class="enemy-chips" id="brief-forces"></div>
+               <div class="spacer"></div>
+               <div class="diff-row">
+                  <div class="chip" data-diff="easy">Einfach</div>
+                  <div class="chip sel" data-diff="normal">Normal</div>
+                  <div class="chip" data-diff="hard">Schwer</div>
+               </div>
+               <div class="btn-row">
+                  <button class="play" id="btn-play">⚓ AUSLAUFEN</button>
+                  <button class="play" id="btn-how" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Steuerung &amp; Taktik</button>
+               </div>
+            </div>
          </div>
-         <div class="btn-row">
-            <button class="play" id="btn-play">⚓ ABFERTIGEN</button>
-            <button class="play" id="btn-how" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Wie man spielt</button>
-         </div>
-         <div class="hint">Tipp: Das Ruder wirkt träge — bring die Bismarck mit Schwenkmanövern so, dass die Türme auf den Gegner schießen können. Ziel = Treffer im zentralen Rumpf (Citadel) für maximale Wirkung.</div>
+         <div class="menu-foot">Einsätze werden der Reihe nach freigeschaltet · Fortschritt und Rekorde werden im Browser gespeichert</div>
       </div>
    </div>
 
    <!-- How to play -->
-   <div id="howto" class="overlay hidden">
-      <div class="card">
-         <div class="title" style="font-size:30px">Kampf-Dozierung</div>
-         <div class="subtitle" style="margin:14px 0">Zwei Dinge machen den Sieg: <b>Positionierung</b> und <b>Timing</b>.</div>
-         <div style="text-align:left; max-width:560px; margin:0 auto; line-height:1.7; color:var(--hud)">
-            <p>🎯 <b>Citadel</b> — Der zentrale Rumpf (Motoren/Feuer) ist besonders verwundbar. Treffer dort bringen Konzentration, Feuer und Flut. Treffer am Bug/Heck „prallen" oft ab.</p>
-            <p>🌫️ <b>Rauch</b> — Mit <b>F</b> legst du einen Tarndetekt, um Torpedos zu umgehen und aus der Deckung erneut anzugreifen.</p>
-            <p>🔥 <b>Brände & Flut</b> — Mit <b>R</b> kannst du Module löschen und Flut bekämpfen; ignoriere sie und der Rumpf versagt.</p>
-            <p>⚓ <b>Positionierung</b> — Zerstörer kommen mit Torpedos, Kreuzer flankieren, Linienschiffe duellieren in der Ferne. Bringe die Türme zur Schusslinie.</p>
+   <div id="howto" class="overlay scroll hidden">
+      <div class="card" style="margin:auto">
+         <div class="title" style="font-size:30px">Gefechtsanleitung</div>
+         <div class="controls-grid">
+            <div><span class="k">W / S</span> <span class="d">Fahrstufe hoch / runter</span></div>
+            <div><span class="k">A / D</span> <span class="d">Ruder links / rechts</span></div>
+            <div><span class="k">Maus</span> <span class="d">Türme richten (Kamera schaut voraus)</span></div>
+            <div><span class="k">Linksklick</span> <span class="d">Volle Salve · <b>halten</b> = Turm für Turm</span></div>
+            <div><span class="k">1 / 2</span> <span class="d">Panzer- (AP) / Sprenggranaten (HE)</span></div>
+            <div><span class="k">Rechtsklick</span> <span class="d">Sekundärbatterie auf Ziel konzentrieren</span></div>
+            <div><span class="k">T</span> <span class="d">halten = Fächer zielen, loslassen = Torpedos los</span></div>
+            <div><span class="k">Q</span> <span class="d">Torpedofächer eng / weit</span></div>
+            <div><span class="k">R</span> <span class="d">Reparaturtrupp (Rumpf heilen)</span></div>
+            <div><span class="k">E</span> <span class="d">Schadensbegrenzung (Brand/Flut löschen)</span></div>
+            <div><span class="k">F</span> <span class="d">Nebelwand legen</span></div>
+            <div><span class="k">Shift</span> <span class="d">Maschinen-Boost</span></div>
+            <div><span class="k">C</span> <span class="d">Wasserbomben (gegen U-Boote)</span></div>
+            <div><span class="k">G</span> <span class="d">Leuchtgranate auf den Cursor (nachts)</span></div>
+            <div><span class="k">Space</span> <span class="d">Anker-Wende (halten: bremsen + enger drehen)</span></div>
+            <div><span class="k">P / Esc</span> <span class="d">Pause</span></div>
+         </div>
+         <div style="text-align:left; max-width:660px; margin:0 auto; line-height:1.5; color:var(--hud); font-size:13.5px">
+            <p>🎯 <b>Salven</b> — Klick feuert alle geladenen Türme, die auf das Ziel zeigen. <b>Halten</b> feuert Turm für Turm, sobald einer geladen und ausgerichtet ist.</p>
+            <p>🛡 <b>AP [1]</b> mittschiffs auf eine <b>Breitseite</b> gibt <b>ZITADELLE</b>-Treffer, bei spitzem Winkel drohen <b>ABPRALLER</b>. <b>HE [2]</b>: verlässlicher Schaden und Brände — ideal gegen Zerstörer, Transporter und Batterien.</p>
+            <p>🌫️ <b>Nebel [F]</b> blockiert die <b>Sicht</b>, nicht die Geschosse. Wer feuert, verrät sich durch das <b>Mündungsfeuer</b>.</p>
+            <p>🎧 <b>U-Boote</b> tauchen ab und sind dann unverwundbar — das Hydrophon zeigt sie als Ping. Wasserbomben <b>[C]</b> rollen vom Heck: fahr über den Kontakt!</p>
+            <p>✈ <b>Flugzeuge</b> — die Flak schießt automatisch. Torpedobomber: Bug zudrehen. Sturzkampfbomber zielen auf deinen Kurs: im letzten Moment abdrehen.</p>
+            <p>💣 <b>Minen</b> erscheinen erst auf kurze Distanz als rote Ringe. Die Sekundärbatterie räumt sichtbare Minen.</p>
+            <p>🎆 <b>Nacht</b> — Leuchtgranaten <b>[G]</b> erhellen ein Gebiet für alle. Wer beleuchtet wird, ist sichtbar.</p>
          </div>
          <div class="btn-row"><button class="play" id="btn-how-close">Verstanden</button></div>
       </div>
    </div>
 
    <!-- End screen -->
-   <div id="end" class="overlay hidden">
-      <div class="card">
+   <div id="end" class="overlay scroll hidden">
+      <div class="card" style="margin:auto">
+         <div class="end-mission" id="end-mission">Einsatz 1 · Jungfernfahrt</div>
          <div class="result-emoji" id="end-emoji">🏆</div>
          <div class="title" id="end-title" style="font-size:38px">SIEG</div>
          <div class="subtitle" id="end-sub">Alle feindlichen Schiffe versenkt.</div>
+         <div class="end-stars" id="end-stars"><span>★</span><span>★</span><span>★</span></div>
+         <ul class="end-crit" id="end-crit"></ul>
          <div class="stats-grid">
             <div class="stat"><div class="v" id="stat-kills">0</div><div class="l">Versenkt</div></div>
             <div class="stat"><div class="v" id="stat-dmg">0</div><div class="l">Schaden</div></div>
+            <div class="stat"><div class="v" id="stat-acc">0%</div><div class="l">Trefferquote</div></div>
             <div class="stat"><div class="v" id="stat-time">0:00</div><div class="l">Zeit</div></div>
+            <div class="stat"><div class="v" id="stat-cit">0</div><div class="l">Zitadellen</div></div>
+            <div class="stat"><div class="v" id="stat-torp">0</div><div class="l">Torpedotreffer</div></div>
+            <div class="stat"><div class="v" id="stat-planes">0</div><div class="l">Flugzeuge</div></div>
+            <div class="stat"><div class="v" id="stat-hull">0%</div><div class="l">Rumpf</div></div>
          </div>
+         <div class="end-record" id="end-record"></div>
          <div class="btn-row">
-            <button class="play" id="btn-again">⚔️ Erneut</button>
+            <button class="play" id="btn-next">Nächste Mission ▶</button>
+            <button class="play" id="btn-again">↻ Wiederholen</button>
             <button class="play" id="btn-menu" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Menü</button>
          </div>
       </div>
@@ -228,7 +416,13 @@
    <div id="pause" class="overlay hidden">
       <div class="card">
          <div class="title" style="font-size:34px">PAUSE</div>
-         <div class="btn-row"><button class="play" id="btn-resume">Fortsetzen</button></div>
+         <div class="subtitle" id="pause-mission"></div>
+         <ul class="end-crit" id="pause-obj" style="margin-top:14px"></ul>
+         <div class="btn-row">
+            <button class="play" id="btn-resume">Fortsetzen</button>
+            <button class="play" id="btn-restart" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">↻ Neu starten</button>
+            <button class="play" id="btn-quit" style="background:linear-gradient(180deg,#3a3f4a,#22262e)">Menü</button>
+         </div>
       </div>
    </div>
 </div>

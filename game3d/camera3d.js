@@ -65,6 +65,7 @@ export class ChaseCamera {
       this.sun = sun || null;
       this.scopeT = 0;           // 0 = third person, 1 = binoculars (smoothed blend)
       this._zoomS = 1;           // smoothed magnification
+      this._zoomV = 0;           // its rate, d ln(zoom) / dt
       this._shakeMag = 0;
       this._ray = new THREE.Raycaster();
       this._v = new THREE.Vector3();
@@ -90,7 +91,10 @@ export class ChaseCamera {
       this.scopeT = clamp01(this.scopeT + (cs.bino ? 1 : -1) * dt / 0.16);
       const s = smooth(this.scopeT);
       const zTarget = cs.bino ? (cs.zoom || 4) : 1;
-      this._zoomS = Math.exp(lerp(Math.log(this._zoomS), Math.log(zTarget), 1 - Math.exp(-dt / 0.09)));
+      // critically damped in log space (like zoom3d's distance): eased, no overshoot, ~0.3 s a step
+      const zw = 26, ze = Math.log(this._zoomS / zTarget), zk = Math.exp(-zw * dt), zm = (this._zoomV + zw * ze) * dt;
+      this._zoomV = (this._zoomV - zw * zm) * zk;
+      this._zoomS = zTarget * Math.exp((ze + zm) * zk);
       const fov = fovForZoom(lerp(1, this._zoomS, s));
       if (Math.abs(cam.fov - fov) > 1e-3) { cam.fov = fov; cam.updateProjectionMatrix(); }
 

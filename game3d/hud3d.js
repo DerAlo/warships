@@ -43,7 +43,34 @@ export class Overlay3D {
          if (ui.frozenPt) this._frozen(ui.frozenPt);
          this._reticle(ui);
          this._torpWarn(ui);
+         if (ui.zoomCueA > 0.01) this._zoomCue(ui);
       }
+   }
+
+   // ------------------------------------------------------------ zoom ladder cue
+   // Brief after a wheel/Shift change: a slim ladder left of the reticle (bottom = widest
+   // third-person view, top = 16x) with the current rung and its name.
+   _zoomCue(ui) {
+      const g = this.g, n = ui.zoomLadder || 10, tp = ui.zoomTP ?? 5, lv = ui.zoomLevel || 0;
+      // just outside the mil scale (at most W*0.2 each side), centred on the horizon line
+      const x = Math.round(Math.max(110, this.W * 0.3 - 30)) + 0.5, yB = this.H / 2 + 44;
+      const yOf = (i) => yB - i * 9 - (i > tp ? 7 : 0);   // a gap between camera and scope rungs
+      g.save();
+      g.globalAlpha = clamp01(ui.zoomCueA) * 0.9;
+      g.shadowColor = 'rgba(0,0,0,0.8)'; g.shadowBlur = 3;
+      g.lineWidth = 2;
+      for (let i = 0; i < n; i++) {
+         const on = Math.abs(i - lv) < 0.5, w = i > tp ? 10 : 6;
+         g.strokeStyle = on ? '#eef6ff' : i > tp ? 'rgba(210,235,255,0.45)' : 'rgba(210,235,255,0.28)';
+         g.beginPath(); g.moveTo(x - w, yOf(i)); g.lineTo(x + w, yOf(i)); g.stroke();
+      }
+      // exact (fractional) position for touchpad glides: a small pointer
+      const yl = lv > tp ? yOf(Math.round(lv)) : yB - lv * 9;
+      g.fillStyle = '#eef6ff';
+      g.beginPath(); g.moveTo(x + 14, yl); g.lineTo(x + 20, yl - 4); g.lineTo(x + 20, yl + 4); g.closePath(); g.fill();
+      g.font = 'bold 13px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
+      g.fillText(lv > tp ? 'Fernglas ' + ui.zoom + '×' : 'Kamera', x - 16, yl);
+      g.restore();
    }
 
    // ------------------------------------------------------------ reticle
