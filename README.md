@@ -61,7 +61,19 @@ see `game3d/ARCHITECTURE.md`):
     slewed onto the aim point fire.
   - **Graphics:** animated sea with wakes, sky with time of day and weather
     (dawn, dusk, night, rain, storm), distance haze, island relief, smoke
-    screens, muzzle flashes, splashes, fires and flooding.
+    screens, muzzle flashes, splashes, fires and flooding. Some missions have a
+    weather front that rolls in mid-battle ("Sturmfront zieht auf"): the sky and
+    fog darken, rain sets in, waves build, visibility and spotting drop and
+    dispersion rises slightly. At night, muzzle flashes light up their
+    surroundings and star shells hang over newly spotted enemies. Sunk ships
+    list and go down, leaving smoke and a fading oil slick.
+  - **Kill camera:** a short cut (about 2 s) to a ship you just sank. Any key or
+    click skips it. It never starts during danger, stops as soon as you take
+    fire, and can be turned off in the pause menu ("Versenkungs-Kamera").
+  - **Sound:** synthesized effects, alert tones ("Torpedos voraus!", "Feuer an
+    Bord!", "Wassereinbruch!", "Zitadelle getroffen!", "Gegner versenkt") and
+    music that follows the combat (calm, spotted, heavy fire, low health).
+    Music and effects volume are set in the pause menu and saved.
   - **Controls (WoWs-style):** fixed centre crosshair with lead ruler and
     turret readiness display.
 
@@ -84,6 +96,7 @@ see `game3d/ARCHITECTURE.md`):
   | M / Tab | Tactical map / scoreboard |
   | H | Controls help |
   | P / Esc | Pause |
+  | O | Photo mode: pauses the game, free camera (drag + mouse wheel), no HUD · O / Esc: back |
 
 **Play it here:** https://deralo.github.io/warships/ · 3D: https://deralo.github.io/warships/index-3d.html
 
