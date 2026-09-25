@@ -229,11 +229,11 @@ export class Overlay3D {
       g.save();
       g.textAlign = 'center';
       const cxs = this.W / 2, cys = this.H / 2;
-      // Layout pass in priority order (locked target, then nearest first): names that would
+      // Layout pass in priority order (locked / secondary target, then nearest first): names that would
       // overlap an already placed label or icon step up a line, or are dropped after two tries;
       // range read-outs that collide are dropped. Drawn afterwards far-to-near (near on top).
       const list = (ui.markers || []).filter(m => m.onScreen)
-         .sort((a, b) => ((b.locked ? 1 : 0) - (a.locked ? 1 : 0)) || ((a.dist || 0) - (b.dist || 0)));
+         .sort((a, b) => ((b.locked ? 2 : b.sec ? 1 : 0) - (a.locked ? 2 : a.sec ? 1 : 0)) || ((a.dist || 0) - (b.dist || 0)));
       const boxes = [];
       const hit = (b) => boxes.some(o => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y);
       const lay = [];
@@ -297,7 +297,23 @@ export class Overlay3D {
             }
             g.stroke();
          }
+         if (m.sec) this._secMark(x, y);
       }
+      g.restore();
+   }
+
+   // Secondary priority target (Ctrl+click): orange square brackets around icon, HP bar and
+   // range, outside the white lock corners so both can sit on one ship.
+   _secMark(x, y) {
+      const g = this.g;
+      const bx = 27, top = y - 11, bot = y + 28, l = 6, pulse = 0.8 + 0.2 * Math.sin(this.t * 4);
+      g.save();
+      g.strokeStyle = `rgba(255,150,40,${pulse})`; g.lineWidth = 2; g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
+      g.beginPath();
+      for (const sx of [-1, 1]) {
+         g.moveTo(x + sx * (bx - l), top); g.lineTo(x + sx * bx, top); g.lineTo(x + sx * bx, bot); g.lineTo(x + sx * (bx - l), bot);
+      }
+      g.stroke();
       g.restore();
    }
 

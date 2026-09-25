@@ -83,8 +83,12 @@ see `game3d/ARCHITECTURE.md`):
     Hipper are free; Nürnberg (7 500 EP) and Z 23 (11 000 EP) are researched
     with XP (ops keep their fixed ships). Credits buy 3 tiers of five modules
     per ship (Hauptbatterie, Antrieb, Ruderanlage, Rumpf, Feuerleitung; ≤ 10 %
-    each), captain levels from lifetime XP give points for ten skills
+    each), captain levels from lifetime XP give points for eleven skills
     (Vorbereitung, Brandschutz, Adrenalinrausch, Tarnexperte …; free respec).
+    The 4-point top skill "Manuelle Steuerung der Sekundärbewaffnung" makes the
+    secondaries fire only at the Ctrl+click target (none set = silent) with
+    55 % (battleships) / 35 % (heavy cruisers) / 30 % (light cruisers) less
+    dispersion.
     Saved locally (`warships3d.profile.v1`), "Profil zurücksetzen" in the
     Kapitän panel. Code: `game3d/progress3d.js`.
   - **WoWs scale:** 1 unit = 1 m, maps 16–28 km across, WoWs-like gun ranges,
@@ -122,6 +126,7 @@ see `game3d/ARCHITECTURE.md`):
   | 1 / 2 | HE / AP shells |
   | 3 | Torpedoes · press 3 again: narrow/wide spread |
   | X | Lock / release target |
+  | Ctrl + left click | Secondary battery priority target (orange brackets); again or on open sea: clear. Never fires the main battery |
   | L | Lead marker on/off |
   | R / T | Damage control / repair party |
   | Y / U | Special consumables (boost, smoke …) |

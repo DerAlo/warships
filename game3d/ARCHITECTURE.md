@@ -81,6 +81,10 @@ ship.turrets                   // [{ off:{x,y} (m, ship-local, +x = bow), guns, 
                                //    elev (rad), aligned:bool, canBear:bool, alive:bool, reload, reloadMax }]
 ship.ammo                      // 'HE' | 'AP' ; ship.setAmmo(type) (switching reloads the guns)
 ship.fireMain(world, aimPoint) // fires every loaded + aligned turret, returns number of guns fired
+ship.lockTarget               // ship id of the X lock (main3d syncs it; secondaries' fallback)
+ship.secTarget, ship.setSecTarget(id|null)  // secondary priority target (Ctrl+click; bots: their gun target);
+                               //   the sim drops it when the target sinks or stays unseen for 10 s
+ship.manualSec                // skill manualSec: secondaries fire ONLY at secTarget (none = silent), tighter dispH
 ship.torps                     // { launchers:[{ off, bearing, reload, reloadMax, tubes }], spread:'narrow'|'wide', range, speedKn } or null
 ship.fireTorpedoes(world, bearing)  // returns number of torpedoes launched
 ship.consumables               // [{ key, name, charges (Infinity = unlimited), maxCharges, cd, cdMax, active, t, dur }]

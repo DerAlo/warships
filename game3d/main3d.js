@@ -484,6 +484,8 @@ function frameInput(dt) {
    }
    if (inp.tapped('L')) { ctl.lead = !ctl.lead; hud.msg('Vorhaltemarker ' + (ctl.lead ? 'an' : 'aus'), 'info'); audio.uiClick(); }
    if (inp.tapped('X')) toggleLock();
+   if (inp.mouse.ctrlClicks && !ctl.mapOpen) pickSecTarget();
+   watchSecTarget();
 
    // --- consumables
    for (const k of CONS_SLOTS) if (inp.tapped(k)) useConsumable(k);
@@ -571,6 +573,45 @@ function toggleLock() {
    else if (ctl.lockId != null) { ctl.lockId = null; audio.uiClick(); }
    else audio.denied();
 }
+// Ctrl+left click (WoWs): the enemy under the crosshair becomes the secondary battery's priority
+// target (sim: ship.secTarget); the same ship again or open sea clears it. Picking: the crosshair
+// ray against the hulls (the aim snap), else the nearest marker / waterline close to the centre.
+function pickSecTarget() {
+   const p = P;
+   if (typeof p?.setSecTarget !== 'function') return;
+   if (!p.cfg?.sec) { audio.denied(); hud.msg('Keine Sekundärbewaffnung an Bord', 'warn'); return; }
+   let id = aim.snapped;
+   if (id == null) {
+      let bestD = Math.max(40, Math.min(W, H) * 0.06);
+      for (const m of lastMarkers) {
+         if (m.ally || !m.onScreen) continue;
+         const s = shipById(m.id);
+         if (!s) continue;
+         const wl = project(s.pos.x, 0, s.pos.y);
+         const d = Math.min(Math.hypot(m.x - W / 2, m.y - H / 2), wl.visible ? Math.hypot(wl.x - W / 2, wl.y - H / 2) : Infinity);
+         if (d < bestD) { bestD = d; id = m.id; }
+      }
+   }
+   if (id != null && id !== p.secTarget) p.setSecTarget(id);
+   else if (p.secTarget != null) p.setSecTarget(null);
+   else { audio.denied(); return; }
+   audio.uiClick();
+}
+// German notice whenever the priority target changes (set, cleared, or dropped by the sim when
+// the target sinks / stays unseen); with the manual skill a hint at the start of a battle.
+const secSeen = { world: null, id: null };
+function watchSecTarget() {
+   const p = P, id = p?.secTarget ?? null;
+   if (secSeen.world !== world) {
+      secSeen.world = world; secSeen.id = id;
+      if (p?.manualSec && p.cfg?.sec) hud.msg('Manuelle Sekundärsteuerung: Ziel mit Strg+Linksklick wählen', 'info', 5);
+      return;
+   }
+   if (id === secSeen.id) return;
+   secSeen.id = id;
+   const s = id != null ? shipById(id) : null;
+   hud.msg(s ? 'Sekundärziel: ' + (s.name || s.cls) : 'Sekundärziel aufgehoben', 'info');
+}
 function lockedShip() {
    if (ctl.lockId == null || !world) return null;
    const s = world.ships.find(x => x.id === ctl.lockId);
@@ -655,10 +696,12 @@ function applyControls(dt) {
    p.aim = { x: bx / bl, y: by / bl };
 
    turretCache = computeTurrets(p);
+   if ('lockTarget' in p) p.lockTarget = ctl.lockId;   // X lock: secondaries' fallback choice
 
    if (phase !== 'playing' || ctl.mapOpen || kc.on) return;
-   // clicked covers a press+release inside one frame (low frame rates, quick taps)
-   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked)) fireGuns();
+   // clicked covers a press+release inside one frame (low frame rates, quick taps);
+   // Ctrl held = secondary target picking, never a salvo
+   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked) && !input.down('CTRL')) fireGuns();
    if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
    if (simv.oldSecondaries) autoSecondaries();
 }
@@ -1060,7 +1103,7 @@ function buildUi(dt) {
       const sp = project(s.pos.x, hgt, s.pos.y);
       const dist = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y);
       markers.push({ id: s.id, x: sp.x, y: sp.y, onScreen: !!sp.visible, ally, name: s.name || s.cls, type: shipType(s),
-         hpFrac: clamp01(s.hp / (s.maxHP || 1)), dist, locked: s.id === ctl.lockId, fires: s.fires?.length || 0 });
+         hpFrac: clamp01(s.hp / (s.maxHP || 1)), dist, locked: s.id === ctl.lockId, sec: s.id === p.secTarget, fires: s.fires?.length || 0 });
    }
    ui.markers = markers;
    lastMarkers = markers;

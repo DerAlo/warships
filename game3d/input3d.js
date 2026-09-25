@@ -19,7 +19,8 @@ export class Input3D {
                                  // (counted: at low frame rates several taps land in one frame)
       // dx/dy: raw movementX/Y summed since endFrame(). down: LMB (fire). right: RMB (free look).
       // wheel: notches (+ = scroll toward the user = zoom out), fractional for touchpads.
-      this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false };
+      // ctrlClicks: Ctrl+left clicks this frame (secondary priority target); they never fire.
+      this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false, ctrlClicks: 0 };
       this.locked = false;
       this.noLock = false;       // main3d: photo mode uses plain drag, no pointer lock
       this._hadLock = false;
@@ -35,11 +36,14 @@ export class Input3D {
          else this.keys.delete(k);
          // Tab would move focus away from the canvas; Space/arrows would scroll the page.
          if ((this.gameActive && GAME_KEYS.has(k)) || k === 'TAB') e.preventDefault();
+         // Ctrl is the secondary-target modifier: keep Ctrl+F/J/G/... browser shortcuts out of a
+         // battle (Ctrl+Shift/Alt combos such as dev tools stay; Ctrl+W/T/N cannot be blocked).
+         else if (this.gameActive && down && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) e.preventDefault();
       };
       window.addEventListener('keydown', (e) => onKey(e, true));
       window.addEventListener('keyup', (e) => onKey(e, false));
       window.addEventListener('blur', () => {
-         this.keys.clear(); this.pressed.clear(); this.mouse.down = false; this.mouse.right = false;
+         this.keys.clear(); this.pressed.clear(); this.mouse.down = false; this.mouse.right = false; this.mouse.ctrlClicks = 0;
       });
 
       this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -53,7 +57,9 @@ export class Input3D {
       document.addEventListener('pointerlockerror', () => {});
 
       this.canvas.addEventListener('mousedown', (e) => {
-         if (e.button === 0) { this.mouse.down = true; this.mouse.clicked = true; }
+         // Ctrl+left click (WoWs): pick the secondary priority target instead of firing
+         if (e.button === 0 && (e.ctrlKey || this.keys.has('CTRL'))) { this.mouse.ctrlClicks++; e.preventDefault(); }
+         else if (e.button === 0) { this.mouse.down = true; this.mouse.clicked = true; }
          if (e.button === 2) this.mouse.right = true;
          this.requestLock();
       });
@@ -146,7 +152,7 @@ export class Input3D {
 
    // Edge taps are consumed once per fixed sim step so a key fires exactly once even on a
    // multi-step frame; endFrame() additionally clears the per-frame mouse accumulators.
-   consumeTaps() { this.pressed.clear(); this.mouse.clicked = false; }
+   consumeTaps() { this.pressed.clear(); this.mouse.clicked = false; this.mouse.ctrlClicks = 0; }
    endFrame() { this.consumeTaps(); this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0; }
 
    down(k) { return this.keys.has(k); }
