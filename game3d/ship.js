@@ -12,6 +12,7 @@ const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, TR: 3.5, CV: 3.5 }; // s, 
 const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
 const TWIST = { BB: 0.03, CA: 0.04, CL: 0.045, DD: 0.06, TR: 0.025, CV: 0.03 };   // rad/s, screws worked against each other
 const HULL_PROBES = [0.92, 0.45, 0, -0.45, -0.92];   // grounding probes along the keel (fraction of L/2)
+const SEC_LOST_T = 10;              // s a secondary priority target may stay unseen before it is dropped
 const _probe = { x: 0, y: 0 };
 const TORP_ARC = 65 * DEG;          // launchers train +-65 deg around the beam
 const MODULE_T = 25;                // s a knocked-out module stays down (damage control fixes it)
@@ -71,6 +72,9 @@ export class Ship {
       this.aimRange = 0;
       this.inRange = false;
       this.lockTarget = null;         // ship id the player/bot has locked (secondaries prefer it)
+      this.secTarget = null;          // ship id: secondary priority target (player: Ctrl+click, bots: gun target)
+      this.secLostT = 0;              // s the secTarget has been out of sight (dropped after SEC_LOST_T)
+      this.manualSec = !!cfg.manualSec; // skill "Manuelle Steuerung der Sekundärbewaffnung": secTarget only
       this.turrets = m.turrets.map((t, i) => ({
          idx: i, off: { x: t.off.x, y: t.off.y }, guns: t.guns, caliber: m.caliber,
          arcC: t.arcC, arcW: t.arcW, bearing: t.arcC, elev: 0, err: 0,
@@ -87,7 +91,7 @@ export class Ship {
          })),
          spread: 'narrow', range: tc.range, speedKn: tc.speedKn, speed: tc.speed, dmg: tc.dmg,
       } : null;
-      this.sec = cfg.sec ? { t: [0.5, 0.8], target: null, retarget: 0 } : null;
+      this.sec = cfg.sec ? { t: [0.5, 0.8], target: null, retarget: 0, lastSec: null } : null;
       this.consumables = cfg.consumables.map(c => ({
          ...c, name: CONSUMABLES[c.key].name, short: CONSUMABLES[c.key].short, icon: CONSUMABLES[c.key].icon,
          charges: c.charges, maxCharges: c.charges, cd: 0, cdMax: c.cd, active: false, t: 0, dur: c.dur,
@@ -281,7 +285,18 @@ export class Ship {
       this._updateTimers(dt, world);
       this._move(dt, world);
       this._updateTurrets(dt);
+      if (this.secTarget != null) this._checkSecTarget(dt, world);
       if (this.sec) this._secondaries(dt, world);
+   }
+
+   // Secondary priority target (WoWs Ctrl+click): drop it once it sinks / leaves the battle or
+   // has stayed out of sight for SEC_LOST_T seconds.
+   setSecTarget(id) { this.secTarget = id ?? null; this.secLostT = 0; }
+   _checkSecTarget(dt, world) {
+      const t = world.shipById(this.secTarget);
+      if (!t || !t.alive || t.side === this.side) { this.setSecTarget(null); return; }
+      if (world.canSee(this.side, t)) this.secLostT = 0;
+      else if ((this.secLostT += dt) > SEC_LOST_T) this.setSecTarget(null);
    }
 
    _updateTimers(dt, world) {
@@ -435,17 +450,23 @@ export class Ship {
       }
    }
 
-   // Secondary battery: auto-fires at the locked or nearest visible enemy inside its range,
-   // one broadside per side, individual mounts staggered across the reload.
+   // Secondary battery: auto-fires at the priority target (secTarget), else the locked, else the
+   // nearest visible enemy inside its range, one broadside per side, individual mounts staggered
+   // across the reload. With manualSec only the priority target is engaged (none = silent).
    _secondaries(dt, world) {
       const sc = this.cfg.sec, st = this.sec;
+      if (st.lastSec !== this.secTarget) { st.lastSec = this.secTarget; st.retarget = 0; }   // react at once
       st.retarget -= dt;
       if (st.retarget <= 0) {
          st.retarget = 1;
          st.target = null;
          let best = sc.range * sc.range;
+         const ok = (s) => s && s.alive && s.side !== this.side && world.canSee(this.side, s) && dist2(s.pos, this.pos) < best;
+         const pri = this.secTarget != null ? world.shipById(this.secTarget) : null;
          const lock = this.lockTarget != null ? world.shipById(this.lockTarget) : null;
-         if (lock && lock.alive && world.canSee(this.side, lock) && dist2(lock.pos, this.pos) < best) st.target = lock;
+         if (ok(pri)) st.target = pri;
+         else if (this.manualSec) { /* manual control: no priority target in range = no fire */ }
+         else if (ok(lock)) st.target = lock;
          else for (const e of world.ships) {
             if (!e.alive || e.side === this.side || !world.canSee(this.side, e)) continue;
             const d2 = dist2(e.pos, this.pos);

@@ -469,3 +469,98 @@ test('Nordkap: sinking Scharnhorst wins, reaching the fjord or the time limit lo
    w.timeLeft = 0.001; w.update(DT);
    assert.strictEqual(w.phase, 'lost');
 });
+
+// ---------------- secondary battery: Ctrl+click priority target + "Manuelle Steuerung" skill
+// Player Bismarck with two spotted, stopped Hippers inside secondary range: A near, B farther.
+function secRange(skills = []) {
+   const w = blank(21);
+   if (skills.length) w.loadout = { modules: {}, skills };
+   const p = w.spawn('Bismarck', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });
+   const a = w.spawn('Hipper', 'enemy', { x: 3000, y: 0 }, Math.PI / 2, {});
+   const b = w.spawn('Hipper', 'enemy', { x: 0, y: 6000 }, 0, {});
+   const tick = (sec) => {
+      for (let i = 0; i < sec * 60; i++) {
+         for (const e of [a, b]) e.detected = e.spotted = true;
+         p.update(DT, w);
+      }
+   };
+   // which ship a player secondary shell was aimed at
+   const secShots = () => w.shells.filter(s => s.kind === 'sec' && s.ownerId === p.id);
+   const aimedAt = (s) => (Math.hypot(s.aimPoint.x - a.pos.x, s.aimPoint.y - a.pos.y) < Math.hypot(s.aimPoint.x - b.pos.x, s.aimPoint.y - b.pos.y) ? a : b);
+   return { w, p, a, b, tick, secShots, aimedAt };
+}
+
+test('secondaries: Ctrl+click target is preferred, falls back to nearest when out of range', () => {
+   const { w, p, a, b, tick, secShots, aimedAt } = secRange();
+   assert.ok(!p.manualSec && p.secTarget === null);
+   tick(1);
+   assert.strictEqual(p.sec.target, a, 'no priority target: nearest');
+   p.setSecTarget(b.id);
+   tick(0.1);
+   assert.strictEqual(p.sec.target, b, 'priority target taken over at once');
+   w.shells.length = 0;
+   tick(6);
+   assert.ok(secShots().length > 3 && secShots().every(s => aimedAt(s) === b), 'every secondary shell goes to the priority target');
+   // out of secondary range -> back to the old behaviour (lock, then nearest), target kept
+   b.pos.y = 9000;
+   tick(1.1);
+   assert.strictEqual(p.sec.target, a);
+   assert.strictEqual(p.secTarget, b.id, 'priority target stays set while visible');
+   p.lockTarget = a.id; b.pos.y = 6000; tick(1.1);
+   assert.strictEqual(p.sec.target, b, 'priority target beats the main-battery lock');
+});
+
+test('secondaries: priority target is dropped when it sinks or stays unseen', () => {
+   const { w, p, a, b } = secRange();
+   p.setSecTarget(b.id);
+   const run = (sec, seen) => { for (let i = 0; i < sec * 60; i++) { a.detected = true; b.detected = b.spotted = seen; p.update(DT, w); } };
+   run(8, false);
+   assert.strictEqual(p.secTarget, b.id, 'short loss of sight keeps it');
+   run(0.5, true); run(8, false);
+   assert.strictEqual(p.secTarget, b.id, 'seeing it again restarts the clock');
+   run(3, false);
+   assert.strictEqual(p.secTarget, null, 'unseen for > 10 s: dropped');
+   p.setSecTarget(a.id);
+   a.takeDamage(a.hp + 1, null, 'test', 1);
+   assert.ok(!a.alive);
+   run(0.1, true);
+   assert.strictEqual(p.secTarget, null, 'sunk: dropped');
+});
+
+test('secondaries: "Manuelle Steuerung" fires only at the Ctrl+click target, much tighter', () => {
+   const m = secRange(['manualSec']);
+   assert.ok(m.p.manualSec, 'skill baked into the player ship');
+   m.p.lockTarget = m.a.id;
+   m.tick(6);
+   assert.strictEqual(m.secShots().length, 0, 'no priority target: secondaries stay silent (even with a lock)');
+   assert.strictEqual(m.p.sec.target, null);
+   m.p.setSecTarget(m.b.id);
+   m.tick(5);
+   const n = m.secShots().length;
+   assert.ok(n > 3 && m.secShots().every(s => m.aimedAt(s) === m.b), 'fires at the chosen target only');
+   m.b.pos.y = 9000; m.w.shells.length = 0; m.tick(3);
+   assert.ok(m.secShots().length <= 1, 'target out of range: no switch to the nearer ship');
+   m.p.setSecTarget(null); m.b.pos.y = 6000; m.w.shells.length = 0; m.tick(3);
+   assert.strictEqual(m.secShots().length, 0, 'cleared: silent again');
+   // dispersion: same gun, same range -> the real shell spread shrinks by the class factor
+   const plain = secRange();
+   const spread = (ship) => {
+      const g = ship.cfg.sec, R = g.range * 0.8;
+      let sy = 0;
+      for (let i = 0; i < 800; i++) { const s = makeShell(ship.world, ship, { x: 0, y: 0 }, { x: R, y: 0 }, g, 'sec', 'HE'); sy += s.target.y ** 2; }
+      return Math.sqrt(sy / 800);
+   };
+   assert.ok(Math.abs(m.p.cfg.sec.dispH / SHIPS.Bismarck.sec.dispH - 0.45) < 1e-9, 'battleship: -55 %');
+   const k = spread(m.p) / spread(plain.p);
+   assert.ok(k > 0.35 && k < 0.55, 'measured spread ratio ' + k.toFixed(2));
+   assert.strictEqual(plain.p.cfg.sec.dispH, SHIPS.Bismarck.sec.dispH, 'without the skill: stock dispersion');
+});
+
+test('secondaries: bots put their secondaries on their gun target', () => {
+   const w = new World('normal', { mission: 'standard', seed: 7 });
+   w.autoPlayer = true;
+   for (let i = 0; i < 40 * 60; i++) w.update(DT);
+   const withSec = w.ships.filter(s => s.alive && s.sec && !s.isPlayer);
+   assert.ok(withSec.length > 0);
+   for (const s of withSec) assert.strictEqual(s.secTarget, s.ai.target ? s.ai.target.id : null, s.name);
+});

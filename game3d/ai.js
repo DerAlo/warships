@@ -71,6 +71,8 @@ function think(b, w, dt) {
       const t = pickTarget(b, w);
       if (t !== ai.target) { ai.target = t; ai.targetSince = w.time; ai.salvoCount = 0; newAimError(b, w); }
    }
+   // secondaries prefer the gun target while it is inside their range (else nearest, as before)
+   if (b.sec) { const id = ai.target ? ai.target.id : null; if (b.secTarget !== id) b.setSecTarget(id); }
    ai.decideT -= dt;
    if (ai.decideT <= 0) { ai.decideT = DECIDE_DT; decide(b, w, d); }
    steer(b, dt);

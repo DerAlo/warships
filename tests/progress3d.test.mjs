@@ -88,7 +88,7 @@ test('progress: modules + skills flow through the ship stat pipeline (player onl
    b.ignite('mid', null); assert.ok(b.fires[0].dur < 35 && b.fires[0].dur > 30);
    // every single effect is modest
    for (const d of PG.MODULES) for (const tr of d.tiers) for (const v of Object.values(tr)) assert.ok(Math.abs(v) <= 0.1);
-   for (const s of PG.SKILLS) for (const v of Object.values(s.fx)) assert.ok(Math.abs(v) <= 0.15);
+   for (const s of PG.SKILLS) if (!s.top) for (const v of Object.values(s.fx)) assert.ok(Math.abs(v) <= 0.15);   // top tier = trade-off flags
 });
 
 test('progress: profile load survives broken, old and blocked storage', () => {
@@ -114,4 +114,39 @@ test('progress: profile load survives broken, old and blocked storage', () => {
    PG.grantRewards(p, { xp: 5000, credits: 90000 }); PG.learnSkill(p, 'prep');
    assert.ok(PG.saveProfile(p, st));
    assert.deepStrictEqual(PG.loadProfile(st), p);
+});
+
+test('progress: top skill "Manuelle Steuerung der Sekundärbewaffnung" loads, learns and bakes in', () => {
+   const sk = PG.SKILLS.find(s => s.key === 'manualSec');
+   assert.ok(sk && sk.name === 'Manuelle Steuerung der Sekundärbewaffnung' && sk.desc && sk.top);
+   assert.strictEqual(sk.cost, 4, 'top tier costs 4 points');
+   assert.ok(sk.cost === Math.max(...PG.SKILLS.map(s => s.cost)), 'the most expensive skill');
+   const total = PG.SKILLS.reduce((a, s) => a + s.cost, 0);
+   assert.ok(PG.CAPTAIN_XP.length - 1 < total, 'the point cap still forces a choice');
+   // learning needs 4 free points
+   const p = PG.defaultProfile();
+   PG.grantRewards(p, { xp: PG.CAPTAIN_XP[3], credits: 0 });
+   assert.strictEqual(PG.learnSkill(p, 'manualSec'), false, 'level 3: not enough points');
+   PG.grantRewards(p, { xp: PG.CAPTAIN_XP[5] - PG.CAPTAIN_XP[3], credits: 0 });
+   assert.ok(PG.learnSkill(p, 'manualSec') && !PG.learnSkill(p, 'manualSec'));
+   assert.strictEqual(PG.skillPointsFree(p), 1);
+   // survives a save/load round trip and sanitising
+   const st = memStore();
+   assert.ok(PG.saveProfile(p, st));
+   assert.deepStrictEqual(PG.loadProfile(st).skills, ['manualSec']);
+   assert.deepStrictEqual(PG.sanitizeProfile({ totalXp: PG.CAPTAIN_XP[3], skills: ['manualSec'] }).skills, [], 'too few points: dropped');
+   // stat pipeline: flag + class-scaled secondary dispersion, main battery untouched
+   const lo = PG.loadoutFor(p, 'Bismarck');
+   const bb = PG.applyLoadout(SHIPS.Bismarck, lo), ca = PG.applyLoadout(SHIPS.Hipper, lo), dd = PG.applyLoadout(SHIPS.Z23, lo);
+   assert.ok(bb.manualSec && ca.manualSec && dd.manualSec);
+   assert.ok(Math.abs(bb.sec.dispH / SHIPS.Bismarck.sec.dispH - (1 - PG.MANUAL_SEC_DISP.BB)) < 1e-9);
+   assert.ok(Math.abs(ca.sec.dispH / SHIPS.Hipper.sec.dispH - (1 - PG.MANUAL_SEC_DISP.CA)) < 1e-9);
+   assert.ok(PG.MANUAL_SEC_DISP.BB >= 0.5 && PG.MANUAL_SEC_DISP.BB <= 0.6, 'battleships: 50-60 % tighter');
+   assert.ok(PG.MANUAL_SEC_DISP.CA < PG.MANUAL_SEC_DISP.BB && PG.MANUAL_SEC_DISP.CL <= PG.MANUAL_SEC_DISP.CA && PG.MANUAL_SEC_DISP.DD < PG.MANUAL_SEC_DISP.CL);
+   assert.strictEqual(dd.sec, null, 'no secondaries, nothing to scale');
+   assert.strictEqual(bb.main.dispH, SHIPS.Bismarck.main.dispH);
+   assert.strictEqual(SHIPS.Bismarck.manualSec, undefined, 'shared class config untouched');
+   const w = new World('normal', { mission: 'standard', ship: 'Bismarck', seed: 5, loadout: lo });
+   assert.ok(w.player.manualSec);
+   for (const s of w.ships) if (!s.isPlayer) assert.ok(!s.manualSec, 'bots never get the skill');
 });

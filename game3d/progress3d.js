@@ -34,8 +34,14 @@ export const SKILLS = [
    { key: 'pyro', name: 'Pyrotechniker', cost: 3, desc: 'Brandchance +10 % (relativ)', fx: { fireChance: 0.10 } },
    { key: 'torpx', name: 'Torpedoexperte', cost: 3, desc: 'Torpedos −8 % Nachladezeit', fx: { torpReload: -0.08 } },
    { key: 'conceal', name: 'Tarnexperte', cost: 3, desc: 'Entdeckungsreichweite −8 %', fx: { detect: -0.08 } },
+   // top tier (WoWs: 4 points): a trade-off, not a flat buff -- the secondaries only engage the
+   // Ctrl+click target (none set = silent), but shoot much tighter (MANUAL_SEC_DISP per class)
+   { key: 'manualSec', name: 'Manuelle Steuerung der Sekundärbewaffnung', cost: 4, top: true,
+      desc: 'Sekundärbatterie feuert nur auf das Strg+Klick-Ziel, dafür bis −55 % Streuung', fx: { manualSec: 1 } },
 ];
-// Captain level L needs CAPTAIN_XP[L] lifetime XP and grants L skill points (max 11 of 20 total cost).
+// Secondary dispersion cut of "Manuelle Steuerung der Sekundärbewaffnung" by hull class.
+export const MANUAL_SEC_DISP = { BB: 0.55, CA: 0.35, CL: 0.30, DD: 0.15 };
+// Captain level L needs CAPTAIN_XP[L] lifetime XP and grants L skill points (max 11 of 24 total cost).
 export const CAPTAIN_XP = [0, 1500, 4000, 7500, 12000, 17500, 24000, 32000, 41000, 52000, 65000, 80000];
 
 // ---------------------------------------------------------------- profile
@@ -197,6 +203,10 @@ export function applyLoadout(cfg, lo) {
       if (m.he && f.fireChance) m.he.fire = m.he.fire * mul('fireChance');
    }
    if (c.sec && c.sec.he && f.fireChance) c.sec.he.fire = c.sec.he.fire * mul('fireChance');
+   if (f.manualSec) {
+      c.manualSec = true;
+      if (c.sec) c.sec.dispH = c.sec.dispH * (1 - (MANUAL_SEC_DISP[c.hull.type] || 0));
+   }
    if (c.torp && f.torpReload) { c.torp.reload = +(c.torp.reload * mul('torpReload')).toFixed(1); c.torp.cd = c.torp.reload; }
    if (f.consCd) c.consumables = c.consumables.map(k => ({ ...k, cd: Math.round(k.cd * mul('consCd')) }));
    if (f.fireDur) c.fireDur = mul('fireDur');
