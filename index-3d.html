@@ -209,7 +209,11 @@
    .sens-row span { float: right; color: #fff; }
    .sens-row input { display: block; width: 100%; margin-top: 8px; accent-color: #ffd36b; }
    .sens-row.check-row input { display: inline-block; width: auto; margin: 0 8px 0 0; vertical-align: -2px; }
-   #photo-hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20; pointer-events: none;
+   .sens-row select { float: right; pointer-events: auto; font: 600 12px var(--font); color: #fff; background: rgba(0,0,0,.35);
+      border: 1px solid var(--panel-edge); border-radius: 4px; padding: 2px 6px; margin-top: -3px; }
+   .sens-row select option { background: #0e1a26; }
+   #shellcam-hint { bottom: 64px; }
+   #photo-hint, #shellcam-hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20; pointer-events: none;
       background: rgba(6, 14, 22, 0.62); color: #e8f1f8; font: 13px/1.4 system-ui, sans-serif; letter-spacing: 0.04em;
       padding: 7px 16px; border-radius: 6px; white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
    .howto-body { text-align: left; max-width: 640px; margin: 10px auto 0; line-height: 1.6; font-size: 14px; }
@@ -294,6 +298,7 @@
             <div><span class="k">R / T</span><span class="d">Schadensbekämpfung / Reparaturtrupp</span></div>
             <div><span class="k">Y / U</span><span class="d">Spezial-Verbrauchsgüter (Boost, Nebel …)</span></div>
             <div><span class="k">M / Tab</span><span class="d">Taktische Karte / Übersicht</span></div>
+            <div><span class="k">B</span><span class="d">Geschoss-Kamera: laufende oder nächste Salve verfolgen</span></div>
             <div><span class="k">P / Esc</span><span class="d">Pause</span></div>
          </div>
       </div>
@@ -321,6 +326,7 @@
             <div><span class="k">R / T / Y / U</span><span class="d">Verbrauchsgüter</span></div>
             <div><span class="k">M / Tab / H</span><span class="d">Karte · Übersicht · Hilfe</span></div>
             <div><span class="k">O</span><span class="d">Fotomodus: Pause, freie Kamera (ziehen + Mausrad)</span></div>
+            <div><span class="k">B</span><span class="d">Geschoss-Kamera: fliegt mit einer eigenen Granate mit</span></div>
          </div>
          <div class="diff-row">
             <div class="chip" data-diff="easy">Einfach</div>
@@ -390,12 +396,16 @@
             <input type="range" id="vol-sfx" min="0" max="100" step="5" value="100">
          </label>
          <label class="sens-row check-row"><input type="checkbox" id="opt-killcam" checked> Versenkungs-Kamera</label>
+         <label class="sens-row">Geschoss-Kamera
+            <select id="opt-shellcam"><option value="off">Aus</option><option value="key" selected>Mit Taste (B)</option><option value="auto">Jede Salve</option></select>
+         </label>
          <div class="hint">P oder Esc setzt fort · O: Fotomodus</div>
       </div>
    </div>
 </div>
 
 <!-- Photo mode hint (main3d.js toggles it) -->
+<div id="shellcam-hint" class="hidden">🎯 Geschoss-Kamera — beliebige Taste: zurück</div>
 <div id="photo-hint" class="hidden">📷 FOTOMODUS · Ziehen: Kamera drehen · Mausrad: Abstand · O / Esc: zurück</div>
 
 <script type="module" src="game3d/main3d.js"></script>

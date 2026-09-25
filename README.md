@@ -106,6 +106,14 @@ see `game3d/ARCHITECTURE.md`):
   - **Kill camera:** a short cut (about 2 s) to a ship you just sank. Any key or
     click skips it. It never starts during danger, stops as soon as you take
     fire, and can be turned off in the pause menu ("Versenkungs-Kamera").
+  - **Shell camera (Geschoss-Kamera):** rides along the shell of your latest
+    main-battery salvo that lands closest to the aim point, holds ~0.8 s on the
+    splash or hit, then returns to the normal view. Pause menu setting: *Aus*,
+    *Mit Taste* (default: B follows the salvo in flight, else the next one) or
+    *Jede Salve* (every salvo with ≥ 2.5 s flight time). Any key or click returns
+    early; a torpedo warning, a hit on you or a kill cam ends it at once. The
+    guns hold fire while it runs, the battle does not slow down. Code:
+    `game3d/shellcam.js`.
   - **Sound:** synthesized effects, alert tones ("Torpedos voraus!", "Feuer an
     Bord!", "Wassereinbruch!", "Zitadelle getroffen!", "Gegner versenkt") and
     music that follows the combat (calm, spotted, heavy fire, low health).
@@ -132,6 +140,7 @@ see `game3d/ARCHITECTURE.md`):
   | Y / U | Special consumables (boost, smoke …) |
   | M / Tab | Tactical map / scoreboard |
   | H | Controls help |
+  | B | Shell camera: follow the salvo in flight, else the next one |
   | P / Esc | Pause |
   | O | Photo mode: pauses the game, free camera (drag + mouse wheel), no HUD · O / Esc: back |
 

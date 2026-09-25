@@ -22,6 +22,7 @@ import * as combat from './combat.js';
 import { getMission } from './missions.js';
 import { Menu3D } from './menu3d.js';
 import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
+import { ShellCam } from './shellcam.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -109,6 +110,10 @@ settings.sfx = clamp(Number.isFinite(Number(settings.sfx)) ? Number(settings.sfx
 settings.killCam = settings.killCam !== false;
 audio.setVolumes(settings.music, settings.sfx);
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
+// shell camera (shellcam.js): settings.shellCam, B key, cam3.override like the kill cam
+const shellcam = new ShellCam({ cam3, input, hud, overlay, settings, saveSettings, simDt: SIM_DT, hintEl: $('shellcam-hint'),
+   world: () => world, phase: () => phase, torpWarn: () => fx.torpWarn.length > 0, killCamOn: () => kc.on,
+   lockedShip: () => lockedShip(), mapOpen: () => ctl.mapOpen });
 let turretCache = [];
 let lastMarkers = [];
 let fired = { shots: 0, salvos: 0, torps: 0 };
@@ -146,6 +151,7 @@ window.__setRender = (on) => { renderOn = !!on; };
 // atmosphere hooks: kill camera on a ship, photo mode state, music level
 window.__killCam = (id) => { const v = id != null ? shipById(id) : world?.ships.find(s => s.side !== P?.side); if (v) startKillCam(v); return kc.on; };
 window.__killCamOn = () => kc.on;
+window.__shellCam = () => shellcam.debug();
 window.__photo = () => ({ on: phase === 'photo', yaw: photo.yaw, pitch: photo.pitch, dist: photo.dist });
 window.__music = () => fx.music;
 // Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
@@ -376,7 +382,7 @@ function startGame(opts = {}) {
       lastHp: P.hp, spotted: false, dmg: 0, feed: [], msgs: [], torpPingT: 0, torpWarn: [], ribbonSndT: 0, maxShellId: 0,
       heat: 0, music: -1, musicHold: 0, starT: -99 });
    for (const k in fx.alertT) fx.alertT[k] = 0;
-   endKillCam(); cam3.override = null;
+   shellcam.reset(); endKillCam(); cam3.override = null;
    fx.ribbons = new Map(); fx.shellSeen = new Set(); fx.effSeen = new WeakSet(); fx.whistled = new Set();
    if (Array.isArray(world.events)) for (const e of world.events) if (e.seq > fx.seq) fx.seq = e.seq;
    fired = { shots: 0, salvos: 0, torps: 0 };
@@ -439,7 +445,7 @@ input.onLockLost = () => { if (phase === 'playing') pause(); };
 input.wheelGate = () => (phase === 'photo' || (phase === 'playing' && !ctl.mapOpen)) && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
-   endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
+   shellcam.reset(); endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
    phase = 'menu';
    input.gameActive = false;
    input.releaseLock();
@@ -698,7 +704,7 @@ function applyControls(dt) {
    turretCache = computeTurrets(p);
    if ('lockTarget' in p) p.lockTarget = ctl.lockId;   // X lock: secondaries' fallback choice
 
-   if (phase !== 'playing' || ctl.mapOpen || kc.on) return;
+   if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
    // Ctrl held = secondary target picking, never a salvo
    if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked) && !input.down('CTRL')) fireGuns();
@@ -1330,6 +1336,7 @@ function frame() {
       } else if (world && phase === 'playing' && input.tapped('O') && !kc.on) enterPhoto();
       if (phase === 'playing' && world) {
          if (kc.on) killCamInput();
+         shellcam.input();
          frameInput(dt);
          tickConsEmu(dt);
          acc += dt;
@@ -1360,20 +1367,21 @@ function frame() {
       if (world) {
          applyInterp(alpha);
          try {
+            shellcam.update(dt, alpha);
             cam3.spectate = !!(P && !P.alive && P.sinking);
             // test hook: headless software-GL is slow, so control tests can skip the 3D draw
             // (the camera rig still runs, keeping aim/projection exact)
             // photo mode freezes the whole scene (particles, waves) for the picture
             if (renderOn) renderer.render(world, phase === 'photo' ? 0 : dt, cam3);
             else if (renderer.cam?.update) { renderer.cam.update(world, dt, cam3); renderer.camera.updateMatrixWorld(); }
-            if ((phase === 'playing' && !kc.on) || phase === 'paused') {
+            if ((phase === 'playing' && !kc.on && !shellcam.on) || phase === 'paused') {
                const ui = buildUi(dt);
                miniT -= dt;
                if (miniT <= 0) { minimap.draw(world, ui.mapOpts); miniT = 1 / 30; }
                hud.update(ui, dt);
                overlay.draw(ui);
             }
-         } finally { restoreInterp(); }
+         } finally { shellcam.restore(); restoreInterp(); }
          if (phase === 'playing') pollAudio(dt);
       } else {
          renderer.render(emptyWorld(), dt, null);
@@ -1442,6 +1450,7 @@ click('btn-quit', toMenu);
       kcBox.checked = settings.killCam;
       kcBox.addEventListener('change', () => { settings.killCam = kcBox.checked; saveSettings(); });
    }
+   shellcam.bindSelect($('opt-shellcam'));
 }
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };
