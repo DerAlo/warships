@@ -5,7 +5,7 @@
 // Key names are normalised to short ids ('W', 'SHIFT', 'TAB', '1', ...). Letters are read from
 // e.key (layout-aware) so a German QWERTZ keyboard's printed "Y" really is the Y action --
 // by physical code it would be KeyZ. Digits and special keys use e.code (Shift+1 = '!').
-const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H', 'O',
+const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H', 'O', 'B',
    '1', '2', '3', '4', 'P', 'SHIFT', 'TAB', 'SPACE', 'CTRL']);
 
 export class Input3D {
