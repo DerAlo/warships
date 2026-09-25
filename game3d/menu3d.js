@@ -250,6 +250,7 @@ const CSS = `
 .m3-op .m3-skill { position:relative; text-align:left; padding:8px 30px 8px 10px; letter-spacing:0; font-weight:400; display:flex; flex-direction:column; gap:2px; }
 .m3-skill b { font-size:13px; color:#e6f0fa; } .m3-skill span { font-size:11px; color:#9db4c8; }
 .m3-skill i { position:absolute; top:8px; right:9px; font-style:normal; font-weight:900; color:#ffd479; }
+.m3-op .m3-skill.top { grid-column:1 / -1; }
 .m3-op .m3-skill.on { border-color:#8fd3ff; background:rgba(40,96,146,.55); cursor:default; }
 .m3-op .m3-skill:disabled { opacity:.4; cursor:not-allowed; }
 .m3-op button.warn { border-color:rgba(230,110,90,.5); color:#ffb4a4; }
@@ -384,7 +385,7 @@ export class Menu3D {
             <div class="m3-bar"><div class="b"><i style="width:${pct}%"></i></div></div>
             <div class="m3-skills">${SKILLS.map(s => {
                const has = pf.skills.includes(s.key);
-               return `<button class="m3-skill ${has ? 'on' : ''}" data-skill="${s.key}" ${!has && s.cost > free ? 'disabled' : ''}><b>${esc(s.name)}</b><span>${esc(s.desc)}</span><i>${s.cost}</i></button>`;
+               return `<button class="m3-skill ${has ? 'on' : ''}${s.top ? ' top' : ''}" data-skill="${s.key}" ${!has && s.cost > free ? 'disabled' : ''}><b>${esc(s.name)}</b><span>${esc(s.desc)}</span><i>${s.cost}</i></button>`;
             }).join('')}</div>
             <div class="bt"><button class="warn" data-cap="reset">PROFIL ZURÜCKSETZEN</button><span style="flex:1"></span>
                <button data-cap="respec" ${pf.skills.length ? '' : 'disabled'}>UMSCHULEN</button><button class="pri" data-cap="close">FERTIG</button></div>
