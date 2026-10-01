@@ -469,7 +469,8 @@ SHIPS.Benham = variant(SHIPS.Jervis, {
 // ---- fleet expansion: more navies, more classes ----
 // Same conventions as the table above. hull.secMounts (optional, battleships) lists the visible
 // secondary turrets of the model: { x, guns, a (training of the starboard mount), k (size),
-// c: true = single centreline mount raised `up` metres }. Funnels may carry their own `rake`.
+// c: true = single centreline mount raised `up` metres }. Funnels may carry their own `rake`;
+// hull.sternCat puts the catapults on the quarterdeck instead of amidships.
 const DD_CONS = (smoke = 3, boost = 1.08) => [
    C('damageControl', { charges: Infinity, dur: 10, cd: 40 }),
    C('smoke', { charges: smoke, dur: 20, cd: 160, radius: 450, life: 60 }),
@@ -513,7 +514,7 @@ Object.assign(SHIPS, {
       key: 'Iowa', name: 'USS Iowa', className: 'Iowa-Klasse', playable: true, tier: 9,
       desc: 'Das schnellste Schlachtschiff der Welt: 33 Knoten und neun 40,6-cm-Geschütze mit überschweren Granaten.',
       sisters: ['USS Iowa', 'USS New Jersey', 'USS Missouri', 'USS Wisconsin'],
-      hull: { type: 'BB', L: 270, beam: 33, draft: 11, deckH: 14, nation: 'us',
+      hull: { type: 'BB', L: 270, beam: 33, draft: 11, deckH: 14, nation: 'us', sternCat: true,
          sup: { x: -3, len: 76, w: 19, h: 29 }, funnels: [{ x: 10, r: 5, h: 17 }, { x: -16, r: 5, h: 16 }],
          secMounts: [{ x: 22, guns: 2, a: 0.7, k: 0.85 }, { x: 10, guns: 2, a: 1.2, k: 0.85, up: 3 }, { x: -3, guns: 2, a: Math.PI / 2, k: 0.85 },
             { x: -16, guns: 2, a: 1.9, k: 0.85, up: 3 }, { x: -29, guns: 2, a: 2.4, k: 0.85 }] },
@@ -535,7 +536,7 @@ Object.assign(SHIPS, {
       key: 'Cleveland', name: 'USS Cleveland', className: 'Cleveland-Klasse', playable: true, tier: 8,
       desc: 'Zwölf schnell feuernde 15,2-cm-Rohre und Radar – die Granaten fliegen in hohem Bogen über Inseln hinweg.',
       sisters: ['USS Cleveland', 'USS Columbia', 'USS Montpelier', 'USS Denver', 'USS Santa Fe', 'USS Birmingham'],
-      hull: { type: 'CL', L: 186, beam: 20.2, draft: 6.3, deckH: 9.5, nation: 'us',
+      hull: { type: 'CL', L: 186, beam: 20.2, draft: 6.3, deckH: 9.5, nation: 'us', sternCat: true,
          sup: { x: 2, len: 50, w: 13, h: 18 }, funnels: [{ x: 7, r: 3.4, h: 12 }, { x: -10, r: 3.4, h: 12 }] },
       hp: 36900, speedKn: 32.5, accel: 16, turnR: 660, rudderShift: 7.9,
       detect: { surface: 11200, fire: 14600, smokeFire: 6100, torp: 1300 },
@@ -580,7 +581,7 @@ Object.assign(SHIPS, {
       key: 'Yamato', name: 'Yamato', className: 'Yamato-Klasse', playable: true, tier: 10,
       desc: 'Das größte Schlachtschiff aller Zeiten: neun 46-cm-Geschütze, die fast jede Panzerung überwältigen.',
       sisters: ['Yamato', 'Musashi'],
-      hull: { type: 'BB', L: 263, beam: 38.9, draft: 10.8, deckH: 15, nation: 'jp',
+      hull: { type: 'BB', L: 263, beam: 38.9, draft: 10.8, deckH: 15, nation: 'jp', sternCat: true,
          sup: { x: -8, len: 72, w: 22, h: 31 }, funnels: [{ x: -15, r: 6.2, h: 17, rake: 0.32 }],
          secMounts: [{ x: 19, c: true, guns: 3, up: 10, a: 0, k: 1.5 }, { x: -46, c: true, guns: 3, up: 7.5, a: Math.PI, k: 1.5 },
             { x: -8, guns: 3, a: Math.PI / 2, k: 1.5 }, { x: 6, guns: 2, a: 1.1, k: 0.8, up: 3 }, { x: -24, guns: 2, a: 2.1, k: 0.8, up: 3 }] },
@@ -623,7 +624,7 @@ Object.assign(SHIPS, {
       key: 'Richelieu', name: 'Richelieu', className: 'Richelieu-Klasse', playable: true, tier: 8,
       desc: 'Beide 38-cm-Vierlinge stehen auf dem Vorschiff: volle Feuerkraft im Angriff, nach achtern nur Mittelartillerie.',
       sisters: ['Richelieu', 'Jean Bart'],
-      hull: { type: 'BB', L: 247.9, beam: 33, draft: 9.6, deckH: 14, nation: 'fr',
+      hull: { type: 'BB', L: 247.9, beam: 33, draft: 9.6, deckH: 14, nation: 'fr', sternCat: true,
          sup: { x: -4, len: 66, w: 20, h: 29 }, funnels: [{ x: -19, r: 5.4, h: 16, rake: 0.42 }],
          secMounts: [{ x: -66, c: true, guns: 3, up: 0.3, a: Math.PI, k: 1.45 }, { x: -52, guns: 3, a: 2.55, k: 1.45 },
             { x: 14, guns: 2, a: 1.0, k: 0.8 }, { x: 0, guns: 2, a: Math.PI / 2, k: 0.8 }, { x: -14, guns: 2, a: 2.0, k: 0.8 }] },
@@ -695,7 +696,7 @@ Object.assign(SHIPS, {
       key: 'Littorio', name: 'Littorio', className: 'Littorio-Klasse', playable: true, tier: 8,
       desc: 'Elegant und schnell: neun 38,1-cm-Geschütze mit enormer Mündungsgeschwindigkeit, aber weiter Streuung.',
       sisters: ['Littorio', 'Vittorio Veneto', 'Roma'],
-      hull: { type: 'BB', L: 237.8, beam: 32.9, draft: 9.6, deckH: 13.5, nation: 'it',
+      hull: { type: 'BB', L: 237.8, beam: 32.9, draft: 9.6, deckH: 13.5, nation: 'it', sternCat: true,
          sup: { x: -4, len: 62, w: 19, h: 28 }, funnels: [{ x: -6, r: 4.6, h: 15 }, { x: -19, r: 4.6, h: 15 }],
          secMounts: [{ x: 29, guns: 3, a: 0.6, k: 1.35 }, { x: -45, guns: 3, a: 2.55, k: 1.35 },
             { x: 12, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: 3, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: -12, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: -24, guns: 1, a: Math.PI / 2, k: 0.7 }] },

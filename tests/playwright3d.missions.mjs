@@ -23,7 +23,7 @@ await page.waitForTimeout(800);
 // ---- fresh profile: two free ships, the others show a lock with their XP cost
 {
    const lk = await page.evaluate(() => [...document.querySelectorAll('.m3-card.lock')].map(e => e.dataset.ship + ':' + e.textContent.replace(/\s+/g, ' ').trim()));
-   if (lk.length !== 2 || !lk.every(s => /EP/.test(s))) { console.log('LOCK FAIL', lk); errors.push('locked ship cards'); }
+   if (lk.length < 2 || !lk.every(s => /EP/.test(s))) { console.log('LOCK FAIL', lk); errors.push('locked ship cards'); }
    console.log('locked', JSON.stringify(lk));
 }
 // ---- historical operations through the real menu: section, briefing screen, Esc / Enter

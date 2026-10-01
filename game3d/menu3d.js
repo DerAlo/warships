@@ -3,8 +3,8 @@
 // and hands the chosen { mission, ship, difficulty } to main3d via callbacks. Reads the menu
 // data the sim exports (MISSIONS, SHIP_STATS, SHIPS) and never touches the running world.
 import { MISSIONS, getMission, opStars } from './missions.js';
-import { SHIPS, SHIP_STATS, PLAYABLE, shipStats } from './config.js';
-import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, MODULES, SKILLS, captainLevel, skillPointsFree, isUnlocked, canUnlock,
+import { SHIPS, SHIP_STATS, PLAYABLE, shipStats, NATIONS, NATION_SHORT } from './config.js';
+import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, UNLOCK_CREDITS, unlockNeeds, MODULES, SKILLS, captainLevel, skillPointsFree, isUnlocked, canUnlock,
    unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout } from './progress3d.js';
 import { classSvg } from './hud.js';
 
@@ -22,6 +22,8 @@ const RATING_LABEL = [
 const RIBBON_ORDER = ['kill', 'citadel', 'pen', 'overpen', 'he', 'sec', 'torp', 'fire', 'flood', 'ricochet', 'shatter', 'spotted', 'cap'];
 const ESCAPE_LABEL = { arrived: 'angekommen', retreated: 'abgelaufen', escaped: 'entkommen' };
 const STORE_KEY ='warships3d.progress.v1';
+const CLASS_ORDER = { BB: 0, CA: 1, CL: 2, DD: 3 };
+const natOf = (k) => SHIPS[k]?.hull?.nation || 'de';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
@@ -54,7 +56,7 @@ const stars = (n) => '<span class="m3-stars">' + [1, 2, 3].map(i => `<i class="$
 function silhouetteSvg(key, w = 190, h = 58) {
    const c = SHIPS[key];
    if (!c) return '';
-   const H = c.hull, L = H.L, maxL = 255;
+   const H = c.hull, L = H.L, maxL = 272;
    const s = (w - 8) / maxL * Math.max(0.62, 1);
    const len = L * s, x0 = (w - len) / 2, wl = h * 0.7;
    const X = (x) => x0 + (x + L / 2) * s;                  // ship-local metres -> px
@@ -87,7 +89,7 @@ function silhouetteSvg(key, w = 190, h = 58) {
       const bl = tw * 0.9, by = y + th * 0.4;
       p += `<rect x="${(aft ? x - tw / 2 - bl : x + tw / 2).toFixed(1)}" y="${by.toFixed(1)}" width="${bl.toFixed(1)}" height="1.1"/>`;
    }
-   return `<svg class="m3-sil" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><line class="wl" x1="0" x2="${w}" y1="${wl}" y2="${wl}"/><g>${p}</g></svg>`;
+   return `<svg class="m3-sil" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet"><line class="wl" x1="0" x2="${w}" y1="${wl}" y2="${wl}"/><g>${p}</g></svg>`;
 }
 
 // ---------------------------------------------------------------- persistence (per viewer)
@@ -160,7 +162,9 @@ const CSS = `
 .m3-brief p { font-size:13.5px; line-height:1.55; color:#c9d8e6; }
 .m3-ship { padding:14px 16px; border-radius:4px; background:rgba(6,14,24,.84); border:1px solid rgba(150,190,230,.14); overflow:auto; scrollbar-width:thin; }
 .m3-ship .nm { font-size:24px; font-weight:900; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
-.m3-ship .cl { font-size:12px; color:#9db4c8; margin:2px 0 10px; }
+.m3-ship .cl { font-size:12px; color:#9db4c8; margin:2px 0 6px; }
+.m3-ship .cl b { color:#d6b25e; font-weight:800; letter-spacing:.5px; }
+.m3-ship .ds { font-size:12px; line-height:1.45; color:#c9d8e6; margin:0 0 10px; }
 .m3-ship .bars { display:flex; flex-direction:column; gap:7px; margin:8px 0 12px; }
 .m3-bar { font-size:11.5px; color:#b6cadb; }
 .m3-bar .l { display:flex; justify-content:space-between; margin-bottom:2px; }
@@ -170,24 +174,37 @@ const CSS = `
 .m3-kv span:nth-child(odd) { color:#8aa3ba; } .m3-kv span:nth-child(even) { text-align:right; color:#e6f0fa; font-variant-numeric:tabular-nums; }
 .m3-cons { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
 .m3-cons span { font-size:11px; padding:3px 7px; border-radius:3px; background:rgba(90,160,230,.14); color:#cfe6ff; }
-.m3-car { flex:none; display:flex; justify-content:center; gap:10px; padding:10px 22px 16px; overflow-x:auto;
-   background:linear-gradient(0deg, rgba(3,9,16,.97), rgba(3,9,16,.7)); border-top:1px solid rgba(150,190,230,.14); }
-.m3-card { position:relative; cursor:pointer; flex:none; width:206px; padding:7px 8px 8px; border-radius:4px; background:rgba(10,22,36,.9);
+.m3-dock { flex:none; min-width:0; background:linear-gradient(0deg, rgba(3,9,16,.97), rgba(3,9,16,.7)); border-top:1px solid rgba(150,190,230,.14); }
+.m3-tabs { display:flex; justify-content:center; flex-wrap:wrap; gap:4px; padding:7px 22px 0; }
+.m3-tabs button { cursor:pointer; border:1px solid rgba(150,190,230,.16); border-radius:3px; padding:4px 11px; background:rgba(0,0,0,.3); color:#8fa8bf;
+   font:800 11px var(--font,"Segoe UI"); letter-spacing:1.2px; text-transform:uppercase; white-space:nowrap; }
+.m3-tabs button:hover { color:#fff; border-color:rgba(150,190,230,.4); }
+.m3-tabs button.sel { color:#fff; background:linear-gradient(180deg,#2f6ea8,#1f4d7a); border-color:#5aa0e0; }
+.m3-tabs button.dim { opacity:.45; }
+.m3-tabs button i { font-style:normal; font-weight:700; color:#7f9bb5; margin-left:5px; letter-spacing:0; } .m3-tabs button.sel i { color:#cfe6ff; }
+.m3-car { display:flex; gap:10px; padding:12px 22px 14px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#35506a transparent; }
+.m3-car > :first-child { margin-left:auto; } .m3-car > :last-child { margin-right:auto; }
+.m3-nat { flex:none; align-self:stretch; display:flex; align-items:center; padding:0 2px 0 8px; border-left:1px solid rgba(214,178,94,.35);
+   font-size:10px; font-weight:800; letter-spacing:2px; color:#d6b25e; text-transform:uppercase; writing-mode:vertical-rl; transform:rotate(180deg); }
+.m3-card.gs { margin-left:10px; }
+.m3-card { position:relative; cursor:pointer; flex:none; width:clamp(150px, calc((100vw - 104px) / 7.2), 206px); padding:7px 8px 8px; border-radius:4px; background:rgba(10,22,36,.9);
    border:1px solid rgba(150,190,230,.14); transition:border-color .12s, background .12s, transform .12s; }
 .m3-card:hover { border-color:rgba(150,190,230,.4); transform:translateY(-2px); }
 .m3-card.sel { border-color:#8fd3ff; background:linear-gradient(180deg, rgba(40,96,146,.9), rgba(12,30,50,.94)); box-shadow:0 0 20px rgba(80,160,240,.3); }
 .m3-card.off { cursor:not-allowed; opacity:.38; transform:none; }
-.m3-card .hd { display:flex; align-items:center; gap:5px; font-size:13px; font-weight:800; }
+.m3-card .hd { display:flex; align-items:center; gap:5px; font-size:13px; font-weight:800; white-space:nowrap; }
+.m3-card .hd .nm2 { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.m3-card .hd .tr { flex:none; font-size:10.5px; color:#d6b25e; letter-spacing:.5px; min-width:17px; }
 .m3-card .hd .ty { margin-left:auto; font-size:10.5px; font-weight:700; color:#9db4c8; letter-spacing:1px; }
 .m3-card .rec { position:absolute; top:-8px; right:8px; font-size:9.5px; font-weight:800; letter-spacing:1px; padding:1px 6px; border-radius:2px; background:#ffc94a; color:#1b1300; }
 .m3-card .lk { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#cfe0f0; }
-.m3-sil { display:block; margin:3px auto 0; }
+.m3-sil { display:block; width:100%; height:auto; margin:3px auto 0; }
 .m3-sil .wl { stroke:rgba(120,180,230,.25); stroke-width:1; }
 .m3-sil g { fill:#b9cde0; } .m3-card.sel .m3-sil g { fill:#eaf5ff; }
 .m3 .cls { vertical-align:-1px; }
 .m3-ally { color:#5dff8c; } .m3-enemy { color:#ff5a4d; }
 @media (max-width: 1150px) { .m3-main { grid-template-columns:300px 1fr; } .m3-brief { display:none; } .m3-battle { padding:11px 30px; font-size:18px; } }
-@media (max-height: 720px) { .m3-brief p { font-size:12.5px; } .m3-car { padding-bottom:10px; } }
+@media (max-height: 720px) { .m3-brief p { font-size:12.5px; } .m3-car { padding-bottom:10px; } .m3-tabs { padding-top:5px; } }
 
 /* ---------------- results ---------------- */
 .m3r { position:absolute; inset:0; z-index:21; display:flex; flex-direction:column; color:#e6f0fa; font-family:var(--font,"Segoe UI",sans-serif);
@@ -235,7 +252,8 @@ const CSS = `
 .m3-capt { cursor:pointer; position:relative; border:1px solid rgba(214,178,94,.45); border-radius:3px; padding:7px 10px; background:rgba(0,0,0,.3); color:#d6b25e; font:800 12px var(--font,"Segoe UI"); letter-spacing:1.5px; }
 .m3-capt:hover { border-color:#d6b25e; color:#fff; } .m3-capt b { color:#fff; margin-left:3px; }
 .m3-capt i { position:absolute; top:-7px; right:-7px; min-width:16px; height:16px; border-radius:8px; background:#ffc94a; color:#1b1300; font:900 10.5px/16px var(--font,"Segoe UI"); font-style:normal; letter-spacing:0; }
-.m3-card.lock .lk { flex-direction:column; gap:2px; background:rgba(4,10,18,.5); font-size:12px; font-weight:800; color:#8fd3ff; letter-spacing:.5px; }
+.m3-card.lock .lk { flex-direction:column; gap:2px; background:rgba(4,10,18,.5); font-size:12px; font-weight:800; color:#8fd3ff; letter-spacing:.5px; line-height:1.15; }
+.m3-card.lock .lk .kr { color:#ffd479; font-size:11px; }
 .m3-prog { margin-top:12px; padding-top:10px; border-top:1px solid rgba(150,190,230,.12); }
 .m3-mod { display:grid; grid-template-columns:92px 32px 1fr auto; align-items:center; gap:6px; font-size:11.5px; padding:3px 0; }
 .m3-mod .n { color:#b6cadb; font-weight:700; } .m3-mod .fx { color:#8fd3ff; font-size:10.5px; } .m3-mod .max { color:#7f9bb5; font-size:10.5px; font-weight:800; letter-spacing:1px; }
@@ -286,6 +304,7 @@ export class Menu3D {
       this.difficulty = ['easy', 'normal', 'hard'].includes(sel.difficulty) ? sel.difficulty : 'normal';
       this.ship = SHIPS[sel.ship] ? sel.ship : null;
       this._fixShip();
+      this.nation = natOf(this.ship);      // carousel tab: a nation key or 'all'
       this.root.className = 'm3 hidden';
       this.root.innerHTML = '';
       this.resRoot.className = 'm3r hidden';
@@ -319,6 +338,11 @@ export class Menu3D {
       if (ok(this.ship)) return;
       const rec = getMission(this.mission)?.recommendedShip;
       this.ship = ok(rec) ? rec : (allowed.find(ok) || allowed[0]);
+      if (this.nation !== 'all') this.nation = natOf(this.ship);
+   }
+   selectNation(n) {
+      if (n !== 'all' && !NATIONS.includes(n)) return;
+      this.nation = n; this.render(); this.cb.onClick?.();
    }
    // loadout snapshot main3d hands to the World for the player ship
    loadout(ship) { return loadoutFor(this.profile, ship); }
@@ -417,10 +441,13 @@ export class Menu3D {
       const allowed = this._allowed();
       const pr = this.progress;
       const shipLocked = !isUnlocked(pf, k0), cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
+      const need = shipLocked ? unlockNeeds(pf, k0) : null, crCost = UNLOCK_CREDITS[k0] || 0;
+      const needTxt = need ? [need.req ? `Erfordert ${SHIPS[need.req]?.name || need.req}` : '', need.xp ? `Noch ${fmtInt(need.xp)} EP benötigt` : '',
+         need.credits ? `Noch ${fmtInt(need.credits)} Kr. benötigt` : ''].filter(Boolean).join(' · ') : '';
       const prog = !S ? '' : shipLocked ? `<div class="m3-prog">
-            <div class="m3-h"><span>Forschung</span><span>${fmtInt(pf.xp)} EP verfügbar</span></div>
-            <button class="m3-buy big" data-act="unlock" ${canUnlock(pf, k0) ? '' : 'disabled'}>ERFORSCHEN · ${fmtInt(UNLOCK_XP[k0])} EP</button>
-            ${canUnlock(pf, k0) ? '' : `<div class="hint">Noch ${fmtInt(UNLOCK_XP[k0] - pf.xp)} EP benötigt</div>`}</div>`
+            <div class="m3-h"><span>Forschung</span><span>${fmtInt(pf.xp)} EP · ${fmtInt(pf.credits)} Kr.</span></div>
+            <button class="m3-buy big" data-act="unlock" ${canUnlock(pf, k0) ? '' : 'disabled'}>ERFORSCHEN · ${fmtInt(UNLOCK_XP[k0])} EP${crCost ? ` · ${fmtInt(crCost)} Kr.` : ''}</button>
+            ${needTxt ? `<div class="hint">${esc(needTxt)}</div>` : ''}</div>`
          : `<div class="m3-prog"><div class="m3-h"><span>Module</span><span>${fmtInt(pf.credits)} Kr.</span></div>
             ${MODULES.map(d => {
                const t = moduleTier(pf, k0, d.key), c = moduleCost(pf, k0, d.key);
@@ -455,7 +482,8 @@ export class Menu3D {
          <p>${esc(m.briefing)}</p>`;
       const shipPanel = S ? `
          <div class="nm">${classSvg(S.type, 18)}${esc(S.name)}</div>
-         <div class="cl">${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
+         <div class="cl">${S.tierRoman ? `<b>Stufe ${S.tierRoman}</b> · ` : ''}${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
+         ${S.desc ? `<p class="ds">${esc(S.desc)}</p>` : ''}
          <div class="bars">${RATING_LABEL.map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
          ${prog}
          <div class="m3-kv">
@@ -474,15 +502,32 @@ export class Menu3D {
          </div>
          <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>` : '';
       // fixed op ships (Duke of York, Washington ...) join the row only while their operation is selected
-      const cards = [...PLAYABLE, ...allowed.filter(k => !PLAYABLE.includes(k))].map(k => {
-         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !isUnlocked(pf, k);
-         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Gesperrt — mit EP erforschen' : '') : 'In dieser Mission nicht verfügbar'}">
+      // the port line-up: one tab per navy, each sorted by class (BB, CA, CL, DD) and tier
+      const roster = [...PLAYABLE, ...allowed.filter(k => !PLAYABLE.includes(k))];
+      const byNat = {};
+      for (const n of NATIONS) byNat[n] = roster.filter(k => natOf(k) === n).sort((a, c) =>
+         (CLASS_ORDER[SHIP_STATS[a].type] ?? 9) - (CLASS_ORDER[SHIP_STATS[c].type] ?? 9) || SHIP_STATS[a].tier - SHIP_STATS[c].tier);
+      const tab = this.nation === 'all' || NATIONS.includes(this.nation) ? this.nation : natOf(k0);
+      const card = (k, i, list) => {
+         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !isUnlocked(pf, k), cr = UNLOCK_CREDITS[k] || 0;
+         const gs = i > 0 && SHIP_STATS[list[i - 1]].type !== st.type;
+         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Gesperrt — mit EP und Kreditpunkten erforschen' : esc(st.typeName + ' · Stufe ' + st.tierRoman)) : 'In dieser Mission nicht verfügbar'}">
             ${m.recommendedShip === k && ok ? '<span class="rec">EMPFOHLEN</span>' : ''}
-            <div class="hd">${classSvg(st.type, 13)}<span>${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
+            <div class="hd"><span class="tr">${st.tierRoman}</span>${classSvg(st.type, 13)}<span class="nm2">${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
             ${silhouetteSvg(k)}
-            ${ok ? (lk ? `<div class="lk">${icon('lock', 20)}<span>${fmtInt(UNLOCK_XP[k])} EP</span></div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}
+            ${ok ? (lk ? `<div class="lk">${icon('lock', 18)}<span>${fmtInt(UNLOCK_XP[k])} EP</span>${cr ? `<span class="kr">${fmtInt(cr)} Kr.</span>` : ''}</div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}
          </div>`;
+      };
+      const cards = tab === 'all'
+         ? NATIONS.filter(n => byNat[n].length).map(n => `<div class="m3-nat">${esc(NATION_SHORT[n])}</div>` + byNat[n].map(card).join('')).join('')
+         : byNat[tab].map(card).join('');
+      const tabs = [...NATIONS.filter(n => byNat[n].length), 'all'].map(n => {
+         const list = n === 'all' ? roster : byNat[n], have = list.filter(k => isUnlocked(pf, k)).length;
+         const dim = n !== 'all' && !list.some(k => allowed.includes(k));
+         return `<button data-nat="${n}" class="${n === tab ? 'sel' : ''} ${dim ? 'dim' : ''}">${n === 'all' ? 'Alle' : esc(NATION_SHORT[n])}<i>${have}/${list.length}</i></button>`;
       }).join('');
+      const oldCar = this.root.querySelector('.m3-car'), keepScroll = oldCar && this._carTab === tab ? oldCar.scrollLeft : null;
+      this._carTab = tab;
       this.root.innerHTML = `
          <div class="m3-top">
             <div class="m3-left"><div class="m3-logo">WARSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
@@ -499,7 +544,12 @@ export class Menu3D {
             <div class="m3-brief">${brief}</div>
             <div class="m3-col"><div class="m3-h"><span>Schiff</span></div><div class="m3-ship">${shipPanel}</div></div>
          </div>
-         <div class="m3-car">${cards}</div>`;
+         <div class="m3-dock"><div class="m3-tabs">${tabs}</div><div class="m3-car">${cards}</div></div>`;
+      const car = this.root.querySelector('.m3-car');
+      if (keepScroll !== null) car.scrollLeft = keepScroll;
+      else car.querySelector('.m3-card.sel')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+      car.addEventListener('wheel', (e) => { if (car.scrollWidth > car.clientWidth && e.deltaY) { car.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+      this.root.querySelectorAll('[data-nat]').forEach(el => el.addEventListener('click', () => this.selectNation(el.dataset.nat)));
       this.root.querySelectorAll('[data-mis]').forEach(el => el.addEventListener('click', () => this.selectMission(el.dataset.mis)));
       this.root.querySelectorAll('[data-ship]').forEach(el => el.addEventListener('click', () => this.selectShip(el.dataset.ship)));
       this.root.querySelectorAll('[data-diff]').forEach(el => el.addEventListener('click', () => {

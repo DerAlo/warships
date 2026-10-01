@@ -5,6 +5,7 @@ import assert from 'node:assert';
 import { World } from '../game3d/state.js';
 import { SHIPS } from '../game3d/config.js';
 import * as PG from '../game3d/progress3d.js';
+import './fleet3d.test.mjs';       // roster, tech tree and bot line-up tests run with this suite
 
 const memStore = (init = {}) => { const m = { ...init }; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, m }; };
 

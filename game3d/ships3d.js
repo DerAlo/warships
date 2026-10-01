@@ -255,10 +255,26 @@ function planShape(x0, x1, hw, rf = 0, ra = 0) {
    return s;
 }
 
+// Per-navy look. fam: tower family ('de' tower mast with foretop director / 'uk' block bridge +
+// tripods), fun: funnel style ('de' cap + searchlight ring, 'jp' cap only, 'uk' plain with black
+// top and steam pipes), rake: default funnel rake, german: Wackeltopp domes + searchlight tower,
+// pagoda: one more bridge level.
+const NATION_STYLE = {
+   de: { fam: 'de', fun: 'de', rake: 0, german: true },
+   uk: { fam: 'uk', fun: 'uk', rake: 0.03 },
+   us: { fam: 'de', fun: 'uk', rake: 0 },
+   jp: { fam: 'de', fun: 'jp', rake: 0.06, pagoda: true },
+   fr: { fam: 'de', fun: 'uk', rake: 0.03 },
+   it: { fam: 'de', fun: 'jp', rake: 0 },
+   su: { fam: 'de', fun: 'uk', rake: 0.06 },
+};
+const GUN_OFFS = { 1: [0], 2: [-0.3, 0.3], 3: [-0.42, 0, 0.42] };
+
 function superstructure(b, d, S, tl, col, ship) {
    const { L, B, type } = d;
    const hull = ship.cfg?.hull || {};
-   const nat = hull.nation === 'uk' || hull.nation === 'us' ? 'uk' : 'de';
+   const st = NATION_STYLE[hull.nation] || NATION_STYLE.de;
+   const nat = st.fam;
    const lv = 2.6;            // one deck level (m)
    const { sup, dark, mast, win, plat } = col;
    const hw = (x) => S.halfDeckAt(x);
@@ -319,7 +335,7 @@ function superstructure(b, d, S, tl, col, ship) {
    const secTurret = (x, y, z, r, a, guns = 2) => {
       const g = new THREE.CylinderGeometry(r * 0.88, r, r * 0.72, 10); g.translate(0, r * 0.36, 0);
       b.put(g, x, y, z, shade(sup, 0.97), 0, -a, 0, 1.3, 1, 1);
-      for (const o of (guns === 1 ? [0] : [-0.3, 0.3])) {
+      for (const o of GUN_OFFS[guns] || GUN_OFFS[2]) {
          const bg = new THREE.CylinderGeometry(0.11 * r, 0.15 * r, r * 2.5, 6).rotateZ(-Math.PI / 2 + 0.08).translate(r * 2.4, 0, o * r);
          b.put(bg, x, y + r * 0.42, z, dark, 0, -a, 0);
       }
@@ -358,7 +374,7 @@ function superstructure(b, d, S, tl, col, ship) {
       // sim radii are hit-box sized; small-ship funnels read oversized at full r
       const small = type === 'DD' || type === 'TR';
       const rx = f.r * (small ? 0.78 : 1), rz = rx * (style === 'uk' ? 0.72 : 0.64);
-      const rake = type === 'DD' || type === 'TR' ? 0.09 : style === 'uk' ? 0.03 : 0;
+      const rake = Number.isFinite(f.rake) ? f.rake : small ? 0.09 : st.rake;
       // body + black top band as separate rings (one height segment would smear the band
       // colour down the whole funnel)
       const hb = h * (style === 'uk' ? 0.86 : 0.95);
@@ -367,10 +383,10 @@ function superstructure(b, d, S, tl, col, ship) {
       const gt = new THREE.CylinderGeometry(1, 1.004, h - hb, 20); gt.translate(0, hb + (h - hb) / 2, 0); gt.scale(rx, 1, rz);
       b.put(gt, fx, fy, 0, col.cap, 0, 0, rake);
       const tx = fx - Math.sin(rake) * h, ty = fy + Math.cos(rake) * h;
-      if (style === 'de') {
+      if (style !== 'uk') {
          const cap = new THREE.CylinderGeometry(1.1, 1.0, 1.4, 20); cap.translate(0, 0.7, 0); cap.scale(rx, 1, rz);
          b.put(cap, tx, ty - 0.5, 0, col.capMetal, 0, 0, rake);
-         if (type !== 'DD' && type !== 'TR') {   // searchlight platform ring
+         if (style === 'de' && type !== 'DD' && type !== 'TR') {   // searchlight platform ring
             const yp = fy + h * 0.58;
             slab(fx - rx * 1.5, fx + rx * 1.5, yp, rz * 1.85, 0.9, 0.9);
             for (const s of [1, -1]) { searchlight(fx + rx * 0.3, yp, s * rz * 1.42); searchlight(fx - rx * 1.0, yp, s * rz * 1.2); }
@@ -394,11 +410,11 @@ function superstructure(b, d, S, tl, col, ship) {
          P(new THREE.BoxGeometry(0.14, 1.35, 0.14), 1.1, 0.95, s * 1.7, dark);
       }
    };
-   const catapult = (x, y, l, a, withPlane) => {
-      b.cyl(1.0, 1.2, 0.9, x, y, 0, dark, 10);
-      b.put(new THREE.BoxGeometry(l, 0.55, 1.2), x, y + 1.2, 0, mast, 0, -a, 0);
-      b.put(new THREE.BoxGeometry(l * 0.92, 0.35, 0.6), x, y + 0.85, 0, dark, 0, -a, 0);
-      if (withPlane) seaplane(x, y + 1.5, 0, a);
+   const catapult = (x, y, l, a, withPlane, z = 0) => {
+      b.cyl(1.0, 1.2, 0.9, x, y, z, dark, 10);
+      b.put(new THREE.BoxGeometry(l, 0.55, 1.2), x, y + 1.2, z, mast, 0, -a, 0);
+      b.put(new THREE.BoxGeometry(l * 0.92, 0.35, 0.6), x, y + 0.85, z, dark, 0, -a, 0);
+      if (withPlane) seaplane(x, y + 1.5, z, a);
    };
    const crane = (x, y0, z, h, jib, dir) => {
       b.cyl(0.55, 0.8, h, x, y0, z, mast, 8);
@@ -505,7 +521,7 @@ function superstructure(b, d, S, tl, col, ship) {
    const hwA = Math.max(1.5, Math.min(W / 2, hw(xm) * (capital ? 0.7 : 0.66)));
    const funnels = (Array.isArray(hull.funnels) && hull.funnels.length ? hull.funnels
       : (FUN_DEF[type] || []).map(([f, r, h]) => ({ x: x1 - f * (x1 - x0), r: r * B, h })))
-      .map(f => ({ x: Number(f.x) || 0, r: Math.max(0.8, Number(f.r) || B * 0.15), h: Math.max(3, Number(f.h) || 10) }))
+      .map(f => ({ x: Number(f.x) || 0, r: Math.max(0.8, Number(f.r) || B * 0.15), h: Math.max(3, Number(f.h) || 10), rake: f.rake }))
       .sort((a, c) => c.x - a.x);
    const fFront = funnels.length ? funnels[0].x + funnels[0].r + 2.5 : x0 + (x1 - x0) * 0.4;
    const fBack = funnels.length ? funnels[funnels.length - 1].x - funnels[funnels.length - 1].r - 1 : fFront - 4;
@@ -577,8 +593,8 @@ function superstructure(b, d, S, tl, col, ship) {
       const xmF = xf - lenB * 0.85, yM = yb + lv * 1.1, topM = yD(xf) + H * 1.35;
       if (nat === 'uk') tripod(xmF, yM, topM - yM, 2.2); else pole(xmF, yM, topM - yM, 0.4);
       yard(xmF, topM - (topM - yM) * 0.25, hwD * 3);
-      for (const f of funnels) funnel(f, nat);
-      if (nat === 'de' && funnels.length >= 2) {   // searchlight tower between the funnels
+      for (const f of funnels) funnel(f, st.fun);
+      if (st.german && funnels.length >= 2) {   // searchlight tower between the funnels
          const xs = (funnels[0].x + funnels[1].x) / 2, ys = yD(xs);
          b.cyl(0.9, 1.1, lv * 1.4, xs, ys, 0, sup, 10);
          slab(xs - 1.8, xs + 1.8, ys + lv * 1.4 + 0.02, 1.8, 0.9, 0.9);
@@ -605,13 +621,18 @@ function superstructure(b, d, S, tl, col, ship) {
       house(bx0, bx1, y0, hA, hwA, 0.55, 0.35);
       slab(bx0 - 0.3, bx1 + 0.3, y0 + hA + 0.02, hwA + 0.35, 0.55, 0.35);
       const yA = y0 + hA;
-      const tw = hwA * 0.8, xf = bx1 - 0.5;
+      // visible secondaries: hull.secMounts ({ x, guns, a, k, up, c }) or three twin pairs
+      const secR = clamp(B * 0.065, 1.4, 2.4);
+      const secC = (Array.isArray(hull.secMounts) ? hull.secMounts : []).filter(m => m.c);
+      const tw = hwA * 0.8;
+      // a centreline secondary turret ahead of the bridge pushes the tower aft of it
+      const xf = Math.min(bx1 - 0.5, ...secC.filter(m => m.x > xm).map(m => m.x - secR * (m.k || 1) * 1.7));
       const lenT = clamp(Math.min(blen * 0.24, xf - fFront - 3), 6, L * 0.12);
-      const nLev = clamp(Math.floor(H * 0.5 / lv), 3, 6);
+      const nLev = clamp(Math.floor(H * 0.5 / lv), 3, 6) + (st.pagoda ? 1 : 0);
       const top = y0 + H;
       const T = nat === 'uk' ? ukTower(xf, yA, top, tw, nLev, lenT) : deTower(xf, yA, top, tw, nLev, lenT, isBB);
       const acL = Math.max(4, blen * 0.055);
-      const xAC = bx0 + Math.max(acL + 1, blen * 0.08);
+      const xAC = Math.max(bx0 + Math.max(acL + 1, blen * 0.08), ...secC.filter(m => m.x <= xm && m.x > bx0 - 2).map(m => m.x + secR * (m.k || 1) * 1.7 + acL));
       const hAC = lv * (isBB ? 2 : 1.5);
       // level B from the tower back to the aft control position
       const hwB = hwA * 0.62, bB0 = xAC + acL - 1, bB1 = T.xr + 1;
@@ -621,7 +642,7 @@ function superstructure(b, d, S, tl, col, ship) {
          slab(bB0 - 0.3, bB1 + 0.3, yA + lv + 0.02, hwB + 0.3, 0.3, 0.3);
       }
       const yB = yA + lv;
-      for (const f of funnels) funnel(f, nat);
+      for (const f of funnels) funnel(f, st.fun);
       // aft control position + mainmast
       house(xAC - acL, xAC + acL, yA, hAC, hwA * 0.5, 0.7, 0.7);
       slab(xAC - acL - 0.3, xAC + acL + 0.3, yA + hAC + 0.02, hwA * 0.5 + 0.35, 0.7, 0.7);
@@ -632,7 +653,11 @@ function superstructure(b, d, S, tl, col, ship) {
       yard(xMM, mmTop - (mmTop - yA) * 0.2, tw * 2);
       // aircraft between the aft funnel and the aft control position
       const room = fBack - (xAC + acL), catX = (fBack + xAC + acL) / 2;
-      if (room > 5 && (nat === 'de' || type !== 'BB' || funnels.length >= 2)) {
+      if (hull.sternCat) {   // catapults on the quarterdeck
+         const xc = -L * (hull.sternCat === true ? 0.43 : hull.sternCat), zc = hw(xc) * 0.55, cl = Math.min(18, L * 0.075);
+         for (const s of [1, -1]) catapult(xc, yD(xc), cl, s * 0.22, s > 0, s * zc);
+         crane(xc - cl * 0.75, yD(xc - cl * 0.75), 0, lv * 2.2, 9, -1);
+      } else if (room > 5 && (nat === 'de' || type !== 'BB' || funnels.length >= 2)) {
          const across = isBB || nat === 'uk';
          const cl = across ? Math.min(W * 1.15, hw(catX) * 1.7) : Math.min(room * 0.9, 16);
          catapult(catX, hasB ? yB : yA, cl, across ? Math.PI / 2 : 0.3, room > 12);
@@ -645,14 +670,20 @@ function superstructure(b, d, S, tl, col, ship) {
       const bl = clamp(L * 0.04, 6, 10);
       for (const f of funnels) {
          const onB = hasB && f.x > bB0 && f.x < bB1;
-         for (const s of [1, -1]) boat(f.x - f.r * 0.2, onB ? yB : yA, s * (f.r * (nat === 'uk' ? 0.72 : 0.64) + bl * 0.13 + 0.25), bl, s > 0);
+         for (const s of [1, -1]) boat(f.x - f.r * 0.2, onB ? yB : yA, s * (f.r * (st.fun === 'uk' ? 0.72 : 0.64) + bl * 0.13 + 0.25), bl, s > 0);
       }
       // secondaries and AA
       if (isBB) {
-         const r = clamp(B * 0.065, 1.4, 2.4);
-         [T.xr + lenT * 0.45, (fFront + fBack) / 2, xAC + acL * 1.3].forEach((x, i) => {
-            for (const s of [1, -1]) secTurret(x, yD(x), s * Math.min(hwA + r * 1.4, hw(x) - r * 1.2), r, s * [0.9, Math.PI / 2, 2.25][i]);
-         });
+         const mounts = Array.isArray(hull.secMounts) ? hull.secMounts
+            : [T.xr + lenT * 0.45, (fFront + fBack) / 2, xAC + acL * 1.3].map((x, i) => ({ x, a: [0.9, Math.PI / 2, 2.25][i] }));
+         for (const m of mounts) {
+            const r = secR * (m.k || 1), up = m.up || 0, x = m.x, yb = yD(x);
+            for (const s of m.c ? [0] : [1, -1]) {
+               const z = s * Math.min(hwA + r * 1.4, hw(x) - r * 1.2);
+               if (up > 0.5) b.cyl(r * 0.92, r * 0.98, up, x, yb, z, shade(sup, 0.92), 12);   // barbette
+               secTurret(x, yb + up, z, r, m.c ? m.a || 0 : s * (m.a ?? Math.PI / 2), m.guns || 2);
+            }
+         }
       }
       const zRoof = (hwA + hwB) / 2;
       if (nat === 'de') {
@@ -660,18 +691,18 @@ function superstructure(b, d, S, tl, col, ship) {
             for (const x of [T.xr - 2.5, (T.xr + fFront) / 2, fFront + 1, xAC + acL + 1.8]) {
                for (const s of [1, -1]) aaTwin(x, yA, s * zRoof, 1.5, s * 1.3);
             }
-            for (const x of [T.xr - 1.5, (T.xr + fFront) / 2 + 3]) for (const s of [1, -1]) aaDome(x, yB, s * hwB * 0.55);
+            if (st.german) for (const x of [T.xr - 1.5, (T.xr + fFront) / 2 + 3]) for (const s of [1, -1]) aaDome(x, yB, s * hwB * 0.55);
          } else {
             const r = clamp(B * 0.05, 0.9, 1.4);
             for (const x of [T.xr + 2, (fFront + fBack) / 2, fBack - 3]) {
                for (const s of [1, -1]) aaTwin(x, yD(x), s * Math.min(hwA + r * 1.3, hw(x) - r * 1.1), r, s * 1.4);
             }
-            for (const s of [1, -1]) aaDome(T.xr - 1.5, yB, s * hwB * 0.5);
+            if (st.german) for (const s of [1, -1]) aaDome(T.xr - 1.5, yB, s * hwB * 0.5);
          }
       } else {
          for (const x of [fFront + 1, fBack - 2]) for (const s of [1, -1]) pompom(x, yA, s * Math.min(zRoof + 0.3, hwA - 1.2), s * 0.3);
       }
-      if (torpL && !isBB) launchers();
+      if (torpL) launchers();
    }
 
    if (type !== 'CV') {
