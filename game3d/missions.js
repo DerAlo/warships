@@ -3,6 +3,7 @@
 // updateMission are called by World. Mission text is German (UI), code English.
 import { SHIPS, PLAYABLE } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
+import { extraMissions } from './missions_extra.js';
 
 // ---------------------------------------------------------------- names
 const POOLS = {
@@ -877,6 +878,14 @@ function rheinCheck(w) {
       w.mission.objectives = o.filter(x => x.id !== 'break');   // the alternative is moot now
       w.end(true, 'Die Dänemarkstraße gehört der Kriegsmarine.');
    }
+}
+
+// second batch (missions_extra.js): three battles are listed with the battles, four ops after the ops
+{
+   const extra = extraMissions({ P, add, objective, setObj, objText, later, radio, zone, inZone, islands, combatants, spawnTeam, teamHPFrac, SHIPS });
+   const firstOp = DEFS.findIndex(d => d.group === 'ops');
+   DEFS.splice(firstOp < 0 ? DEFS.length : firstOp, 0, ...extra.filter(d => d.group !== 'ops'));
+   DEFS.push(...extra.filter(d => d.group === 'ops'));
 }
 
 // ---------------------------------------------------------------- public API

@@ -11,6 +11,8 @@ import { classSvg } from './hud.js';
 const TYPE_LABEL = {
    training: 'Übung', annihilation: 'Vernichtung', domination: 'Herrschaft', escort: 'Geleitschutz',
    historic: 'Historisch', survival: 'Überleben', raid: 'Handelskrieg',
+   defense: 'Verteidigung', delay: 'Nachhut', fleet: 'Flottenschlacht', breakout: 'Durchbruch',
+   torpedo: 'Torpedoangriff', harbour: 'Hafenüberfall',
 };
 const TIME_LABEL = { day: 'Tag', dawn: 'Morgengrauen', dusk: 'Abenddämmerung', night: 'Nacht' };
 const WEATHER_LABEL = { clear: 'Klar', overcast: 'Bewölkt', rain: 'Regen', storm: 'Sturm' };
