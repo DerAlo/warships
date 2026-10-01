@@ -1,7 +1,7 @@
 // game3d/missions.js — singleplayer missions: maps (islands), environment, teams, objectives,
 // scripted reinforcements and win/lose logic. MISSIONS is pure data for the menu; setupMission /
 // updateMission are called by World. Mission text is German (UI), code English.
-import { SHIPS, PLAYABLE } from './config.js';
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, NATION_BLOC } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 
 // ---------------------------------------------------------------- names
@@ -22,7 +22,7 @@ const POOLS = {
 };
 function nextName(w, cls, side) {
    const S = w._script;
-   const pool = POOLS[cls === 'Transport' ? 'Transport_' + side : cls] || [SHIPS[cls].name];
+   const pool = POOLS[cls === 'Transport' ? 'Transport_' + side : cls] || SHIPS[cls].sisters || [SHIPS[cls].name];
    for (const n of pool) if (!S.used.has(n)) { S.used.add(n); return n; }
    const n = pool[0] + ' ' + (++S.dup + 1);
    S.used.add(n);
@@ -137,9 +137,26 @@ const DE_TEAM = [['Bismarck', 0, -700], ['Scharnhorst', -300, 700], ['Hipper', 5
    ['Nuernberg', 700, -4000], ['Z23', 1600, -1600], ['Z23', 1600, 1600]];
 const UK_TEAM = [['KGV', 0, -700], ['Rodney', -300, 700], ['Norfolk', 500, -2500], ['Norfolk', 500, 2500],
    ['Fiji', 700, 4000], ['Jervis', 1600, -1600], ['Jervis', 1600, 1600]];
+// Random-battle line-ups: each slot draws a comparable class from config.BOT_POOLS (seeded by the
+// world seed and the slot index only, so both teams roll the same weight class and the sim's own
+// rng stream stays untouched). A player sailing for the other bloc (Allied ship in the Axis
+// line-up) swaps the two fleets: the player's team is always called first.
+function rollFleet(w, slots, playerCls) {
+   const S = w._script;
+   if (playerCls) S.swap = (NATION_BLOC[SHIPS[playerCls].hull.nation] || 'axis') !== (BOT_POOLS.axis[slots[0][0]] ? 'axis' : 'allies');
+   return slots.map(([cls, fx, fy], i) => {
+      const base = S.swap && BOT_MIRROR[cls] ? BOT_MIRROR[cls] : cls;
+      const pool = BOT_POOLS.axis[base] || BOT_POOLS.allies[base];
+      if (!pool) return [base, fx, fy];
+      let h = (Math.imul((w.seed >>> 0) ^ 0x9e3779b9, 2654435761) + Math.imul(i + 1, 40503)) >>> 0;
+      h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13;
+      return [pool[(h >>> 0) % pool.length], fx, fy];
+   });
+}
 // Spawn a team at anchor facing `heading`; `playerCls` takes the slot of the first matching class
 // (or the first slot of the same type, or slot 0).
 function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({})) {
+   slots = rollFleet(w, slots, playerCls);
    let pIdx = -1;
    if (playerCls) {
       pIdx = slots.findIndex(s => s[0] === playerCls);

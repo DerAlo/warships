@@ -7,9 +7,34 @@
 export const PROFILE_KEY = 'warships3d.profile.v1';
 const LEGACY_KEY = 'warships3d.progress.v1';     // menu3d mission records (held xp/credits before)
 
-// ---------------------------------------------------------------- ship unlocks (XP)
-// Bismarck (start ship, forced in "Letztes Gefecht") and Hipper stay free.
-export const UNLOCK_XP = { Bismarck: 0, Hipper: 0, Nuernberg: 7500, Z23: 11000 };
+// ---------------------------------------------------------------- ship unlocks (tech tree)
+// Bismarck (start ship, forced in "Letztes Gefecht") and Hipper stay free. Every other ship is
+// researched with XP, bought with credits and may need its predecessor in the tree.
+// A ship without a row here (op-only ships such as Washington / Duke of York) is never locked.
+// Rows: [ship, XP, credits, predecessor | null]. Nürnberg and Z 23 keep their old XP-only price,
+// so profiles saved before the fleet expansion behave exactly as they did.
+export const TECH_TREE = [
+   // Kriegsmarine
+   ['Bismarck', 0, 0, null], ['Hipper', 0, 0, null], ['Nuernberg', 7500, 0, null], ['Z23', 11000, 0, null],
+   ['Scharnhorst', 9000, 140000, null], ['Gneisenau', 10500, 150000, 'Scharnhorst'],
+   // Royal Navy
+   ['Norfolk', 5500, 80000, null], ['Fiji', 8500, 130000, 'Norfolk'], ['Jervis', 8000, 120000, null],
+   ['Warspite', 6500, 90000, null], ['Hood', 9500, 140000, 'Warspite'], ['Rodney', 10000, 150000, 'Warspite'], ['KGV', 11500, 160000, 'Rodney'],
+   // US Navy
+   ['Benham', 5500, 80000, null], ['Fletcher', 24000, 350000, 'Benham'], ['Cleveland', 14000, 220000, null], ['Iowa', 26000, 380000, 'Cleveland'],
+   // Kaiserliche Marine
+   ['Kirishima', 4500, 60000, null], ['Yamato', 38000, 550000, 'Kirishima'], ['Takao', 14500, 220000, null],
+   ['Fubuki', 5500, 80000, null], ['Shimakaze', 34000, 500000, 'Fubuki'],
+   // Marine nationale
+   ['Algerie', 9000, 130000, null], ['Richelieu', 16000, 240000, 'Algerie'], ['LeFantasque', 13000, 200000, null],
+   // Regia Marina
+   ['Zara', 9000, 130000, null], ['Littorio', 15500, 230000, 'Zara'],
+   // Sowjetische Marine
+   ['Gnevny', 5500, 80000, null], ['Kirov', 6500, 90000, null],
+];
+export const UNLOCK_XP = Object.fromEntries(TECH_TREE.map(r => [r[0], r[1]]));
+export const UNLOCK_CREDITS = Object.fromEntries(TECH_TREE.map(r => [r[0], r[2]]));
+export const UNLOCK_REQ = Object.fromEntries(TECH_TREE.map(r => [r[0], r[3]]));
 
 // ---------------------------------------------------------------- modules (credits)
 // Each module has 3 tiers bought in order; values are fractional changes of the stock stat.
@@ -107,10 +132,22 @@ export function skillPointsUsed(p) { return p.skills.reduce((a, k) => a + (SKILL
 export function skillPointsFree(p) { return captainLevel(p.totalXp).points - skillPointsUsed(p); }
 
 export function isUnlocked(p, ship) { return !UNLOCK_XP[ship] || !!p.unlocked[ship]; }
-export function canUnlock(p, ship) { return !isUnlocked(p, ship) && p.xp >= UNLOCK_XP[ship]; }
+// Why a locked ship cannot be researched yet: { req: missing predecessor | null, xp, credits: shortfall }.
+export function unlockNeeds(p, ship) {
+   const req = UNLOCK_REQ[ship];
+   return {
+      req: req && !isUnlocked(p, req) ? req : null,
+      xp: Math.max(0, (UNLOCK_XP[ship] || 0) - p.xp), credits: Math.max(0, (UNLOCK_CREDITS[ship] || 0) - p.credits),
+   };
+}
+export function canUnlock(p, ship) {
+   if (isUnlocked(p, ship)) return false;
+   const n = unlockNeeds(p, ship);
+   return !n.req && !n.xp && !n.credits;
+}
 export function unlockShip(p, ship) {
    if (!canUnlock(p, ship)) return false;
-   p.xp -= UNLOCK_XP[ship]; p.unlocked[ship] = true;
+   p.xp -= UNLOCK_XP[ship]; p.credits -= UNLOCK_CREDITS[ship] || 0; p.unlocked[ship] = true;
    return true;
 }
 
