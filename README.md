@@ -135,7 +135,7 @@ see `game3d/ARCHITECTURE.md`):
   | 3 | Torpedoes · press 3 again: narrow/wide spread |
   | X | Lock / release target |
   | Ctrl + left click | Secondary battery priority target (orange brackets); again or on open sea: clear. Never fires the main battery |
-  | L | Lead marker on/off |
+  | L | Lead marker on/off (red diamond: always on screen while an enemy is in sight; edge arrow when the lead point is outside the view, dashed "zu weit" beyond range, pale "außer Sicht" for a target lost a moment ago; green in torpedo mode) |
   | R / T | Damage control / repair party |
   | Y / U | Special consumables (boost, smoke …) |
   | M / Tab | Tactical map / scoreboard |

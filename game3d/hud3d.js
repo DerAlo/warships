@@ -9,6 +9,11 @@ const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 const km = (m) => (m / 1000).toFixed(m < 9950 ? 2 : 1).replace('.', ',') + ' km';
 const TURRET_COL = { ready: '#6dff8e', traverse: '#ffd24a', reload: '#ff6a5a', blocked: '#ff6a5a', dead: '#5a5a5a' };
 const NICE_MRAD = [0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50];
+// lead marker palette (constants: the marker is drawn every frame)
+const LEAD_RED = '#ff2a1c', LEAD_TORP = '#3dff8a', LEAD_LOST = '#d8a49c', LEAD_DARK = 'rgba(8,10,14,0.92)',
+   LEAD_HI = '#ffffff', LEAD_FILL = 'rgba(255,40,24,0.14)';
+const LEAD_DASH = [5, 4], NO_DASH = [];
+const LEAD_FONT = '600 12px Segoe UI, sans-serif', LEAD_FONT_L = '600 15px Segoe UI, sans-serif';
 
 export class Overlay3D {
    constructor(canvas) {
@@ -36,7 +41,6 @@ export class Overlay3D {
       if (!ui.p) return;
       if (ui.mapOpen) { this._tacticalMap(ui); return; }
       this._markers(ui);
-      if (ui.leadPt && ui.alive) this._ghost(ui.leadPt);
       if (ui.torpFan && ui.alive) this._torpFan(ui);
       if (ui.scopeT > 0.01) this._binoculars(ui);
       if (ui.alive) {
@@ -44,6 +48,8 @@ export class Overlay3D {
          this._reticle(ui);
          this._torpWarn(ui);
          if (ui.zoomCueA > 0.01) this._zoomCue(ui);
+         // last: the lead marker is never covered by the scene, the scope mask or the reticle
+         if (ui.leadMark?.shown) this._lead(ui.leadMark, ui.H);
       }
    }
 
@@ -317,29 +323,70 @@ export class Overlay3D {
       g.restore();
    }
 
-   // Lead ghost: where the target will be when a salvo fired now lands.
-   _ghost(lp) {
+   // Lead marker: where the target will be when a salvo (or torpedo) fired now arrives. Drawn last,
+   // above markers, binocular mask and reticle. Every stroke is doubled (dark under bright) so it
+   // reads against bright sky, dark sea and at night. States: 'ok' solid, 'range' dashed + "zu weit",
+   // 'lost' dashed grey-red + "außer Sicht". Off-screen (m.off): parked on the frame edge with an
+   // arrow towards the lead point. Constant colours / dash arrays only: no per-frame allocation.
+   _lead(m, H) {
       const g = this.g;
+      const k = Math.max(1, Math.min(2, H / 900));
+      const col = m.state === 'lost' ? LEAD_LOST : m.torp ? LEAD_TORP : LEAD_RED;
+      const dash = m.state === 'ok' ? NO_DASH : LEAD_DASH;
+      const pulse = 0.5 + 0.5 * Math.sin(this.t * 5);
+      const r = (9 + 1.5 * pulse) * k;
       g.save();
-      const pulse = 0.55 + 0.2 * Math.sin(this.t * 5);
-      if (lp.bow && lp.stern) {
-         const dx = lp.bow.x - lp.stern.x, dy = lp.bow.y - lp.stern.y;
-         const len = Math.hypot(dx, dy);
-         const w = Math.max(3, Math.min(14, len * 0.14));
-         g.translate((lp.bow.x + lp.stern.x) / 2, (lp.bow.y + lp.stern.y) / 2);
-         g.rotate(Math.atan2(dy, dx));
-         g.fillStyle = `rgba(255,110,90,${0.22 * pulse})`;
-         g.strokeStyle = `rgba(255,150,130,${pulse})`; g.lineWidth = 1.4;
-         g.setLineDash([4, 3]);
-         g.beginPath();
-         const hl = Math.max(6, len / 2);
-         g.moveTo(hl, 0); g.lineTo(hl * 0.55, -w / 2); g.lineTo(-hl, -w / 2); g.lineTo(-hl, w / 2); g.lineTo(hl * 0.55, w / 2); g.closePath();
-         g.fill(); g.stroke();
-         g.setLineDash([]);
-      } else {
-         g.translate(lp.x, lp.y);
-         g.strokeStyle = `rgba(255,150,130,${pulse})`; g.lineWidth = 1.4;
-         g.beginPath(); g.moveTo(0, -6); g.lineTo(6, 0); g.lineTo(0, 6); g.lineTo(-6, 0); g.closePath(); g.stroke();
+      g.lineJoin = 'round'; g.lineCap = 'round';
+      // hull ghost at the lead point (only when it is large enough to read)
+      if (m.hull) {
+         const dx = m.bx - m.sx, dy = m.by - m.sy, len = Math.hypot(dx, dy);
+         if (len >= 26) {
+            const w = Math.max(4, Math.min(16, len * 0.14)), hl = len / 2;
+            g.save();
+            g.translate((m.bx + m.sx) / 2, (m.by + m.sy) / 2);
+            g.rotate(Math.atan2(dy, dx));
+            g.beginPath();
+            g.moveTo(hl, 0); g.lineTo(hl * 0.55, -w / 2); g.lineTo(-hl, -w / 2); g.lineTo(-hl, w / 2); g.lineTo(hl * 0.55, w / 2); g.closePath();
+            g.globalAlpha = 0.16; g.fillStyle = col; g.fill();
+            g.globalAlpha = 0.9;
+            g.setLineDash(dash);
+            g.strokeStyle = LEAD_DARK; g.lineWidth = 4 * k; g.stroke();
+            g.strokeStyle = col; g.lineWidth = 1.8 * k; g.stroke();
+            g.restore();
+         }
+      }
+      g.translate(m.x, m.y);
+      if (m.off) {
+         // arrow pointing at the lead point, the diamond sits just inside it
+         g.save();
+         g.rotate(m.ang);
+         const a = 15 * k;
+         g.beginPath(); g.moveTo(0, 0); g.lineTo(-a, -a * 0.72); g.lineTo(-a * 0.62, 0); g.lineTo(-a, a * 0.72); g.closePath();
+         g.strokeStyle = LEAD_DARK; g.lineWidth = 4.5 * k; g.stroke();
+         g.fillStyle = col; g.fill();
+         g.strokeStyle = LEAD_HI; g.lineWidth = 1.2 * k; g.stroke();
+         g.restore();
+         g.translate(-Math.cos(m.ang) * (a + r + 5 * k), -Math.sin(m.ang) * (a + r + 5 * k));
+      }
+      g.setLineDash(dash);
+      g.beginPath(); g.moveTo(0, -r); g.lineTo(r, 0); g.lineTo(0, r); g.lineTo(-r, 0); g.closePath();
+      g.fillStyle = LEAD_FILL; g.fill();
+      g.strokeStyle = LEAD_DARK; g.lineWidth = 5.5 * k; g.stroke();
+      g.strokeStyle = col; g.lineWidth = 2.6 * k; g.stroke();
+      g.setLineDash(NO_DASH);
+      // centre dot
+      g.beginPath(); g.arc(0, 0, 2.6 * k, 0, 6.2832);
+      g.fillStyle = LEAD_DARK; g.fill();
+      g.beginPath(); g.arc(0, 0, 1.6 * k, 0, 6.2832);
+      g.fillStyle = LEAD_HI; g.fill();
+      // state label
+      const label = m.state === 'lost' ? 'außer Sicht' : m.state === 'range' ? 'zu weit' : m.torp ? 'Vorhalt' : null;
+      if (label) {
+         g.font = k > 1.4 ? LEAD_FONT_L : LEAD_FONT;
+         g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+         const ly = m.y > 150 ? -r - 7 * k : r + 15 * k;
+         g.strokeStyle = LEAD_DARK; g.lineWidth = 3.5; g.strokeText(label, 0, ly);
+         g.fillStyle = m.state === 'ok' ? col : LEAD_HI; g.fillText(label, 0, ly);
       }
       g.restore();
    }
@@ -361,13 +408,6 @@ export class Overlay3D {
          g.stroke();
       }
       g.setLineDash([]);
-      if (ui.torpLead) {
-         const { x, y, inRange } = ui.torpLead;
-         g.strokeStyle = inRange ? '#aaffc8' : 'rgba(255,255,255,0.5)'; g.lineWidth = 2;
-         g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x + 8, y); g.lineTo(x, y + 8); g.lineTo(x - 8, y); g.closePath(); g.stroke();
-         g.font = '10px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillStyle = g.strokeStyle;
-         g.fillText(inRange ? 'Vorhalt' : 'zu weit', x, y - 12);
-      }
       g.restore();
    }
 

@@ -23,6 +23,7 @@ import { getMission } from './missions.js';
 import { Menu3D } from './menu3d.js';
 import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
+import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -373,7 +374,7 @@ function startGame(opts = {}) {
    ctl.telegraph = P.telegraph ?? 0; ctl.rudder = P.rudderCmd ?? 0;
    ctl.ammo = P.ammo || 'HE'; ctl.mode = 'guns'; ctl.spread = P.torps?.spread || 'narrow';
    ctl.lockId = null; ctl.mapOpen = false; ctl.board = false;
-   ctl.lead = difficulty !== 'hard';
+   ctl.lead = true; lead.id = null; lead.shown = false;
    for (const k in ctl.hold) ctl.hold[k] = 0;
    consEmu = simv.newCons ? null : makeConsEmu(P);
    flightCal = null;
@@ -621,8 +622,15 @@ function watchSecTarget() {
 function lockedShip() {
    if (ctl.lockId == null || !world) return null;
    const s = world.ships.find(x => x.id === ctl.lockId);
-   if (!s || !s.alive || !isVisible(world, s)) { ctl.lockId = null; return null; }
-   return s;
+   if (!s || !s.alive) { ctl.lockId = null; return null; }
+   if (isVisible(world, s)) return s;
+   // out of sight: the lock (and the dead-reckoned lead marker) survives a short loss of contact
+   if (!seenWithin(s, LOCK_GRACE)) { ctl.lockId = null; hud.msg('Ziel außer Sicht – Erfassung aufgehoben', 'info'); }
+   return null;
+}
+function seenWithin(s, sec) {
+   const k = intel.lastKnown.get(s.id);
+   return !!k && world.time - k.t <= sec;
 }
 
 // Aim point from the (smoothed) aim bearing/range, then snapped to a ship the crosshair ray
@@ -948,7 +956,9 @@ function updateIntel() {
       const vis = s.alive && isVisible(world, s);
       if (vis) {
          if (!k) { k = {}; intel.lastKnown.set(s.id, k); }
-         Object.assign(k, { x: s.pos.x, y: s.pos.y, t: world.time, type: shipType(s), name: s.name || s.cls, visible: true, alive: true });
+         const v = velOf(s);
+         k.x = s.pos.x; k.y = s.pos.y; k.vx = v.x; k.vy = v.y; k.hdg = s.heading; k.t = world.time;
+         k.type = shipType(s); k.name = s.name || s.cls; k.visible = true; k.alive = true;
       } else if (k) { k.visible = false; k.alive = s.alive; }
    }
 }
@@ -1060,10 +1070,95 @@ function restoreInterp() {
 }
 
 // ------------------------------------------------------------------ HUD state per frame
-function project(x, h, y) {
-   if (typeof renderer.project === 'function') return renderer.project(x, h, y);
-   return renderer.cam.project(x, h, y, W, H);
+function project(x, h, y, out) {
+   if (typeof renderer.project === 'function') return renderer.project(x, h, y, out);
+   const q = renderer.cam.project(x, h, y, W, H);
+   return out ? Object.assign(out, q) : q;
 }
+
+// ------------------------------------------------------------------ lead marker (Vorhaltemarker)
+// Where the target will be when a salvo (or a torpedo) fired now arrives. Whenever there is an
+// enemy to shoot at, the marker is on screen: clamped to the frame edge with an arrow when the lead
+// point is outside the view, dead-reckoned for a few seconds when the target drops out of sight
+// ('lost'), flagged when the lead point is beyond weapon range ('range'). The target is the X lock,
+// else the enemy whose icon or lead point is nearest to the crosshair. All scratch objects are
+// module-level: nothing is allocated per frame. Drawn by hud3d.js (_lead), pure logic in lead3d.js.
+const LOCK_GRACE = 10, AUTO_GRACE = 6;                     // s a locked / auto target may stay unseen
+const LEAD_FRAME = { l: 36, t: 100, r: 36, b: 250 };       // px kept clear: score box, bottom panels + minimap
+const lead = { shown: false, x: 0, y: 0, off: false, ang: 0, state: 'ok', torp: false, id: null,
+   hull: false, bx: 0, by: 0, sx: 0, sy: 0, dist: 0 };
+const leadPt = { x: 0, y: 0, t: 0 }, leadPr = { x: 0, y: 0, visible: false }, leadPr2 = { x: 0, y: 0, visible: false };
+const leadCands = [];
+let leadSpeed = 0;   // torpedo speed (m/s) in torpedo mode, 0 = guns
+function leadSolve(p, tx, ty, vx, vy, out) {
+   if (leadSpeed > 0) return solveIntercept(p.pos.x, p.pos.y, tx, ty, vx, vy, leadSpeed, out);
+   solveLead(p.pos.x, p.pos.y, tx, ty, vx, vy, flightTime, out);
+   return true;
+}
+function buildLead(ui, markers) {
+   const p = P, L = lead, cx = W / 2, cy = H / 2;
+   L.shown = false;
+   const torp = ctl.mode === 'torp';
+   if (!ctl.lead || !p?.alive || (torp && !ui.torpInfo)) { L.id = null; return; }
+   leadSpeed = torp ? ui.torpInfo.speed : 0;
+   // --- target: the lock (also while it is briefly unseen), else the best candidate
+   let tgt = ui.lockShip, lost = false;
+   if (!tgt && ctl.lockId != null) { tgt = shipById(ctl.lockId); lost = !!tgt; }
+   if (!tgt) {
+      let n = 0;
+      for (let i = 0; i < markers.length; i++) {
+         const m = markers[i];
+         if (m.ally) continue;
+         const s = m.ship, v = velOf(s);
+         let d = m.onScreen ? Math.hypot(m.x - cx, m.y - cy) : Infinity;
+         if (leadSolve(p, s.pos.x, s.pos.y, v.x, v.y, leadPt)) {
+            project(leadPt.x, 0, leadPt.y, leadPr);
+            if (leadPr.visible) d = Math.min(d, Math.hypot(leadPr.x - cx, leadPr.y - cy));
+         }
+         // off-screen: rank by how far the camera would have to turn
+         if (d === Infinity) d = W + H + Math.abs(angleDelta(renderer.cam?.pose?.yaw ?? cam3.yaw,Math.atan2(s.pos.y - p.pos.y, s.pos.x - p.pos.x))) * ui.pxPerRad;
+         const c = leadCands[n] || (leadCands[n] = { id: null, score: 0, ship: null });
+         c.id = s.id; c.score = d; c.ship = s; n++;
+      }
+      const bi = pickTarget(leadCands, n, L.id);
+      const best = bi >= 0 ? leadCands[bi] : null;
+      // the previous target dropped out of sight: keep its marker for a moment unless the crosshair
+      // is clearly on another ship
+      const prev = L.id != null && (!best || best.id !== L.id) ? shipById(L.id) : null;
+      if (prev && prev.alive && !isAlly(world, prev) && !isVisible(world, prev) && seenWithin(prev, AUTO_GRACE)
+         && (!best || best.score > Math.max(W, H) * 0.22)) { tgt = prev; lost = true; }
+      else if (best) tgt = best.ship;
+      for (let i = 0; i < n; i++) leadCands[i].ship = null;   // no stale ship references
+   }
+   if (!tgt) { L.id = null; return; }
+   L.id = tgt.id;
+   // --- lead point: live track, or dead reckoning from the last sighting
+   let tx, ty, vx, vy, hdg;
+   if (lost) {
+      const k = intel.lastKnown.get(tgt.id);
+      if (!k) { L.id = null; return; }
+      const dtk = world.time - k.t;
+      vx = k.vx || 0; vy = k.vy || 0; tx = k.x + vx * dtk; ty = k.y + vy * dtk; hdg = k.hdg ?? 0;
+   } else { const v = velOf(tgt); tx = tgt.pos.x; ty = tgt.pos.y; vx = v.x; vy = v.y; hdg = tgt.heading; }
+   if (!leadSolve(p, tx, ty, vx, vy, leadPt)) return;   // a torpedo cannot catch this target
+   const dist = Math.hypot(leadPt.x - p.pos.x, leadPt.y - p.pos.y);
+   L.dist = dist; L.torp = torp;
+   L.state = leadState(!lost, dist, torp ? ui.torpInfo.range : aim.gunRange);
+   // --- screen placement (view-space z / x tell "behind the camera" and which side)
+   const e = renderer.camera.matrixWorldInverse.elements;
+   const vz = e[2] * leadPt.x + e[10] * leadPt.y + e[14], vxs = e[0] * leadPt.x + e[8] * leadPt.y + e[12];
+   project(leadPt.x, 0, leadPt.y, leadPr);
+   edgeClamp(leadPr.x, leadPr.y, vz > -1, vxs, W, H, LEAD_FRAME, L);
+   L.hull = false;
+   if (!L.off && !torp) {
+      const hl = shipLen(tgt) / 2, c = Math.cos(hdg), sn = Math.sin(hdg);
+      project(leadPt.x + c * hl, 0, leadPt.y + sn * hl, leadPr);
+      project(leadPt.x - c * hl, 0, leadPt.y - sn * hl, leadPr2);
+      if (leadPr.visible && leadPr2.visible) { L.hull = true; L.bx = leadPr.x; L.by = leadPr.y; L.sx = leadPr2.x; L.sy = leadPr2.y; }
+   }
+   L.shown = true;
+}
+window.__lead = () => ({ shown: lead.shown, x: lead.x, y: lead.y, off: lead.off, ang: lead.ang, state: lead.state, torp: lead.torp, id: lead.id, hull: lead.hull, dist: lead.dist });
 
 function buildUi(dt) {
    const p = P;
@@ -1108,40 +1203,18 @@ function buildUi(dt) {
       const hgt = hullDeckH(s) * 2.6 + 28;
       const sp = project(s.pos.x, hgt, s.pos.y);
       const dist = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y);
-      markers.push({ id: s.id, x: sp.x, y: sp.y, onScreen: !!sp.visible, ally, name: s.name || s.cls, type: shipType(s),
+      markers.push({ id: s.id, ship: s, x: sp.x, y: sp.y, onScreen: !!sp.visible, ally, name: s.name || s.cls, type: shipType(s),
          hpFrac: clamp01(s.hp / (s.maxHP || 1)), dist, locked: s.id === ctl.lockId, sec: s.id === p.secTarget, fires: s.fires?.length || 0 });
    }
    ui.markers = markers;
    lastMarkers = markers;
 
-   // target (locked, else nearest to the crosshair) -> lead ghost + lock panel
-   let tgt = lockedShip();
-   if (!tgt) {
-      let bestD = Math.max(W, H) * 0.22;
-      for (const m of markers) {
-         if (m.ally || !m.onScreen) continue;
-         const dd = Math.hypot(m.x - W / 2, m.y - H / 2);
-         if (dd < bestD) { bestD = dd; tgt = shipById(m.id); }
-      }
-   }
-   ui.target = tgt;
+   // lock panel + lead marker (guns and torpedoes; see buildLead)
    ui.lockShip = lockedShip();
-   if (tgt && ctl.lead && ctl.mode === 'guns') {
-      const v = velOf(tgt);
-      let px = tgt.pos.x, py = tgt.pos.y;
-      for (let i = 0; i < 4; i++) {
-         const t = flightTime(Math.hypot(px - p.pos.x, py - p.pos.y));
-         px = tgt.pos.x + v.x * t; py = tgt.pos.y + v.y * t;
-      }
-      const sp = project(px, 0, py);
-      if (sp.visible) {
-         const hl = shipLen(tgt) / 2, c = Math.cos(tgt.heading), s = Math.sin(tgt.heading);
-         const bow = project(px + c * hl, 0, py + s * hl), stern = project(px - c * hl, 0, py - s * hl);
-         ui.leadPt = { x: sp.x, y: sp.y, bow: bow.visible ? bow : null, stern: stern.visible ? stern : null, id: tgt.id };
-      }
-   }
+   buildLead(ui, markers);
+   ui.leadMark = lead;
 
-   // torpedo fan (screen polylines) + lead
+   // torpedo fan (screen polylines)
    if (ctl.mode === 'torp' && ui.torpInfo) {
       const ti = ui.torpInfo;
       const bs = torpBearings(ti, aim.yaw);
@@ -1157,18 +1230,6 @@ function buildUi(dt) {
          lines.push(pts);
       }
       ui.torpFan = { lines, ready: ti.readyCount > 0 };
-      if (tgt) {
-         const v = velOf(tgt), rx = tgt.pos.x - p.pos.x, ry = tgt.pos.y - p.pos.y, s = ti.speed;
-         const a = v.x * v.x + v.y * v.y - s * s, b = 2 * (rx * v.x + ry * v.y), c = rx * rx + ry * ry;
-         let t = null;
-         if (Math.abs(a) < 1e-6) t = -c / b;
-         else { const disc = b * b - 4 * a * c; if (disc >= 0) { const r1 = (-b - Math.sqrt(disc)) / (2 * a), r2 = (-b + Math.sqrt(disc)) / (2 * a); t = Math.min(...[r1, r2].filter(x => x > 0)); } }
-         if (t && isFinite(t) && t > 0) {
-            const lx = tgt.pos.x + v.x * t, ly = tgt.pos.y + v.y * t;
-            const q = project(lx, 0, ly);
-            if (q.visible) ui.torpLead = { x: q.x, y: q.y, inRange: Math.hypot(lx - p.pos.x, ly - p.pos.y) <= ti.range };
-         }
-      }
    }
 
    // torpedo warnings as screen angles around the crosshair (0 = straight ahead/up)
