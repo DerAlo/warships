@@ -914,6 +914,7 @@ export const MISSIONS = DEFS.map(d => ({
    timeLimit: d.timeLimit, arena: d.arena, stars: d.stars || 2,   // stars = difficulty 1..3 for the menu
    group: d.group || 'battle', debrief: d.debrief || '',          // 'ops' = Historische Operationen
    fleet: d.fleet ? { ...d.fleet } : null,
+   fixedShips: !!d.playableShips,                                 // the mission prescribes its ships
 }));
 export const MISSION_IDS = DEFS.map(d => d.id);
 export function getMission(id) { return MISSIONS.find(m => m.id === id) || null; }
