@@ -66,12 +66,22 @@ see `game3d/ARCHITECTURE.md`):
   (Three.js, vendored locally under `vendor/three/` — no CDN, still fully offline).
   - **Missions:** Übungsgefecht (training), Standardgefecht (7 vs 7),
     Herrschaft (domination, three capture points), Geleitzug (convoy escort),
-    Letztes Gefecht, Nachtgefecht (destroyer night action) and Handelskrieg
-    (commerce raid), each with briefing and objectives.
+    Letztes Gefecht, Nachtgefecht (destroyer night action), Handelskrieg
+    (commerce raid), Sperrriegel (hold a fjord entrance against three waves —
+    three ships through and the harbour is lost), Rückzugsgefecht (rearguard:
+    cover the crippled Gneisenau until she reaches the fjord) and
+    Flottenschlacht (8 vs 8, sink the enemy battle line before yours is gone),
+    each with briefing and objectives.
   - **Historische Operationen:** Unternehmen Rheinübung (Bismarck vs Hood and
     Prince of Wales at dawn), Nachtschlacht vor Guadalcanal (Washington vs
-    Kirishima and Long-Lance destroyers) and Schlacht am Nordkap (Duke of York
-    runs down Scharnhorst in an Arctic storm). Each op has fixed ships, an intro
+    Kirishima and Long-Lance destroyers), Schlacht am Nordkap (Duke of York
+    runs down Scharnhorst in an Arctic storm), Unternehmen Cerberus (Channel
+    Dash: take Scharnhorst through mines and the Harwich destroyers into the
+    North Sea), Vians Nachtangriff (HMS Cossack's flotilla torpedoes the
+    crippled Bismarck at night), Schlacht in der Barentssee (HMS Sheffield
+    drives Admiral Hipper off convoy JW 51B) and Überfall auf Narvik (HMS Hardy
+    raids the harbour, then fights her way back out of the fjord). Each op has
+    fixed ships, an intro
     briefing, scripted radio traffic, multi-stage objectives, a debrief with the
     historical outcome and a medal (1–3 stars, saved locally).
   - **Playable ships:** Bismarck (battleship), Admiral Hipper (heavy cruiser),
@@ -135,7 +145,7 @@ see `game3d/ARCHITECTURE.md`):
   | 3 | Torpedoes · press 3 again: narrow/wide spread |
   | X | Lock / release target |
   | Ctrl + left click | Secondary battery priority target (orange brackets); again or on open sea: clear. Never fires the main battery |
-  | L | Lead marker on/off |
+  | L | Lead marker on/off (red diamond: always on screen while an enemy is in sight; edge arrow when the lead point is outside the view, dashed "zu weit" beyond range, pale "außer Sicht" for a target lost a moment ago; green in torpedo mode) |
   | R / T | Damage control / repair party |
   | Y / U | Special consumables (boost, smoke …) |
   | M / Tab | Tactical map / scoreboard |
@@ -165,6 +175,10 @@ node tests/playwright.shots.mjs      # 2D browser self-test + screenshots
 node tests/playwright2d.missions.mjs # 2D browser play-test of every mission + survival
 node tests/playwright3d.shots.mjs    # 3D browser self-test + screenshots
 node --test tests/sim3d.test.mjs     # headless 3D simulation tests (ballistics, AI, missions, career)
+node --test tests/missions3d.test.mjs # 3D second mission batch: loads, win and lose paths, 4-min AI runs
+node tests/balance3d.mjs strait,cerberus normal 4  # 3D balance: AI-captained win rate per mission/difficulty
+node tests/playwright3d.newmissions.mjs # 3D browser smoke test of the second mission batch (menu, briefing, HUD, result)
+node --test tests/lead3d.test.mjs    # 3D lead marker maths
 node --test tests/zoom3d.test.mjs    # 3D mouse-wheel zoom / binoculars ladder
 node tests/playwright3d.zoom.mjs     # 3D browser check of the wheel zoom
 node tests/playwright3d.missions.mjs # 3D browser play-test of every mission

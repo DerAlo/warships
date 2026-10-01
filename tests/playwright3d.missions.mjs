@@ -11,7 +11,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URL3D || 'http://localhost:5173/index-3d.html';
 const OUT = process.env.OUT || 'tests/shots';
 mkdirSync(OUT, { recursive: true });
-const missions = (process.env.MISSIONS || 'training,standard,domination,convoy,laststand,night,raid,rheinuebung,guadalcanal,nordkap').split(',');
+const missions = (process.env.MISSIONS || 'training,standard,domination,convoy,laststand,night,raid,strait,rearguard,fleet,rheinuebung,guadalcanal,nordkap,cerberus,vian,barents,narvik').split(',');
 const ships = (process.env.SHIPS || 'Bismarck,Hipper,Nuernberg,Z23').split(',');
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });

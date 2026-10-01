@@ -13,6 +13,8 @@ import { shipType, TYPE_NAME, isAlly, isVisible, displayKn } from './minimap3d.j
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
 const fmtKm = (m) => (m / 1000).toFixed(1).replace('.', ',') + ' km';
+// ships taken out of the battle by a mission script (world.removeShip) are not sunk
+const LEFT_LABEL = { arrived: 'angekommen', retreated: 'abgedreht', escaped: 'entkommen' };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mmss = (t) => { t = Math.max(0, Math.floor(t)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 // Per-frame writes go through these: assigning textContent / an inline style dirties style and
@@ -217,17 +219,21 @@ export class Hud {
 
    _rosters(world) {
       const p = world.player;
-      const sig = world.ships.map(s => s.id + ':' + (s.alive ? 1 : 0) + (isVisible(world, s) ? 1 : 0)).join(',');
+      // world.roster keeps sunk ships (struck through) and ships that left the battle (dimmed):
+      // world.ships drops them once the sinking animation is over and the line-up would shrink
+      const all = world.roster || world.ships;
+      const sig = all.map(s => s.id + ':' + (s.alive ? 1 : 0) + (s.alive && isVisible(world, s) ? 1 : 0)).join(',');
       if (sig === this._sig.roster) return;
       this._sig.roster = sig;
       const row = (s) => {
          const ally = isAlly(world, s);
          const vis = ally || isVisible(world, s);
-         const cls = ['r', ally ? 'ally' : 'enemy', s.alive ? '' : 'dead', !s.alive || vis ? '' : 'hid', s === p ? 'me' : ''].join(' ');
-         return `<div class="${cls}">${classSvg(shipType(s), 11)}<span>${esc(s.name || s.cls)}</span></div>`;
+         const left = !s.alive && s.escaped;
+         const cls = ['r', ally ? 'ally' : 'enemy', s.alive || left ? '' : 'dead', left || (s.alive && !vis) ? 'hid' : '', s === p ? 'me' : ''].join(' ');
+         return `<div class="${cls}"${left ? ` title="${LEFT_LABEL[s.escaped] || ''}"` : ''}>${classSvg(shipType(s), 11)}<span>${esc(s.name || s.cls)}</span></div>`;
       };
-      const allies = world.ships.filter(s => isAlly(world, s));
-      const enemies = world.ships.filter(s => !isAlly(world, s));
+      const allies = all.filter(s => isAlly(world, s));
+      const enemies = all.filter(s => !isAlly(world, s));
       if (this.el.rosterA) this.el.rosterA.innerHTML = allies.map(row).join('');
       if (this.el.rosterE) this.el.rosterE.innerHTML = enemies.map(row).join('');
    }
@@ -424,12 +430,13 @@ export class Hud {
       const rows = (list) => list.map(s => {
          const ally = isAlly(world, s), vis = ally || isVisible(world, s);
          const hpF = clamp01(s.hp / (s.maxHP || 1));
-         const hp = !s.alive ? 'versenkt' : vis ? fmtInt(s.hp) : '?';
+         const hp = !s.alive ? (LEFT_LABEL[s.escaped] || 'versenkt') : vis ? fmtInt(s.hp) : '?';
          return `<tr class="${s.alive ? '' : 'dead'} ${s === p ? 'me' : ''}"><td class="ic ${ally ? 'ally' : 'enemy'}">${classSvg(shipType(s), 12)}</td>
             <td>${esc(s.name || s.cls)}</td><td class="ty">${esc(TYPE_NAME[shipType(s)] || '')}</td>
             <td class="hp"><div class="sb-bar"><i style="width:${s.alive && vis ? (hpF * 100).toFixed(0) : 0}%"></i></div>${hp}</td></tr>`;
       }).join('');
-      const allies = world.ships.filter(s => isAlly(world, s)), enemies = world.ships.filter(s => !isAlly(world, s));
+      const all = world.roster || world.ships;   // the roster keeps sunk ships and those that left
+      const allies = all.filter(s => isAlly(world, s)), enemies = all.filter(s => !isAlly(world, s));
       const st = world.stats || {};
       const html = `
          <div class="sb-title">${esc(world.mission?.name || 'Gefecht')} <span>${world.timeLeft != null ? mmss(world.timeLeft) : mmss(world.time)}</span></div>

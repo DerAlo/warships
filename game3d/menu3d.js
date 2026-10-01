@@ -11,6 +11,8 @@ import { classSvg } from './hud.js';
 const TYPE_LABEL = {
    training: 'Übung', annihilation: 'Vernichtung', domination: 'Herrschaft', escort: 'Geleitschutz',
    historic: 'Historisch', survival: 'Überleben', raid: 'Handelskrieg',
+   defense: 'Verteidigung', delay: 'Nachhut', fleet: 'Flottenschlacht', breakout: 'Durchbruch',
+   torpedo: 'Torpedoangriff', harbour: 'Hafenüberfall',
 };
 const TIME_LABEL = { day: 'Tag', dawn: 'Morgengrauen', dusk: 'Abenddämmerung', night: 'Nacht' };
 const WEATHER_LABEL = { clear: 'Klar', overcast: 'Bewölkt', rain: 'Regen', storm: 'Sturm' };
@@ -126,15 +128,15 @@ const CSS = `
 .m3-main { flex:1; min-height:0; display:grid; grid-template-columns:330px 1fr 330px; gap:18px; padding:16px 22px 10px; }
 .m3-col { min-height:0; display:flex; flex-direction:column; gap:8px; }
 .m3-h { font-size:11px; letter-spacing:2.5px; font-weight:800; color:#7f9bb5; text-transform:uppercase; padding:2px 2px 4px; display:flex; justify-content:space-between; }
-.m3-list { overflow:auto; display:flex; flex-direction:column; gap:6px; padding-right:4px; scrollbar-width:thin; scrollbar-color:#35506a transparent; }
-.m3-mis { position:relative; cursor:pointer; padding:10px 12px 10px 14px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12);
+.m3-list { overflow:auto; display:flex; flex-direction:column; gap:6px; padding-right:6px; scrollbar-width:thin; scrollbar-color:#5a86ad rgba(255,255,255,.06); }
+.m3-mis { position:relative; flex:none; cursor:pointer; padding:8px 12px 8px 14px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12);
    transition:background .12s, border-color .12s; }
 .m3-mis:hover { background:rgba(14,30,48,.86); border-color:rgba(150,190,230,.3); }
 .m3-mis.sel { background:linear-gradient(90deg, rgba(38,92,140,.85), rgba(14,34,56,.88)); border-color:#5aa0e0; box-shadow:0 0 18px rgba(70,150,230,.25); }
 .m3-mis.sel::before { content:''; position:absolute; left:0; top:6px; bottom:6px; width:3px; border-radius:2px; background:#8fd3ff; }
 .m3-mis .n { font-weight:800; font-size:14.5px; display:flex; align-items:center; gap:6px; }
 .m3-mis .s { font-size:11.5px; color:#9db4c8; margin-top:2px; }
-.m3-mis .row { display:flex; align-items:center; gap:8px; margin-top:6px; font-size:11px; color:#b6cadb; }
+.m3-mis .row { display:flex; align-items:center; gap:8px; margin-top:4px; font-size:11px; color:#b6cadb; }
 .m3-mis .tag { padding:1px 6px; border-radius:2px; background:rgba(255,255,255,.07); letter-spacing:.5px; font-weight:700; }
 .m3-sec { margin:10px 2px 2px; padding-top:8px; border-top:1px solid rgba(214,178,94,.35); font-size:11px; letter-spacing:2.5px; font-weight:800; color:#d6b25e; text-transform:uppercase; }
 .m3-mis.op { border-color:rgba(214,178,94,.22); }
@@ -626,13 +628,14 @@ export class Menu3D {
          </div>
          <div class="m3r-body">
             <div class="m3r-box"><div class="m3-h"><span>Persönliche Leistung</span></div><div class="m3r-grid">${tiles}</div>
-               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${rwBox}${objs ? `<div class="m3r-obj">${objs}</div>` : ''}
-               ${isOp && medal ? `<div class="m3r-medal">${'✦'.repeat(medal)} ${MEDAL[medal]} erhalten</div>` : ''}
-               ${isOp && m.debrief ? `<div class="m3r-hist"><b>HISTORISCHER HINTERGRUND</b>${esc(m.debrief)}</div>` : ''}</div>
+               ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${rwBox}</div>
             <div class="m3r-box"><div class="m3r-teams">
                <div><div class="m3-h"><span class="m3-ally">Eigenes Team</span></div><table>${head}${allies.map(row).join('')}</table></div>
                <div><div class="m3-h"><span class="m3-enemy">Gegner</span></div><table>${head}${enemies.map(row).join('')}</table></div>
-            </div></div>
+            </div>
+               ${objs ? `<div class="m3-h" style="margin-top:14px"><span>Missionsziele</span></div><div class="m3r-obj" style="margin-top:4px">${objs}</div>` : ''}
+               ${isOp && medal ? `<div class="m3r-medal">${'✦'.repeat(medal)} ${MEDAL[medal]} erhalten</div>` : ''}
+               ${isOp && m.debrief ? `<div class="m3r-hist"><b>HISTORISCHER HINTERGRUND</b>${esc(m.debrief)}</div>` : ''}</div>
          </div>
          <div class="m3r-foot">
             <div class="m3r-earn"><div class="xp"><b data-count="${res.xp || 0}">0</b><span>ERFAHRUNG</span></div><div class="cr"><b data-count="${res.credits || 0}">0</b><span>KREDITPUNKTE</span></div></div>
