@@ -479,9 +479,9 @@ export function extraMissions(H) {
             // at their berths, crews asleep: they wake when the first shells land (or after 70 s)
             S.berth = [['Wilhelm Heidkamp', P(8200, -900)], ['Anton Schmitt', P(8500, 1900)]]
                .map(([name, pos]) => add(w, 'Z23', 'enemy', pos, Math.PI, { name, telegraph: 0, dmgMult: w.difficulty.botDmg * 0.7, ai: { passive: true, patrol: [pos, P(pos.x - 200, pos.y)] } }));
-            const me = add(w, shipKey, 'player', P(-6500, 300), 0, { isPlayer: true, name: 'HMS Hardy', telegraph: 3 });
+            const me = add(w, shipKey, 'player', P(-4800, 300), 0, { isPlayer: true, name: 'HMS Hardy', telegraph: 3 });
             me.ai.huntId = S.ships[0].id; me.ai.press = true;   // only read by the autopilot (tests)
-            S.flot = [['HMS Hunter', P(-7300, -700)], ['HMS Havock', P(-7400, 1200)], ['HMS Hotspur', P(-8600, -300)], ['HMS Hostile', P(-8700, 1400)]]
+            S.flot = [['HMS Hunter', P(-5600, -700)], ['HMS Havock', P(-5700, 1200)], ['HMS Hotspur', P(-6600, -300)], ['HMS Hostile', P(-6700, 1400)]]
                .map(([name, pos], i) => add(w, 'Jervis', 'player', pos, 0, { name, telegraph: 3, dmgMult: 0.6, ai: { huntId: S.ships[1 + i].id, press: true } }));
             S.german = [...S.berth];
             later(S, 4, () => radio(w, 'Captain Warburton-Lee', 'Flottille: mir nach in den Hafen. Feuer erst auf mein Kommando – sie schlafen noch.'));
