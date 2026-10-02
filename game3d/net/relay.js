@@ -120,11 +120,13 @@ export function makeBusLobby(bus, selfId) {
 // ---------------------------------------------------------------- room transport
 const LATEST = new Set(['snap', 'cmd']);
 const K_REL = 0, K_LATEST = 1, K_HI = 2, K_BYE = 3, K_PING = 4, K_PONG = 5, K_NACK = 6, K_RESET = 7;
+const K_PROBE = 8, K_PROBED = 9, K_NODIRECT = 10;      // direct channel: question, answer; "I stopped using it"
 const TICK_MS = 250;
 const HI_MS = 3000;                  // presence broadcast on the relay
 const PING_MS = 2000;                // per peer, on the route in use (round trip time, liveness)
 const DEAD_MS = 11000;               // nothing heard on any route: the peer is gone
-const STALL_MS = 7000;               // direct channel open but silent: use the relay again
+const STALL_MS = 5000;               // direct channel in use but silent: use the relay again
+const PROBE_MS = 1000;               // direct channel open but not in use: ask over it
 const GAP_MS = 250;                  // how long a gap may wait for another broker to fill it
 const NACK_MS = 500;                 // pause between two requests for missing frames
 const NACK_RANGES = 40, NACK_FRAMES = 300;   // per request: ranges asked for, frames repeated
@@ -202,7 +204,7 @@ export async function makeRoomTransport(o) {
    let txChain = Promise.resolve(), rxChain = Promise.resolve();
 
    const mkPeer = (id) => ({
-      id, joined: false, epoch: 0, direct: false, directAt: 0, relayAt: 0, born: now(),
+      id, joined: false, epoch: 0, up: false, direct: false, directAt: 0, probeAt: 0, relayAt: 0, born: now(),
       txSeq: 0, sent: new Map(), latestTx: 0,
       rxNext: 1, held: new Map(), relHigh: 0, gapAt: 0, nackAt: 0, latestRx: new Map(), hiN: 0,
       out: Array.from({ length: nB }, () => ({ rel: [], latest: new Map() })), sideAt: new Array(nB).fill(0), score: new Array(nB).fill(0),
@@ -214,10 +216,19 @@ export async function makeRoomTransport(o) {
       peers.delete(p.id);
       if (p.joined && !left) onLeave?.(p.id);
    }
-   function setDirect(p, on) {
+   // A peer's traffic moves to the direct channel only after a question sent over that channel
+   // came back answered over it (probe): the channel a browser reports as open may be dead or
+   // work in one direction only (seen after a re-join), and whatever is sent into it then is lost.
+   // tell: let the peer know that we stopped using the channel, so it does not send into it either
+   function setDirect(p, on, tell = false) {
       if (p.direct === on) return;
       p.direct = on; p.directAt = now();
+      if (!on && tell && p.epoch) emit(p, makeFrame(K_NODIRECT, ++p.latestTx, '', undefined), 'nodirect');
       if (p.joined && !left) onRoute?.(p.id, via(p));
+   }
+   function probe(p) {
+      p.probeAt = now();
+      st.directOut++; carrier?.send(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBE, 0, '', undefined)]), p.id);
    }
 
    // ------------------------------------------------------------ sending
@@ -313,12 +324,17 @@ export async function makeRoomTransport(o) {
       }
       p.epoch = bundle.epoch;
       const t = now();
-      if (b >= 0) p.relayAt = t; else { p.directAt = t; if (!p.direct) setDirect(p, true); }
+      if (b >= 0) p.relayAt = t; else p.directAt = t;
       if (bundle.relHigh > p.relHigh) p.relHigh = bundle.relHigh;
       for (const raw of bundle.frames) {
          const f = readFrame(raw);
          if (!f) continue;
          if (f.kind === K_BYE) { bye.set(from, bundle.epoch); drop(p); return; }
+         if (f.kind === K_PROBE || f.kind === K_PROBED) {     // not part of any stream; only count when they came over the channel itself
+            if (b < 0 && f.kind === K_PROBE) { st.directOut++; carrier?.send(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBED, 0, '', undefined)]), p.id); }
+            if (b < 0 && f.kind === K_PROBED && p.up) setDirect(p, true);
+            continue;
+         }
          if (!p.joined) { p.joined = true; onJoin?.(p.id); if (left || peers.get(from) !== p) return; }
          onFrame(p, f, b);
          if (left || peers.get(from) !== p) return;
@@ -367,6 +383,7 @@ export async function makeRoomTransport(o) {
             }
             return;
          }
+         case K_NODIRECT: setDirect(p, false); return;
          case K_RESET:
             if (Number(f.data) > p.rxNext) { for (const s of [...p.held.keys()]) if (s < f.data) p.held.delete(s); p.rxNext = Number(f.data); p.gapAt = 0; drain(p); }
             return;
@@ -379,7 +396,8 @@ export async function makeRoomTransport(o) {
       const t = now();
       if (t - hiAt >= HI_MS) sayHi();
       for (const p of [...peers.values()]) {
-         if (p.direct && t - p.directAt > STALL_MS) setDirect(p, false);
+         if (p.direct && t - p.directAt > STALL_MS) setDirect(p, false, true);
+         if (p.up && !p.direct && carrier && t - p.probeAt >= PROBE_MS) probe(p);
          if (!p.direct && t - Math.max(p.relayAt, p.directAt, p.born) > DEAD_MS) { drop(p); continue; }
          if (!p.joined) continue;
          if (t - p.pingAt >= PING_MS) { p.pingAt = t; sendLatest(p, '', t, K_PING); }
@@ -452,11 +470,10 @@ export async function makeRoomTransport(o) {
             if (left || !validId(id) || id === selfId) return;
             let p = peers.get(id);
             if (!p) { p = mkPeer(id); peers.set(id, p); }
-            p.directAt = now();
-            setDirect(p, true);
-            sendLatest(p, '', now(), K_PING);              // the first bundle tells the peer our epoch
+            p.up = true;
+            probe(p);                                      // also tells the peer our epoch
          },
-         onDown(id) { const p = peers.get(id); if (p) setDirect(p, false); },
+         onDown(id) { const p = peers.get(id); if (p) { p.up = false; setDirect(p, false, true); } },
          onData(bytes, id) { if (!left) { st.directIn++; onBundle(id, bytes, -1); } },
          onFail() { st.directFail++; },
       })).then((c) => { if (left) c?.leave(); else carrier = c; }).catch((e) => { console.warn('net: no direct connections, the relay is used', e); });

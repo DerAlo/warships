@@ -236,6 +236,7 @@ if (inAgain) {
       for (let i = 0; i < 4; i++) { await B.keyboard.press('w'); await sleep(60); }
       const ctl2 = await B.evaluate(() => window.__ctl());
       check('second battle: host applies the client\'s telegraph', await wait(A, ([id, c]) => window.__world().ships.find(s => s.id === id)?.telegraph === c.telegraph, [me2, ctl2], 6000), { telegraph: ctl2.telegraph });
+      { const a = await stats(A), b = await stats(B); console.log('   second visit, routes ' + JSON.stringify({ host: a.peers, client: b.peers, hostDirect: [a.directOut, a.directIn], clientDirect: [b.directOut, b.directIn], hostCmd: a.rx.cmd?.n })); }
       await sleep(5000);
       const n1 = await B.evaluate(() => window.__net().snapsIn);
       check('second battle: snapshots keep arriving', n1 - n0 > (ONLY ? 25 : 60), { in5s: n1 - n0, via: (await stats(B))?.peers[0]?.via });

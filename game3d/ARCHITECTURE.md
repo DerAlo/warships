@@ -253,8 +253,9 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
 - **Transport.** Two browsers behind home routers often get no WebRTC path (no TURN server), so
   the room never depends on one: `makeRoomTransport` reaches every peer over public MQTT brokers
-  from the first moment and moves a peer to the data channel when one opens (and back when it
-  stalls for 7 s). Both routes share one framing with sequence numbers, so a switch loses
+  from the first moment and moves a peer to the data channel once a probe sent over it came back
+  answered (an "open" channel may be dead, e.g. after a re-join), and back when it is silent
+  for 5 s or the peer says it stopped using it. Both routes share one framing with sequence numbers, so a switch loses
   nothing. Reliable channels are repaired with NACKs; `snap` and `cmd` are latest-wins and are
   sent at full rate to the peer's fastest broker only (thinned copies to the others keep them
   measured). Measured from one machine in 2026-10: relay 20 snapshots/s, round trip ~25 ms,
