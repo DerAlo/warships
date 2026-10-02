@@ -109,7 +109,7 @@ const CSS = `
 .m3-ic { flex:none; vertical-align:middle; }
 .m3-top { flex:none; height:66px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; padding:0 22px;
    background:linear-gradient(180deg, rgba(3,9,16,.96), rgba(3,9,16,.72)); border-bottom:1px solid rgba(150,190,230,.16); box-shadow:0 6px 24px rgba(0,0,0,.35); }
-.m3-logo { font-weight:900; font-size:22px; letter-spacing:6px; color:#dbe9f7; text-shadow:0 0 18px rgba(90,160,230,.35); }
+.m3-logo { font-weight:900; font-size:22px; letter-spacing:3px; color:#dbe9f7; text-shadow:0 0 18px rgba(90,160,230,.35); }
 .m3-logo small { display:block; font-size:10.5px; letter-spacing:3px; color:#7f9bb5; font-weight:700; margin-top:1px; }
 .m3-battle { pointer-events:auto; cursor:pointer; border:0; border-radius:4px; padding:12px 58px 11px; font:900 21px/1 var(--font,"Segoe UI"); letter-spacing:5px; color:#fff;
    background:linear-gradient(180deg,#f07a2c 0%,#d24f12 55%,#a8380b 100%); box-shadow:0 0 0 1px rgba(255,190,120,.45) inset, 0 6px 26px rgba(230,90,20,.45);
@@ -534,7 +534,7 @@ export class Menu3D {
       this._carTab = tab;
       this.root.innerHTML = `
          <div class="m3-top">
-            <div class="m3-left"><div class="m3-logo">WARSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
+            <div class="m3-left"><div class="m3-logo">KRIEGSSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
                <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button></div>
             <button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst erforschen"' : ''}>GEFECHT!</button>
             <div class="m3-right">
