@@ -535,7 +535,8 @@ export class Menu3D {
       this.root.innerHTML = `
          <div class="m3-top">
             <div class="m3-left"><div class="m3-logo">KRIEGSSCHIFFE<small>3D · EINZELSPIELER-KAMPAGNE</small></div>
-               <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button></div>
+               <button class="m3-capt" data-act="captain" title="Kapitän &amp; Fertigkeiten">KAPITÄN<b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button>
+               <button class="m3-capt" data-act="mp" title="Gemeinsam mit anderen Spielern über das Internet">MEHRSPIELER</button></div>
             <button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst erforschen"' : ''}>GEFECHT!</button>
             <div class="m3-right">
                <div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b> EP</span><span><b>${fmtInt(pf.credits)}</b> Kreditpunkte</span></div>
@@ -565,6 +566,11 @@ export class Menu3D {
       this.root.querySelector('[data-act="battle"]').addEventListener('click', () => this.start());
       this.root.querySelector('[data-act="help"]').addEventListener('click', () => this.cb.onHowTo?.());
       this.root.querySelector('[data-act="captain"]').addEventListener('click', () => this._openCaptain());
+      // the multiplayer screen (and everything network-related) is only loaded on demand
+      this.root.querySelector('[data-act="mp"]').addEventListener('click', () => {
+         this.cb.onClick?.();
+         import('./mpui.js').then(m => m.openMultiplayer(this)).catch(e => console.warn('multiplayer: could not load', e));
+      });
       this.root.querySelector('[data-act="unlock"]')?.addEventListener('click', () => {
          if (unlockShip(pf, k0)) { this._saveProfile(); this.render(); this.cb.onClick?.(); }
       });
