@@ -8,7 +8,12 @@
 //                           routers): everything must work over the relay
 //   MODE=direct             WebRTC allowed: the room must switch to the direct channel
 //   MODE=relayonly          ?net=relay: WebRTC is never tried
-//   ONLY=emqx               (any part of a broker's host name) all other brokers are unreachable:
+//   REMOTE_WS=ws://...      player B runs in a Playwright server on another machine (two real
+//                           networks), e.g. `npx playwright run-server --port 39300` there, reached
+//                           through `ssh -L 39300:127.0.0.1:39300 -R 39301:127.0.0.1:5173`;
+//                           URL3D_B=http://localhost:39301/index-3d.html is the page as B sees it.
+//                           B then draws nothing (no GPU there), so its timings are upper bounds.
+//   ONLY=emqx             (any part of a broker's host name) all other brokers are unreachable:
 //                           how the game does on that broker alone
 //
 // Flow: create a game with password -> the other browser sees it -> wrong password -> right
@@ -34,15 +39,30 @@ if (MODE === 'blocked') args.push('--force-webrtc-ip-handling-policy=disable_non
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const browsers = [];
 const mkPage = async (tag, name) => {
-   const browser = await chromium.launch({ args });          // one browser process per player
+   // REMOTE_WS (+ URL3D_B): player B runs in a Playwright server on another machine / network
+   const remote = tag === 'B' && process.env.REMOTE_WS;
+   const rargs = args.filter(x => !/angle|gpu/.test(x)).concat('--enable-unsafe-swiftshader');
+   const browser = remote ? await chromium.connect(remote, { headers: { 'x-playwright-launch-options': JSON.stringify({ args: rargs }) } })
+      : await chromium.launch({ args });          // one browser process per player
    browsers.push(browser);
-   const ctx = await browser.newContext({ viewport: { width: 1440, height: 810 } });
+   // a remote machine usually renders in software: a small window keeps its page responsive
+   const ctx = await browser.newContext({ viewport: remote ? { width: 800, height: 450 } : { width: 1440, height: 810 } });
    await ctx.addInitScript(() => { window.__netMeasure = true; });      // the netcode counts its bytes
    if (ONLY) await ctx.addInitScript((only) => {
       const Real = window.WebSocket;
       window.WebSocket = class extends Real { constructor(url, protocols) { if (protocols === 'mqtt' && !String(url).includes(only)) throw new Error('broker blocked by the test'); super(url, protocols); } };
    }, ONLY);
+   // ... and a few frames per second are enough there: the netcode does not depend on the frame rate
+   if (remote) await ctx.addInitScript(() => {
+      const raf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (fn) => setTimeout(() => raf(fn), 40);
+      // no rasterising at all: software WebGL would block the page for seconds and spoil the timings
+      for (const C of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) if (C) {
+         for (const f of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements', 'clear']) if (C.prototype[f]) C.prototype[f] = () => { };
+      }
+   });
    const page = await ctx.newPage();
+   if (remote) page.click = (sel) => page.dispatchEvent(sel, 'click');
    page.on('console', m => {
       if (m.type() !== 'error') return;
       // a public broker or relay that refuses a connection is expected now and then; the browser logs it by itself
@@ -50,7 +70,7 @@ const mkPage = async (tag, name) => {
       else errors.push(`[${tag}] ${m.text()}`);
    });
    page.on('pageerror', e => errors.push(`[${tag}] PAGEERROR: ${e.message}`));
-   await page.goto(URL);
+   await page.goto(remote && process.env.URL3D_B ? URL.replace(BASE, process.env.URL3D_B) : URL);
    await page.waitForSelector('.m3-card');
    await page.click('[data-act="mp"]');
    await page.waitForSelector('[data-f="pname"]');
@@ -87,14 +107,16 @@ const seen = await wait(B, (n) => [...document.querySelectorAll('.mp-game .n')].
 check('client sees the game in the list', seen, `${Date.now() - t0} ms after opening the lobby; brokers ${JSON.stringify(await B.evaluate(() => window.__mp.lobby.status()))}`);
 check('no "unreachable" warning', !(await B.evaluate(() => /keine direkte Verbindung/i.test(document.querySelector('.mp-body').innerText))));
 const row = B.locator('.mp-game', { hasText: NAME });
+// a software-rendered remote page is too slow for Playwright's "stable for two frames" click check
+const joinClick = () => process.env.REMOTE_WS ? row.locator('[data-join]').dispatchEvent('click') : row.locator('[data-join]').click();
 
 // ---- 3. wrong password, then the right one
-await row.locator('[data-join]').click();
+await joinClick();
 await B.fill('[data-f="joinpw"]', 'falsch');
 await B.click('.mp-modal [data-ok]');
 const denied = await wait(B, () => /Falsches Passwort/.test(document.querySelector('.mp-modal')?.innerText || ''), null, 15000);
 check('wrong password is refused', denied, (await B.evaluate(() => document.querySelector('.mp-modal')?.innerText || '')).replace(/\n/g, ' | ').slice(0, 120));
-if (!await B.locator('[data-f="joinpw"]').count()) { await B.click('.mp-modal [data-ok]').catch(() => { }); await row.locator('[data-join]').click(); }
+if (!await B.locator('[data-f="joinpw"]').count()) { await B.click('.mp-modal [data-ok]').catch(() => { }); await joinClick(); }
 await B.fill('[data-f="joinpw"]', PW);
 t0 = Date.now();
 await B.click('.mp-modal [data-ok]');
@@ -218,7 +240,7 @@ check('client is back in the list and sees the game again', await wait(B, (n) =>
 
 // ---- 11. the client comes straight back (what a player does after a battle) and a second battle starts
 t0 = Date.now();
-await row.locator('[data-join]').click();
+await joinClick();
 await B.fill('[data-f="joinpw"]', PW);
 await B.click('.mp-modal [data-ok]');
 const inAgain = await wait(B, () => !!document.querySelector('.mp-body.room') && document.querySelectorAll('.mp-player').length === 2, null, 30000);
