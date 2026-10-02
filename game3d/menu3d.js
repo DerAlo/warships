@@ -189,7 +189,7 @@ const CSS = `
 .m3-nat { flex:none; align-self:stretch; display:flex; align-items:center; padding:0 2px 0 8px; border-left:1px solid rgba(214,178,94,.35);
    font-size:10px; font-weight:800; letter-spacing:2px; color:#d6b25e; text-transform:uppercase; writing-mode:vertical-rl; transform:rotate(180deg); }
 .m3-card.gs { margin-left:10px; }
-.m3-card { position:relative; cursor:pointer; flex:none; width:clamp(150px, calc((100vw - 104px) / 7.2), 206px); padding:7px 8px 8px; border-radius:4px; background:rgba(10,22,36,.9);
+.m3-card { position:relative; cursor:pointer; flex:none; width:clamp(150px, calc((100vw - 104px) / var(--div, 7.2)), 206px); padding:7px 8px 8px; border-radius:4px; background:rgba(10,22,36,.9);
    border:1px solid rgba(150,190,230,.14); transition:border-color .12s, background .12s, transform .12s; }
 .m3-card:hover { border-color:rgba(150,190,230,.4); transform:translateY(-2px); }
 .m3-card.sel { border-color:#8fd3ff; background:linear-gradient(180deg, rgba(40,96,146,.9), rgba(12,30,50,.94)); box-shadow:0 0 20px rgba(80,160,240,.3); }
@@ -550,6 +550,9 @@ export class Menu3D {
          </div>
          <div class="m3-dock"><div class="m3-tabs">${tabs}</div><div class="m3-car">${cards}</div></div>`;
       const car = this.root.querySelector('.m3-car');
+      // 8-9 card nation tabs (submarines) shrink the cards a little so the row still fits without scrolling
+      const nCards = car.querySelectorAll('.m3-card').length;
+      if (nCards > 7 && nCards <= 9) car.style.setProperty('--div', nCards + .5);
       if (keepScroll !== null) car.scrollLeft = keepScroll;
       else car.querySelector('.m3-card.sel')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
       car.addEventListener('wheel', (e) => { if (car.scrollWidth > car.clientWidth && e.deltaY) { car.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
