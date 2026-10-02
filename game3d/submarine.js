@@ -60,7 +60,7 @@ export function orderDepth(ship, target, world = ship.world) {
    target = clamp(Math.round(target), 0, 2);
    if (target === ship.depthTarget) return false;
    if (target > ship.depthTarget && (ship.batteryLock || ship.battery <= 0)) {
-      if (ship.isPlayer && world) world.pushEvent('subInfo', { srcId: ship.id, text: 'Batterie zu schwach zum Tauchen', level: 'warn' });
+      if ((ship.isPlayer || ship.human) && world) world.pushEvent('subInfo', { srcId: ship.id, text: 'Batterie zu schwach zum Tauchen', level: 'warn' });
       return false;
    }
    const from = ship.depthTarget;
@@ -244,7 +244,7 @@ function explodeCharge(world, c) {
       const dmg = DC.dmg * c.dmgMult * clamp01((DC.reach - d) / (DC.reach - DC.full)) * (s.depth === 0 ? 0.5 : 1);
       world.pushEvent('dc', { srcId: c.ownerId, dstId: s.id, dmg: Math.round(dmg), pos: { x: s.pos.x, y: s.pos.y }, text: 'Wasserbombentreffer' });
       if (s === world.player) world.shakeAdd(0.6 + 1.2 * clamp01(1 - d / DC.reach));
-      if (shooter && shooter.isPlayer) world.stats.dcHits = (world.stats.dcHits || 0) + 1;
+      if (shooter && shooter.stats) shooter.stats.dcHits = (shooter.stats.dcHits || 0) + 1;
       s.takeDamage(dmg, shooter, 'dc', 0.5);
       if (s.alive && d < DC.full && world.rng() < 0.2) s.flood(world.rng() < 0.5 ? 0 : 1, shooter);
    }

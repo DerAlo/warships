@@ -26,7 +26,7 @@ export function updateBots(world, dt) {
    if (world._aiTick === world.tick) return;
    world._aiTick = world.tick;
    // world.autoPlayer: the AI also captains the player ship (tests, attract mode)
-   for (const b of world.ships) if (b.alive && (!b.isPlayer || world.autoPlayer)) think(b, world, dt);
+   for (const b of world.ships) if (b.alive && !b.human && (!b.isPlayer || world.autoPlayer)) think(b, world, dt);
 }
 // Legacy per-bot entry point (old main3d loop). World.update already runs every bot.
 export function updateBot() {}

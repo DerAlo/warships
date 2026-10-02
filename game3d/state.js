@@ -22,6 +22,15 @@ function envWeather(time, weather, e) {
    };
 }
 const NONE = [];
+// Personal battle statistics. world.stats belongs to the local player's ship; in a net game the
+// host keeps one of these per human-controlled ship (ship.stats, see game3d/net/host.js).
+export function makeStats() {
+   return {
+      dmg: 0, kills: 0, citadels: 0, pens: 0, overpens: 0, ricochets: 0, shatters: 0, heHits: 0, secHits: 0,
+      fires: 0, floods: 0, torpHits: 0, torpsFired: 0, shotsFired: 0, hits: 0, spottingDmg: 0, tanked: 0,
+      potential: 0, healed: 0, caps: 0, spotted: 0,
+   };
+}
 const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
 
 export class World {
@@ -59,11 +68,8 @@ export class World {
       this.mission = null;
       this.result = null;
       this.env = null;
-      this.stats = {
-         dmg: 0, kills: 0, citadels: 0, pens: 0, overpens: 0, ricochets: 0, shatters: 0, heHits: 0, secHits: 0,
-         fires: 0, floods: 0, torpHits: 0, torpsFired: 0, shotsFired: 0, hits: 0, spottingDmg: 0, tanked: 0,
-         potential: 0, healed: 0, caps: 0, spotted: 0,
-      };
+      this.stats = makeStats();
+      this.net = null;          // net game (host): { humans: [ship per slot] }, see game3d/net/
       this.logLines = [];
       this.killCount = 0;       // legacy HUD: enemy ships sunk
       this._shake = 0;
@@ -148,8 +154,19 @@ export class World {
       this.ships.push(ship);
       this.roster.push(ship);
       this._byId.set(ship.id, ship);
-      if (opts.isPlayer) this.player = ship;
+      if (opts.isPlayer) { this.player = ship; ship.stats = this.stats; }
       else this.bots.push(ship);
+      return ship;
+   }
+   // Co-op: put a human captain's ship in the place of a bot. Id, list positions, position and
+   // heading are kept, so every peer that does the same swap ends up with the same roster.
+   replaceShip(old, cls, opts = {}) {
+      const keep = this._nextId;
+      this._nextId = old.id;
+      const ship = new Ship(this, cls, old.side, old.pos, old.heading, { telegraph: 2, ...opts });
+      this._nextId = keep;
+      for (const list of [this.ships, this.roster, this.bots]) { const i = list.indexOf(old); if (i >= 0) list[i] = ship; }
+      this._byId.set(ship.id, ship);
       return ship;
    }
    // Take a ship out of the battle without sinking it (escaped / arrived / retreated).
@@ -220,8 +237,8 @@ export class World {
    onHit(shooter, target, type, proj) {
       if (!shooter) return;
       if (type !== 'ricochet' && type !== 'shatter') shooter.hits++;
-      if (!shooter.isPlayer) return;
-      const st = this.stats;
+      const st = shooter.stats;      // only human-controlled ships keep personal statistics
+      if (!st) return;
       // main-battery accuracy = hits / shotsFired: secondaries fire on their own and are counted apart
       if (type === 'torp') st.torpHits++;
       else if (proj?.kind !== 'sec') st.hits++;   // secondary shatters too
@@ -234,22 +251,25 @@ export class World {
       else if (type === 'sec') st.secHits++;
    }
    onDamage(target, shooter, amt, type) {
-      if (shooter && shooter.isPlayer) this.stats.dmg += amt;
-      else if (shooter && shooter.side === 'player' && target.side !== 'player' && target.spottedByPlayer) this.stats.spottingDmg += amt;
-      if (target.isPlayer) this.stats.tanked += amt;
+      if (shooter && shooter.stats) shooter.stats.dmg += amt;
+      if (shooter && shooter.side === 'player' && target.side !== 'player') {
+         if (target.spottedByPlayer && shooter !== this.player) this.stats.spottingDmg += amt;
+         if (target.spotMask) for (const h of this.net.humans) if (h && h !== shooter && h.stats && (target.spotMask & (1 << h.slot))) h.stats.spottingDmg += amt;
+      }
+      if (target.stats) target.stats.tanked += amt;
    }
    onStatus(ship, shooter, kind, zone) {
       this.pushEvent(kind, { srcId: shooter ? shooter.id : null, dstId: ship.id, pos: { x: ship.pos.x, y: ship.pos.y }, zone,
          text: kind === 'fire' ? 'Brand' : 'Wassereinbruch' });
-      if (shooter && shooter.isPlayer) this.stats[kind === 'fire' ? 'fires' : 'floods']++;
+      if (shooter && shooter.stats) shooter.stats[kind === 'fire' ? 'fires' : 'floods']++;
       if (ship.isPlayer) this.log(null, kind === 'fire' ? '🔥 Feuer an Bord!' : '💧 Wassereinbruch!', 'warn');
    }
    onSink(ship, killer, type) {
       if (ship.side === 'enemy') this.killCount++;
       if (killer) {
          killer.kills++;
-         if (killer.isPlayer) {
-            this.stats.kills++;
+         if (killer.stats) {
+            killer.stats.kills++;
             this.pushEvent('kill', { srcId: killer.id, dstId: ship.id, pos: { x: ship.pos.x, y: ship.pos.y }, text: ship.name + ' versenkt' });
          }
       }
@@ -264,7 +284,10 @@ export class World {
       if (type === 'citadel' && ship.type !== 'DD' && ship.type !== 'SS') this.addEffect('detonation', ship.pos, 3, 60 + L * 0.3, { big: true, shipId: ship.id });
       if (ship === this.player) this.shakeAdd(2);
       if (this._script && this._script.onSink) this._script.onSink(this, ship, killer);
-      if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
+      if (this.net) {
+         // net game: the battle goes on while any human captain is still afloat
+         if ((ship.isPlayer || ship.human) && !this.net.humans.some(h => h && h.alive && (h.isPlayer || h.human))) this.end(false, 'Alle Spielerschiffe wurden versenkt.');
+      } else if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
    }
 
    // ---------------- end of battle ----------------
@@ -325,13 +348,13 @@ export class World {
       const ships = this.ships, prox2 = WORLD.PROXIMITY * WORLD.PROXIMITY;
       for (const T of ships) {
          if (!T.alive) continue;
-         let seen = false, byPlayer = false;
+         let seen = false, byPlayer = false, mask = 0;
          // submarines (submarine.js): a deep boat is never seen and sees nothing itself; at periscope
          // depth the proximity rule shrinks and radar finds nothing, the hydrophone still does
          const td = T.depth, tprox2 = td === 1 ? PERI_PROX * PERI_PROX : prox2;
          for (const O of td === 2 ? NONE : ships) {
             if (!O.alive || O.side === T.side || O.depth === 2) continue;
-            if (seen && !O.isPlayer) continue;
+            if (seen && !O.isPlayer && !O.human) continue;
             const d2 = dist2(O.pos, T.pos);
             let sees = d2 < tprox2;
             if (!sees) {
@@ -342,20 +365,22 @@ export class World {
                   sees = !this.losBlocked(O.pos, T.pos) && (T.inSmoke || !this.smokeBlocks(O.pos, T.pos));
                }
             }
-            if (sees) { seen = true; if (O.isPlayer) byPlayer = true; }
+            if (sees) { seen = true; if (O.isPlayer) byPlayer = true; else if (O.human) mask |= 1 << O.slot; }
          }
          const was = T.detected;
          T.detected = seen;
          T.spottedByPlayer = byPlayer;
+         T.spotMask = mask;             // net game: bit per remote human slot that sees T itself
          T.spotted = T.side === 'player' ? true : seen;
          if (seen) {
             T.lastSeen = { x: T.pos.x, y: T.pos.y, heading: T.heading, speed: T.speed, t: this.time };
             if (!was && T.side === 'enemy') {
                this.pushEvent('spotted', { dstId: T.id, text: T.name + ' entdeckt', pos: { x: T.pos.x, y: T.pos.y } });
                if (byPlayer) this.stats.spotted++;
+               if (mask) for (const h of this.net.humans) if (h && h.stats && !h.isPlayer && (mask & (1 << h.slot))) h.stats.spotted++;
             }
          }
-         if (was !== seen && T === this.player) this.pushEvent(seen ? 'spotted' : 'unspotted', { dstId: T.id, text: seen ? 'Sie wurden entdeckt!' : 'Nicht mehr entdeckt' });
+         if (was !== seen && (T === this.player || T.human)) this.pushEvent(seen ? 'spotted' : 'unspotted', { dstId: T.id, text: seen ? 'Sie wurden entdeckt!' : 'Nicht mehr entdeckt' });
          else if (was && !seen && T.side === 'enemy') this.pushEvent('unspotted', { dstId: T.id, text: T.name + ' außer Sicht' });
       }
       // torpedoes: seen by the opposing team within their detect range (or hydrophone range)
@@ -397,6 +422,7 @@ export class World {
             cap.owner = side; cap.progress = 0; cap.capper = null;
             if (side === 'player') {
                this.stats.caps++;
+               if (this.net) for (const h of this.net.humans) if (h && h.stats && !h.isPlayer) h.stats.caps++;
                this.pushEvent('cap', { text: 'Punkt ' + cap.id + ' eingenommen', capId: cap.id, pos: { ...cap.pos } });
                this.log(null, '🚩 Punkt ' + cap.id + ' eingenommen', 'kill');
             } else {

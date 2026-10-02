@@ -33,6 +33,9 @@ export class Ship {
       this.side = side;
       this.name = opts.name || cfg.name;
       this.isPlayer = !!opts.isPlayer;
+      this.human = false;             // net game (host): steered by a remote player's commands, the AI keeps off
+      this.slot = -1;                 // net game: index into session.players
+      this.stats = null;              // personal statistics (state.makeStats) of a human-controlled ship
       this.color = opts.color || cfg.hull.color || cfg.color;
       this.nation = opts.nation || cfg.hull.nation;
       // ---- motion ----
@@ -117,7 +120,7 @@ export class Ship {
       if (type === this.ammo || !(type === 'AP' ? m.ap : m.he)) return false;
       this.ammo = type;
       for (const t of this.turrets) t.reload = Math.max(t.reload, t.reloadMax * WORLD.AMMO_SWITCH);
-      if (this.isPlayer && this.world) this.world.pushEvent('ammo', { srcId: this.id, text: 'Munition: ' + AMMO_NAMES[type] });
+      if ((this.isPlayer || this.human) && this.world) this.world.pushEvent('ammo', { srcId: this.id, text: 'Munition: ' + AMMO_NAMES[type] });
       return true;
    }
    setTorpSpread(mode) { if (this.torps) this.torps.spread = mode === 'wide' ? 'wide' : 'narrow'; }
@@ -158,7 +161,8 @@ export class Ship {
       if (n > 0) {
          this.lastMainFire = world.time;
          this.shotsFired += n;
-         if (this.isPlayer) { world.stats.shotsFired += n; world.shakeAdd(0.25 + Math.min(1, n / 10) * (m.caliber / 400)); }
+         if (this.stats) this.stats.shotsFired += n;
+         if (this.isPlayer) world.shakeAdd(0.25 + Math.min(1, n / 10) * (m.caliber / 400));
       }
       return n;
    }
@@ -201,7 +205,7 @@ export class Ship {
       }
       l.reload = l.reloadMax;
       world.addEffect('torpLaunch', origin, 0.6, 8, { shipId: this.id, bearing });
-      if (this.isPlayer) world.stats.torpsFired = (world.stats.torpsFired || 0) + l.tubes;
+      if (this.stats) this.stats.torpsFired = (this.stats.torpsFired || 0) + l.tubes;
       return l.tubes;
    }
 
@@ -317,7 +321,7 @@ export class Ship {
             if (c.key === 'repair' && this.healPool > 0) {
                const h = Math.min(this.healPool, (c.heal || 0.005) * this.maxHP * dt, this.maxHP - this.hp);
                this.hp += h; this.healPool -= h;
-               if (this.isPlayer) world.stats.healed = (world.stats.healed || 0) + h;
+               if (this.stats) this.stats.healed = (this.stats.healed || 0) + h;
             }
             if (c.key === 'smoke') {
                this._smokeT -= dt;

@@ -188,8 +188,8 @@ export function resolveShells(world, dt) {
 // "Potential damage" (WoWs stat): enemy shells that landed close to the player.
 function noteNearMiss(world, s) {
    const p = world.player;
-   if (!p || !p.alive || s.side === p.side) return;
-   if (dist2(p.pos, s.target) < 250 * 250) world.stats.potential += s.dmg;
+   if (p && p.alive && s.side !== p.side && dist2(p.pos, s.target) < 250 * 250) world.stats.potential += s.dmg;
+   if (world.net) for (const h of world.net.humans) if (h && h !== p && h.stats && h.alive && s.side !== h.side && dist2(h.pos, s.target) < 250 * 250) h.stats.potential += s.dmg;
 }
 
 // ---------------- damage model ----------------
