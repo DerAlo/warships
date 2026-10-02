@@ -193,3 +193,59 @@ menu.loadout(ship)                   // career snapshot { modules, skills } -> n
 - Camera collision (`camera3d.js`) samples `renderer.terrain.heightAt` around the lens; when a
   hill forces a lift, the orbit arm is shortened (not lengthened), so the own ship keeps its screen
   spot. Pixel-floored FX (tracers, cap letters) scale with `tan(fov/2)` so they do not balloon at 16x.
+
+## Multiplayer (`net/`)
+
+Serverless co-op, host-authoritative. The interfaces to matchmaking and the wire protocol are in
+`net/CONTRACT.md`; this is how the game side is put together.
+
+```
+net/coop.js      coopSlots(missionId)            humans a mission takes (0 = not playable in co-op)
+net/setup.js     buildNetWorld(o)                same World on every peer: seed, mission, difficulty,
+                 validClass, cleanLoadout        humans in place of allied bots (slot order = players)
+net/command.js   makeCommand / applyCommand      continuous controls (telegraph, rudder, aim, lock)
+                 execAction(ship, world, a)      one-shot actions; used by singleplayer too
+net/codec.js     encodeShips / decodeSnap,       binary ship snapshot; localSide() is the one place
+                 encodeOwn / decodeOwn           that maps host sides to local sides (PvP later)
+net/host.js      makeHost(world, o)              applies commands, records events, sends snap/evt/sync
+net/replica.js   makeReplica(world, o)           client: replaces world.update, applies host state
+net/game.js      createNetGame(session, hooks)   handshake, channel wiring, quit/onEnd, byte counters
+main3d.js        startNetGame(session)           = window.__startNetGame; window.__net() -> info
+```
+
+- **Host.** The real `World` runs as in singleplayer. Ships of remote humans carry `ship.human`
+  (the AI skips them); every sim step the host applies each player's latest command and executes
+  queued actions in order (a fire order that finds no gun ready is retried for 15 ticks, so a
+  click made on the client's slightly earlier reload read-out is not lost). `world.net` hooks
+  record events, effects, smoke, log lines, shell and torpedo spawns/removals and ship
+  spawns/removals. Statistics are kept per human (`ship.stats`), so each client gets its own
+  results screen and career rewards; the host's `world.stats` stays the host's own.
+- **Client.** `makeReplica` swaps `world.update` for a step that never simulates ships or decides
+  damage: it interpolates ship state from the snapshot ring, integrates shells and torpedoes
+  locally (visual only), ages effects and smoke, and replays host events into `world.events`.
+  `world.player` is the client's own ship, so renderer, HUD, camera, minimap, audio, lead marker
+  and shell cam read the world unchanged.
+- **Rates.** Ship snapshots 20 Hz (every 3 sim steps, `SNAP_EVERY`), event batches when something
+  happened, slow state (score, caps, timer, objectives, weather) 4 Hz, scoreboard and personal
+  statistics 1 Hz. Commands: at most 30/s while something changes, 10/s keep-alive.
+- **Interpolation.** The client renders `delay = clamp(0.06 + 2.5 * jitter, 0.1, 0.3)` s behind the
+  host clock (offset and jitter are running averages over snapshot arrivals), extrapolates up to
+  0.25 s when snapshots are late and jumps when it is off by more than 0.4 s. Snapshots carry the
+  host tick; late or out-of-order ones are dropped. Event batches are numbered and applied in
+  order (a gap is waited for 2 s, then skipped).
+- **Prediction.** Own actions run through `execAction` on the replica at once: muzzle flash,
+  reload start, shells (adopted by the host's shell record when it arrives, dropped after 1.2 s
+  otherwise), consumables, ammo, spread, depth orders. Telegraph and rudder read-outs, turret
+  traverse, aim and camera are local. Hull motion is **not** predicted: the own ship follows the
+  interpolated host state like every other ship. Own reloads and cooldowns are shown ahead by the
+  measured round trip, so "ready" on the client means ready when the order reaches the host.
+- **Match flow.** `startGame` (singleplayer) and `startNetGame` both end in `beginMatch()`. In a
+  net game the pause menu and photo mode are overlays: `frame()` keeps stepping the world
+  (`live`), and a hidden host tab is stepped by a worker timer. The results screen offers only
+  "Zur Lobby"; `toMenu()` calls `net.quit()`, which calls `session.onEnd` exactly once.
+- **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
+  (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
+  to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **Tests.** `tests/net3d.test.mjs` (node, virtual clock over `makeMemoryHub`, prints the measured
+  bandwidth), `tests/playwright3d.net.mjs` (two pages over `makeLocalTransport`; set
+  `window.__netMeasure = true` before the start to count bytes).

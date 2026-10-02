@@ -118,7 +118,7 @@ export function depthMetres(cfg, f) {
 }
 
 // ---- own-ship detail: what only the captain's HUD needs
-//   u16 ship id · u8 nT · nT x (u16 reload cs, u8 disabledT*4) · u8 nL · nL x u16 reload cs
+//   u32 ship id · u8 nT · nT x (u16 reload cs, u8 disabledT*4) · u8 nL · nL x u16 reload cs
 //   · u8 nC · nC x (u8 charges, u16 cd cs, u16 t cs, u8 active) · u16 engine cs · u16 rudder cs
 //   · u8 bits (1 AP, 2 wide spread, 4 battery lock, 8 has asw) · u16 secTarget (0 = none)
 //   · f32 detectRange · f32 healPool · u8 nFires · n x (u8 zone, u16 t cs, u16 dur cs)
