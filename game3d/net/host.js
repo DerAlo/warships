@@ -236,7 +236,10 @@ export function makeHost(world, o) {
       if (world.phase !== 'playing') return true;
       world.message((c.name || s.name) + (s.alive ? ' hat das Gefecht verlassen – KI übernimmt' : ' hat das Gefecht verlassen'), 'warn');
       const H = world.net && world.net.humans;
-      if (H && !H.some(h => h && h.alive && (h.isPlayer || h.human))) world.end(false, 'Alle Spielerschiffe wurden versenkt.');
+      if (H && !H.some(h => h && h.alive && (h.isPlayer || h.human))) {
+         world.end(false, 'Alle Spielerschiffe wurden versenkt.');
+         post();                      // ended outside a sim step: tell the others now
+      }
       return true;
    }
 

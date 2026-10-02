@@ -225,6 +225,7 @@ export function makeReplica(world, o) {
       const sx = it[5], sy = it[6], tx = it[7], ty = it[8];
       const R = Math.max(30, Math.hypot(tx - sx, ty - sy));
       const t0 = (it[9] - 1) * SIM_DT;
+      if (rt - t0 > flightTime(gun, R) + 0.5) return;   // long over (the tab was in the background)
       let s = null;
       if (owner === me && it[3] === 0) {
          // the host's version of a shell this client predicted: keep the object, take the trajectory
