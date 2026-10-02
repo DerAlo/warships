@@ -576,7 +576,7 @@ function toggleLock() {
       const d = Math.hypot(m.x - W / 2, m.y - H / 2);
       if (d < bestD) { bestD = d; best = m; }
    }
-   if (best && bestD < Math.max(W, H) * 0.35 && best.id !== ctl.lockId) { ctl.lockId = best.id; audio.uiClick(); }
+   if (best && bestD < Math.max(W, H) * 0.35 && best.id !== ctl.lockId) { ctl.lockId = best.id; audio.lock(); }
    else if (ctl.lockId != null) { ctl.lockId = null; audio.uiClick(); }
    else audio.denied();
 }
@@ -802,7 +802,7 @@ function fireTorps() {
          });
       }
    }
-   if (n > 0) { fired.torps += n; audio.torpLaunch(); hud.msg('Torpedos los!', 'info'); }
+   if (n > 0) { fired.torps += n; audio.torpLaunch(n); hud.msg('Torpedos los!', 'info'); }
    else audio.denied();
    return n;
 }
@@ -860,7 +860,7 @@ function processEvents(dt) {
       switch (e.type) {
          case 'pen': case 'citadel': case 'overpen': case 'ricochet': case 'shatter': case 'he': case 'sec': case 'torp': case 'fire': case 'flood':
             if (mine) { addRibbon(e.type); fx.dmg += e.dmg || 0; }
-            if (onMe && e.type !== 'fire' && e.type !== 'flood') { audio.hit((e.dmg || 0) > p.maxHP * 0.05); fx.heat += 1; }
+            if (onMe && e.type !== 'fire' && e.type !== 'flood') { audio.hit((e.dmg || 0) > p.maxHP * 0.05, e.type); fx.heat += 1; }
             if (onMe && e.type === 'fire') { audio.fireStart(); alertCue('fire', 'Feuer an Bord!'); }
             if (onMe && e.type === 'flood') alertCue('flood', 'Wassereinbruch!');
             if (onMe && (e.type === 'citadel' || (e.dmg || 0) > p.maxHP * 0.12)) alertCue('citadel', e.type === 'citadel' ? 'Zitadelle getroffen!' : 'Schwerer Treffer!');
@@ -876,7 +876,7 @@ function processEvents(dt) {
             if (v && !fx.whistled.has('sunk' + v.id)) {
                fx.whistled.add('sunk' + v.id);
                feed(k, v);
-               audio.sink(Math.hypot(v.pos.x - p.pos.x, v.pos.y - p.pos.y));
+               audio.sink(Math.hypot(v.pos.x - p.pos.x, v.pos.y - p.pos.y), v.pos);
             }
             break;
          }
@@ -902,10 +902,11 @@ function processEvents(dt) {
          case 'module': if (onMe && e.text) hud.msg(e.text, 'warn'); break;
          case 'objective': {
             // mission radio + objective updates: longer on screen than combat notices
-            if (!e.text || e.end) break;
+            if (e.end) { audio.endCue(e.level !== 'lose' && e.state !== 'failed'); break; }
+            if (!e.text) break;
             const bad = e.level === 'warn' || e.level === 'bad' || e.state === 'failed';
             hud.msg(e.text, bad ? 'warn' : e.state === 'done' ? 'good' : 'radio', 6);
-            audio.radio?.();
+            if (e.state === 'done' || e.state === 'failed') audio.objective(e.state); else audio.radio();
             break;
          }
          default: break;
@@ -986,10 +987,13 @@ function torpThreats() {
    return out;
 }
 
+const AUDIO_FX = new Set(['ricochet', 'shatter', 'terrain', 'torpHit', 'detonation']);
+let gunsWereBusy = false;
 function pollAudio(dt) {
    const p = P;
    if (!p) return;
    const lx = p.pos.x, ly = p.pos.y;
+   audio.setListener(lx, ly, renderer.cam?.pose?.yaw ?? cam3.yaw);
    // other ships' guns + incoming whistles
    const salvos = new Map();
    for (const s of world.shells) {
@@ -1001,7 +1005,7 @@ function pollAudio(dt) {
          if (!own) {
             const shooter = s.shooter || shipById(s.ownerId);
             const key = (shooter?.id ?? 'x') + (s.kind || 'main');
-            if (!salvos.has(key)) salvos.set(key, { n: 0, sec: s.kind === 'sec', cal: s.caliber || shooter?.cfg?.main?.caliber || 200,
+            if (!salvos.has(key)) salvos.set(key, { n: 0, sec: s.kind === 'sec', cal: s.caliber || shooter?.cfg?.main?.caliber || 200, pos: shooter?.pos || s.pos,
                d: shooter ? Math.hypot(shooter.pos.x - lx, shooter.pos.y - ly) : Math.hypot(s.pos.x - lx, s.pos.y - ly) });
             salvos.get(key).n++;
          }
@@ -1014,7 +1018,7 @@ function pollAudio(dt) {
       }
    }
    for (const v of salvos.values()) {
-      if (v.sec) audio.secondary(v.d); else audio.mainGun(v.cal, v.n, Math.max(1, v.d));
+      if (v.sec) audio.secondary(v.d, v.pos); else audio.mainGun(v.cal, v.n, Math.max(1, v.d), v.pos);
    }
    if (fx.shellSeen.size > 4000) fx.shellSeen = new Set(world.shells.map(s => s.id));
    if (fx.whistled.size > 4000) fx.whistled = new Set();
@@ -1025,9 +1029,19 @@ function pollAudio(dt) {
       if (!e.pos) continue;
       const d = Math.hypot(e.pos.x - lx, e.pos.y - ly);
       if (d > 9000) continue;
-      if (e.kind === 'splash') audio.splash(d, !!e.big || (e.size || 0) > 1.5);
-      else if (e.kind === 'explosion') audio.explosion(!!e.big, d);
+      if (e.kind === 'splash') audio.splash(d, !!e.big || (e.size || 0) > 1.5, e.pos);
+      else if (e.kind === 'explosion') {
+         // hits on the own ship are heard from inside the hull (processEvents -> audio.hit)
+         if (e.sink || e.shipId !== p.id) audio.impact(e.sink ? 'explosion' : e.hit || 'explosion', d, e.pos, !!e.big || !!e.sink);
+      } else if (e.kind === 'torpLaunch') { if (e.shipId !== p.id) audio.impact(e.kind, d, e.pos); }
+      else if (AUDIO_FX.has(e.kind)) audio.impact(e.kind, d, e.pos, !!e.big);
    }
+   // main battery loaded again: a muffled clank from the turrets
+   let live = 0, ready = 0;
+   for (const t of turretCache) { if (t.state !== 'dead') live++; if (t.state === 'ready') ready++; }
+   const allReady = live > 0 && ready === live;
+   if (allReady && gunsWereBusy && p.alive && phase === 'playing') audio.reloaded();
+   gunsWereBusy = !allReady;
    // torpedo warning ping + spotted alarm
    fx.torpPingT -= dt;
    if (fx.torpWarn.length && !fx.hadTorpWarn) alertCue('torp', 'Torpedos voraus!');
@@ -1037,8 +1051,8 @@ function pollAudio(dt) {
    if (sp && !fx.spotted) { audio.spottedAlarm(); hud.msg('Du wurdest entdeckt!', 'warn'); }
    fx.spotted = sp;
    const muted = phase !== 'playing';
-   audio.updateEngine(Math.abs(p.speed || 0), maxSpeedMs(p), muted || !p.alive);
-   audio.updateAmbient(world.env?.seaState ?? 0.4, muted);
+   audio.updateEngine(Math.abs(p.speed || 0), maxSpeedMs(p), muted || !p.alive, Math.abs(ctl.telegraph || 0) / 4);
+   audio.updateAmbient(world.env?.seaState ?? 0.4, muted, world.env?.weather, p.alive ? p.fires?.length || 0 : 0);
 }
 
 // ------------------------------------------------------------------ render interpolation

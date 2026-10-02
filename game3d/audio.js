@@ -22,7 +22,7 @@
 import { render, impulse, SOUND_NAMES, GUN_CLASSES } from './audiosynth.js';
 
 const SOUND_SPEED = 1500;   // m/s -- compressed like the sim's ship speeds, real 343 feels laggy
-const WORLD_VOICES = 26, DIRECT_VOICES = 8;
+const WORLD_VOICES = 32, DIRECT_VOICES = 8;
 export const MAX_VOICES = WORLD_VOICES + DIRECT_VOICES;
 export const MAX_SOURCES = 110;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -48,7 +48,7 @@ const TIMP = [
 ];
 const CELLO = [1, 1, 1.5, 1, 1, 1, 1.189, 1];   // ostinato: root root fifth root root root m3 root
 const BPM = [0, 50, 60, 72];
-const PAD_GAIN = [0.085, 0.105, 0.125, 0.13], PAD_CUT = [300, 420, 640, 540], CHORD_SEC = [14, 12, 8, 6.67];
+const PAD_GAIN = [0.075, 0.095, 0.11, 0.115], PAD_CUT = [380, 520, 760, 680], CHORD_SEC = [14, 12, 8, 6.67];
 
 export class Audio {
    constructor() {
@@ -65,7 +65,7 @@ export class Audio {
       this._sub = false;
       this._d = { delay: 0, gain: 1, cutoff: 20000, send: 0.3 };
       this._mLevel = -2; this._nextStep = 0; this._step = 0; this._chord = 0; this._nextChord = 0;
-      this._thunderT = 0;
+      this._thunderT = 0; this._splT = -1; this._splN = 0;
       this._onEnd = () => { this._srcN--; };
    }
 
@@ -93,6 +93,7 @@ export class Audio {
          curve[i] = a < 0.6 ? x : Math.sign(x) * (0.6 + 0.38 * Math.tanh((a - 0.6) / 0.38));
       }
       clip.curve = curve;
+      this.out = clip;           // last node before the speakers (tests tap it)
       const pre = ctx.createGain(); pre.gain.value = 0.5;
       this.limiter = ctx.createDynamicsCompressor();
       this.limiter.threshold.value = -3; this.limiter.knee.value = 0; this.limiter.ratio.value = 20;
@@ -272,7 +273,7 @@ export class Audio {
       const ch = this._take(this._world, own ? 9 : h > 0.5 ? 5 : 4, dur);
       if (!ch) return;
       const salvo = 0.8 + 0.2 * Math.min(count, 9) / 3;
-      this._cfg(ch, D.gain * (0.5 + 0.5 * h) * (own ? 1 : 0.95), own ? 20000 : D.cutoff, own ? 0 : this._pan(pos), own ? 0.3 : D.send);
+      this._cfg(ch, D.gain * (0.5 + 0.5 * h) * (own ? 1 : 0.95), own ? 20000 : D.cutoff, own ? 0 : this._pan(pos), own ? 0.1 + 0.26 * h : D.send * (0.6 + 0.4 * h));
       // barrels ripple: turret after turret, a few hundredths apart
       const nb = own ? Math.min(count, 6) : nearW > 0.08 ? Math.min(count, 3) : 0;
       let at = delay;
@@ -280,7 +281,7 @@ export class Audio {
          this._src(ch, 'gun' + gi + ((i + (Math.random() < 0.5 ? 1 : 0)) & 1 ? 'b' : 'a'), at, nearW * (i ? 0.52 : 0.8), rate * this._rnd(0.95, 1.05));
          at += 0.03 + 0.03 * h + Math.random() * 0.035;
       }
-      if (nearW > 0.05) this._src(ch, tailName, delay + 0.02, nearW * 0.62 * salvo, rate * this._rnd(0.95, 1.05));
+      if (nearW > 0.05) this._src(ch, tailName, delay + 0.02, nearW * (0.34 + 0.3 * h) * salvo, rate * this._rnd(0.95, 1.05));
       if (farW > 0.05) this._src(ch, farName, delay, farW * 1.15 * salvo, rate * FAR_RATE[gi] * this._rnd(0.94, 1.06));
    }
    // legacy name used by older call sites
@@ -302,6 +303,10 @@ export class Audio {
    // ---- impacts ----
    splash(dist = 0, big = false, pos = null) {
       if (!this.ctx) return;
+      // a salvo lands as one sheet of water: at most four splash voices per 80 ms
+      const now = this.ctx.currentTime;
+      if (now - this._splT > 0.08) { this._splT = now; this._splN = 0; }
+      if (++this._splN > 4) return;
       const D = this._dist(dist);
       this._one(this._world, big ? 2 : 1, (big ? 'splashBig' : 'splash') + (Math.random() < 0.5 ? 'A' : 'B'), D.gain * (big ? 0.75 : 0.5),
          { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate: this._rnd(0.92, 1.08) });
@@ -500,7 +505,9 @@ export class Audio {
       const ctx = this.ctx;
       this._padF = ctx.createBiquadFilter(); this._padF.type = 'lowpass'; this._padF.frequency.value = 280; this._padF.Q.value = 0.9;
       this._padG = ctx.createGain(); this._padG.gain.value = 0;
-      this._padF.connect(this._padG); this._padG.connect(this.music);
+      // the swell LFO modulates its own gain stage, so the pad is truly silent when _padG is 0
+      this._swell = ctx.createGain(); this._swell.gain.value = 1;
+      this._padF.connect(this._swell); this._swell.connect(this._padG); this._padG.connect(this.music);
       const c = CHORDS[0];
       this._mOsc = [];   // [osc, chord index, frequency factor]
       const add = (type, idx, mult, gain, det) => {
@@ -509,8 +516,8 @@ export class Audio {
          o.connect(g); g.connect(this._padF); o.start();
          this._mOsc.push([o, idx, mult]);
       };
-      add('sine', 0, 1, 0.55, 0); add('triangle', 0, 2, 0.22, 3);
-      for (let v = 1; v <= 3; v++) { add('sawtooth', v, 1, 0.2 - v * 0.03, -6); add('sawtooth', v, 1, 0.2 - v * 0.03, 6); }
+      add('sine', 0, 1, 0.3, 0); add('triangle', 0, 2, 0.2, 3);
+      for (let v = 1; v <= 3; v++) { add('sawtooth', v, 1, 0.3 - v * 0.04, -6); add('sawtooth', v, 1, 0.3 - v * 0.04, 6); }
       // tension: a minor second grinding against the fifth, only at low HP
       const tense = ctx.createOscillator(); tense.type = 'sawtooth'; tense.frequency.value = 116.54;
       this._tenseG = ctx.createGain(); this._tenseG.gain.value = 0;
@@ -518,9 +525,8 @@ export class Audio {
       // slow swell: the pad breathes like long brass notes
       const lfo = ctx.createOscillator(); lfo.frequency.value = 0.06;
       const lfoF = ctx.createGain(); lfoF.gain.value = 110;
-      this._swell = ctx.createGain(); this._swell.gain.value = 1;
       const lfoG = ctx.createGain(); lfoG.gain.value = 0.3;
-      lfo.connect(lfoF); lfoF.connect(this._padF.frequency); lfo.connect(lfoG); lfoG.connect(this._padG.gain); lfo.start();
+      lfo.connect(lfoF); lfoF.connect(this._padF.frequency); lfo.connect(lfoG); lfoG.connect(this._swell.gain); lfo.start();
    }
    _mHit(name, when, gain, rate) {
       if (this._srcN >= MAX_SOURCES) return;

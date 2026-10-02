@@ -212,32 +212,32 @@ function gunShot(sr, r, h) {
    lay(out, sr, c, 1.0 - 0.15 * h);
    const s = white(Math.floor(0.4 * sr), r);
    svf(s, sr, BP, (1500 - 750 * h) * j, 0.9); shape(s, sr, dec(0.022 + 0.04 * h));
-   lay(out, sr, s, 0.8);
+   lay(out, sr, s, 1.0);
    const body = sweep(n, sr, (178 - 90 * h) * j, 64 - 32 * h, 0.04 + 0.075 * h, ar(0.002, 0.08 + 0.38 * h));
-   lay(out, sr, drive(body, 2.4), 1.15 + 0.6 * h);
+   lay(out, sr, drive(body, 2.4), 0.6 + 1.15 * h);
    if (h > 0.4) lay(out, sr, sweep(n, sr, 60, 29, 0.25, ar(0.012, 0.22 + 0.4 * h)), 0.85 * h);
    const bl = pink(n, r);
    svf(bl, sr, LP, expo(7500 - 2600 * h, 240, 0.045 + 0.14 * h), 0.7); shape(bl, sr, ar(0.001, 0.065 + 0.28 * h));
    lay(out, sr, bl, 1.3);
    const bark = white(n, r);
    svf(bark, sr, BP, (340 - 160 * h) * j, 1.4); shape(bark, sr, ar(0.003, 0.1 + 0.22 * h));
-   lay(out, sr, bark, 0.7);
+   lay(out, sr, bark, 1.0 - 0.3 * h);
    return fade(norm(drive(out, 1.5), 0.95), sr, 0.0003, 0.08);
 }
 // the long rumbling tail of a salvo rolling away over the water
 function gunTail(sr, r, h) {
-   const n = Math.floor((1.5 + 3.5 * h) * sr), out = new Float32Array(n);
+   const n = Math.floor((0.9 + 4.1 * h) * sr), out = new Float32Array(n);
    const x = brown(n, r);
-   svf(x, sr, LP, expo(720 - 300 * h, 125 - 35 * h, 0.5 + 0.6 * h), 0.7);
-   mul(x, lfn(n, sr, 5.5 - 2.5 * h, r), 0.4, 1.3); shape(x, sr, ar(0.05, 0.42 + 1.05 * h));
+   svf(x, sr, LP, expo(1500 - 1050 * h, 270 - 180 * h, 0.4 + 0.7 * h), 0.7);
+   mul(x, lfn(n, sr, 5.5 - 2.5 * h, r), 0.4, 1.3); shape(x, sr, ar(0.05, 0.2 + 1.27 * h));
    lay(out, sr, x, 1);
    const air = pink(n, r);
-   svf(air, sr, BP, 420 - 120 * h, 0.6); mul(air, lfn(n, sr, 4, r), 0.3, 1); shape(air, sr, ar(0.04, 0.5 + 0.7 * h));
-   lay(out, sr, air, 0.3);
+   svf(air, sr, BP, 700 - 380 * h, 0.6); mul(air, lfn(n, sr, 4, r), 0.3, 1); shape(air, sr, ar(0.04, 0.22 + 0.98 * h));
+   lay(out, sr, air, 0.5 - 0.2 * h);
    const echoes = 2 + Math.round(3 * h);
    for (let k = 0; k < echoes; k++) {
-      const at = 0.12 + r() * (0.45 + 0.95 * h);
-      const th = sweep(Math.floor(0.7 * sr), sr, 92 - 40 * h, 42 - 12 * h, 0.08, ar(0.012, 0.11 + 0.17 * h));
+      const at = 0.12 + r() * (0.25 + 1.15 * h);
+      const th = sweep(Math.floor(0.7 * sr), sr, 130 - 78 * h, 60 - 30 * h, 0.08, ar(0.012, 0.07 + 0.21 * h));
       lay(out, sr, th, 0.55 * Math.exp(-at / 0.7), at);
    }
    return fade(norm(out, 0.9), sr, 0.002, 0.25);
@@ -502,7 +502,7 @@ function uiClick(sr, r) {
 function uiLock(sr, r) {
    const n = Math.floor(0.38 * sr), out = new Float32Array(n);
    lay(out, sr, tick(sr, r), 0.6);
-   lay(out, sr, modal(n, sr, [[392, 0.09, 1], [588, 0.07, 0.6], [1046, 0.04, 0.25], [1340, 0.03, 0.15]], r), 0.75, 0.07);
+   lay(out, sr, modal(n, sr, [[392, 0.09, 1], [588, 0.07, 0.95], [1046, 0.05, 0.5], [1340, 0.04, 0.35], [196, 0.06, 0.4]], r), 0.75, 0.07);
    lay(out, sr, tick(sr, r, 1500, 0.004), 0.4, 0.07);
    return fade(svf(norm(out, 0.7), sr, LP, 3200, 0.7), sr, 0.0002, 0.04);
 }
@@ -570,7 +570,7 @@ function radio(sr, r) {
 // ship's alarm gong: `strikes` hits of a muted bell, `gap` seconds apart
 function gong(sr, r, base, strikes, gap, tau) {
    const n = Math.floor((strikes * gap + tau * 5) * sr), out = new Float32Array(n);
-   const p = [[base, tau, 1], [base * 2.0, tau * 0.8, 0.55], [base * 2.76, tau * 0.55, 0.45], [base * 4.07, tau * 0.36, 0.3], [base * 5.4, tau * 0.24, 0.2]];
+   const p = [[base, tau, 1], [base * 0.5, tau, 0.45], [base * 2.0, tau * 0.8, 0.85], [base * 2.76, tau * 0.6, 0.75], [base * 4.07, tau * 0.4, 0.5], [base * 5.4, tau * 0.28, 0.3]];
    for (let k = 0; k < strikes; k++) {
       lay(out, sr, modal(Math.floor(tau * 7 * sr), sr, p, r, 0.004, 0.02), 0.9, k * gap);
       lay(out, sr, tick(sr, r, base * 3, 0.004), 0.35, k * gap);
@@ -602,8 +602,9 @@ function alertFlood(sr, r) {
 function alertSpotted(sr, r) {
    const n = Math.floor(0.6 * sr), out = new Float32Array(n);
    lay(out, sr, sweep(n, sr, 185, 108, 0.12, ar(0.01, 0.13)), 0.7);
-   mix(out, brass(n, sr, 146.83, swell(0.03, 0.2, 0.1), 0.7), 0.5);
-   mix(out, brass(n, sr, 155.56, swell(0.03, 0.2, 0.1), 0.7), 0.3);
+   mix(out, brass(n, sr, 146.83, swell(0.03, 0.2, 0.1), 1.4), 0.45);
+   mix(out, brass(n, sr, 220, swell(0.03, 0.2, 0.1), 1.4), 0.4);
+   mix(out, brass(n, sr, 233.08, swell(0.03, 0.2, 0.1), 1.2), 0.25);
    lay(out, sr, tick(sr, r, 1300, 0.004), 0.4);
    return fade(norm(out, 0.7), sr, 0.001, 0.08);
 }
@@ -898,7 +899,16 @@ def('objDone', 2, (sr, r) => objective(sr, r, 'done')); def('objFailed', 2, (sr,
 def('victory', 2, (sr, r) => endCue(sr, r, true)); def('defeat', 2, (sr, r) => endCue(sr, r, false));
 def('timpani', 2, (sr, r) => timpani(sr, r)); def('cello', 2, cello);
 def('consSmoke', 1, consSmoke); def('consBoost', 2, consBoost); def('consRepair', 1, consRepair); def('consRadar', 1, consRadar);
-def('consHydro', 1, (sr, r) => sonar(sr, r, 720, 1.8, 0.22));
+def('consHydro', 1, (sr, r) => {
+   // hydrophone switched on: relay click, water noise swelling in the headset, one soft ping
+   const out = sonar(sr, r, 720, 1.8, 0.22), n = out.length;
+   for (let i = 0; i < n; i++) out[i] *= 0.45;
+   const w = pink(n, r);
+   svf(w, sr, BP, expo(300, 900, 0.5), 0.8); mul(w, lfn(n, sr, 7, r), 0.5, 1); shape(w, sr, swell(0.25, 0.7, 0.3));
+   lay(out, sr, w, 0.5);
+   lay(out, sr, tick(sr, r, 1400, 0.004), 0.5);
+   return fade(norm(out, 0.75), sr, 0.001, 0.3);
+});
 def('klaxon', 1, klaxon); def('ballast', 1, ballastVent); def('surfacing', 1, surfacing);
 def('sonar', 1, (sr, r) => sonar(sr, r)); def('depthCharge', 2, depthCharge);
 def('loopSea', 2, stereo(seaLoop)); def('loopWind', 2, stereo(windLoop)); def('loopRain', 1, stereo(rainLoop));
