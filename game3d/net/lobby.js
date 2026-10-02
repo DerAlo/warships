@@ -253,7 +253,8 @@ export class Lobby {
    async _onKnock(d, from) {
       if (!this.isHost || !d || d.room !== this.room.id) { if (d && this.lt) this.lt.send('knockr', { ok: false, why: 'gone' }, from); return; }
       const r = this.room, now = Date.now();
-      const seats = r.players.length + [...this._approved].filter(([id, until]) => id !== from && until > now && !r.players.some(p => p.id === id)).length;
+      // the knocking peer itself takes no seat: it may still be listed from a visit whose goodbye got lost
+      const seats = r.players.filter(p => p.id !== from).length + [...this._approved].filter(([id, until]) => id !== from && until > now && !r.players.some(p => p.id === id)).length;
       let why = null;
       if (d.v !== NET_VERSION) why = 'version';
       else if (this._banned.has(from)) why = 'banned';
@@ -375,10 +376,18 @@ export class Lobby {
          if (!this.room) return;
          if (this.isHost) {
             const p = this.room.players.find(x => x.id === id);
-            this._approved.delete(id);
+            this._unseat(id, p);
             if (p) { this.room.players = this.room.players.filter(x => x.id !== id); this._say(null, `${p.name} hat das Spiel verlassen.`); this._sync(); }
          } else if (id === this.room.hostId) this._drop('hostleft', 'Der Host hat das Spiel verlassen.');
       });
+   }
+   // host: player p (may be undefined) is gone, its seat reservation with it. A reservation made
+   // after that player came in belongs to its next visit and stays: the goodbye of the earlier
+   // visit may arrive after the new knock (or never, then the re-join itself ends the old visit).
+   // What is kept here runs out by itself (SEAT_MS).
+   _unseat(id, p) {
+      const until = this._approved.get(id);
+      if (until !== undefined && p && until - SEAT_MS <= p.at) this._approved.delete(id);
    }
    _hostMsg(m, from) {
       const r = this.room;
@@ -388,7 +397,7 @@ export class Lobby {
          if (p) { this.rt.send('room', this._state(), from); return; }
          const why = this._banned.has(from) ? 'banned' : !this._approved.has(from) ? 'gone' : r.state !== 'lobby' ? 'running' : r.players.length >= r.max ? 'full' : null;
          if (why) { this.rt.send('room', { t: 'deny', why }, from); return; }
-         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false };
+         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now() };
          r.players.push(p);
          this._say(null, `${p.name} ist beigetreten.`);
          this._sync();
@@ -400,7 +409,7 @@ export class Lobby {
          if ('ready' in m) p.ready = !!m.ready && !!p.ship;
          this._sync();
       } else if (m.t === 'bye') {
-         this._approved.delete(from);
+         this._unseat(from, p);
          r.players = r.players.filter(x => x.id !== from);
          this._say(null, `${p.name} hat das Spiel verlassen.`);
          this.session?.transport._leave(from);

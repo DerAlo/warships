@@ -120,13 +120,17 @@ check('B: joins a second time', again, again ? `${Date.now() - t} ms` : await mo
 // host closes the game: client is told, listing disappears
 t = Date.now();
 await A.click('[data-act="back"]');
-check('B: told that the host closed the game', await wait(B, () => document.querySelector('.mp-modal')?.textContent.includes('Host')), `${Date.now() - t} ms; ${await modalText(B)}`);
+// (needs B to be in the room; "verlassen" is the wording when the goodbye arrives before the room's last message)
+check('B: told that the host closed the game', again && await wait(B, () => /Der Host hat das Spiel (geschlossen|verlassen)/.test(document.querySelector('.mp-modal')?.textContent || '')), `${Date.now() - t} ms; ${await modalText(B)}`);
 await B.click('.mp-modal [data-ok]').catch(() => { });
 check('B: listing withdrawn', await wait(B, (n) => ![...document.querySelectorAll('.mp-game .n')].some(e => e.textContent === n), gameName), `${Date.now() - t} ms`);
 console.log('   relay sockets opened by A:', A.ws.length, ' by B:', B.ws.length);
 
 await browser.close();
 const failed = results.filter(x => !x.ok).length;
-console.log(`lobby live: ${results.length - failed}/${results.length} checks passed, ${errors.length} console errors`);
-for (const e of [...new Set(errors)]) console.log('  ERROR ' + e);
+// a public broker or relay refusing a connection is logged by the browser itself: listed, not counted
+const noise = errors.filter(e => /WebSocket connection to|ERR_(NAME_NOT_RESOLVED|CONNECTION|INTERNET|SSL|CERT|TIMED_OUT)/.test(e)), real = errors.filter(e => !noise.includes(e));
+for (const e of [...new Set(noise)]) console.log('  network noise: ' + e);
+for (const e of [...new Set(real)]) console.log('  ERROR ' + e);
+console.log(`lobby live: ${results.length - failed}/${results.length} checks passed, ${real.length} console errors (${noise.length} refused connections)`);
 process.exit(failed ? 1 : 0);

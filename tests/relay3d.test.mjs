@@ -121,7 +121,8 @@ test('latest-wins channels are never repeated, never duplicated and never go bac
    await until(() => a.peers().length === 1 && b.peers().length === 1, 6000, 'peers');
    for (let i = 1; i <= 100; i++) { const s = new Uint8Array(600); new DataView(s.buffer).setUint32(0, i); a.send('snap', s); await sleep(10); }
    await sleep(400);
-   assert.ok(got.length >= 60 && got.length <= 100, `received ${got.length} of 100`);
+   // how many get through is chance (10% loss, and the jitter overtakes the 10 ms send interval)
+   assert.ok(got.length >= 35 && got.length <= 100, `received ${got.length} of 100`);
    for (let i = 1; i < got.length; i++) assert.ok(got[i] > got[i - 1], 'strictly newer');
    assert.equal(a.stats().resent, 0);
    a.leave(); b.leave();
@@ -232,4 +233,61 @@ test('lobby channel: broadcast and addressed messages arrive once per message, n
    await sleep(100);
    assert.equal(gotB.length, 2);
    a.leave(); c.leave();
+});
+
+// ---------------------------------------------------------------- the lobby on top of it
+function lobbyBackend(net, selfId) {
+   const bus = net.bus();
+   return {
+      local: false, selfId, bus,
+      openLobby: async () => makeBusLobby(bus, selfId),
+      openRoom: (id, hostId, key, admit) => makeRoomTransport({ bus, selfId, room: id, hostId, key, admit }),
+      status: () => bus.status(),
+   };
+}
+async function lobbyPair(net) {
+   const { Lobby, coopMissions } = await import('../game3d/net/lobby.js');
+   const profile = () => ({ unlocked: {} });
+   const host = new Lobby(lobbyBackend(net, 'hostA'), profile, {}), client = new Lobby(lobbyBackend(net, 'clientB'), profile, {});
+   host.name = 'Anna'; client.name = 'Bert';
+   await host.open();
+   await host.host({ name: 'T', mission: coopMissions()[0].id, max: 2, password: 'pw' });
+   await client.open();
+   await until(() => client.list().length === 1, 4000, 'listing');
+   const entry = client.list()[0];
+   await client.join(entry, 'pw');
+   await until(() => host.room.players.length === 2, 3000, 'two players');
+   return { host, client, entry };
+}
+
+test('lobby: leaving and joining again at once works although the goodbye is still on its way', async () => {
+   // slow brokers: the knock of the second visit overtakes the goodbye of the first
+   const net = makeNet([{ delay: 300 }, { delay: 320 }]);
+   const { host, client, entry } = await lobbyPair(net);
+   client.leaveRoom();
+   await until(() => !!client.lt, 2000, 'lobby open again');
+   await client.join(entry, 'pw');
+   assert.equal(client.room.players.length, 2);
+   await until(() => host.room.players.length === 2, 3000, 'two players again');
+   await sleep(800);                                    // every late goodbye has arrived by now
+   assert.deepEqual(host.room.players.map(p => p.id), ['hostA', 'clientB']);
+   assert.deepEqual(host.rt.peers(), ['clientB']);
+   client.close(); host.close();
+   await sleep(400);
+});
+
+test('lobby: joining again works when the goodbye never arrived (full room, same player)', async () => {
+   const net = makeNet([{ delay: 10 }, { delay: 20 }]);
+   const { host, client, entry } = await lobbyPair(net);
+   client.net.bus.setOpen(0, false); client.net.bus.setOpen(1, false);      // the line drops, nothing gets out
+   client.leaveRoom();
+   await sleep(700);
+   client.net.bus.setOpen(0, true); client.net.bus.setOpen(1, true);
+   assert.equal(host.room.players.length, 2, 'the host has not noticed');
+   await until(() => !!client.lt, 2000, 'lobby open again');
+   await client.join(entry, 'pw');
+   await until(() => host.room.players.length === 2 && host.rt.peers().length === 1, 3000, 'two players again');
+   assert.equal(client.room.players.length, 2);
+   client.close(); host.close();
+   await sleep(400);
 });

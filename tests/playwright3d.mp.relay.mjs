@@ -13,7 +13,8 @@
 //
 // Flow: create a game with password -> the other browser sees it -> wrong password -> right
 // password -> ready -> start -> co-op battle of SECS seconds (the client steers and fires, the
-// host sees its ship react) -> results -> back in the room -> leave.
+// host sees its ship react) -> results -> back in the room -> the client leaves, joins again at
+// once, a second battle starts and runs a few seconds -> the host closes the game.
 // Prints what the client measured: round trip time, snapshot rate, largest snapshot gap, broker
 // connects/drops.
 //
@@ -214,7 +215,44 @@ check('both are back in the room with both players', (await wait(A, back, null, 
 await B.click('[data-act="back"]');
 check('host sees the client leave', await wait(A, () => document.querySelectorAll('.mp-player').length === 1, null, 12000));
 check('client is back in the list and sees the game again', await wait(B, (n) => [...document.querySelectorAll('.mp-game .n')].some(e => e.textContent.includes(n)), NAME, 15000));
+
+// ---- 11. the client comes straight back (what a player does after a battle) and a second battle starts
+t0 = Date.now();
+await row.locator('[data-join]').click();
+await B.fill('[data-f="joinpw"]', PW);
+await B.click('.mp-modal [data-ok]');
+const inAgain = await wait(B, () => !!document.querySelector('.mp-body.room') && document.querySelectorAll('.mp-player').length === 2, null, 30000);
+check('client joined a second time', inAgain, inAgain ? `${Date.now() - t0} ms` : (await B.evaluate(() => document.querySelector('.mp-modal')?.innerText || document.querySelector('.mp-body').innerText)).replace(/\n/g, ' | ').slice(0, 200));
+check('host sees the client again', await wait(A, () => document.querySelectorAll('.mp-player').length === 2, null, 10000));
+if (inAgain) {
+   await B.click('[data-act="main"]');
+   check('host may start again', await wait(A, () => !document.querySelector('[data-act="main"]').disabled, null, 10000));
+   await A.click('[data-act="main"]');
+   const again = (await wait(A, () => window.__phase() === 'playing' && !!window.__world()?.player, null, 30000)) && (await wait(B, () => window.__phase() === 'playing' && !!window.__world()?.player && window.__net()?.synced, null, 30000));
+   check('second battle: both in, client synced', again);
+   if (again) {
+      const me2 = await B.evaluate(() => window.__world().player.id);
+      const n0 = await B.evaluate(() => window.__net().snapsIn);
+      for (let i = 0; i < 4; i++) { await B.keyboard.press('w'); await sleep(60); }
+      const ctl2 = await B.evaluate(() => window.__ctl());
+      check('second battle: host applies the client\'s telegraph', await wait(A, ([id, c]) => window.__world().ships.find(s => s.id === id)?.telegraph === c.telegraph, [me2, ctl2], 6000), { telegraph: ctl2.telegraph });
+      await sleep(5000);
+      const n1 = await B.evaluate(() => window.__net().snapsIn);
+      check('second battle: snapshots keep arriving', n1 - n0 > (ONLY ? 25 : 60), { in5s: n1 - n0, via: (await stats(B))?.peers[0]?.via });
+      await A.evaluate(() => window.__world().end(true, 'Testende'));
+      check('second battle: both show the results', (await wait(A, shown, null, 15000)) && (await wait(B, shown, null, 15000)));
+      await A.click('.m3r-btn[data-act="port"]'); await B.click('.m3r-btn[data-act="port"]');
+      check('second battle: both are back in the room', (await wait(A, back, null, 15000)) && (await wait(B, back, null, 15000)));
+   }
+}
+
+// ---- 12. the host closes the game: the client is told and the listing goes
 await A.click('[data-act="back"]');
+if (inAgain) {
+   const told = await wait(B, () => /Der Host hat das Spiel (geschlossen|verlassen)/.test(document.querySelector('.mp-modal')?.innerText || ''), null, 15000);
+   check('client is told that the host is gone', told, (await B.evaluate(() => document.querySelector('.mp-modal')?.innerText || '')).replace(/\n/g, ' | ').slice(0, 120));
+   await B.click('.mp-modal [data-ok]').catch(() => { });
+}
 check('game disappears from the list when the host leaves', await wait(B, (n) => ![...document.querySelectorAll('.mp-game .n')].some(e => e.textContent.includes(n)), NAME, 15000));
 
 for (const b of browsers) await b.close();
