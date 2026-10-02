@@ -31,6 +31,9 @@ export const TECH_TREE = [
    ['Zara', 9000, 130000, null], ['Littorio', 15500, 230000, 'Zara'],
    // Sowjetische Marine
    ['Gnevny', 5500, 80000, null], ['Kirov', 6500, 90000, null],
+   // U-Boote
+   ['U96', 7000, 100000, null], ['U505', 15000, 230000, 'U96'], ['Triton', 7000, 100000, null],
+   ['Gato', 15000, 230000, null], ['I19', 11000, 170000, null], ['S13', 11000, 170000, null],
 ];
 export const UNLOCK_XP = Object.fromEntries(TECH_TREE.map(r => [r[0], r[1]]));
 export const UNLOCK_CREDITS = Object.fromEntries(TECH_TREE.map(r => [r[0], r[2]]));

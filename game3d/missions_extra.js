@@ -549,5 +549,75 @@ export function extraMissions(H) {
             w.end(false, S.phase2 ? 'Die deutschen Zerstörer haben den Fjord abgeriegelt – kein Entkommen.' : 'Der Überfall ist gescheitert – zu wenige Frachter versenkt.');
          },
       },
+
+      // ------------------------------------------------------------ op: wolf pack against a convoy
+      {
+         id: 'wolfpack', group: 'ops', name: 'Geleitzugschlacht', subtitle: 'Nordatlantik · Rudeltaktik · Herbst 1941',
+         fleet: { own: 'U 96 (Typ VII C) · im Rudel: U 552, U 99', foe: 'Geleitzug aus sechs Frachtern · Zerstörer der Escort Group' },
+         briefing: 'Ein Fühlunghalter hat einen britischen Geleitzug gemeldet: sechs Frachter auf Ostkurs, gesichert von Zerstörern. ' +
+            'Das Rudel ist angesetzt, Ihr Boot steht vor dem Geleit. Tauchen Sie mit F auf Sehrohrtiefe, lassen Sie die Sicherung passieren und schießen Sie Ihre Bugrohre auf die Frachter. ' +
+            'Hören Sie Ortungsimpulse, gehen Sie tief und laufen Sie ab – Wasserbomben treffen nur, was der Zerstörer überläuft. ' +
+            'Achten Sie auf die Batterie: Ist sie leer, muss das Boot auftauchen. Erreichen zu viele Frachter die Luftsicherung im Osten, ist der Angriff gescheitert.',
+         debrief: 'Im Herbst 1941 standen die Rudel der Typ-VII-Boote auf dem Höhepunkt ihrer Erfolge: Ein Boot hielt Fühlung, die anderen wurden herangeführt und griffen meist nachts über Wasser an. ' +
+            'Mit Radar, Kurzwellenpeilung, Geleitflugzeugträgern und Langstreckenflugzeugen wendete sich das Blatt. Im Mai 1943 gingen 41 Boote verloren – Dönitz zog die Rudel aus dem Nordatlantik zurück. ' +
+            'Von rund 40.000 deutschen U-Boot-Fahrern kehrten etwa 30.000 nicht zurück.',
+         env: { time: 'dusk', weather: 'overcast' }, type: 'raid', playableShips: ['U96'], recommendedShip: 'U96',
+         arena: 12000, timeLimit: 17 * 60, stars: 3,
+         setup(w, shipKey) {
+            islands(w, []);
+            const S = w._script, key = w.difficulty.key;
+            S.need = key === 'easy' ? 3 : 4;
+            S.exit = zone(w, 10200, -1600, 1400, 'Luftsicherung', 'danger');
+            const route = [P(-4000, 1400), P(3000, 200), P(S.exit.x, S.exit.y)];
+            S.transports = [];
+            for (let i = 0; i < 6; i++) {
+               const lane = i & 1 ? 450 : -450;
+               S.transports.push(add(w, 'Transport', 'enemy', P(-9600 - (i >> 1) * 750, 2300 + lane), -0.12,
+                  { telegraph: 4, speedKn: 8, hpMult: 0.75 * w.difficulty.botHP, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
+            }
+            S.escorts = [
+               add(w, 'Jervis', 'enemy', P(-8000, 900), -0.12, { ai: { escortId: S.transports[0].id } }),
+               add(w, 'Jervis', 'enemy', P(-10400, 3900), -0.12, { ai: { escortId: S.transports[3].id } }),
+            ];
+            if (key !== 'easy') S.escorts.push(add(w, 'Jervis', 'enemy', P(-11300, 1000), -0.12, { ai: { escortId: S.transports[4].id } }));
+            if (key === 'hard') S.escorts.push(add(w, 'Fiji', 'enemy', P(-7600, 3300), -0.12, { ai: { escortId: S.transports[1].id } }));
+            // huntId is read by the pack boats and by the autopilot (tests)
+            add(w, shipKey, 'player', P(-1200, 5200), -2.2, { isPlayer: true, name: 'U 96', telegraph: 2, ai: { huntId: S.transports[1].id } });
+            S.pack = [['U 552', P(600, -4800), 2.4, 0], ['U 99', P(4200, 4600), -2.6, 2]]
+               .map(([name, pos, hd, t]) => add(w, 'U96', 'player', pos, hd, { name, dmgMult: 0.45, ai: { huntId: S.transports[t].id } }));
+            later(S, 4, () => radio(w, 'BdU', 'An Rudel: Geleitzug in Sicht, Kurs Ost, 8 Knoten. Angriff frei!'));
+            later(S, 60, () => radio(w, 'U 552', 'Fühlung am Geleit. Zerstörer an der Spitze – tauchen Sie rechtzeitig!', 'warn'));
+            objective(w, 'sink', `Versenken Sie ${S.need} Frachter (0/${S.need})`);
+            objective(w, 'escape', `Höchstens ${6 - S.need} Frachter entkommen lassen (0 entkommen)`);
+            objective(w, 'pack', 'Kein Boot des Rudels geht verloren', { optional: true });
+            w.score = { kind: 'raid', player: 0, enemy: 0, target: S.need };
+            S.sunk = 0; S.escaped = 0;
+            w.message('Geleitzug im Westen. F: tauchen · G: auftauchen.');
+         },
+         update(w, dt, S) {
+            for (const t of S.transports) {
+               if (!t.alive || !inZone(t, S.exit)) continue;
+               w.removeShip(t, 'escaped');
+               S.escaped++;
+               w.score.enemy = S.escaped;
+               w.message(`${t.name} hat die Luftsicherung erreicht.`, 'warn');
+               objText(w, 'escape', `Höchstens ${6 - S.need} Frachter entkommen lassen (${S.escaped} entkommen)`);
+               if (S.escaped > 6 - S.need) { setObj(w, 'escape', 'failed'); setObj(w, 'sink', 'failed'); w.end(false, 'Der Geleitzug ist entkommen.'); return; }
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (ship.isPlayer) { w.end(false, 'Ihr Boot wurde versenkt.'); return; }
+            if (S.pack.includes(ship)) { setObj(w, 'pack', 'failed'); return; }
+            if (ship.type !== 'TR' || ship.side !== 'enemy') return;
+            S.sunk++;
+            w.score.player = S.sunk;
+            objText(w, 'sink', `Versenken Sie ${S.need} Frachter (${Math.min(S.sunk, S.need)}/${S.need})`);
+            if (S.sunk < S.need) return;
+            setObj(w, 'sink', 'done'); setObj(w, 'escape', 'done');
+            if (S.pack.every(s => s.alive)) setObj(w, 'pack', 'done');
+            w.end(true, `${S.sunk} Frachter versenkt – das Rudel hat den Geleitzug zerschlagen.`);
+         },
+         timeout(w, S) { setObj(w, 'sink', 'failed'); w.end(false, `Nur ${S.sunk} Frachter versenkt – der Geleitzug ist entkommen.`); },
+      },
    ];
 }

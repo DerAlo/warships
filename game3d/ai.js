@@ -15,6 +15,7 @@
 import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
+import { subPlan } from './ai_sub.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
 const TARGET_DT = 2;               // s between target re-evaluations
@@ -117,7 +118,7 @@ function newAimError(b, w) {
 function decide(b, w, d) {
    const ai = b.ai, hpF = b.hp / b.maxHP;
    const tgt = ai.target;
-   let want = b.heading, tel = 3, goal = null;
+   let want = b.heading, tel = 3, goal = null, sp = null;
 
    // stuck on a coast or rammed: back off for a few seconds
    if (ai.reverseT > 0) {
@@ -188,6 +189,9 @@ function decide(b, w, d) {
       tel = 4;
    } else if (ai.breakOff) {
       want = threat.away; tel = 4;
+   } else if ((sp = subPlan(b, w, d, tgt, threat, searchGoal))) {
+      // submarines, sub hunters and ships dodging a known boat (ai_sub.js)
+      want = sp.want; tel = sp.tel; goal = sp.goal;
    } else {
       const esc = ai.escortId != null ? w.shipById(ai.escortId) : null;
       const cap = capGoal(b, w);
@@ -764,7 +768,7 @@ function torpedoes(b, w, dt) {
    if (!tgt || !tgt.alive || !w.canSee(b.side, tgt)) return;
    const tc = b.cfg.torp;
    const dd = Math.sqrt(dist2(b.pos, tgt.pos));
-   if (dd > tc.range * (ai.role === 'dd' ? 0.85 : 0.7) || dd < 900) return;
+   if (dd > tc.range * (ai.role === 'dd' ? 0.85 : ai.role === 'ss' ? 0.8 : 0.7) || dd < 900) return;
    const ip = interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel);
    if (!ip || ip.t * tc.speed > tc.range * 0.95) return;
    // light error so spreads are not laser-perfect

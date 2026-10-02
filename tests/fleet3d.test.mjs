@@ -26,7 +26,7 @@ test('fleet: every ship config is complete, finite and geometrically sane', () =
       const bad = []; walk(c, k, bad);
       assert.deepStrictEqual(bad, [], 'NaN / undefined values');
       const h = c.hull;
-      assert.ok(['BB', 'CA', 'CL', 'DD', 'CV', 'TR'].includes(h.type), `${k} hull type`);
+      assert.ok(['BB', 'CA', 'CL', 'DD', 'SS', 'CV', 'TR'].includes(h.type), `${k} hull type`);
       for (const f of ['L', 'beam', 'draft']) fin(h[f], `${k}.hull.${f}`);
       for (const f of ['hp', 'speedKn', 'accel', 'turnR', 'rudderShift']) fin(c[f], `${k}.${f}`);
       assert.ok(Number.isInteger(c.tier) && c.tier >= 1 && c.tier <= 10, `${k} tier`);
@@ -39,7 +39,7 @@ test('fleet: every ship config is complete, finite and geometrically sane', () =
       for (const f of ['caliber', 'reload', 'range', 'traverse', 'dispH']) fin(m[f], `${k}.main.${f}`);
       assert.ok(m.ap || m.he, `${k} has a shell type`);
       for (const sh of [m.ap, m.he]) if (sh) fin(sh.dmg, `${k} shell dmg`);
-      assert.ok(m.turrets.length >= 2, `${k} turrets`);
+      assert.ok(m.turrets.length >= (h.type === 'SS' ? 1 : 2), `${k} turrets`);   // a boat has one deck gun
       const r = turretR(m.caliber, h.beam);
       const xs = m.turrets.map(t => t.off.x).sort((a, b) => a - b);
       for (const t of m.turrets) {
@@ -54,7 +54,7 @@ test('fleet: every ship config is complete, finite and geometrically sane', () =
       for (const s of h.secMounts || []) assert.ok(Math.abs(s.x) < h.L * 0.42 && [1, 2, 3].includes(s.guns), `${k} secondary mount`);
       for (const l of c.torp?.launchers || []) {
          const x = l.off?.x ?? l.x;
-         assert.ok(Math.abs(x) < h.L * 0.42, `${k} launcher x`);
+         assert.ok(Math.abs(x) < h.L * (h.type === 'SS' ? 0.48 : 0.42), `${k} launcher x`);   // bow / stern tubes
          for (const t of m.turrets) assert.ok(Math.abs(t.off.x - x) > r + 2.5, `${k} launcher at ${x} under turret at ${t.off.x}`);
       }
       if (c.torp) for (const f of ['range', 'speedKn', 'dmg', 'reload']) fin(c.torp[f], `${k}.torp.${f}`);

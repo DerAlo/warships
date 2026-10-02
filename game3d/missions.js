@@ -1,7 +1,7 @@
 // game3d/missions.js — singleplayer missions: maps (islands), environment, teams, objectives,
 // scripted reinforcements and win/lose logic. MISSIONS is pure data for the menu; setupMission /
 // updateMission are called by World. Mission text is German (UI), code English.
-import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, NATION_BLOC } from './config.js';
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, NATION_BLOC } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
 
@@ -142,6 +142,7 @@ const UK_TEAM = [['KGV', 0, -700], ['Rodney', -300, 700], ['Norfolk', 500, -2500
 // world seed and the slot index only, so both teams roll the same weight class and the sim's own
 // rng stream stays untouched). A player sailing for the other bloc (Allied ship in the Axis
 // line-up) swaps the two fleets: the player's team is always called first.
+const SUB_CHANCE = 0.4;
 function rollFleet(w, slots, playerCls) {
    const S = w._script;
    if (playerCls) S.swap = (NATION_BLOC[SHIPS[playerCls].hull.nation] || 'axis') !== (BOT_POOLS.axis[slots[0][0]] ? 'axis' : 'allies');
@@ -157,9 +158,26 @@ function rollFleet(w, slots, playerCls) {
 // Spawn a team at anchor facing `heading`; `playerCls` takes the slot of the first matching class
 // (or the first slot of the same type, or slot 0).
 function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({})) {
+   const axis = !!BOT_POOLS.axis[slots[0][0]];
    slots = rollFleet(w, slots, playerCls);
+   // submarines: at most one boat per side, in place of the last destroyer. The player's team is
+   // rolled first: a player boat always meets an enemy boat, otherwise SUB_CHANCE of the battles
+   // (seeded like the fleet roll) have one on each side.
+   const S = w._script, pSub = !!playerCls && SHIPS[playerCls].hull.type === 'SS';
+   let h = (Math.imul((w.seed >>> 0) ^ 0x51ed270b, 2246822519) >>> 0);
+   h ^= h >>> 15; h = Math.imul(h, 2654435761) >>> 0; h ^= h >>> 13;
+   if (S.subs === undefined) S.subs = pSub || (h >>> 0) % 100 < SUB_CHANCE * 100;
+   let dd = -1;
+   slots.forEach((s, i) => { if (SHIPS[s[0]].hull.type === 'DD') dd = i; });
    let pIdx = -1;
-   if (playerCls) {
+   if (S.subs && dd >= 0) {
+      if (pSub) pIdx = dd;
+      else {
+         const pool = BOT_SUBS[axis !== !!S.swap ? 'axis' : 'allies'];
+         slots[dd] = [pool[(h >>> 8) % pool.length], slots[dd][1], slots[dd][2]];
+      }
+   }
+   if (playerCls && pIdx < 0) {
       pIdx = slots.findIndex(s => s[0] === playerCls);
       if (pIdx < 0) pIdx = slots.findIndex(s => SHIPS[s[0]].hull.type === SHIPS[playerCls].hull.type);
       if (pIdx < 0) pIdx = 0;

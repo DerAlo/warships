@@ -5,12 +5,15 @@
 import { WORLD, SHIPS, CONSUMABLES } from './config.js';
 import { TAU, DEG, clamp, clamp01, angleDelta, approach, toWorld, toLocal, obstacleT, obstacleRadiusAt, dist2 } from './utils.js';
 import { makeShell, launchAngle, flightTime } from './combat.js';
+import { initSubState, subSpeedFactor, subDetectRange, SUB_TUBE_ARC } from './submarine.js';
 
-const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
+const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, SS: 18, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
 const FLOOD_DUR = 40;
-const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, TR: 3.5, CV: 3.5 }; // s, yaw inertia
-const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
-const TWIST = { BB: 0.03, CA: 0.04, CL: 0.045, DD: 0.06, TR: 0.025, CV: 0.03 };   // rad/s, screws worked against each other
+const YAW_TAU = { BB: 3.2, CA: 2.2, CL: 1.9, DD: 1.2, SS: 1.3, TR: 3.5, CV: 3.5 }; // s, yaw inertia
+const TURN_LOSS = { BB: 0.25, CA: 0.2, CL: 0.2, DD: 0.15, SS: 0.15, TR: 0.2, CV: 0.25 }; // speed lost at full rudder
+const TWIST = { BB: 0.03, CA: 0.04, CL: 0.045, DD: 0.06, SS: 0.05, TR: 0.025, CV: 0.03 };   // rad/s, screws worked against each other
+const tubeCentre = (side, rel) => side === 'bow' ? 0 : side === 'stern' ? Math.PI : side === 'port' ? -Math.PI / 2
+   : side === 'stbd' ? Math.PI / 2 : (rel < 0 ? -Math.PI / 2 : Math.PI / 2);
 const HULL_PROBES = [0.92, 0.45, 0, -0.45, -0.92];   // grounding probes along the keel (fraction of L/2)
 const SEC_LOST_T = 10;              // s a secondary priority target may stay unseen before it is dropped
 const _probe = { x: 0, y: 0 };
@@ -86,7 +89,7 @@ export class Ship {
       this.torps = tc ? {
          launchers: tc.launchers.map(l => ({
             off: { x: l.off.x, y: l.off.y }, side: l.side, tubes: l.tubes,
-            bearing: l.side === 'port' ? -Math.PI / 2 : Math.PI / 2,
+            bearing: tubeCentre(l.side, 1),
             reload: 0, reloadMax: tc.reload, canBear: false,
          })),
          spread: 'narrow', range: tc.range, speedKn: tc.speedKn, speed: tc.speed, dmg: tc.dmg,
@@ -102,6 +105,8 @@ export class Ship {
       this.ai = opts.ai || {};
       // captain skills baked into the config at creation (1 = stock)
       this.torpSpot = cfg.torpSpot || 1; this.fireDur = cfg.fireDur || 1; this.adrenaline = cfg.adrenaline || 0;
+      initSubState(this);             // depth, battery, sonar contact, depth-charge racks (submarine.js)
+      if (opts.depth && this.sub) { this.depthTarget = this.depthF = this.depth = clamp(opts.depth, 0, 2); }
    }
 
    // ================= controls API =================
@@ -120,7 +125,7 @@ export class Ship {
 
    get maxSpeed() {                 // m/s incl. boost
       const b = this.consumable('boost');
-      return this.maxSpeedKn * WORLD.KN_TO_MS * (b && b.active ? (b.mult || 1.08) : 1);
+      return this.maxSpeedKn * WORLD.KN_TO_MS * (b && b.active ? (b.mult || 1.08) : 1) * (this.depthF > 0 ? subSpeedFactor(this) : 1);
    }
    consumable(key) { for (const c of this.consumables) if (c.key === key) return c; return null; }
    consumableActive(key) { const c = this.consumable(key); return !!(c && c.active); }
@@ -128,7 +133,7 @@ export class Ship {
    // Fire every loaded turret that bears on the aim point within FIRE_TOL. aim: {x,y} (or a
    // legacy {pos}). Returns the number of guns fired.
    fireMain(world = this.world, aim = this.aimPoint) {
-      if (!this.alive || !aim) return 0;
+      if (!this.alive || !aim || this.depthF > 0.3) return 0;   // the deck gun is under water
       const a = aim.pos || aim;
       this.aimPoint = { x: a.x, y: a.y };
       const m = this.cfg.main;
@@ -162,11 +167,12 @@ export class Ship {
    torpLauncherFor(bearing) {
       if (!this.torps) return null;
       const rel = angleDelta(this.heading, bearing);
+      const deep = this.depth === 2;                 // no launch from deep water
       let best = null, bestOff = Infinity;
       for (const l of this.torps.launchers) {
-         const c = l.side === 'port' ? -Math.PI / 2 : l.side === 'stbd' ? Math.PI / 2 : (rel < 0 ? -Math.PI / 2 : Math.PI / 2);
-         const off = Math.abs(angleDelta(c, rel));
-         l.canBear = off <= TORP_ARC;
+         const fixed = l.side === 'bow' || l.side === 'stern';
+         const off = Math.abs(angleDelta(tubeCentre(l.side, rel), rel));
+         l.canBear = !deep && off <= (fixed ? SUB_TUBE_ARC : TORP_ARC);
          if (l.reload > 0 || !l.canBear) continue;
          if (off < bestOff) { bestOff = off; best = l; }
       }
@@ -181,7 +187,9 @@ export class Ship {
       const tc = this.cfg.torp;
       const step = (this.torps.spread === 'wide' ? 3.2 : 1.3) * DEG;
       const rel = angleDelta(this.heading, bearing);
-      const origin = toWorld(this, { x: l.off.x, y: (rel < 0 ? -1 : 1) * this.cfg.hull.beam * 0.35 });
+      const fixed = l.side === 'bow' || l.side === 'stern';
+      const origin = toWorld(this, { x: l.off.x, y: fixed ? 0 : (rel < 0 ? -1 : 1) * this.cfg.hull.beam * 0.35 });
+      this.lastTorpFire = world.time;
       for (let i = 0; i < l.tubes; i++) {
          const h = bearing + (i - (l.tubes - 1) / 2) * step;
          world.addTorpedo({
@@ -349,6 +357,7 @@ export class Ship {
       // ship can never shoot from beyond its own bloom outside smoke (as in WoWs)
       const bloom = Math.max(d.fire, this.cfg.main ? this.cfg.main.range : 0);
       this.detectRange = Math.min(env.spotCap ?? Infinity, smoked ? (blooming ? d.smokeFire : 0) : blooming ? bloom : d.surface * vis);
+      if (this.depth > 0) this.detectRange = Math.min(this.detectRange, subDetectRange(this, world, vis));
    }
 
    _move(dt, world) {

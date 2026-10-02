@@ -2,6 +2,7 @@
 // model (AP pen vs angled armour, ricochet, overmatch, overpen, citadels, HE shatter/fires,
 // torpedo floods). Pure functions over the World; no rendering.
 import { WORLD, TUNE } from './config.js';
+import { PERI_SHELL_MULT } from './submarine.js';
 import {
    DEG, clamp, clamp01, dist2, toLocal, insideHull, halfBeamAt, islandHeightAt, obstacleT, truncGauss,
 } from './utils.js';
@@ -91,7 +92,7 @@ function nearbyShips(world, p, side, pad) {
    const out = _near;
    out.length = 0;
    for (const s of world.ships) {
-      if (!s.alive || s.side === side) continue;
+      if (!s.alive || s.side === side || s.depth === 2) continue;   // shells cannot reach a deep boat
       const r = s.cfg.hull.L / 2 + pad;
       if (dist2(s.pos, p) < r * r) out.push(s);
    }
@@ -254,7 +255,8 @@ export function resolveHit(world, s, ship, zone, lp, p, alt) {
       // HE: angle-independent, penetrates if its pen >= the plate it strikes
       if (s.hePen >= plate) { type = 'he'; mult = 1 / 3; } else type = 'shatter';
    }
-   const dmg = s.dmg * mult;
+   // a boat at periscope depth shows only its tower: half damage (submarine.js)
+   const dmg = s.dmg * mult * (ship.depth === 1 ? PERI_SHELL_MULT : 1);
    world.onHit(shooter, ship, type, s);
    world.pushEvent(type, { srcId: s.ownerId, dstId: ship.id, dmg: Math.round(dmg), pos: { x: p.x, y: p.y }, text: HIT_TEXT[type] });
    const big = type === 'citadel' || s.caliber >= 280;
@@ -290,7 +292,7 @@ export function resolveTorpedoes(world, dt) {
       }
       if (!t.alive || t.traveled < 120) continue;       // arming distance
       for (const ship of world.ships) {
-         if (!ship.alive || ship.side === t.side) continue;
+         if (!ship.alive || ship.side === t.side || ship.depth === 2) continue;   // runs over a deep boat
          const r = ship.cfg.hull.L / 2 + step + 10;
          if (dist2(ship.pos, t.pos) > r * r) continue;
          let hit = null;

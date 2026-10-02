@@ -7,6 +7,7 @@ import { Ship } from './ship.js';
 import { resolveShells, resolveTorpedoes } from './combat.js';
 import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
+import { updateSubs, hullContact, PERI_PROX } from './submarine.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -20,6 +21,7 @@ function envWeather(time, weather, e) {
       spotCap: e.spotCap ?? (weather === 'storm' ? 8000 : Infinity),
    };
 }
+const NONE = [];
 const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
 
 export class World {
@@ -44,6 +46,7 @@ export class World {
       this.player = null;
       this.shells = [];
       this.torpedoes = [];
+      this.depthCharges = [];   // pooled (alive flag), see submarine.js
       this.smokeClouds = [];
       this.effects = [];
       this.planes = [];
@@ -258,7 +261,7 @@ export class World {
          this.addEffect('explosion', { x: ship.pos.x + Math.cos(ship.heading) * L * f, y: ship.pos.y + Math.sin(ship.heading) * L * f },
             1.6 + i * 0.3, 30 + L * 0.15, { big: true, sink: true, shipId: ship.id });
       }
-      if (type === 'citadel' && ship.type !== 'DD') this.addEffect('detonation', ship.pos, 3, 60 + L * 0.3, { big: true, shipId: ship.id });
+      if (type === 'citadel' && ship.type !== 'DD' && ship.type !== 'SS') this.addEffect('detonation', ship.pos, 3, 60 + L * 0.3, { big: true, shipId: ship.id });
       if (ship === this.player) this.shakeAdd(2);
       if (this._script && this._script.onSink) this._script.onSink(this, ship, killer);
       if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
@@ -288,6 +291,7 @@ export class World {
       if (this.phase === 'playing' && this.timeLeft != null) this.timeLeft = Math.max(0, this.timeLeft - dt);
       updateBots(this, dt);
       for (const s of this.ships) s.update(dt, this);
+      updateSubs(this, dt);
       this._collideShips();
       resolveShells(this, dt);
       resolveTorpedoes(this, dt);
@@ -322,13 +326,16 @@ export class World {
       for (const T of ships) {
          if (!T.alive) continue;
          let seen = false, byPlayer = false;
-         for (const O of ships) {
-            if (!O.alive || O.side === T.side) continue;
+         // submarines (submarine.js): a deep boat is never seen and sees nothing itself; at periscope
+         // depth the proximity rule shrinks and radar finds nothing, the hydrophone still does
+         const td = T.depth, tprox2 = td === 1 ? PERI_PROX * PERI_PROX : prox2;
+         for (const O of td === 2 ? NONE : ships) {
+            if (!O.alive || O.side === T.side || O.depth === 2) continue;
             if (seen && !O.isPlayer) continue;
             const d2 = dist2(O.pos, T.pos);
-            let sees = d2 < prox2;
+            let sees = d2 < tprox2;
             if (!sees) {
-               const radar = O.consumableActive('radar') ? O.consumable('radar').range : 0;
+               const radar = td === 0 && O.consumableActive('radar') ? O.consumable('radar').range : 0;
                const hydro = O.consumableActive('hydro') ? O.consumable('hydro').range : 0;
                if (d2 < Math.max(radar, hydro) ** 2) sees = true;
                else if (T.detectRange > 0 && d2 < T.detectRange * T.detectRange) {
@@ -411,6 +418,7 @@ export class World {
             if (!b.alive) continue;
             const reach = (a.cfg.hull.L + b.cfg.hull.L) / 2;
             if (dist2(a.pos, b.pos) > reach * reach) continue;
+            if (a.depth || b.depth) { hullContact(this, a, b); continue; }   // submerged boats: submarine.js
             const hit = keelContact(a, b);
             if (!hit) continue;
             const wa = b.maxHP / (a.maxHP + b.maxHP), wb = 1 - wa;

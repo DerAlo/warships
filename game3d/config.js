@@ -42,7 +42,7 @@ export const CONSUMABLES = {
    radar: { name: 'Funkmessortung', short: 'Radar', icon: '📡' },
 };
 
-export const CLASS_NAMES = { BB: 'Schlachtschiff', CA: 'Schwerer Kreuzer', CL: 'Leichter Kreuzer', DD: 'Zerstörer', TR: 'Transporter', CV: 'Flugzeugträger' };
+export const CLASS_NAMES = { BB: 'Schlachtschiff', CA: 'Schwerer Kreuzer', CL: 'Leichter Kreuzer', DD: 'Zerstörer', SS: 'U-Boot', TR: 'Transporter', CV: 'Flugzeugträger' };
 export const NATION_NAMES = { de: 'Kriegsmarine', uk: 'Royal Navy', us: 'US Navy', jp: 'Kaiserliche Marine',
    fr: 'Marine nationale', it: 'Regia Marina', su: 'Sowjetische Marine' };
 // Port order of the nations and their tab labels.
@@ -784,6 +784,119 @@ Object.assign(SHIPS, {
       ai: { prefRange: [6500, 9500], role: 'dd', value: 32 },
    }),
 });
+
+// ---- submarines (hull type SS, class "U-Boot") ----
+// A boat is a normal ship with a `sub` block (submarine.js runs the depth states, the battery,
+// sonar, depth charges and ramming). Torpedo launchers sit on the centreline: side 'bow' fires
+// ahead, 'stern' astern, each inside SUB_TUBE_ARC. Speeds are WoWs-like, not historical: a
+// real 17-kn boat could not take part in a 30-kn battle.
+//    diveT      s per depth step (surface <-> periscope depth <-> deep)
+//    battery    s a full charge lasts at periscope depth / deep, s to recharge on the surface
+//    periSpeed / deepSpeed   fraction of the surface speed
+//    periDetect m: periscope + wake at full speed (0.6x when creeping)
+//    torpBloom  m: detectability for SUB_BLOOM_T s after a torpedo salvo from periscope depth
+//    hydrophone m: range of the bearing lines while the boat is deep
+const SUB_CONS = () => [C('damageControl', { charges: Infinity, dur: 10, cd: 50 })];
+const SUB = (o = {}) => ({ diveT: 6, battery: { peri: 300, deep: 110, charge: 80 }, periSpeed: 0.7, deepSpeed: 0.5,
+   periDetect: 1800, torpBloom: 4500, hydrophone: 6000, ...o });
+const deckGun = (x, caliber, o = {}) => ({
+   caliber, turrets: [T(x, 1, false, 150)],
+   traverse: 14, reload: 6.5, range: 7500, tMax: 6.5, fallMax: 16, dispH: 120, vRatio: 0.5, sigma: 1.7,
+   ap: { dmg: 1500, pen: 90 }, he: { dmg: 1200, pen: 17, fire: 0.05 }, ...o,
+});
+const SUB_ARMOR = { belt: 19, deck: 8, ends: 10, sup: 8, cit: 0, citLen: 0, tds: 0 };
+Object.assign(SHIPS, {
+   U96: ship({
+      key: 'U96', name: 'U 96', className: 'Typ VII C', playable: true, tier: 6,
+      desc: 'Das Arbeitspferd der Atlantikschlacht: klein, wendig, schnell unter Wasser. Vier Bugrohre und ein Heckrohr.',
+      sisters: ['U 96', 'U 47', 'U 99', 'U 100', 'U 552', 'U 331', 'U 81'],
+      hull: { type: 'SS', L: 67.1, beam: 6.2, draft: 4.7, deckH: 3, nation: 'de', sup: { x: 2, len: 7, w: 2.6, h: 5 }, funnels: [] },
+      hp: 9200, speedKn: 23, accel: 8, turnR: 360, rudderShift: 3.6,
+      detect: { surface: 5600, fire: 7200, smokeFire: 2000, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(11, 88),
+      sec: null, aa: { range: 2000, reload: 0.6 },
+      torp: { launchers: [L(29, 'bow', 4), L(-30, 'stern', 1)], range: 7500, speedKn: 60, dmg: 12500, flood: 0.25, reload: 50 },
+      sub: SUB({ diveT: 5.5 }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [2500, 5000], role: 'ss', value: 30 },
+   }),
+   U505: ship({
+      key: 'U505', name: 'U 505', className: 'Typ IX C', playable: true, tier: 8,
+      desc: 'Großes Fernkampfboot: sechs Rohre, starke Batterie und ein 10,5-cm-Geschütz – dafür taucht es träger.',
+      sisters: ['U 505', 'U 107', 'U 123', 'U 156', 'U 172', 'U 515'],
+      hull: { type: 'SS', L: 76.8, beam: 6.8, draft: 4.7, deckH: 3.2, nation: 'de', sup: { x: 3, len: 8, w: 2.8, h: 5.2 }, funnels: [] },
+      hp: 11500, speedKn: 24, accel: 9, turnR: 420, rudderShift: 4,
+      detect: { surface: 5900, fire: 7500, smokeFire: 2000, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(13, 105, { range: 8200, ap: { dmg: 1800, pen: 110 }, he: { dmg: 1500, pen: 17, fire: 0.06 } }),
+      sec: null, aa: { range: 2000, reload: 0.6 },
+      torp: { launchers: [L(33, 'bow', 4), L(-35, 'stern', 2)], range: 8500, speedKn: 62, dmg: 13500, flood: 0.25, reload: 55 },
+      sub: SUB({ diveT: 7, battery: { peri: 360, deep: 130, charge: 85 } }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [2800, 5500], role: 'ss', value: 36 },
+   }),
+   Triton: ship({
+      key: 'Triton', name: 'HMS Triton', className: 'T-Klasse', playable: true, tier: 6,
+      desc: 'Britisches Hochseeboot mit der stärksten Bugsalve seiner Zeit: sechs innere und vier äußere Rohre nach vorn.',
+      sisters: ['HMS Triton', 'HMS Thunderbolt', 'HMS Triumph', 'HMS Torbay', 'HMS Truant', 'HMS Tigris'],
+      hull: { type: 'SS', L: 84, beam: 8.1, draft: 4.4, deckH: 3.2, nation: 'uk', sup: { x: 4, len: 9, w: 3, h: 5.4 }, funnels: [] },
+      hp: 10500, speedKn: 21.5, accel: 9, turnR: 430, rudderShift: 4.2,
+      detect: { surface: 5800, fire: 7400, smokeFire: 2000, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(15, 102),
+      sec: null, aa: { range: 2000, reload: 0.6 },
+      torp: { launchers: [L(37, 'bow', 6), L(33, 'bow', 4)], range: 6500, speedKn: 58, dmg: 11500, flood: 0.25, reload: 72 },
+      sub: SUB({ diveT: 6.5 }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [2500, 4500], role: 'ss', value: 32 },
+   }),
+   Gato: ship({
+      key: 'Gato', name: 'USS Gato', className: 'Gato-Klasse', playable: true, tier: 8,
+      desc: 'Flottenboot des Pazifikkriegs: sechs Bug- und vier Heckrohre, große Reichweite, robuste Bauweise.',
+      sisters: ['USS Gato', 'USS Wahoo', 'USS Barb', 'USS Albacore', 'USS Cavalla', 'USS Flasher', 'USS Tang'],
+      hull: { type: 'SS', L: 95, beam: 8.3, draft: 5.2, deckH: 3.4, nation: 'us', sup: { x: 4, len: 10, w: 3, h: 5.6 }, funnels: [] },
+      hp: 13000, speedKn: 25, accel: 9, turnR: 470, rudderShift: 4.4,
+      detect: { surface: 6100, fire: 7700, smokeFire: 2100, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(-14, 127, { turrets: [T(-14, 1, true, 150)], range: 8500, reload: 7, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } }),
+      sec: null, aa: { range: 2500, reload: 0.5 },
+      torp: { launchers: [L(42, 'bow', 6), L(-43, 'stern', 4)], range: 8000, speedKn: 62, dmg: 13000, flood: 0.25, reload: 62 },
+      sub: SUB({ diveT: 7, battery: { peri: 340, deep: 125, charge: 80 } }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [2800, 5500], role: 'ss', value: 38 },
+   }),
+   I19: ship({
+      key: 'I19', name: 'I-19', className: 'Typ B1', playable: true, tier: 7,
+      desc: 'Riesiger U-Kreuzer mit sechs Bugrohren für die sauerstoffgetriebenen Typ-95-Torpedos – groß, schnell über Wasser, träge beim Tauchen.',
+      sisters: ['I-19', 'I-15', 'I-17', 'I-25', 'I-26', 'I-27', 'I-36'],
+      hull: { type: 'SS', L: 108.7, beam: 9.3, draft: 5.1, deckH: 3.6, nation: 'jp', sup: { x: 6, len: 12, w: 3.4, h: 5.8 }, funnels: [] },
+      hp: 13500, speedKn: 26, accel: 10, turnR: 520, rudderShift: 4.8,
+      detect: { surface: 6500, fire: 8000, smokeFire: 2200, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(-20, 140, { turrets: [T(-20, 1, true, 150)], range: 9000, reload: 8, ap: { dmg: 2400, pen: 170 }, he: { dmg: 2000, pen: 23, fire: 0.08 } }),
+      sec: null, aa: { range: 2000, reload: 0.6 },
+      torp: { launchers: [L(49, 'bow', 6)], range: 9500, speedKn: 64, dmg: 15000, flood: 0.27, reload: 68 },
+      sub: SUB({ diveT: 8.5, periDetect: 2000 }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [3000, 6500], role: 'ss', value: 36 },
+   }),
+   S13: ship({
+      key: 'S13', name: 'S-13', className: 'Serie IX-bis', playable: true, tier: 7,
+      desc: 'Sowjetisches Mittelboot nach deutschem Entwurf: vier Bug- und zwei Heckrohre, ein kräftiges 10-cm-Geschütz.',
+      sisters: ['S-13', 'S-7', 'S-31', 'S-33', 'S-51', 'S-56', 'S-101'],
+      hull: { type: 'SS', L: 77.8, beam: 6.4, draft: 4, deckH: 3.1, nation: 'su', sup: { x: 2, len: 9, w: 2.8, h: 5.2 }, funnels: [] },
+      hp: 10200, speedKn: 24, accel: 8.5, turnR: 400, rudderShift: 3.9,
+      detect: { surface: 5800, fire: 7500, smokeFire: 2000, torp: 1300 },
+      armor: { ...SUB_ARMOR },
+      main: deckGun(12, 100, { range: 8000, ap: { dmg: 1800, pen: 110 }, he: { dmg: 1400, pen: 17, fire: 0.06 } }),
+      sec: null, aa: { range: 2000, reload: 0.6 },
+      torp: { launchers: [L(33, 'bow', 4), L(-35, 'stern', 2)], range: 7000, speedKn: 60, dmg: 13000, flood: 0.25, reload: 55 },
+      sub: SUB({ diveT: 6 }),
+      consumables: SUB_CONS(),
+      ai: { prefRange: [2500, 5000], role: 'ss', value: 32 },
+   }),
+});
 // Player-selectable classes, in port order (grouped by nation there). The four original ships
 // stay in front; op-only ships (Washington, Duke of York) are not listed.
 export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst', 'Gneisenau',
@@ -792,7 +905,10 @@ export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst'
    'Kirishima', 'Yamato', 'Takao', 'Fubuki', 'Shimakaze',
    'Richelieu', 'Algerie', 'LeFantasque',
    'Littorio', 'Zara',
-   'Kirov', 'Gnevny'];
+   'Kirov', 'Gnevny',
+   'U96', 'U505', 'Triton', 'Gato', 'I19', 'S13'];
+// Submarines for random battles, by bloc (missions.js swaps at most one destroyer slot per side).
+export const BOT_SUBS = { axis: ['U96', 'U505', 'I19'], allies: ['Triton', 'Gato', 'S13'] };
 
 // Random battles (missions.js spawnTeam): every slot of the standard Axis / Allied line-ups draws
 // from a pool of comparable classes. The pools are index-aligned, so both teams roll the same
