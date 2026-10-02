@@ -139,6 +139,34 @@ renderer.setCameraPose(...), renderer.screenToWorld(nx, ny), renderer.scopeT
 renderer.project(worldX, height, worldY) -> { x, y (CSS px), visible } // for floating HUD markers
 ```
 
+## Audio (`audio.js`, `audiosynth.js`)
+
+No sample files. `audiosynth.js` is a pure-JS offline synth (`render(name, sampleRate)`, seeded, so
+every run sounds the same); `audio.js` turns the results into cached AudioBuffers (pre-rendered in
+idle slices after the first gesture) and mixes them: pooled voice channels (low-pass, gain, stereo
+pan, reverb send; `MAX_VOICES`, priorities, lowest gets stolen) -> world bus -> bus compressor ->
+effects volume -> master -> limiter -> soft clip. Interface sounds bypass the world bus, music has
+its own volume bus. Every method is a silent no-op until `init()` ran on a user gesture.
+
+```
+audio.setListener(x, y, camYaw)              // once per frame; pans by bearing relative to the camera
+audio.mainGun(caliber, barrels, dist, pos?)  // dist 0 = own guns; far = delayed (d / 1500 m/s), muffled, rolling
+audio.secondary(dist, pos?), audio.splash(dist, big, pos?), audio.sink(dist, pos?)
+audio.impact(kind, dist, pos?, big?)         // 'pen' 'citadel' 'overpen' 'ricochet' 'shatter' 'he' 'sec' 'terrain'
+                                             // 'torpHit' 'detonation' 'torpLaunch' 'explosion' (world.effects kinds)
+audio.hit(big, eventType?)                   // own ship is hit, heard from inside the hull
+audio.updateEngine(speed, maxSpeed, muted, throttle01?)
+audio.updateAmbient(seaState, muted, weather?, fires?)   // sea, wind, rain, thunder, fire crackle, bow wash
+audio.updateMusic(level)                     // -1 off, 0 calm, 1 spotted, 2 heavy fire, 3 low HP
+audio.setVolumes(music, sfx), audio.setMuted(bool), audio.stats()
+// interface: uiClick, lock, denied, ammoSwitch, reloaded, ribbon(kind), alert(kind), torpWarning,
+//            spottedAlarm, consumable(key), radio, objective('done'|'failed'|'new'), endCue(victory)
+// submarines (safe at any time): subDive(), subSurface(), sonarPing(dist), depthCharge(dist), setSubmerged(on)
+```
+
+`tests/playwright3d.audio.mjs` renders every sound through the desk in an OfflineAudioContext and
+checks level, spectrum and duration; it also writes WAV files to `tests/shots/` for listening.
+
 ## Menu & match flow (`menu3d.js`, `main3d.js`)
 
 ```
