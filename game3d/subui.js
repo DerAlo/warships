@@ -3,7 +3,8 @@
 // deep-water view with hydrophone bearing lines, sonar contact markers and the audio hooks.
 // main3d.js owns one SubUi and calls reset / input / event / frame / fill; hud3d.js calls the two
 // draw functions with the `ui.sub` snapshot. Nothing here allocates per frame.
-import { DEPTH_NAMES, SONAR_KEEP, diveDeeper, diveUp, dropDepthCharges, hydrophoneContacts } from './submarine.js';
+import { DEPTH_NAMES, SONAR_KEEP, hydrophoneContacts } from './submarine.js';
+import { execAction } from './net/command.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -102,17 +103,20 @@ export class SubUi {
    // battle over / back to the port
    stop() { if (this.wasUnder) { this.wasUnder = false; this.audio.setSubmerged?.(false); } }
 
-   // F deeper / G up in a boat; G drops a depth-charge pattern from a destroyer or light cruiser
-   input(inp, p, world) {
+   // F deeper / G up in a boat; G drops a depth-charge pattern from a destroyer or light cruiser.
+   // act(action): how main3d.js runs ship actions (net/command.js); default = on the ship itself.
+   input(inp, p, world, act) {
       if (!p || !p.alive) return;
       const f = inp.tapped('F'), g = inp.tapped('G');
+      if (!f && !g) return;
+      const run = act || ((a) => execAction(p, world, a));
       if (p.sub) {
-         if (f && !diveDeeper(p, world) && p.depthTarget >= 2) this.audio.denied?.();
-         if (g && !diveUp(p, world)) this.audio.denied?.();
+         if (f && !run(['d', 1]) && p.depthTarget >= 2) this.audio.denied?.();
+         if (g && !run(['d', -1])) this.audio.denied?.();
       } else if (g) {
          const a = p.asw;
          if (!a) { this.audio.denied?.(); this.hud.msg('Keine Wasserbomben an Bord', 'warn'); }
-         else if (dropDepthCharges(p, world)) this.hud.msg('Wasserbomben los!', 'info');
+         else if (run(['g'])) this.hud.msg('Wasserbomben los!', 'info');
          else { this.audio.denied?.(); this.hud.msg('Wasserbomben laden nach', 'warn'); }
       }
    }

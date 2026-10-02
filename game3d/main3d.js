@@ -25,6 +25,7 @@ import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
+import { makeCommand, applyCommand, execAction } from './net/command.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -82,6 +83,12 @@ let phase = 'menu';                   // menu | playing | paused | ended
 let difficulty = 'normal';
 let endTimer = 0, acc = 0;
 let simv = {};                        // which contract features the sim provides
+let net = null;                       // running net game (net/game.js), null in singleplayer
+// The own ship is steered through one command structure (net/command.js): continuous state in
+// `cmd`, one-shot actions through act(). A net client hands both to the netcode (predicted
+// locally, executed by the host); everybody else applies them to the own ship directly.
+const cmd = makeCommand();
+function act(a) { return net && !net.isHost ? net.act(a) : execAction(P, world, a); }
 
 // Camera/aim state handed to the renderer (camera3d.js reads yaw/range/dist/bino/zoom...).
 const cam3 = { yaw: 0, range: 3000, dist: 500, bino: false, zoom: 4, rangeMin: 1000, rangeMax: 20000, aimH: 0, spectate: false, freeLook: false };
@@ -301,7 +308,7 @@ function useConsumable(slot) {
    if (!c) { audio.denied(); return false; }
    if (simv.newCons) {
       let ok = false;
-      try { ok = !!P.useConsumable(world, c.key); } catch (e) { ok = false; }
+      try { ok = !!act(['c', c.key]); } catch (e) { ok = false; }
       if (ok) { audio.consumable(c.key); hud.msg(c.name + ' aktiviert', 'info'); } else audio.denied();
       return ok;
    }
@@ -488,7 +495,7 @@ function frameInput(dt) {
       if (!ti) { audio.denied(); hud.msg('Keine Torpedos an Bord', 'warn'); }
       else if (ctl.mode === 'torp') {
          ctl.spread = ctl.spread === 'narrow' ? 'wide' : 'narrow';
-         if (typeof p.setTorpSpread === 'function') p.setTorpSpread(ctl.spread);
+         if (typeof p.setTorpSpread === 'function') act(['s', ctl.spread]);
          else if (p.torps) p.torps.spread = ctl.spread;
          audio.uiClick();
          hud.msg('Torpedofächer: ' + (ctl.spread === 'wide' ? 'weit' : 'eng'), 'info');
@@ -508,7 +515,7 @@ function frameInput(dt) {
    if (!ctl.mapOpen && inp.mouse.wheel && zoom.wheel(inp.mouse.wheel)) audio.uiClick();
    zoom.update(dt);
    cam3.bino = zoom.bino; cam3.zoom = zoom.zoom; cam3.dist = zoom.dist;
-   subui.input(inp, p, world);                          // F / G: depth keys, depth charges
+   subui.input(inp, p, world, act);                     // F / G: depth keys, depth charges
    if (p.sub && p.depth === 2) cam3.bino = false;       // deep: no optics
 
    // --- free look (C or RMB): the camera roams, the guns hold the last aim
@@ -564,7 +571,7 @@ function selectAmmo(type) {
    const wasTorp = ctl.mode === 'torp';
    ctl.mode = 'guns';
    if (currentAmmo() === type) { if (wasTorp) audio.ammoSwitch(); return; }
-   if (simv.newAmmo) { try { P.setAmmo(type); } catch (e) { /* ignore */ } }
+   if (simv.newAmmo) { try { act(['a', type]); } catch (e) { /* ignore */ } }
    else {
       // emulate the switch: every mount reloads with the new shell type
       const rl = P.cfg?.main?.reload || 5;
@@ -606,8 +613,8 @@ function pickSecTarget() {
          if (d < bestD) { bestD = d; id = m.id; }
       }
    }
-   if (id != null && id !== p.secTarget) p.setSecTarget(id);
-   else if (p.secTarget != null) p.setSecTarget(null);
+   if (id != null && id !== p.secTarget) act(['x', id]);
+   else if (p.secTarget != null) act(['x', null]);
    else { audio.denied(); return; }
    audio.uiClick();
 }
@@ -702,22 +709,23 @@ function rayHitShip(ax, ay) {
 function applyControls(dt) {
    const p = P;
    if (!p || !p.alive) return;
-   // engine + rudder
-   if (simv.newTele) p.setTelegraph(ctl.telegraph);
-   else { p.throttleIn = OLD_THROTTLE[ctl.telegraph]; p.telegraph = ctl.telegraph; }
-   if (simv.newRudder) p.setRudder(ctl.rudder);
-   else { p.helm = ctl.rudder / 2; p.rudderCmd = ctl.rudder; }
-
-   // aim
+   // engine + rudder, aim point, X lock (the secondaries' fallback choice)
    updateAimPoint();
    const ap = aim.point;
-   p.aimPoint = ap;
-   const bx = ap.x - p.pos.x, by = ap.y - p.pos.y, bl = Math.hypot(bx, by) || 1;
-   p.aimBearing = Math.atan2(by, bx);
-   p.aim = { x: bx / bl, y: by / bl };
-
+   cmd.telegraph = ctl.telegraph; cmd.rudder = ctl.rudder; cmd.aim = ap; cmd.lock = ctl.lockId;
+   if (simv.newTele && simv.newRudder) applyCommand(p, cmd);
+   else {
+      // old sim
+      p.throttleIn = OLD_THROTTLE[ctl.telegraph]; p.telegraph = ctl.telegraph;
+      p.helm = ctl.rudder / 2; p.rudderCmd = ctl.rudder;
+      p.aimPoint = ap;
+      const bx = ap.x - p.pos.x, by = ap.y - p.pos.y, bl = Math.hypot(bx, by) || 1;
+      p.aimBearing = Math.atan2(by, bx);
+      p.aim = { x: bx / bl, y: by / bl };
+      if ('lockTarget' in p) p.lockTarget = ctl.lockId;
+   }
+   if (net) net.control(cmd);
    turretCache = computeTurrets(p);
-   if ('lockTarget' in p) p.lockTarget = ctl.lockId;   // X lock: secondaries' fallback choice
 
    if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
@@ -739,7 +747,7 @@ function fireGuns() {
    let n = 0;
    if (simv.newTurrets && !hasData(p, 'fireTimer')) {
       const before = p.turrets.map(t => t.reload || 0);
-      try { n = p.fireMain(world, ap) || 0; } catch (e) { n = 0; }
+      try { n = act(['f', ap.x, ap.y]) || 0; } catch (e) { n = 0; }
       p.turrets.forEach((t, i) => { if ((t.reload || 0) > before[i] + 1e-6 && st[i]?.state !== 'ready') window.__badFireCount++; });
    } else {
       // Old sim: fireMain fires every mount with cd <= 0 along the aim bearing and has a
@@ -799,7 +807,7 @@ function fireTorps() {
    }
    let n = 0;
    if (simv.newTorps) {
-      try { n = p.fireTorpedoes(world, aim.yaw) || 0; } catch (e) { n = 0; }
+      try { n = act(['t', aim.yaw]) || 0; } catch (e) { n = 0; }
    } else {
       const save = p.aimBearing;
       try { n = p.fireTorpedo(world, null, { x: Math.cos(aim.yaw), y: Math.sin(aim.yaw) }) || 0; } catch (e) { n = 0; }
