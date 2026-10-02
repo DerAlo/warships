@@ -46,7 +46,9 @@ const wait = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 8000 })
 // ---- nothing network-related before the screen is opened
 const A = await mkPage('A', 1440, 810);
 check('port: MEHRSPIELER button', await A.locator('[data-act="mp"]').count() === 1);
-check('port: no multiplayer module loaded before opening', A.netReq.length === 0, A.netReq);
+// the game's own netcode (net/game.js, transport.js, ...) is plain local code; the lobby, the WebRTC transport and the vendored library must stay unloaded
+const early = A.netReq.filter(u => /mpui|lobby|trystero|transport_rtc/.test(u));
+check('port: no lobby / signalling module loaded before opening', early.length === 0 && A.extReq.length === 0, { early, ext: A.extReq });
 await openMp(A);
 check('name prompt on first open', (await modalText(A)).includes('SPIELERNAME'));
 await A.fill('[data-f="pname"]', 'Anna');
