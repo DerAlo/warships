@@ -54,7 +54,7 @@ check('name prompt on first open', (await modalText(A)).includes('SPIELERNAME'))
 await A.fill('[data-f="pname"]', 'Anna');
 await A.click('.mp-modal [data-ok]');
 check('name stored', await A.evaluate(() => localStorage.getItem('warships3d.net.name')) === 'Anna');
-check('local mode: no trystero / rtc module', !A.netReq.some(u => /trystero|transport_rtc/.test(u)), A.netReq);
+check('local mode: no trystero / rtc / relay module', !A.netReq.some(u => /trystero|transport_rtc|net\/relay|net\/mqtt/.test(u)), A.netReq);
 check('A list fits 1440x810', await fits(A).then(f => !f.scroll && !f.bad.length), await fits(A));
 check('empty list message', await A.evaluate(() => document.querySelector('.mp-empty')?.textContent.includes('keine Spiele')));
 

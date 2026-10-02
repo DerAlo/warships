@@ -1,8 +1,9 @@
 // tests/playwright3d.lobby.live.mjs -- manual live test of the multiplayer lobby over the real
-// internet signalling (public Nostr relays + WebRTC): two separate browser contexts create, list,
-// join (wrong / right password), chat, start a match and exchange data. Prints timings.
-// Needs internet. Both browsers run on this machine, so this does NOT prove NAT traversal
-// between two different networks. Console errors from unreachable relays are listed, not fatal.
+// internet path (public MQTT brokers; WebRTC through Nostr relays where it comes up): two separate
+// browser contexts create, list, join (wrong / right password), chat, start a match and exchange
+// data. Prints timings. Needs internet. Both browsers run on this machine, so this does NOT prove
+// anything about two different networks. Console errors from unreachable brokers or relays are
+// listed, not fatal. The full battle over the relay is tests/playwright3d.mp.relay.mjs.
 //
 // Run:  node server.js 8792   then   URL3D=http://localhost:8792/index-3d.html node tests/playwright3d.lobby.live.mjs
 import { chromium } from 'playwright';
@@ -31,7 +32,7 @@ const mkPage = async (tag, name) => {
    await page.fill('[data-f="pname"]', name);
    await page.click('.mp-modal [data-ok]');
    const ok = await page.waitForFunction(() => window.__mp.lobby?.lt && window.__mp.lobby.status().open > 0, null, { timeout: 20000 }).then(() => true, () => false);
-   check(`${tag}: signalling relays connected`, ok, `${Date.now() - t0} ms, ${JSON.stringify(await page.evaluate(() => window.__mp.lobby?.status()))}`);
+   check(`${tag}: brokers connected`, ok, `${Date.now() - t0} ms, ${JSON.stringify(await page.evaluate(() => window.__mp.lobby?.status()))}`);
    return page;
 };
 const wait = (page, fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout }).then(() => true, () => false);

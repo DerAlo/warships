@@ -14,8 +14,13 @@
 //   transport.onPeerJoin(fn(id)), transport.onPeerLeave(fn(id))
 //   transport.leave()
 //
-// Channel names are at most 12 ASCII characters (WebRTC action name limit of the real transport).
-// Delivery is reliable and ordered per peer. Messages are never delivered to the sender.
+// Channel names are at most 12 ASCII characters.
+// Delivery is ordered per peer and reliable. Messages are never delivered to the sender.
+// One exception in the real transport (relay.js): the channels `snap` and `cmd` are "latest
+// wins" — a message lost on the relay is not repeated and a stale one is dropped, because each
+// carries a complete state. The test transports below deliver everything.
+// The real transport also offers link(id) -> { via: 'direct'|'relay', rtt }, onRoute(fn) and
+// stats(); callers must treat them as optional.
 
 export const NET_VERSION = 1;
 

@@ -210,6 +210,11 @@ net/codec.js     encodeShips / decodeSnap,       binary ship snapshot; localSide
 net/host.js      makeHost(world, o)              applies commands, records events, sends snap/evt/sync
 net/replica.js   makeReplica(world, o)           client: replaces world.update, applies host state
 net/game.js      createNetGame(session, hooks)   handshake, channel wiring, quit/onEnd, byte counters
+net/lobby.js     Lobby, makeBackend(mode)        game list, knock, room, hand-over (UI: mpui.js)
+net/mqtt.js      MqttClient, BROKERS             minimal MQTT 3.1.1 over WSS, the public broker list
+net/relay.js     Bus, makeBusLobby,              lobby channel and the game room transport: relay to
+                 makeRoomTransport               every peer at once, direct channel where it comes up
+net/transport_rtc.js  makeRtcCarrier             the WebRTC data channel (Trystero over Nostr relays)
 main3d.js        startNetGame(session)           = window.__startNetGame; window.__net() -> info
 ```
 
@@ -246,6 +251,18 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
 - **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
   (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **Transport.** Two browsers behind home routers often get no WebRTC path (no TURN server), so
+  the room never depends on one: `makeRoomTransport` reaches every peer over public MQTT brokers
+  from the first moment and moves a peer to the data channel when one opens (and back when it
+  stalls for 7 s). Both routes share one framing with sequence numbers, so a switch loses
+  nothing. Reliable channels are repaired with NACKs; `snap` and `cmd` are latest-wins and are
+  sent at full rate to the peer's fastest broker only (thinned copies to the others keep them
+  measured). Measured from one machine in 2026-10: relay 20 snapshots/s, round trip ~25 ms,
+  largest gap ~150 ms; on the rate-limited broker alone 7.5 snapshots/s and ~175 ms. The
+  interpolation delay does not look at the snapshot interval yet, so that last case stutters.
 - **Tests.** `tests/net3d.test.mjs` (node, virtual clock over `makeMemoryHub`, prints the measured
   bandwidth), `tests/playwright3d.net.mjs` (two pages over `makeLocalTransport`; set
-  `window.__netMeasure = true` before the start to count bytes).
+  `window.__netMeasure = true` before the start to count bytes), `tests/relay3d.test.mjs` (node,
+  the room transport over a fake broker network with loss, reordering and a rate limit),
+  `tests/playwright3d.mp.relay.mjs` (needs internet: two separate Chromium instances over the
+  real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality).

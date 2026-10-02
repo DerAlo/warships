@@ -1,7 +1,9 @@
 # Multiplayer contract (branch `feat/3d-multiplayer`)
 
-Serverless multiplayer for the 3D mode. No own server: browsers connect directly (WebRTC data
-channels); public, registration-free infrastructure is used only to find each other.
+Serverless multiplayer for the 3D mode. No own server and no account anywhere: the players find
+each other over public, registration-free MQTT brokers; game data flows directly between the
+browsers (WebRTC data channel) where that works and through the same brokers, encrypted, where
+it does not.
 First mode: **co-op against bots**. PvP comes later and must stay possible.
 
 Two work areas meet at the interfaces below. Do not change an interface without updating this file.
@@ -22,8 +24,30 @@ Two work areas meet at the interfaces below. Do not change an interface without 
 ## Transport (`game3d/net/transport.js`)
 
 Documented in the file header. `makeMemoryHub()` is for node tests, `makeLocalTransport()`
-(BroadcastChannel) for browser tests and two tabs on one machine. The real WebRTC transport
-implements the same interface.
+(BroadcastChannel) for browser tests and two tabs on one machine. The real transport is
+`makeRoomTransport()` in `relay.js`; it implements the same interface.
+
+What the real transport guarantees, and what not:
+
+- Every peer is reachable over the brokers ("relay") as soon as both have joined the room. A
+  WebRTC data channel ("direct", `transport_rtc.js`, signalling over Nostr relays via Trystero,
+  STUN only) is tried beside it and used for the peers where it comes up. The route is per peer
+  and may change in both directions during a match; nothing is lost or reordered by a change.
+- All channels are ordered per peer and free of duplicates. All channels are reliable **except
+  `snap` and `cmd`**: those carry complete states, so over the relay only the newest counts — a
+  lost one is not repeated and one that arrives after a newer one is dropped. (Both messages are
+  built for that: a snapshot is a full state with a tick, a command repeats its unacknowledged
+  actions.) A new game channel that needs every message must not be added to `LATEST` in
+  `relay.js`.
+- Brokers are QoS 0 and public: the transport publishes to all connected brokers, deduplicates,
+  asks again for missing reliable messages, and paces brokers that limit the message rate. With
+  only a rate-limited broker left (`gap` in `mqtt.js`, today broker.emqx.io: 10 messages/s) the
+  client receives about 7.5 snapshots/s instead of 20.
+- Relayed traffic is AES-GCM encrypted with a key derived from the room password. A game
+  without password uses a key derived from the public room id: obscurity, not secrecy.
+- Extras beyond the interface (optional, absent on the test transports): `link(id)` ->
+  `{ via: 'direct' | 'relay', rtt }`, `onRoute(fn(id, via))`, `stats()`. The session transport
+  passes `link` and `stats` through.
 
 ## Session: the hand-over from matchmaking to the game
 
@@ -108,5 +132,18 @@ effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal.
 - Listing entry: `{ id, name, host, mode, mission, difficulty, players, max, locked, state:
   'lobby'|'running', v: NET_VERSION }`. Entries with another `v` are shown as incompatible.
 - Player name lives in `localStorage['warships3d.net.name']`.
+- Discovery needs no connection between the players: hosts publish their entry on a lobby topic
+  of the brokers (on request `who`, on change, and every 4 s; an entry not refreshed for 13 s is
+  dropped). The knock (password proof) and its answer go to per-peer topics. All of this is
+  public, plain JSON and unauthenticated; the lobby treats it as untrusted input.
+- Room state from the host: `{ t: 'state', room, players: [{ id, name, ship, ready, via }] }`;
+  `via` is how that player is connected to the host (`'direct'`, `'relay'` or `''`), shown in the
+  room as "direkt" / "über Relay". A missing direct connection is not an error.
 - `?net=local` in the URL switches lobby and transport to BroadcastChannel (no network) so the
-  whole flow is testable with two pages of one browser context.
+  whole flow is testable with two pages of one browser context. `?net=relay` uses the brokers
+  only and never tries WebRTC.
+- External services (lists in `mqtt.js` and `transport_rtc.js`; re-test when multiplayer stops
+  finding anybody): MQTT over WSS at HiveMQ (mqtt-dashboard.com / broker.hivemq.com),
+  test.mosquitto.org and broker.emqx.io — one reachable broker shared by both players is enough;
+  for the direct route additionally public Nostr relays and the STUN servers of Trystero's
+  defaults. There is no TURN server.
