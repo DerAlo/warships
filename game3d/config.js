@@ -965,8 +965,9 @@ export function shipStats(key, cfgIn) {
       detectKm: +(c.detect.surface / 1000).toFixed(1), belt: c.armor.belt,
       consumables: c.consumables.map(k => CONSUMABLES[k.key].name),
       ratings: {
-         firepower: Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2),
-         survivability: rate(c.hp * (1 + c.armor.belt / 400), 15000, 110000),
+         // boats: one deck gun and a pressure hull would rate 0 on the surface-ship scales
+         firepower: Math.max(c.hull.type === 'SS' ? 6 : 0, Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2)),
+         survivability: c.hull.type === 'SS' ? rate(c.hp, 4000, 60000) : rate(c.hp * (1 + c.armor.belt / 400), 15000, 110000),
          mobility: rate(c.speedKn * 1000 / c.turnR, 25, 60),
          concealment: rate(-c.detect.surface, -16500, -7000),
          torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 100000) : 0,

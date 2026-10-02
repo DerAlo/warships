@@ -10,6 +10,7 @@ const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 const MAX_LINES = 12, MAX_CONTACTS = 4;
 const TYPE_SOUND = { DD: 'schnelle Schrauben', CL: 'Kreuzer', CA: 'Kreuzer', BB: 'schwere Schrauben', CV: 'schwere Schrauben', TR: 'Frachter', SS: 'U-Boot' };
 const CSS = `
+#sub-panel, #asw-panel { position: absolute; right: 16px; bottom: 262px; }
 #sub-panel { width: 150px; padding: 8px 10px; font: 12px var(--mono, Consolas, monospace); color: #cfe2f5; }
 #sub-panel .sp-title { font: 700 11px var(--sans, 'Segoe UI', sans-serif); letter-spacing: .08em; color: #8fb0cf; margin-bottom: 5px; }
 #sub-panel .sp-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 3px; color: #7f95aa; }
@@ -73,8 +74,9 @@ export class SubUi {
       const asw = el('div', 'asw-panel', 'panel hidden', '<b>WASSERBOMBEN · G</b><span class="asw-stat">bereit</span>');
       const alert = el('div', 'dc-alert', 'hidden'); alert.textContent = 'WASSERBOMBEN!';
       const br = document.getElementById('bottom-right'), hudRoot = document.getElementById('hud');
-      if (br) { br.insertBefore(sub, br.firstChild); br.insertBefore(asw, br.firstChild); }
-      hudRoot?.appendChild(alert);
+      // above the minimap, clear of the weapon bar
+      const host = hudRoot || br;
+      if (host) { host.appendChild(sub); host.appendChild(asw); host.appendChild(alert); }
       this.dom = { sub, asw, alert, rows: [...sub.querySelectorAll('.sp-row')], bat: sub.querySelector('.sp-bat i'),
          pct: sub.querySelector('.sp-pct'), ping: sub.querySelector('.sp-ping'), aswStat: asw.querySelector('.asw-stat') };
    }
@@ -346,18 +348,18 @@ export function drawPeriscope(g, ui, W, H) {
    for (const km of [0.5, 1, 2, 4]) {
       const y = cy + ui.pxPerRad * (u.lensY / (km * 1000) - u.lensY / Ra);
       if (y < cy - R * 0.5 || y > cy + R * 0.6 || Math.abs(y - cy) < 5) continue;
-      g.moveTo(cx - 34, y); g.lineTo(cx - 14, y);
-      g.fillText(String(km).replace('.', ',') + ' km', cx - 38, y);
+      g.moveTo(cx - R * 0.5, y); g.lineTo(cx - R * 0.5 + 22, y);
+      g.fillText(String(km).replace('.', ',') + ' km', cx - R * 0.5 - 4, y);
    }
    g.stroke();
    // read-outs
    g.font = 'bold 16px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
    g.fillStyle = 'rgba(200,245,220,0.9)';
-   g.fillText(ui.zoom + '×', cx + R * 0.86, cy - 10);
+   g.fillText(ui.zoom + '×', cx + R * 0.6, cy + R * 0.62);
    g.textAlign = 'left';
-   g.fillText('Peilung ' + String(Math.round(u.relBrg) % 360).padStart(3, '0') + '°', cx - R * 0.86, cy - 10);
-   g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(200,245,220,0.55)';
-   g.fillText('SEHROHR · Mausrad: Zoom · Shift: einfahren', cx - R * 0.86, cy - 30);
+   g.fillText('Peilung ' + String(Math.round(u.relBrg) % 360).padStart(3, '0') + '°', cx - R * 0.6, cy + R * 0.62);
+   g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(200,245,220,0.55)'; g.textAlign = 'center';
+   g.fillText('SEHROHR · Mausrad: Zoom · Shift: einfahren', cx, cy + R * 0.72);
    g.restore();
 }
 

@@ -77,7 +77,7 @@ export class Overlay3D {
       g.fillStyle = '#eef6ff';
       g.beginPath(); g.moveTo(x + 14, yl); g.lineTo(x + 20, yl - 4); g.lineTo(x + 20, yl + 4); g.closePath(); g.fill();
       g.font = 'bold 13px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
-      g.fillText(lv > tp ? 'Fernglas ' + ui.zoom + '×' : 'Kamera', x - 16, yl);
+      g.fillText(lv > tp ? (ui.sub?.peri ? 'Sehrohr ' : 'Fernglas ') + ui.zoom + '×' : 'Kamera', x - 16, yl);
       g.restore();
    }
 
