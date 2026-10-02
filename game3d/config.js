@@ -797,7 +797,7 @@ Object.assign(SHIPS, {
 //    torpBloom  m: detectability for SUB_BLOOM_T s after a torpedo salvo from periscope depth
 //    hydrophone m: range of the bearing lines while the boat is deep
 const SUB_CONS = () => [C('damageControl', { charges: Infinity, dur: 10, cd: 50 })];
-const SUB = (o = {}) => ({ diveT: 6, battery: { peri: 300, deep: 110, charge: 80 }, periSpeed: 0.7, deepSpeed: 0.5,
+const SUB = (o = {}) => ({ diveT: 6, battery: { peri: 420, deep: 210, charge: 75 }, periSpeed: 0.7, deepSpeed: 0.5,
    periDetect: 1800, torpBloom: 4500, hydrophone: 6000, ...o });
 const deckGun = (x, caliber, o = {}) => ({
    caliber, turrets: [T(x, 1, false, 150)],
@@ -832,7 +832,7 @@ Object.assign(SHIPS, {
       main: deckGun(13, 105, { range: 8200, ap: { dmg: 1800, pen: 110 }, he: { dmg: 1500, pen: 17, fire: 0.06 } }),
       sec: null, aa: { range: 2000, reload: 0.6 },
       torp: { launchers: [L(33, 'bow', 4), L(-35, 'stern', 2)], range: 8500, speedKn: 62, dmg: 13500, flood: 0.25, reload: 55 },
-      sub: SUB({ diveT: 7, battery: { peri: 360, deep: 130, charge: 85 } }),
+      sub: SUB({ diveT: 7, battery: { peri: 480, deep: 240, charge: 85 } }),
       consumables: SUB_CONS(),
       ai: { prefRange: [2800, 5500], role: 'ss', value: 36 },
    }),
@@ -862,7 +862,7 @@ Object.assign(SHIPS, {
       main: deckGun(-14, 127, { turrets: [T(-14, 1, true, 150)], range: 8500, reload: 7, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } }),
       sec: null, aa: { range: 2500, reload: 0.5 },
       torp: { launchers: [L(42, 'bow', 6), L(-43, 'stern', 4)], range: 8000, speedKn: 62, dmg: 13000, flood: 0.25, reload: 62 },
-      sub: SUB({ diveT: 7, battery: { peri: 340, deep: 125, charge: 80 } }),
+      sub: SUB({ diveT: 7, battery: { peri: 460, deep: 230, charge: 80 } }),
       consumables: SUB_CONS(),
       ai: { prefRange: [2800, 5500], role: 'ss', value: 38 },
    }),

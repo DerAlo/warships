@@ -15,7 +15,7 @@
 import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
-import { subPlan } from './ai_sub.js';
+import { subPlan, subFireRange } from './ai_sub.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
 const TARGET_DT = 2;               // s between target re-evaluations
@@ -768,7 +768,9 @@ function torpedoes(b, w, dt) {
    if (!tgt || !tgt.alive || !w.canSee(b.side, tgt)) return;
    const tc = b.cfg.torp;
    const dd = Math.sqrt(dist2(b.pos, tgt.pos));
-   if (dd > tc.range * (ai.role === 'dd' ? 0.85 : ai.role === 'ss' ? 0.8 : 0.7) || dd < 900) return;
+   const ss = ai.role === 'ss';         // boats shoot from close in (ai_sub.js)
+   if (!ss && tgt.sub && tgt.depth > 0) return;      // a dived boat is a job for depth charges, not for a spread
+   if (dd > (ss ? subFireRange(b, tgt) : tc.range * (ai.role === 'dd' ? 0.85 : 0.7)) || dd < (ss ? 420 : 900)) return;
    const ip = interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel);
    if (!ip || ip.t * tc.speed > tc.range * 0.95) return;
    // light error so spreads are not laser-perfect
@@ -782,7 +784,7 @@ function torpedoes(b, w, dt) {
       if (Math.abs(angleDelta(brg, ob)) < Math.atan2(o.cfg.hull.L * 0.5 + 300, od)) return;
    }
    if (!b.torpLauncherFor(brg)) return;
-   b.setTorpSpread(dd > tc.range * 0.5 ? 'wide' : 'narrow');
+   b.setTorpSpread(!ss && dd > tc.range * 0.5 ? 'wide' : 'narrow');
    if (b.fireTorpedoes(w, brg) > 0) ai.torpT = 2.5;
 }
 

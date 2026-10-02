@@ -17,6 +17,38 @@ Graphics and controls only **read** simulation state (plus call the documented s
 below). Everything below is the contract between these three areas. Consumers must degrade
 gracefully (optional chaining + sensible fallbacks) when a field is missing.
 
+## Submarines (`submarine.js`, `ai_sub.js`, `subui.js`)
+
+Class `SS` ("U-Boot"): a ship whose config has a `sub` block (`SUB()` in `config.js`). All
+submarine rules live in `submarine.js` (sim), `ai_sub.js` (bots) and `subui.js` (HUD, keys, audio
+hooks); the shared files only call into them.
+
+- State on the ship: `depth` (0 surfaced, 1 periscope depth, 2 deep; the state the hull is in),
+  `depthTarget`, `depthF` (0..2, continuous) and `depthM` (metres below surfaced trim, read by the renderer),
+  `battery` 0..1, `batteryLock` (forced up until 15 %), `sonarSeen {x, y, t}`, `pingT`.
+  Orders: `orderDepth(ship, depth, world)`, or `diveDeeper` / `diveUp`.
+- Who hits what: **surfaced** = a normal small ship. **Periscope depth** = shells do
+  `PERI_SHELL_MULT` (0.5), torpedoes and ramming hit in full, depth charges hit. **Deep** = shells,
+  torpedoes and ramming pass over; only depth charges (`DC`: full damage within 45 m, none beyond
+  135 m) reach it.
+- Who sees what: `subDetectRange` replaces the surface detectability — periscope depth
+  `sub.periDetect` scaled by speed (the feather), `sub.torpBloom` for `SUB_BLOOM_T` s after a
+  salvo, deep = never. A deep boat spots nothing; `hydrophoneContacts` gives it bearings only.
+- Sonar: `updateSonar` runs every `SONAR_DT`; range per hunter class in `SONAR_RANGE`, scaled by
+  how loud the boat is (speed, depth). A hit sets `sonarSeen` and emits `sonar`.
+- Depth charges: `ASW` gives DD and CL `ship.asw { charges, reload }`; `dropDepthCharges(ship,
+  world)`; `world.depthCharges` is a fixed pool (`alive` flag, never shrinks). Events: `dcDrop`,
+  `depthCharge` (explosion, for FX/audio), `dc` (damage), `ram`, `depth`.
+- Bots (`subPlan` from `ai.js`): boats close at periscope depth, fire inside `subFireRange`, go
+  deep after a salvo or when a hunter is on top of them, run clear and surface to recharge below
+  30 % battery. DD/CL steer onto a contact (weaving) and drop on it; BB/CA/CV turn away and zigzag.
+  Surface bots do not launch torpedoes at a dived boat.
+- Client: `SubUi` owns keys F/G, the depth/battery and depth-charge panels, the periscope overlay
+  (`cam3.peri` switches `camera3d.js` to the periscope rig) and calls the optional audio hooks
+  `subDive`, `subSurface`, `sonarPing`, `depthCharge`, `setSubmerged`.
+- Saved profiles: the boats are appended to the tech tree; `progress3d.js` fills missing ship
+  entries on load, so older `warships3d.profile.v1` data keeps working.
+
 ## Coordinates & scale
 
 * Sim plane: `{x, y}`; X+ = east, Y+ = south; angle 0 = +x (east), CCW positive in sim math,

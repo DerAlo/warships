@@ -29,7 +29,7 @@ export const SONAR_DT = 0.5;
 export const SONAR_KEEP = 8;              // s a sonar contact stays on the plot
 // depth-charge racks by hull type: charges per pattern, s between patterns
 export const ASW = { DD: { charges: 6, reload: 24 }, CL: { charges: 4, reload: 32 } };
-export const DC = { sink: 2.6, gap: 0.28, full: 45, reach: 135, dmg: 900, max: 64, throwY: 34 };
+export const DC = { sink: 2.6, gap: 0.28, full: 45, reach: 135, dmg: 1500, max: 64, throwY: 34 };
 
 // hull sinkage (m) at periscope depth: the tower top ends ~1.5 m under the surface
 export function periDepthM(cfg) { const h = cfg.hull; return h.deckH + (h.sup ? h.sup.h : 5) + 1.5; }
@@ -145,7 +145,8 @@ function updateSonar(world) {
       if (!T.alive || !T.sub) continue;
       if (T.depth === 0) { if (T.sonarSeen && now - T.sonarSeen.t > SONAR_KEEP) T.sonarSeen = null; continue; }
       const vmax = T.maxSpeedKn * WORLD.KN_TO_MS * T.sub.deepSpeed;
-      const loud = 0.7 + 0.3 * clamp01(Math.abs(T.speed) / (vmax || 1));
+      // a creeping boat is quiet, a deep one harder to hold: silent running breaks a contact
+      const loud = (0.5 + 0.5 * clamp01(Math.abs(T.speed) / (vmax || 1))) * (T.depth === 2 ? 0.85 : 1);
       let by = null, bd = Infinity;
       for (let j = 0; j < ships.length; j++) {
          const O = ships[j];

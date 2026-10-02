@@ -113,6 +113,32 @@ see `game3d/ARCHITECTURE.md`):
     dispersion rises slightly. At night, muzzle flashes light up their
     surroundings and star shells hang over newly spotted enemies. Sunk ships
     list and go down, leaving smoke and a fading oil slick.
+  - **Submarines (U-Boote):** six boats — U 96 (Typ VII C, tier 6), U 505
+    (Typ IX C, tier 8), HMS Triton (T class, 6), USS Gato (8), I-19 (Typ B1, 7)
+    and S-13 (Serie IX-bis, 7). Three depth states, F deeper / G up, a change
+    takes 5–9 s:
+    *Aufgetaucht* — full speed, deck gun, battery recharges, visible like a
+    small destroyer. *Sehrohrtiefe* — 70 % speed, torpedoes from the bow/stern
+    tubes (±28° arcs), periscope view through the zoom ladder (circular mask,
+    bearing tape, range marks); only spotted within about 1.8 km (the periscope
+    feather, less when creeping) or for 14 s after a salvo; shells do half
+    damage, torpedoes and ramming hit in full. *Getaucht* — half speed, immune
+    to shells, torpedoes and ramming, cannot be sighted, cannot fire; the boat
+    sees nothing and only hears ships as hydrophone bearing lines (6 km); the
+    battery drains about twice as fast. An empty battery forces the boat up
+    until it has recharged to 15 %.
+    **ASW:** every surface ship has passive sonar against submerged boats
+    (destroyers 3 km, light cruisers 2.4 km, heavier ships 1.2–1.5 km; a slow
+    or deep boat is heard at about half that). A contact shows as a pulsing
+    ring on screen and map; the boat gets "SONAR-ORTUNG". Destroyers and light
+    cruisers carry depth charges (G, 6 or 4 per pattern, 24/32 s reload): the
+    only weapon that reaches a deep boat (full damage within 45 m, fading out
+    at 135 m). Bot destroyers run down a contact and drop on it, bot capital
+    ships turn away from a known boat and zigzag. About 40 % of the random
+    battles have one boat per side (always when you sail one); the mission
+    *Geleitzugschlacht* puts you in U 96 against
+    an escorted convoy. Code: `game3d/submarine.js`, `game3d/ai_sub.js`,
+    `game3d/subui.js`.
   - **Kill camera:** a short cut (about 2 s) to a ship you just sank. Any key or
     click skips it. It never starts during danger, stops as soon as you take
     fire, and can be turned off in the pause menu ("Versenkungs-Kamera").
@@ -147,6 +173,8 @@ see `game3d/ARCHITECTURE.md`):
   | Ctrl + left click | Secondary battery priority target (orange brackets); again or on open sea: clear. Never fires the main battery |
   | L | Lead marker on/off (red diamond: always on screen while an enemy is in sight; edge arrow when the lead point is outside the view, dashed "zu weit" beyond range, pale "außer Sicht" for a target lost a moment ago; green in torpedo mode) |
   | R / T | Damage control / repair party |
+  | F / G | Submarine: one depth step down / up (Aufgetaucht → Sehrohrtiefe → Getaucht) |
+  | G | Destroyer / light cruiser: drop a depth-charge pattern over the stern |
   | Y / U | Special consumables (boost, smoke …) |
   | M / Tab | Tactical map / scoreboard |
   | H | Controls help |
@@ -179,6 +207,8 @@ node --test tests/missions3d.test.mjs # 3D second mission batch: loads, win and 
 node tests/balance3d.mjs strait,cerberus normal 4  # 3D balance: AI-captained win rate per mission/difficulty
 node tests/playwright3d.newmissions.mjs # 3D browser smoke test of the second mission batch (menu, briefing, HUD, result)
 node --test tests/lead3d.test.mjs    # 3D lead marker maths
+node --test tests/sub3d.test.mjs     # 3D submarines: depth states, battery, sonar, depth charges, bot behaviour
+node tests/playwright3d.subs.mjs     # 3D browser smoke test of the submarine class (needs the dev server)
 node --test tests/zoom3d.test.mjs    # 3D mouse-wheel zoom / binoculars ladder
 node tests/playwright3d.zoom.mjs     # 3D browser check of the wheel zoom
 node tests/playwright3d.missions.mjs # 3D browser play-test of every mission

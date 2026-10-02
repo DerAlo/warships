@@ -44,8 +44,11 @@ function hunt(b, w) {
    const dd = Math.sqrt(bd);
    // the racks are at the stern: drop as the hull runs over the contact
    if (dd < 120) dropDepthCharges(b, w);
-   _pos.x = best.x; _pos.y = best.y;
-   _plan.want = dd > 60 ? Math.atan2(best.y - b.pos.y, best.x - b.pos.x) : b.heading;
+   // weave on the run-in: a straight course down the bearing is a gift to the boat's bow tubes
+   const brg = Math.atan2(best.y - b.pos.y, best.x - b.pos.x);
+   const off = dd > 500 ? Math.sin(w.time / 3.2 + (b.ai.zigPhase || 0)) * Math.min(dd * 0.3, 420) : 0;
+   _pos.x = best.x - Math.sin(brg) * off; _pos.y = best.y + Math.cos(brg) * off;
+   _plan.want = dd > 60 ? Math.atan2(_pos.y - b.pos.y, _pos.x - b.pos.x) : b.heading;
    _plan.tel = 4; _plan.goal = dd > 500 ? _pos : null;
    return _plan;
 }
@@ -70,6 +73,12 @@ function avoid(b, w) {
 }
 
 // ---------------------------------------------------------------- the boat itself
+// Torpedo range a bot boat fires at: short against a destroyer (snap shot down the throat),
+// about half the run against everything else. ai.js torpedoes() uses the same gate.
+export function subFireRange(b, tgt) {
+   return tgt.type === 'DD' ? 1300 : Math.min(b.cfg.torp.range * 0.55, 4200);
+}
+
 function subCaptain(b, w, d, tgt, threat, searchGoal) {
    const ai = b.ai, now = w.time, sb = b.sub;
    // nearest enemy the boat knows of (sighted by the team, or heard on its own hydrophone) and
@@ -84,43 +93,71 @@ function subCaptain(b, w, d, tgt, threat, searchGoal) {
       if (e.asw && d2 < dh) { dh = d2; hunter = e; }
    }
    dn = Math.sqrt(dn); dh = Math.sqrt(dh);
-   const bowReady = b.torps && b.torps.launchers.some(l => l.side !== 'stern' && l.reload <= 0);
+   let bowReady = false, sternReady = false;
+   if (b.torps) for (const l of b.torps.launchers) if (l.reload <= 0) { if (l.side === 'stern') sternReady = true; else bowReady = true; }
    if (b.lastTorpFire > (ai.fireSeen ?? -999)) {
       ai.fireSeen = b.lastTorpFire;
-      if (!bowReady) ai.deepUntil = now + 16;          // salvo away: get out from under the bloom
+      if (!bowReady) ai.deepUntil = now + 14;          // salvo away: get out from under the bloom
    }
-   const hunted = now - b.pingT < 9 || dh < 2400 || dn < 1100 || (b.depth > 0 && now - b.lastHitT < 8);
-   if (hunted) ai.deepUntil = Math.max(ai.deepUntil || 0, now + 10);
+   const pinged = now - b.pingT < 6;
+   // a hunter coming in with tubes loaded: come up for a snap shot instead of waiting for the charges
+   // (bow tubes, or a stern tube when the hunter is already astern)
+   const hb = hunter ? Math.abs(angleDelta(b.heading, Math.atan2(hunter.pos.y - b.pos.y, hunter.pos.x - b.pos.x))) : 0;
+   const duel = !!hunter && dh < 3600 && dh > 520 && (bowReady || (sternReady && hb > 115 * DEG)) && b.battery > 0.1 && !b.batteryLock;
+   const hunted = !duel && ((hunter && dh < 2400) || dn < 600 || (pinged && dh < 3600 && !bowReady) || (b.depth > 0 && now - b.lastHitT < 6));
+   if (hunted) ai.deepUntil = Math.max(ai.deepUntil || 0, now + 8);
+   if (duel) { ai.deepUntil = 0; if (ai.target !== hunter && w.canSee(b.side, hunter)) { ai.target = hunter; ai.targetSince = now - 5; ai.targetT = 2; } }
 
-   // ---- depth
+   // ---- depth: the battery decides. Recharging means running out of sight first.
+   const safeR = Math.max(b.cfg.detect.surface * 1.15, 6000);
+   if (!ai.recharge && b.battery < 0.3 && !duel && !(hunted && b.battery > 0.12)) ai.recharge = true;
    let depth;
-   if (b.batteryLock || b.battery <= 0.03) depth = 0;
+   if (b.batteryLock || b.battery <= 0.02) depth = 0;
    else if (ai.recharge) {
-      depth = 0;
-      if (b.battery > 0.85 || (dn < 4500 && b.battery > 0.3)) ai.recharge = false;
-   } else if (b.battery < 0.2 && dn > 6000 && !hunted) { ai.recharge = true; depth = 0; }
-   else if (now < (ai.deepUntil || 0) && b.battery > 0.06) depth = 2;
+      const up = b.depthTarget === 0 ? dn > safeR * 0.8 : dn > safeR;
+      depth = up ? 0 : (hunter && dh < 700 && b.battery > 0.06 ? 2 : 1);
+      if (b.battery > 0.92 || (b.battery > 0.5 && dn < safeR)) ai.recharge = false;
+   } else if (duel) depth = 1;
+   else if (now < (ai.deepUntil || 0) && b.battery > 0.08) depth = 2;
    else depth = dn < Math.max(b.cfg.detect.surface * 1.3, 7500) ? 1 : 0;
    if (depth !== b.depthTarget) orderDepth(b, depth, w);
 
    // ---- course
    const s = ai.angSide;
    _plan.goal = null; _plan.tel = 3;
-   if (depth === 2 || (ai.recharge && nearest)) {
+   if (ai.recharge) {
+      const from = hunter && dh < dn * 1.5 ? hunter : nearest;
+      _plan.want = from ? Math.atan2(b.pos.y - from.pos.y, b.pos.x - from.pos.x) : threat.away;
+      _plan.tel = 4;
+   } else if (duel) {
+      const ip = interceptPoint(b.pos, b.cfg.torp.speed, hunter.pos, hunter.vel);
+      const ib = ip ? Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) : Math.atan2(hunter.pos.y - b.pos.y, hunter.pos.x - b.pos.x);
+      _plan.want = bowReady ? ib : ib + Math.PI;
+      _plan.tel = 2;
+   } else if (depth === 2) {
       const from = hunter || nearest;
-      _plan.want = from ? Math.atan2(b.pos.y - from.pos.y, b.pos.x - from.pos.x) + s * 20 * DEG : threat.away;
-      _plan.tel = depth === 2 ? 3 : 4;
+      if (!from) { _plan.want = threat.away; _plan.tel = 2; }
+      else {
+         const brg = Math.atan2(from.pos.y - b.pos.y, from.pos.x - b.pos.x);
+         const df = from === hunter ? dh : dn;
+         if (from === hunter && bowReady && df > 700) { _plan.want = brg; _plan.tel = 1; }          // lie in wait, bow on
+         else if (df < 800) { _plan.want = brg + s * 90 * DEG; _plan.tel = 4; }                      // sidestep the run-in
+         else { _plan.want = brg + Math.PI + s * 25 * DEG; _plan.tel = pinged ? 4 : 1; }             // creep away, quiet
+      }
    } else if (tgt) {
       const tc = b.cfg.torp;
       const dd = Math.sqrt(dist2(b.pos, tgt.pos));
       const brg = Math.atan2(tgt.pos.y - b.pos.y, tgt.pos.x - b.pos.x);
       const ip = interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel);
       const ib = ip ? Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) : brg;
+      const fireR = subFireRange(b, tgt);
       if (bowReady) {
-         if (dd > tc.range * 0.72) { _plan.want = ib; _plan.tel = 4; }
+         if (dd > fireR) { _plan.want = ib; _plan.tel = 4; }
          else { _plan.want = ib; _plan.tel = Math.abs(angleDelta(b.heading, ib)) > 20 * DEG ? 3 : 2; }   // creep and lay the bow on
-      } else if (dd < tc.range * 0.45) {
-         _plan.want = brg + Math.PI + s * 12 * DEG; _plan.tel = 4;      // open the range (stern tubes bear)
+      } else if (sternReady && dd < fireR) {
+         _plan.want = ib + Math.PI; _plan.tel = 2;                      // stern tube
+      } else if (dd < 2600) {
+         _plan.want = brg + Math.PI + s * 12 * DEG; _plan.tel = 4;      // open the range while the tubes reload
       } else {
          _plan.want = brg + s * 95 * DEG; _plan.tel = 3;
       }

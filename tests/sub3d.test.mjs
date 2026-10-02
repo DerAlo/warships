@@ -243,7 +243,7 @@ test('depth charges hit a deep boat, are pooled, and spare surface ships', () =>
 test('sonar: a destroyer holds a submerged boat at short range, a battleship only very close; ramming hurts', () => {
    const w = blank(9);
    const u = hold(w.spawn('U96', 'player', P(0, 0), 0, { depth: 2 }));
-   const dd = hold(w.spawn('Jervis', 'enemy', P(2000, 0), 0, {}));
+   const dd = hold(w.spawn('Jervis', 'enemy', P(1100, 0), 0, {}));     // a stopped deep boat is quiet: 3 km sonar shrinks to ~1.3 km
    run(w, 2);
    assert.ok(u.sonarSeen && w.time - u.sonarSeen.t < 1 && w.time - u.pingT < 1, 'destroyer sonar');
    assert.ok(Math.hypot(u.sonarSeen.x, u.sonarSeen.y) < 150, 'contact is close to the boat');
