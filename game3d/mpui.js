@@ -2,7 +2,8 @@
 // room (players, ship picker, ready, chat). Pure UI on top of game3d/net/lobby.js.
 // Loaded lazily by the port's MEHRSPIELER button (menu3d.js), so nothing here — and nothing
 // network-related — runs in a singleplayer session. `?net=local` uses BroadcastChannel instead
-// of the internet (two pages of one browser, for tests).
+// of the internet (two pages of one browser, for tests); `?net=relay` never tries a direct
+// WebRTC connection and plays over the relay only.
 import { Lobby, makeBackend, filterGames, coopMissions, ownShips, cleanName, MODES, DIFFICULTIES, NET_VERSION } from './net/lobby.js';
 import { coopSlots } from './net/coop.js';
 import { getMission } from './missions.js';
@@ -61,6 +62,7 @@ const CSS = `
 .mp-player { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:2px 8px; align-items:center; padding:8px 10px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12); }
 .mp-player.me { border-color:#5aa0e0; background:linear-gradient(90deg, rgba(38,92,140,.6), rgba(14,34,56,.8)); }
 .mp-player .n { font-weight:800; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-player .n i { font-style:normal; font-size:9.5px; font-weight:800; letter-spacing:1px; padding:1px 5px; border-radius:2px; background:#ffc94a; color:#1b1300; margin-left:6px; vertical-align:2px; }
+.mp-player .n em { font-style:normal; font-size:9.5px; font-weight:700; letter-spacing:.5px; padding:1px 5px; border-radius:2px; border:1px solid rgba(214,178,94,.55); color:#ffe2a8; margin-left:6px; vertical-align:2px; } .mp-player .n em.direct { border-color:rgba(110,230,150,.5); color:#8dffb0; }
 .mp-player .s { grid-column:1; font-size:12px; color:#b6cadb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-player .s svg { margin-right:4px; }
 .mp-player .r { grid-row:1 / span 2; grid-column:2; font-size:10.5px; font-weight:800; letter-spacing:1px; color:#8aa3ba; } .mp-player .r.on { color:#6dff9e; }
 .mp-player .k { grid-row:1 / span 2; grid-column:3; cursor:pointer; width:24px; height:24px; border-radius:3px; border:1px solid rgba(230,110,90,.5); background:rgba(60,14,10,.5); color:#ffb4a4; font:800 12px var(--font,"Segoe UI"); }
@@ -99,7 +101,8 @@ export function openMultiplayer(menu) {
 class MpUI {
    constructor(menu) {
       this.menu = menu;
-      this.local = new URLSearchParams(location.search).get('net') === 'local';
+      this.netMode = new URLSearchParams(location.search).get('net') || '';
+      this.local = this.netMode === 'local';
       this.flt = { q: '', mode: '', mission: '', hideFull: false, hideLocked: false, hideRunning: false };
       this.backend = null; this.lobby = null; this.modal = null; this.view = ''; this.notice = ''; this.openedAt = 0;
       if (!document.getElementById('mpui-style')) {
@@ -137,7 +140,7 @@ class MpUI {
    }
    async _connect() {
       try {
-         if (!this.backend) this.backend = await makeBackend(this.local);
+         if (!this.backend) this.backend = await makeBackend(this.netMode);
          const lobby = new Lobby(this.backend, () => this.profile(), {
             onList: () => { if (this.view === 'list') this._renderGames(); },
             onRoom: () => { if (this.view === 'room') this._renderRoom(); else if (this.visible && this.lobby?.room) this._show('room'); },
@@ -219,9 +222,9 @@ class MpUI {
       const lb = this.lobby;
       if (this.local) { el.innerHTML = '<b>Lokaler Testmodus</b><br>ohne Internet'; return; }
       if (!lb) { el.innerHTML = 'Verbinde …'; return; }
-      const s = lb.status(), online = lb.lt ? lb.lt.peers().length + 1 : null;
-      el.innerHTML = `Vermittlung: <b class="${s.open ? '' : 'bad'}">${s.open}/${s.total}</b>${online ? `<br>${online} Spieler im Netz` : ''}`;
-      el.title = 'Öffentliche Nostr-Relays, über die sich die Browser finden. Spieldaten laufen direkt zwischen den Spielern.';
+      const s = lb.status();
+      el.innerHTML = `Vermittlung: <b class="${s.open ? '' : 'bad'}">${s.open}/${s.total}</b>${this.netMode === 'relay' ? '<br>nur über Relay' : ''}`;
+      el.title = 'Öffentliche, anmeldefreie Vermittlungsdienste (MQTT), über die sich die Spieler finden. Kommt keine direkte Verbindung zustande, laufen auch die Spieldaten verschlüsselt darüber.';
       const dead = !s.open && Date.now() - this.openedAt > 8000;
       if (dead !== this._dead) { this._dead = dead; if (this.view === 'list') this._renderGames(); }
    }
@@ -248,7 +251,7 @@ class MpUI {
             </div>
             <div class="mp-box mp-note mp-scroll">${this.local
                ? '<b>Lokaler Testmodus (?net=local):</b> Spiele werden nur zwischen Fenstern dieses Browsers gefunden, es gibt keine Internetverbindung.'
-               : '<b>Ohne Server:</b> Die Spieler verbinden sich direkt miteinander (WebRTC). Zum Finden dienen öffentliche, anmeldefreie Nostr-Relays. Andere Spieler in dieser Liste können dabei deine IP-Adresse sehen. Blockiert ein Router die Direktverbindung, sind manche Spiele nicht erreichbar.'}</div>
+               : '<b>Ohne eigenen Server:</b> Die Spieler finden sich über öffentliche, anmeldefreie Vermittlungsdienste. Im Spiel verbinden sie sich möglichst direkt miteinander (WebRTC; Mitspieler können dabei deine IP-Adresse sehen). Blockiert ein Router die Direktverbindung, laufen die Spieldaten verschlüsselt über die Vermittlung (Relay) – das Spiel funktioniert trotzdem, mit etwas mehr Verzögerung.'}</div>
          </div>
          <div class="mp-col">
             <div class="mp-h"><span>Offene Spiele</span><span data-count></span></div>
@@ -264,7 +267,6 @@ class MpUI {
       this.root.querySelector('[data-count]').textContent = all.length === shown.length ? `${all.length}` : `${shown.length} von ${all.length}`;
       const warn = [];
       if (this._dead) warn.push('Kein Vermittlungsdienst erreichbar. Bitte Internetverbindung und Firewall prüfen; ohne Vermittlung können sich die Spieler nicht finden.');
-      if (lb?.unreachable.size) warn.push(`Zu ${lb.unreachable.size} Spieler${lb.unreachable.size > 1 ? 'n' : ''} im Netz ist keine direkte Verbindung möglich (Router oder Firewall; einen Relay-Server gibt es nicht). Deren Spiele erscheinen hier nicht.`);
       this.root.querySelector('[data-warn]').innerHTML = warn.map(w => `<div class="mp-warn" style="margin-bottom:6px">${esc(w)}</div>`).join('');
       if (!shown.length) {
          box.innerHTML = `<div class="mp-empty">${!lb || !lb.lt ? 'Verbinde mit dem Netz …' : all.length ? 'Kein Spiel entspricht den Filtern.' : 'Zurzeit sind keine Spiele offen.<br>Erstelle eines mit <b>SPIEL ERSTELLEN</b>.'}</div>`;
@@ -319,8 +321,11 @@ class MpUI {
       $('[data-players]').innerHTML = r.players.map(p => {
          const st = SHIP_STATS[p.ship];
          const ready = p.id === r.hostId ? ['on', 'HOST'] : p.ready ? ['on', 'BEREIT'] : ['', 'WARTET'];
+         const via = lb.via(p.id);
+         const route = via === 'direct' ? '<em class="direct" data-via="direct" title="Direkte Verbindung zum Host">direkt</em>'
+            : via === 'relay' ? '<em data-via="relay" title="Keine direkte Verbindung zum Host: die Spieldaten laufen verschlüsselt über die Vermittlung. Das funktioniert, mit etwas mehr Verzögerung.">über Relay</em>' : '';
          return `<div class="mp-player ${p.id === lb.selfId ? 'me' : ''}" data-id="${esc(p.id)}">
-            <span class="n">${esc(p.name)}${p.id === lb.selfId ? '<i>DU</i>' : ''}</span>
+            <span class="n">${esc(p.name)}${p.id === lb.selfId ? '<i>DU</i>' : ''}${route}</span>
             <span class="r ${ready[0]}">${ready[1]}</span>
             ${host && p.id !== lb.selfId ? `<button class="k" data-kick="${esc(p.id)}" title="Aus dem Spiel entfernen">✕</button>` : ''}
             <span class="s">${st ? `${classSvg(st.type, 12)}${esc(st.name)} · ${esc(st.tierRoman)} ${esc(st.type)}` : 'kein Schiff gewählt'}</span></div>`;
@@ -452,7 +457,7 @@ class MpUI {
             <div><label>Max. Spieler</label><select data-f="max"></select></div>
          </div>
          <label>Passwort (optional)</label><input type="password" data-f="password" maxlength="64" autocomplete="new-password" placeholder="leer = offen für alle">
-         <p class="mp-note" style="margin-top:8px">Mit Passwort kann nur beitreten, wer es kennt: der Verbindungsaufbau wird damit verschlüsselt. Name, Mission und Spielerzahl bleiben in der Liste für alle sichtbar.</p>
+         <p class="mp-note" style="margin-top:8px">Mit Passwort kann nur beitreten, wer es kennt: Verbindungsaufbau und über Relay laufende Spieldaten werden damit verschlüsselt. Name, Mission und Spielerzahl bleiben in der Liste für alle sichtbar.</p>
          <div class="err"></div>
          <div class="bt"><button class="mp-btn" data-cancel>ABBRECHEN</button><button class="mp-btn pri" data-ok>ERSTELLEN</button></div>`);
       const f = (k) => el.querySelector(`[data-f="${k}"]`);

@@ -3,24 +3,29 @@
 // ready, chat, kick) and the hand-over to the game (`session`, see CONTRACT.md).
 //
 // How peers find each other
-//   Everybody who has the multiplayer screen open sits in one shared "lobby" room (a Transport).
-//   Hosts send their listing entry to every lobby peer: when a peer appears, when the entry
-//   changes and as a heartbeat. A listing disappears when the host withdraws it, when the host's
-//   peer leaves, or when no heartbeat arrived for STALE_MS. A client leaves the lobby room while
-//   it is inside a game room; a host stays to keep its game listed.
-//   With the real transport the lobby room is a WebRTC mesh, so the list only shows hosts this
-//   browser can actually reach, and it is meant for dozens of simultaneous browsers, not hundreds.
+//   Discovery does not need a connection between the players. Everybody who has the multiplayer
+//   screen open listens on a lobby channel (public MQTT brokers, see relay.js / mqtt.js; with
+//   ?net=local a BroadcastChannel). Hosts publish their listing entry there: when somebody asks
+//   (`who`, sent on opening the screen), when the entry changes and as a heartbeat. A listing
+//   disappears when the host withdraws it or when no heartbeat arrived for STALE_MS. A client
+//   stops listening while it is inside a game room; a host keeps announcing.
+//   Everything on the lobby channel is public and unauthenticated: treat it as untrusted input.
 //
 // How a game room works (channels `room` and `chat`, host-authoritative)
 //   join: client -> host over the lobby `knock` (password proof), host answers `knockr` and
-//   reserves a seat; the client then connects to the game room and says `hello`. The host owns
-//   the room state and broadcasts it; clients only send requests (`set`, chat lines).
+//   reserves a seat; the client then opens the game room transport and says `hello`. The host
+//   owns the room state and broadcasts it; clients only send requests (`set`, chat lines).
+//   The room transport reaches every peer over the brokers ("relay") at once and switches to a
+//   WebRTC data channel ("direct") for the peers where one comes up. No direct channel is not an
+//   error: the peer stays relayed.
 //
 // Password
 //   key = PBKDF2-SHA256(password, salt = room id). The knock carries SHA-256(key, room, peer id),
-//   never the password. With the real transport the key is also the Trystero room password: the
-//   WebRTC session descriptions are AES-GCM encrypted with it, so somebody who skips the knock
-//   still cannot connect. With ?net=local (BroadcastChannel, test only) just the knock applies.
+//   never the password. The key encrypts the relayed room traffic (AES-GCM) and is the Trystero
+//   room password of the direct route (encrypted WebRTC session descriptions), so somebody who
+//   skips the knock can neither read the room nor connect. A game without password is open to
+//   everybody by definition (its relay key is derived from the public room id). With ?net=local
+//   (BroadcastChannel, test only) just the knock applies.
 import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots } from './coop.js';
 import { MISSIONS, getMission } from '../missions.js';
@@ -32,7 +37,7 @@ export const NAME_KEY = 'warships3d.net.name';
 export const MODES = [['coop', 'Koop gegen Bots', true], ['pvp', 'PvP', false]];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 const HEARTBEAT_MS = 4000, STALE_MS = 13000, TICK_MS = 1000;
-const KNOCK_MS = 10000, CONNECT_MS = 20000, SEAT_MS = 30000;
+const KNOCK_MS = 10000, KNOCK_AGAIN_MS = 2000, CONNECT_MS = 15000, SEAT_MS = 30000;
 const CHAT_MAX = 200, CHAT_KEEP = 120;
 
 // ---------------------------------------------------------------- small helpers
@@ -98,9 +103,11 @@ const DENY = {
 };
 
 // ---------------------------------------------------------------- backends
-// A backend opens Transports: the shared lobby room and game rooms.
-export async function makeBackend(local) {
-   if (local) {
+// A backend opens the lobby channel ({ send, on, leave }) and game room Transports.
+// mode: 'local' = BroadcastChannel (tests, no network), 'relay' = brokers only, never WebRTC,
+//       anything else = brokers plus a direct WebRTC channel where one comes up.
+export async function makeBackend(mode) {
+   if (mode === true || mode === 'local') {
       const selfId = randId(16);
       return {
          local: true, selfId,
@@ -109,12 +116,17 @@ export async function makeBackend(local) {
          status: () => ({ open: 1, total: 1 }),
       };
    }
-   const rtc = await import('./transport_rtc.js');
+   const { Bus, makeBusLobby, makeRoomTransport } = await import('./relay.js');
+   let rtc = null;
+   if (mode !== 'relay') { try { rtc = await import('./transport_rtc.js'); } catch (e) { console.warn('multiplayer: WebRTC module not available, relay only', e); } }
+   const selfId = rtc ? rtc.selfId : randId(20);
+   const bus = new Bus();
    return {
-      local: false, selfId: rtc.selfId,
-      openLobby: (onError) => rtc.makeRtcTransport('lobby-1', '', { onError }),
-      openRoom: (id, hostId, key, admit, onError) => rtc.makeRtcTransport('g-' + id, hostId, { password: key, admit, onError }),
-      status: rtc.relayStatus,
+      local: false, selfId, bus,
+      openLobby: async () => makeBusLobby(bus, selfId),
+      openRoom: (id, hostId, key, admit) => makeRoomTransport({ bus, selfId, room: id, hostId, key, admit,
+         direct: rtc ? (hooks) => rtc.makeRtcCarrier('g-' + id, { password: key, admit, ...hooks }) : null }),
+      status: () => bus.status(),
    };
 }
 
@@ -128,6 +140,8 @@ function sessionTransport(base, members, onLeave) {
    return {
       selfId: base.selfId, hostId: base.hostId, isHost: base.selfId === base.hostId,
       peers,
+      link: (id) => base.link?.(id) ?? null,            // { via: 'direct'|'relay', rtt } with the real transport
+      stats: () => base.stats?.() ?? null,
       send(channel, data, to) {
          if (!live) return;
          const t = to === undefined ? peers() : (Array.isArray(to) ? to : [to]).filter(id => set.has(id));
@@ -153,7 +167,6 @@ export class Lobby {
       this.net = backend; this.selfId = backend.selfId; this.getProfile = getProfile; this.cb = cb;
       this.name = loadName();
       this.games = new Map();       // host peer id -> { entry, seen }
-      this.unreachable = new Set(); // lobby peers a direct connection could not be made to
       this.room = null;             // { id, name, mode, mission, difficulty, max, locked, state, hostId, players: [{ id, name, ship, ready }] }
       this.chat = [];
       this.session = null;
@@ -176,7 +189,7 @@ export class Lobby {
    // ------------------------------------------------------------ discovery
    async open() {
       if (this.lt || this._closed) return;
-      const lt = await this.net.openLobby((e) => { if (e.kind === 'unreachable' && e.peerId) { this.unreachable.add(e.peerId); this.cb.onList?.(); } });
+      const lt = await this.net.openLobby();
       if (this._closed || this.lt) { lt.leave(); return; }
       this.lt = lt;
       lt.on('list', (d, from) => {
@@ -189,9 +202,8 @@ export class Lobby {
       });
       lt.on('knock', (d, from) => this._onKnock(d, from));
       lt.on('knockr', (d, from) => { if (this._knock && from === this._knock.hostId) this._knock.resolve(d); });
-      lt.onPeerJoin((id) => { this.unreachable.delete(id); if (this.isHost) lt.send('list', this._entry(), id); });
-      lt.onPeerLeave((id) => { if (this.games.delete(id)) this.cb.onList?.(); });
-      if (this.isHost) lt.send('list', this._entry());
+      lt.on('who', () => { if (this.isHost && Date.now() - this._beat > 700) this._announce(); });
+      if (this.isHost) this._announce(); else lt.send('who', 1);
       if (!this._timer) this._timer = setInterval(() => this._tick(), TICK_MS);
    }
    _closeLobby() {
@@ -299,26 +311,29 @@ export class Lobby {
    async join(entry, password = '') {
       if (this.room || this._joining) throw new NetError('busy', 'Du bist bereits in einem Spiel.');
       if (entry.v !== NET_VERSION) throw new NetError('version', DENY.version);
-      if (!this.lt || !this.lt.peers().includes(entry.hostId)) throw new NetError('gone', DENY.gone);
+      if (!this.lt) throw new NetError('gone', DENY.gone);
       this._joining = true;
-      let rt = null;
+      let rt = null, again = null;
       try {
          const key = entry.locked ? await deriveKey(String(password), entry.id) : '';
          const proof = entry.locked ? await proofOf(key, entry.id, this.selfId) : '';
          const answer = await new Promise((resolve) => {
             this._knock = { hostId: entry.hostId, resolve };
-            this.lt.send('knock', { room: entry.id, proof, v: NET_VERSION }, entry.hostId);
+            // the lobby channel may lose a message: knock until the host answers
+            const knock = () => this.lt?.send('knock', { room: entry.id, proof, v: NET_VERSION }, entry.hostId);
+            knock();
+            again = setInterval(knock, KNOCK_AGAIN_MS);
             setTimeout(() => resolve(null), KNOCK_MS);
          });
+         clearInterval(again);
          this._knock = null;
          if (!answer) throw new NetError('timeout', 'Der Host antwortet nicht.');
          if (!answer.ok) throw new NetError(answer.why, DENY[answer.why] || 'Der Host hat den Beitritt abgelehnt.');
-         // connect to the game room and wait for the host to show up there
-         let fail = null, wake = () => { };
-         rt = await this.net.openRoom(entry.id, entry.hostId, key, null, (e) => { if (e.peerId === entry.hostId || !e.peerId) { fail = e.kind; wake(); } });
+         // open the game room and wait for the host to show up there (over the relay within a
+         // moment; whether a direct channel follows does not matter here)
+         rt = await this.net.openRoom(entry.id, entry.hostId, key, null);
          const result = await new Promise((resolve) => {
             const t = setTimeout(() => resolve('timeout'), CONNECT_MS);
-            wake = () => { clearTimeout(t); resolve(fail); };
             this._hello = (r) => { clearTimeout(t); resolve(r); };
             const hello = () => rt.send('room', { t: 'hello', name: this.name, ship: this._ship = pickShip(entry.mission, this.getProfile(), this._ship) }, entry.hostId);
             rt.on('room', (m, from) => { if (from === entry.hostId) this._clientMsg(m); });
@@ -330,8 +345,7 @@ export class Lobby {
          if (result !== 'ok') {
             if (result === 'password') throw new NetError('password', DENY.password);
             if (DENY[result]) throw new NetError(result, DENY[result]);
-            if (result === 'handshake') throw new NetError('denied', 'Der Host hat den Beitritt abgelehnt.');
-            throw new NetError('unreachable', 'Keine direkte Verbindung zum Host möglich. Vermutlich blockiert ein Router oder eine Firewall die Verbindung; einen Relay-Server gibt es nicht.');
+            throw new NetError('unreachable', 'Der Host ist nicht erreichbar: Weder eine direkte Verbindung noch der Weg über das Relay kam zustande. Bitte später erneut versuchen.');
          }
          this.rt = rt; rt = null;
          this.chat = [];
@@ -339,6 +353,7 @@ export class Lobby {
          this._closeLobby();
          this.cb.onRoom?.();
       } finally {
+         clearInterval(again);
          this._joining = false; this._knock = null; this._hello = null; this._pendingRoom = null;
          if (rt) { rt.leave(); this.room = null; }
       }
@@ -353,6 +368,8 @@ export class Lobby {
          else if (from === this.room?.hostId && m) this._chatLine(m);
       });
       rt.onPeerJoin((id) => { this.session?.transport._join(id); });
+      // a player's route changed (relay <-> direct): the host tells everybody
+      rt.onRoute?.(() => { if (this.isHost) this._sync(); else this.cb.onRoom?.(); });
       rt.onPeerLeave((id) => {
          this.session?.transport._leave(id);
          if (!this.room) return;
@@ -398,7 +415,8 @@ export class Lobby {
          this.room = {
             id: base.id, hostId: base.hostId, name: cleanName(m.room.name, 32), mode: String(m.room.mode), mission: String(m.room.mission), difficulty: String(m.room.difficulty),
             max: Number(m.room.max) || 1, locked: !!m.room.locked, state: m.room.state === 'running' ? 'running' : 'lobby',
-            players: m.players.slice(0, 16).map(p => ({ id: String(p.id), name: cleanName(p.name) || '?', ship: SHIPS[p.ship] ? p.ship : null, ready: !!p.ready })),
+            players: m.players.slice(0, 16).map(p => ({ id: String(p.id), name: cleanName(p.name) || '?', ship: SHIPS[p.ship] ? p.ship : null, ready: !!p.ready,
+               via: p.via === 'direct' || p.via === 'relay' ? p.via : '' })),
          };
          const me = this.me;
          if (me && this._hello) this._hello('ok');
@@ -411,7 +429,17 @@ export class Lobby {
    }
    _state() {
       const r = this.room;
-      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, state: r.state }, players: r.players };
+      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, state: r.state },
+         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ready: p.ready, via: this.via(p.id) })) };
+   }
+   // how a player is connected to the host: 'direct' | 'relay' | '' (the host itself, or unknown).
+   // The host and the player concerned know it first-hand, the others from the room state.
+   via(id) {
+      const r = this.room;
+      if (!r || id === r.hostId) return '';
+      if (this.isHost) return this.rt?.link?.(id)?.via || '';
+      if (id === this.selfId) return this.rt?.link?.(r.hostId)?.via || '';
+      return r.players.find(p => p.id === id)?.via || '';
    }
    // host: push the room state to everybody and refresh the listing
    _sync() {
