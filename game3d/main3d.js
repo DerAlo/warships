@@ -26,6 +26,7 @@ import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
+import { createNetGame } from './net/game.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -357,11 +358,79 @@ function resolveOpts(opts) {
 }
 
 function startGame(opts = {}) {
+   if (net) { const n = net; net = null; n.quit(); }
    const o = resolveOpts(opts || {});
    lastOpts = o;
    difficulty = o.difficulty;
    world = new World(difficulty, { mission: o.mission, ship: o.ship, loadout: menu?.loadout ? menu.loadout(o.ship) : null,
       ...(o.seed != null ? { seed: o.seed } : {}) });
+   beginMatch();
+}
+
+// ------------------------------------------------------------------ net game (game3d/net/)
+// The lobby hands over a session (net/CONTRACT.md). The host's World is the real one, a client's
+// is a replica fed by the host; either way `world.player` is the local ship and everything below
+// reads the world as in a singleplayer match. session.onEnd() fires when the player leaves the
+// match (results screen, pause menu, host lost) through toMenu() -> net.quit().
+function netNotice(text) {
+   const el = document.createElement('div');
+   el.className = 'net-notice';
+   el.style.cssText = 'position:fixed;top:14%;left:50%;transform:translateX(-50%);z-index:120;background:rgba(20,28,38,.94);color:#ffd9a0;border:1px solid #7a5a2a;padding:12px 20px;border-radius:6px;font:15px system-ui,sans-serif;pointer-events:none';
+   el.textContent = text;
+   document.body.appendChild(el);
+   setTimeout(() => el.remove(), 7000);
+}
+export function startNetGame(session) {
+   if (net) { const n = net; net = null; n.quit(); }
+   if (world) toMenu();
+   const g = createNetGame(session, {
+      now: () => performance.now() / 1000,
+      measure: !!window.__netMeasure,
+      loadout: (cls) => (menu?.loadout ? menu.loadout(cls) : null),
+      onReady: (w) => {
+         if (net !== g) return;
+         world = w;
+         difficulty = session.difficulty;
+         lastOpts = { mission: w.mission?.id || session.mission, ship: w.player.cls, difficulty };
+         beginMatch();
+      },
+      // host gone, connection lost or the match never started
+      onLost: (text) => { if (net !== g) return; netNotice(text); toMenu(); },
+   });
+   net = g;
+   return g;
+}
+window.__startNetGame = startNetGame;
+window.__net = () => (net ? net.info() : null);
+
+// A hidden tab gets no animation frames, but a net host must keep simulating for the others: a
+// worker timer (not throttled like the page's own timers) steps the world meanwhile.
+let bgWorker = null, bgT = 0;
+function bgTick() {
+   if (!document.hidden || !net || !net.isHost || !world || (phase !== 'playing' && phase !== 'paused' && phase !== 'photo')) return;
+   const t = performance.now() / 1000;
+   const dt = Math.min(0.5, t - bgT);
+   bgT = t; lastT = t;
+   net.pump();
+   acc += dt;
+   let steps = 0;
+   while (acc >= SIM_DT && steps < 30) { world.update(SIM_DT); acc -= SIM_DT; steps++; }
+   if (steps === 30) acc = 0;
+}
+document.addEventListener('visibilitychange', () => {
+   if (document.hidden && net && net.isHost && world) {
+      bgT = performance.now() / 1000;
+      if (!bgWorker) {
+         try {
+            bgWorker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 33)'], { type: 'text/javascript' })));
+            bgWorker.onmessage = bgTick;
+         } catch (e) { bgWorker = null; }
+      }
+   } else if (bgWorker) { bgWorker.terminate(); bgWorker = null; }
+});
+
+// Everything a fresh `world` needs before the first frame (singleplayer and net game alike).
+function beginMatch() {
    menu?.hide(); menu?.hideResults();
    world.audio = audio;
    P = world.player;
@@ -429,7 +498,7 @@ function endGame() {
    input.releaseLock();
    hud.show(false);
    for (const id of ['pause', 'howto']) $(id)?.classList.add('hidden');
-   menu.showResults(world, lastOpts || resolveOpts({}), { ribbons: fx.ribbons, ribbonNames: RIBBON_NAMES });
+   menu.showResults(world, lastOpts || resolveOpts({}), { ribbons: fx.ribbons, ribbonNames: RIBBON_NAMES, net: !!net });
 }
 
 let pausedAt = 0;
@@ -456,6 +525,8 @@ input.onLockLost = () => { if (phase === 'playing') pause(); };
 input.wheelGate = () => (phase === 'photo' || (phase === 'playing' && !ctl.mapOpen)) && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
+   const n = net;
+   net = null;
    subui.stop();
    shellcam.reset(); endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
    phase = 'menu';
@@ -465,6 +536,7 @@ function toMenu() {
    for (const id of ['pause', 'howto']) $(id)?.classList.add('hidden');
    hud.show(false);
    menu.show();
+   if (n) n.quit();                    // tells the others and hands back to the lobby (session.onEnd)
 }
 
 // ------------------------------------------------------------------ frame-level input
@@ -1402,6 +1474,7 @@ function tickPhoto() {
    }
    if (m.wheel) photo.dist = clamp(photo.dist * Math.pow(1.15, m.wheel), 60, 6000);
    m.clicked = false;
+   if (net && P) { photo.cx = P.pos.x; photo.cz = P.pos.y; }   // net game: the battle goes on, stay with the ship
    const o = photo.pose, cp = Math.cos(photo.pitch);
    o.tx = photo.cx; o.ty = 12; o.tz = photo.cz;
    o.px = photo.cx - Math.cos(photo.yaw) * cp * photo.dist;
@@ -1421,6 +1494,7 @@ function frame() {
    if (dt > 0.25) dt = 0.25;
 
    try {
+      if (net) net.pump();
       // Esc both drops the pointer lock (-> pause) and may arrive as a key tap in the same frame:
       // that tap must not resume the pause it just caused.
       if (world && phase === 'photo') {
@@ -1430,16 +1504,20 @@ function frame() {
          if (phase === 'playing') pause();
          else if (phase === 'paused' && performance.now() - pausedAt > 400) resume();
       } else if (world && phase === 'playing' && input.tapped('O') && !kc.on) enterPhoto();
-      if (phase === 'playing' && world) {
-         if (kc.on) killCamInput();
-         shellcam.input();
-         frameInput(dt);
-         tickConsEmu(dt);
+      // a net game never stops: pause menu and photo mode are local overlays over a running battle
+      const live = !!net && !!world && (phase === 'paused' || phase === 'photo');
+      if ((phase === 'playing' || live) && world) {
+         if (!live) {
+            if (kc.on) killCamInput();
+            shellcam.input();
+            frameInput(dt);
+            tickConsEmu(dt);
+         }
          acc += dt;
          let steps = 0;
          while (acc >= SIM_DT && steps < 15) {
             snapshotPrev();
-            applyControls(SIM_DT);
+            if (!live) applyControls(SIM_DT);
             if (!simv.botsInternal && ai.updateBot) for (const b of world.bots) ai.updateBot(b, world, SIM_DT);
             world.update(SIM_DT);
             acc -= SIM_DT; steps++;
@@ -1449,17 +1527,17 @@ function frame() {
             processEvents(dt);
             updateIntel();
             fx.torpWarn = torpThreats();
-            if (steps === 0) updateAimPoint();
+            if (steps === 0 && !live) updateAimPoint();
          }
-         if ((world.phase === 'won' || world.phase === 'lost') && phase === 'playing') {
+         if (world.phase === 'won' || world.phase === 'lost') {
             endTimer += dt;
-            if (endTimer > 2.5) endGame();
+            if (endTimer > 2.5) { if (phase === 'photo') exitPhoto(); endGame(); }
          }
       }
 
       if (kc.on) tickKillCam(dt);
       updateMusic(dt);
-      const alpha = phase === 'playing' ? clamp01(acc / SIM_DT) : 1;
+      const alpha = phase === 'playing' || (net && (phase === 'paused' || phase === 'photo')) ? clamp01(acc / SIM_DT) : 1;
       if (world) {
          applyInterp(alpha);
          try {
@@ -1467,8 +1545,8 @@ function frame() {
             cam3.spectate = !!(P && !P.alive && P.sinking);
             // test hook: headless software-GL is slow, so control tests can skip the 3D draw
             // (the camera rig still runs, keeping aim/projection exact)
-            // photo mode freezes the whole scene (particles, waves) for the picture
-            if (renderOn) renderer.render(world, phase === 'photo' ? 0 : dt, cam3);
+            // photo mode freezes the whole scene (particles, waves) for the picture (not in a net game)
+            if (renderOn) renderer.render(world, phase === 'photo' && !net ? 0 : dt, cam3);
             else if (renderer.cam?.update) { renderer.cam.update(world, dt, cam3); renderer.camera.updateMatrixWorld(); }
             if ((phase === 'playing' && !kc.on && !shellcam.on) || phase === 'paused') {
                const ui = buildUi(dt);

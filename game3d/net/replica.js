@@ -116,6 +116,7 @@ export function makeReplica(world, o) {
       // clock offset host -> local: follow early arrivals quickly, late ones slowly
       const d = s.t - now;
       if (!synced) { synced = true; off = d; rt = Math.max(0, now + off - delay); }
+      else if (off - d > 0.5) off = d;                 // the host's clock stood still (a long hitch): follow at once
       else {
          off += (d - off) * (d > off ? 0.2 : 0.02);
          jit += (Math.abs(d - off) - jit) * 0.05;

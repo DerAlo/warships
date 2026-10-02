@@ -578,7 +578,7 @@ export class Menu3D {
 
    // ------------------------------------------------------------ results
    // world: the finished World; opts: the { mission, ship, difficulty } it was started with;
-   // extra: { ribbons: Map(kind -> count), ribbonNames }
+   // extra: { ribbons: Map(kind -> count), ribbonNames, net: true after a net game (back to the lobby only) }
    showResults(world, opts, extra = {}) {
       const res = world.result || { victory: world.phase === 'won', reason: '', xp: 0, credits: 0 };
       const st = res.stats || world.stats || {};
@@ -644,14 +644,15 @@ export class Menu3D {
          </div>
          <div class="m3r-foot">
             <div class="m3r-earn"><div class="xp"><b data-count="${res.xp || 0}">0</b><span>ERFAHRUNG</span></div><div class="cr"><b data-count="${res.credits || 0}">0</b><span>KREDITPUNKTE</span></div></div>
-            <div class="m3r-btns">
+            <div class="m3r-btns">${extra.net ? `
+               <button class="m3r-btn pri" data-act="port">ZUR LOBBY</button>` : `
                <button class="m3r-btn pri" data-act="again">NOCHMAL</button>
                <button class="m3r-btn" data-act="next">NÄCHSTE MISSION</button>
-               <button class="m3r-btn" data-act="port">HAFEN</button>
+               <button class="m3r-btn" data-act="port">HAFEN</button>`}
             </div>
          </div>`;
-      this.resRoot.querySelector('[data-act="again"]').addEventListener('click', () => { this.hideResults(); this.start(opts); });
-      this.resRoot.querySelector('[data-act="next"]').addEventListener('click', () => {
+      this.resRoot.querySelector('[data-act="again"]')?.addEventListener('click', () => { this.hideResults(); this.start(opts); });
+      this.resRoot.querySelector('[data-act="next"]')?.addEventListener('click', () => {
          this.hideResults();
          this.mission = next.id;
          this._fixShip();
