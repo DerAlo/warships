@@ -1303,6 +1303,8 @@ export class FX {
          if (!e || typeof e !== 'object' || this._seenFx.has(e)) continue;
          this._seenFx.add(e);
          const kind = e.kind;
+         // depth charge: a broad white dome and column, no flash above the water
+         if (kind === 'depthCharge' && e.pos) { this._splash(e.pos.x, e.pos.y, 560, true); continue; }
          if ((kind !== 'splash' && kind !== 'explosion' && kind !== 'hit') || !e.pos) continue;
          // match the impact we derived from the vanished projectile (same frame, close by)
          let best = null, bd = 70 * 70;
@@ -1373,9 +1375,12 @@ export class FX {
          // is dropped once the model has faded so a re-spot starts a fresh one instead of a jump
          if (!r.visible) { const t = this.wakes.trails.get(s); if (t) { this.wakes.trails.delete(s); this.wakes.free.push(t); } }
          else if (r.sinkT < 0.3) {
-            const inten = clamp(r.kn / 26, 0, 1) * (r.alive ? 1 : 1 - r.sinkT * 3) * r.opacity;
-            this.wakes.feed(s, 0, r.x - ch * d.L * 0.47, r.z - sh * d.L * 0.47, r.spd, d.B, inten, time);
-            if (r.visible && r.kn > 3 && inten > 0.05) {
+            // a submerged boat only trails the thin feather of its periscope
+            const un = r.under || 0;
+            const inten = clamp(r.kn / 26, 0, 1) * (r.alive ? 1 : 1 - r.sinkT * 3) * r.opacity * (1 - 0.7 * un);
+            const wx = un > 0.5 ? 0 : d.L * 0.47;
+            this.wakes.feed(s, 0, r.x - ch * wx, r.z - sh * wx, r.spd, un > 0.5 ? 1.6 : d.B, inten, time);
+            if (r.visible && r.kn > 3 && inten > 0.05 && un < 0.5) {
                this.decals.add(3, r.x + ch * d.L * 0.3, r.z + sh * d.L * 0.3, r.hd, d.B * 3, d.B * 3, 1, clamp(r.kn / 22, 0.2, 1) * r.opacity, 1, d.L * 0.46 / (d.B * 3), true);
             }
          }

@@ -24,6 +24,7 @@ import { Menu3D } from './menu3d.js';
 import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
+import { SubUi } from './subui.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -55,6 +56,7 @@ const renderer = new Renderer3D(scene3d);
 const overlay = new Overlay3D($('fx'));
 const hud = new Hud();
 const audio = new Audio();
+const subui = new SubUi({ hud, audio });   // submarine / ASW client side (subui.js)
 const input = new Input3D(scene3d);
 const minimap = new HudCanvases3D();
 minimap.setCanvases($('minimap-canvas'), null);
@@ -400,6 +402,7 @@ function startGame(opts = {}) {
    // the last match may have ended in the scope: snap the lens back instead of blending out
    if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
+   cam3.peri = null; subui.reset(world);
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
 
@@ -446,6 +449,7 @@ input.onLockLost = () => { if (phase === 'playing') pause(); };
 input.wheelGate = () => (phase === 'photo' || (phase === 'playing' && !ctl.mapOpen)) && !document.querySelector('.overlay:not(.hidden)');
 
 function toMenu() {
+   subui.stop();
    shellcam.reset(); endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
    phase = 'menu';
    input.gameActive = false;
@@ -466,6 +470,7 @@ function frameInput(dt) {
    ctl.board = inp.down('TAB');
    if (inp.tapped('H')) { ctl.help = !ctl.help; hud.toggleHelp(ctl.help); }
 
+   subui.frame(p, world, cam3, dt);
    if (!p || !p.alive) { cam3.bino = false; return; }
 
    // --- engine telegraph / rudder: persistent steps, hold repeats
@@ -503,6 +508,8 @@ function frameInput(dt) {
    if (!ctl.mapOpen && inp.mouse.wheel && zoom.wheel(inp.mouse.wheel)) audio.uiClick();
    zoom.update(dt);
    cam3.bino = zoom.bino; cam3.zoom = zoom.zoom; cam3.dist = zoom.dist;
+   subui.input(inp, p, world);                          // F / G: depth keys, depth charges
+   if (p.sub && p.depth === 2) cam3.bino = false;       // deep: no optics
 
    // --- free look (C or RMB): the camera roams, the guns hold the last aim
    const wantFree = inp.down('C') || inp.mouse.right;
@@ -784,7 +791,12 @@ function fireTorps() {
    const ti = torpInfo(p);
    if (!ti) return 0;
    if (ti.readyCount <= 0) { audio.denied(); return 0; }
-   if (ti.canFire === false) { audio.denied(); hud.msg('Kein Schusswinkel – Torpedorohre zeigen zur Seite', 'warn'); return 0; }
+   if (ti.canFire === false) {
+      audio.denied();
+      hud.msg(!p.sub ? 'Kein Schusswinkel – Torpedorohre zeigen zur Seite'
+         : p.depth === 2 ? 'Zu tief – Torpedos nur bis Sehrohrtiefe' : 'Kein Schusswinkel – Bug- oder Heckrohre auf das Ziel drehen', 'warn');
+      return 0;
+   }
    let n = 0;
    if (simv.newTorps) {
       try { n = p.fireTorpedoes(world, aim.yaw) || 0; } catch (e) { n = 0; }
@@ -908,7 +920,7 @@ function processEvents(dt) {
             audio.radio?.();
             break;
          }
-         default: break;
+         default: subui.event(e, p, world, mine, onMe); break;
       }
    }
    // old sim: {kind:'sink', ship} records + synthesized hit ribbons
@@ -1250,8 +1262,9 @@ function buildUi(dt) {
    ui.spread = ctl.spread;
    ui.torpWarnCount = fx.torpWarn.length;
    ui.camYaw = pose?.yaw ?? cam3.yaw;
+   subui.fill(ui, p, world, cam3, project, subui.peri.y, dt);
    ui.mapOpts = {
-      intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
+      sub: ui.sub.map, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
       aimPoint: aim.point, torpFan: ctl.mode === 'torp' && ui.torpInfo ? { bearings: torpBearings(ui.torpInfo, aim.yaw), range: ui.torpInfo.range } : null,
    };
    return ui;

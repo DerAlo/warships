@@ -15,7 +15,7 @@ const LEGACY_DIMS = {
    HC: { L: 205, beam: 21, type: 'CA' }, EB: { L: 230, beam: 32, type: 'BB' },
    Bismarck: { L: 251, beam: 36, type: 'BB' },
 };
-const TYPE_ALIAS = { BB: 'BB', CA: 'CA', CL: 'CL', DD: 'DD', CV: 'CV', TR: 'TR', AP: 'TR', CC: 'CA', BC: 'BB' };
+const TYPE_ALIAS = { BB: 'BB', CA: 'CA', CL: 'CL', DD: 'DD', CV: 'CV', TR: 'TR', AP: 'TR', CC: 'CA', BC: 'BB', SS: 'SS' };
 
 export function shipDims(ship) {
    const h = ship.cfg?.hull || {};
@@ -47,6 +47,7 @@ const HULL_PARAMS = {
    DD: { pb: 2.5, tr: 0.55, sheer: 0.55, flare: 1.18, rake: 0.030, nMid: 4, tumble: 1.0, fc: true },
    CV: { pb: 2.2, tr: 0.55, sheer: 0.30, flare: 1.15, rake: 0.030, nMid: 5, tumble: 1.0 },
    TR: { pb: 1.5, tr: 0.72, sheer: 0.25, flare: 1.03, rake: 0.018, nMid: 9, tumble: 1.0 },
+   SS: { pb: 1.9, tr: 0.12, sheer: 0.4, flare: 0.8, rake: 0.012, nMid: 2.6, tumble: 0.62 },
 };
 
 function makeHullShape(d) {
@@ -573,6 +574,31 @@ function superstructure(b, d, S, tl, col, ship) {
          yard(mx, yD(mx) + lv * 4.6, B * 0.6);
          for (const s of [1, -1]) b.put(new THREE.CylinderGeometry(0.15, 0.2, L * 0.1, 5).rotateZ(Math.PI / 2 - 0.5), mx - L * 0.04, yD(mx) + lv * 2, s * 1.2, mast);
       }
+   } else if (type === 'SS') {
+      // submarine: conning tower with bridge bulwark, Wintergarten, periscopes, dive planes and
+      // jumping wires. The periscope heads end 1.9 m above the water at periscope depth
+      // (submarine.js periDepthM = deckH + sup.h + 1.5).
+      const len = x1 - x0, xc = (x0 + x1) / 2;
+      const hwS = Math.max(0.9, Math.min(W / 2, hw(xc) * 0.75));
+      const yb = yD(xc) - 0.1, hT = H * 0.66, yT = yb + H;
+      house(x0, x1, yb, hT, hwS, 0.8, 0.55);
+      house(x0 + len * 0.28, x1 - 0.2, yb + hT, H - hT, hwS * 0.86, 0.85, 0.2);          // bridge bulwark
+      b.box(len * 0.36, 0.5, hwS * 1.1, x0 + len * 0.52, yb + hT + 0.25, 0, dark);         // bridge well
+      slab(x0 - len * 0.6, x0 + 0.5, yb + hT * 0.72, hwS * 1.1, 0.15, 0.85, 0.25);         // Wintergarten
+      for (const s of [1, -1]) strut(x0 - len * 0.5, yb, s * hwS * 0.7, x0 - len * 0.5, yb + hT * 0.72, s * hwS * 0.7, 0.09);
+      b.cyl(0.28, 0.34, 0.9, x0 - len * 0.3, yb + hT * 0.72, 0, dark, 6);                   // flak mount
+      strut(x0 - len * 0.3, yb + hT * 0.72 + 0.9, 0, x0 - len * 0.3 - 1.6, yb + hT * 0.72 + 1.9, 0, 0.07, dark);
+      const pTop = (Number(hull.deckH) || 3) + H + 1.5 + 1.9;
+      pole(xc + len * 0.06, yT - 0.6, pTop - yT + 0.6, 0.2);                                // attack periscope
+      pole(xc - len * 0.1, yT - 0.6, (pTop - yT) * 0.72 + 0.6, 0.26);                       // sky periscope
+      b.cyl(0.16, 0.16, 0.5, xc + len * 0.06, pTop - 0.5, 0, dark, 6);
+      for (const s of [1, -1]) b.box(L * 0.045, 0.22, B * 0.34, L * 0.4, -d.T * 0.3, s * (hw(L * 0.4) * 0.8 + B * 0.17), dark);     // bow planes
+      for (const s of [1, -1]) b.box(L * 0.04, 0.22, B * 0.3, -L * 0.44, -d.T * 0.45, s * B * 0.2, dark);                          // stern planes
+      b.box(L * 0.035, d.T * 0.8, 0.25, -L * 0.47, -d.T * 0.45, 0, dark);                  // rudder
+      b.box(L * 0.03, 1.5, 0.3, L * 0.492, yD(L * 0.49) + 0.75, 0, dark);                  // net cutter
+      strut(L * 0.49, yD(L * 0.49) + 1.5, 0, x1 - 0.4, yT + 0.2, 0, 0.05);                 // jumping wires
+      strut(x0 + len * 0.3, yT + 0.2, 0, -L * 0.47, yD(-L * 0.47) + 0.6, 0, 0.05);
+      for (const hx of [L * 0.3, L * 0.2, -L * 0.18, -L * 0.3]) b.box(1.3, 0.14, 1.0, hx, yD(hx) + 0.07, 0, dark);   // hatches
    } else if (type === 'DD') {
       const xf = bx1, hwD = Math.max(1.5, Math.min(W / 2, hw(xf) * 0.66));
       const lenB = clamp((x1 - x0) * 0.8, 6, L * 0.14);
@@ -705,6 +731,7 @@ function superstructure(b, d, S, tl, col, ship) {
       if (torpL) launchers();
    }
 
+   if (type === 'SS') return { smoke };
    if (type !== 'CV') {
       if (fwd.length && type !== 'TR') { const t = fwd[fwd.length - 1]; const x = t.x + t.r * 2.1; if (x < L * 0.4) breakwater(x); }
       bowFittings();
@@ -852,7 +879,7 @@ export class ShipModels {
       const cols = {
          sup: shade(tint, 1.12), plat: shade(tint, 0.86), dark: lin(0x2a2d31), mast: lin(0x3b3f44), win: lin(0x0b0d10), boat: lin(0xcfccc3),
          cap: lin(0x17181a), capMetal: lin(0x45494e), plane: lin(0x6d7768), lamp: lin(0xe6eadc),
-         deck: d.type === 'DD' || d.type === 'TR' ? lin(0x6b665e) : lin(0xa88a64),
+         deck: d.type === 'SS' ? lin(0x3a3d40) : d.type === 'DD' || d.type === 'TR' ? lin(0x6b665e) : lin(0xa88a64),
       };
       let smoke = [];
       const hullGeo = this._geo(hullKey, () => {
@@ -985,6 +1012,19 @@ export class ShipModels {
       // squat: bow rises slightly at speed
       const trim = -clamp(kn / 35, 0, 1) * 0.006;
       let py = r.heave, rz = r.pitch - trim, rx = r.roll + r.heel;
+      // submarines: hull sinkage by depth state; under water the swell no longer moves the boat
+      const dm = s.depthM || 0;
+      let under = 0;
+      if (dm > 0 || r.diveP) {
+         under = clamp(dm / (d.D + 4), 0, 1);
+         const calm = 1 - 0.85 * under;
+         const dv = dt > 0 ? clamp((dm - (r.lastDm || 0)) / dt, -3, 3) : 0;      // m/s down (+) / up (-)
+         r.diveP = (r.diveP || 0) + (dv * 0.035 - (r.diveP || 0)) * (1 - Math.exp(-dt * 2));
+         if (Math.abs(r.diveP) < 1e-4 && dm === 0) r.diveP = 0;
+         py = py * calm - dm; rx *= calm; rz = rz * calm - r.diveP;
+         if (s.depthF > 1.3) r.root.visible = false;                              // deep: nothing left to draw
+      }
+      r.lastDm = dm; r.under = under;
       if (sinkT > 0) {
          const e = sinkT * sinkT;
          py -= e * (d.D + d.T + d.L * 0.12) + sinkT * 2;
@@ -1035,7 +1075,7 @@ export class ShipModels {
          }
          tr.lastReload = rl;
       }
-      if (sinkT === 0 && alive) this.hulls.push(this._hullRec(x, z, hd, d));
+      if (sinkT === 0 && alive && under < 0.5) this.hulls.push(this._hullRec(x, z, hd, d));
       r.x = x; r.z = z; r.hd = hd; r.kn = kn; r.spd = spd; r.alive = alive; r.visible = r.root.visible;
    }
 

@@ -5,6 +5,7 @@
 // hand the renderer any canvas: it owns its own HudCanvases3D and draws after render with the
 // camera/intel extras, so the renderer's instance stays a harmless no-op either way.
 import { WORLD } from './config.js';
+import { drawSubMap } from './subui.js';
 
 const TAU = Math.PI * 2;
 const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
@@ -18,14 +19,14 @@ const OLD_TYPE = { DD: 'DD', LC: 'CL', HC: 'CA', EB: 'BB', Bismarck: 'BB' };
 export function shipType(s) { return s?.cfg?.hull?.type || OLD_TYPE[s?.cls] || s?.cfg?.type || 'CA'; }
 // Speed for display. The contract sim gives speedKn; the old arcade sim moves ~90 m/s, so its
 // speed is shown as a fraction of a plausible top speed for the class instead.
-const REAL_KN = { DD: 38, CL: 34, CA: 32, BB: 30 };
+const REAL_KN = { DD: 38, CL: 34, CA: 32, BB: 30, SS: 18 };
 export function displayKn(s) {
    if (s?.speedKn != null) return s.speedKn;
    if (s?.maxSpeed > 0) return Math.abs(s.speed || 0) / s.maxSpeed * (REAL_KN[shipType(s)] || 30);
    return Math.abs(s?.speed || 0) * 1.94384;
 }
-export const TYPE_NAME = { DD: 'Zerstörer', CL: 'Leichter Kreuzer', CA: 'Schwerer Kreuzer', BB: 'Schlachtschiff', CV: 'Flugzeugträger', TR: 'Transporter' };
-export const TYPE_SHORT = { DD: 'Z', CL: 'LK', CA: 'SK', BB: 'SS', CV: 'FT', TR: 'TR' };
+export const TYPE_NAME = { DD: 'Zerstörer', CL: 'Leichter Kreuzer', CA: 'Schwerer Kreuzer', BB: 'Schlachtschiff', CV: 'Flugzeugträger', TR: 'Transporter', SS: 'U-Boot' };
+export const TYPE_SHORT = { DD: 'Z', CL: 'LK', CA: 'SK', BB: 'SS', CV: 'FT', TR: 'TR', SS: 'UB' };
 export function shipLen(s) {
    return s?.cfg?.hull?.L || ({ DD: 120, LC: 170, HC: 205, EB: 251, Bismarck: 251 }[s?.cls]) || 180;
 }
@@ -53,6 +54,8 @@ export function drawClassIcon(g, type, x, y, size, color, opts = {}) {
    g.beginPath();
    if (type === 'DD') {
       g.moveTo(0, -s * 0.55); g.lineTo(s * 0.5, s * 0.45); g.lineTo(0, s * 0.2); g.lineTo(-s * 0.5, s * 0.45); g.closePath();
+   } else if (type === 'SS') {                       // U-Boot: slim lens
+      g.ellipse(0, 0, s * 0.26, s * 0.58, 0, 0, TAU);
    } else if (type === 'CV') {
       g.rect(-s * 0.5, -s * 0.34, s, s * 0.68);
    } else if (type === 'TR') {
@@ -232,6 +235,8 @@ function paintMapInner(g, world, x0, y0, size, opts) {
          }
       }
    }
+
+   if (opts.sub) drawSubMap(g, opts.sub, p, mx, my, size, world.time || 0);
 
    // ships
    const base = big ? 13 : Math.max(8, size / 24);

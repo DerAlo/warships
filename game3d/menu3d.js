@@ -24,7 +24,7 @@ const RATING_LABEL = [
 const RIBBON_ORDER = ['kill', 'citadel', 'pen', 'overpen', 'he', 'sec', 'torp', 'fire', 'flood', 'ricochet', 'shatter', 'spotted', 'cap'];
 const ESCAPE_LABEL = { arrived: 'angekommen', retreated: 'abgelaufen', escaped: 'entkommen' };
 const STORE_KEY ='warships3d.progress.v1';
-const CLASS_ORDER = { BB: 0, CA: 1, CL: 2, DD: 3 };
+const CLASS_ORDER = { BB: 0, CA: 1, CL: 2, DD: 3, SS: 4 };
 const natOf = (k) => SHIPS[k]?.hull?.nation || 'de';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

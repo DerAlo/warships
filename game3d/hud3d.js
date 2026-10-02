@@ -3,6 +3,7 @@
 // ship markers, the lead ghost, the torpedo fan, torpedo warnings, binocular optics and the
 // full-screen tactical map. Pure drawing from the `ui` snapshot main3d.js builds each frame.
 import { paintMap, drawClassIcon, COL } from './minimap3d.js';
+import { drawSubUnder, drawPeriscope } from './subui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -40,9 +41,10 @@ export class Overlay3D {
       this.t += 1 / 60;
       if (!ui.p) return;
       if (ui.mapOpen) { this._tacticalMap(ui); return; }
+      if (ui.sub) drawSubUnder(g, ui, this.W, this.H, this.t);
       this._markers(ui);
       if (ui.torpFan && ui.alive) this._torpFan(ui);
-      if (ui.scopeT > 0.01) this._binoculars(ui);
+      if (ui.scopeT > 0.01) { if (ui.sub?.peri) drawPeriscope(g, ui, this.W, this.H); else this._binoculars(ui); }
       if (ui.alive) {
          if (ui.frozenPt) this._frozen(ui.frozenPt);
          this._reticle(ui);

@@ -44,7 +44,10 @@ function rigAt(L, deckH, R, s, cs) {
    const pivotH = deckH * 1.4 + 6;
    const fwd = L * 0.5 + 25;
    const tpBack = Math.cos(elev) * D, tpY = pivotH + Math.sin(elev) * D;
-   const biBack = -fwd, biY = Math.max(deckH * 2.6 + 12, (R - fwd) * Math.tan(1.0 * DEG));
+   let biBack = -fwd, biY = Math.max(deckH * 2.6 + 12, (R - fwd) * Math.tan(1.0 * DEG));
+   // periscope (cs.peri = { x: tower position ahead of the centre, y: lens height }): the eye
+   // sits on the boat, a few metres above the sea
+   if (cs.peri) { biBack = -cs.peri.x; biY = cs.peri.y; }
    return { tpBack, tpY, biBack, biY, pivotH, D, back: lerp(tpBack, biBack, s), y: lerp(tpY, biY, s) };
 }
 
@@ -117,6 +120,7 @@ export class ChaseCamera {
       // ---- collision: stay above the swell and above any island the camera drifts over.
       const T = this.terrain;
       const liftAt = (x, z, y) => {
+         if (cs.peri) return Math.max(y, lerp(12, cs.peri.y, s));
          y = Math.max(y, 12);
          if (T) {
             // the real relief around the lens, not the island's bounding cone (which lifted the

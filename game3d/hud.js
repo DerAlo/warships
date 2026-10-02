@@ -27,6 +27,7 @@ const setVar = (el, k, v) => { if (el && el['_st' + k] !== v) { el['_st' + k] = 
 export function classSvg(type, size = 12) {
    let body;
    if (type === 'DD') body = '<path d="M6 .8 11.2 11 6 8.3.8 11Z"/>';
+   else if (type === 'SS') body = '<ellipse cx="6" cy="6" rx="2.7" ry="5.6"/>';
    else if (type === 'CV') body = '<rect x="1" y="3" width="10" height="6"/>';
    else if (type === 'TR') body = '<circle cx="6" cy="6" r="4.4"/>';
    else {
