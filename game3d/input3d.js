@@ -23,6 +23,7 @@ export class Input3D {
       this.mouse = { dx: 0, dy: 0, down: false, right: false, wheel: 0, clicked: false, ctrlClicks: 0 };
       this.locked = false;
       this.noLock = false;       // main3d: photo mode uses plain drag, no pointer lock
+      this.touchMode = false;    // touch3d.js: touch overlay on (no pointer lock, no touch-made clicks)
       this._hadLock = false;
       this.onLockLost = null;    // callback: pointer lock dropped (Esc / alt-tab) while playing
       this._bind();
@@ -57,6 +58,8 @@ export class Input3D {
       document.addEventListener('pointerlockerror', () => {});
 
       this.canvas.addEventListener('mousedown', (e) => {
+         // touch mode: a finger on the sea aims (touch3d.js); a mouse event made up from it must not fire
+         if (this.touchMode && e.sourceCapabilities?.firesTouchEvents) return;
          // Ctrl+left click (WoWs): pick the secondary priority target instead of firing
          if (e.button === 0 && (e.ctrlKey || this.keys.has('CTRL'))) { this.mouse.ctrlClicks++; e.preventDefault(); }
          else if (e.button === 0) { this.mouse.down = true; this.mouse.clicked = true; }
@@ -100,8 +103,16 @@ export class Input3D {
       else { window.removeEventListener('wheel', this._onWheel); this.mouse.wheel = 0; }
    }
 
+   // Touch controls (touch3d.js) drive the same state as the keys: a tap counts like a key press,
+   // a held button like a held key. No KeyboardEvents are made up.
+   virtualTap(k) { this.pressed.set(k, (this.pressed.get(k) || 0) + 1); }
+   virtualKey(k, down) {
+      if (down) { if (!this.keys.has(k)) this.pressed.set(k, (this.pressed.get(k) || 0) + 1); this.keys.add(k); }
+      else this.keys.delete(k);
+   }
+
    requestLock() {
-      if (!this.gameActive || this.noLock || document.pointerLockElement === this.canvas) return;
+      if (!this.gameActive || this.noLock || this.touchMode || document.pointerLockElement === this.canvas) return;
       try {
          const ret = this.canvas.requestPointerLock({ unadjustedMovement: true });
          if (ret && typeof ret.catch === 'function') {
