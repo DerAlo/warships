@@ -85,6 +85,12 @@ test('coopSlots: the standard battle takes several captains, historical operatio
    assert.deepEqual(coopRoles('rheinuebung').map(r => r.name), ['Bismarck', 'Prinz Eugen']);
    assert.deepEqual(coopRoles('cerberus').map(r => r.cls), ['Scharnhorst', 'Scharnhorst', 'Hipper', 'Z23']);
    assert.deepEqual(coopRoles('standard'), [], 'free ship choice');
+   // round-7 operations
+   assert.equal(coopSlots('wahoo'), 0, 'the Wahoo hunts alone');
+   for (const id of ['matapan', 'dakar', 'spartivento']) assert.equal(coopSlots(id), 4, id);
+   assert.deepEqual(coopRoles('matapan').map(r => r.name), ['HMS Warspite', 'HMS Valiant', 'HMS Barham', 'HMS Jervis']);
+   assert.deepEqual(coopRoles('dakar').map(r => r.cls), ['Richelieu', 'LeFantasque', 'LeFantasque', 'LeFantasque']);
+   assert.deepEqual(coopRoles('spartivento').map(r => r.cls), ['Littorio', 'Zara', 'Zara', 'Zara']);
 });
 
 test('historical operation: the host keeps the flagship, the others take the mission\'s own allied ships', () => {
