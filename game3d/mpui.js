@@ -5,7 +5,7 @@
 // of the internet (two pages of one browser, for tests); `?net=relay` never tries a direct
 // WebRTC connection and plays over the relay only.
 import { Lobby, makeBackend, filterGames, coopMissions, ownShips, cleanName, MODES, DIFFICULTIES, NET_VERSION } from './net/lobby.js';
-import { coopSlots } from './net/coop.js';
+import { coopSlots, coopRoles } from './net/coop.js';
 import { getMission } from './missions.js';
 import { SHIP_STATS } from './config.js';
 import { loadProfile } from './progress3d.js';
@@ -19,6 +19,14 @@ const TYPE_LABEL = {
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const misName = (id) => getMission(id)?.name || id;
+// <option>s of the co-op missions: free ship choice first, then the historical operations
+// (prescribed ships, see coopRoles), each with its player limit
+const missionOptions = (sel, need = 1) => {
+   const opt = (m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''} ${coopSlots(m.id) < need ? 'disabled' : ''}>${esc(m.name)} — ${esc(TYPE_LABEL[m.type] || m.type)} · bis ${coopSlots(m.id)} Spieler</option>`;
+   const all = coopMissions(), free = all.filter(m => !m.fixedShips), ops = all.filter(m => m.fixedShips);
+   return `<optgroup label="Gefechte – freie Schiffswahl">${free.map(opt).join('')}</optgroup>`
+      + (ops.length ? `<optgroup label="Historische Operationen – Schiffe vorgegeben">${ops.map(opt).join('')}</optgroup>` : '');
+};
 const LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
 
 const CSS = `
@@ -210,6 +218,8 @@ class MpUI {
       else if (r && lb.isHost) {
          main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : 'GEFECHT!'; main.disabled = !lb.canStart(); main.dataset.kind = 'start';
          main.title = main.disabled && r.state === 'lobby' ? 'Alle Mitspieler müssen bereit sein' : '';
+      } else if (r && r.state === 'running' && !lb.session && lb.canRejoin({ id: r.id, hostId: r.hostId, state: r.state })) {
+         main.textContent = 'ZURÜCK INS GEFECHT'; main.disabled = false; main.dataset.kind = 'rejoin';
       } else if (r) {
          const me = lb.me;
          main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : me?.ready ? 'NICHT BEREIT' : 'BEREIT'; main.disabled = r.state !== 'lobby' || !me?.ship; main.dataset.kind = 'ready';
@@ -235,6 +245,7 @@ class MpUI {
       if (kind === 'create') this._askCreate();
       else if (kind === 'start') lb.start();
       else if (kind === 'ready') lb.setReady(!lb.me?.ready);
+      else if (kind === 'rejoin') this._rejoin();
    }
 
    // ------------------------------------------------------------ list view
@@ -275,12 +286,15 @@ class MpUI {
       box.innerHTML = shown.map(g => {
          const bad = g.v !== NET_VERSION, full = g.players >= g.max, run = g.state === 'running';
          const st = bad ? ['bad', 'INKOMPATIBEL'] : run ? ['running', 'LÄUFT'] : full ? ['running', 'VOLL'] : ['lobby', 'OFFEN'];
+         // the running match this tab took part in: the way back into it
+         const back = !bad && lb.canRejoin(g) ? `<button class="mp-btn pri" data-back="${esc(g.hostId)}" title="Zurück ins laufende Gefecht: Du übernimmst wieder dein Schiff.">ZURÜCKKEHREN</button>` : '';
          return `<div class="mp-game ${bad ? 'off' : ''}" data-id="${esc(g.id)}" data-host="${esc(g.hostId)}" ${bad ? 'title="Dieses Spiel wurde mit einer anderen Spielversion erstellt."' : ''}>
             <span class="n">${g.locked ? LOCK : ''}${esc(g.name)}</span><span>${esc(g.host)}</span><span class="c-mode">${esc(MODE_LABEL[g.mode] || g.mode)}</span>
             <span>${esc(misName(g.mission))}</span><span class="c-diff">${esc(DIFF_LABEL[g.difficulty] || g.difficulty)}</span><span>${g.players}/${g.max}</span>
             <span class="st ${st[0]}">${st[1]}</span>
-            <button class="mp-btn" data-join="${esc(g.hostId)}" ${bad || full || run ? 'disabled' : ''}>BEITRETEN</button></div>`;
+            ${back || `<button class="mp-btn" data-join="${esc(g.hostId)}" ${bad || full || run ? 'disabled' : ''}>BEITRETEN</button>`}</div>`;
       }).join('');
+      box.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => { this._click(); this._rejoin(); }));
       box.querySelectorAll('[data-join]').forEach(b => b.addEventListener('click', () => {
          const g = this.lobby?.list().find(x => x.hostId === b.dataset.join);
          if (!g) return;
@@ -298,6 +312,21 @@ class MpUI {
          const text = e?.code ? e.message : 'Beitritt fehlgeschlagen.';
          if (!e?.code) console.warn('multiplayer: join failed', e);
          if (onError && e?.code === 'password') onError(text); else this._message('Beitritt nicht möglich', text);
+      }
+   }
+   async _rejoin() {
+      const rec = this.lobby?.rejoinable();
+      if (!rec) return;
+      this._busy(`Zurück ins Gefecht „${rec.name || 'Spiel'}“ …`);
+      try {
+         await this.lobby.rejoin();
+         this._closeModal();
+         this._show('room');
+      } catch (e) {
+         const text = e?.code ? e.message : 'Rückkehr fehlgeschlagen.';
+         if (!e?.code) console.warn('multiplayer: rejoin failed', e);
+         this._message('Rückkehr nicht möglich', text);
+         if (this.view === 'list') this._renderGames();
       }
    }
 
@@ -318,8 +347,11 @@ class MpUI {
       if (!r || !$('[data-players]')) return;
       const host = lb.isHost, lobbyState = r.state === 'lobby';
       $('[data-pcount]').textContent = `${r.players.length}/${r.max}`;
-      $('[data-players]').innerHTML = r.players.map(p => {
-         const st = SHIP_STATS[p.ship];
+      // historical operation: the ship of each slot is prescribed (host = flagship)
+      const roles = coopRoles(r.mission, r.difficulty);
+      const shipLine = (k, role) => { const st = SHIP_STATS[k]; return st ? `${classSvg(st.type, 12)}${esc(role ? role.name : st.name)} · ${esc(st.tierRoman)} ${esc(st.type)}` : ''; };
+      $('[data-players]').innerHTML = r.players.map((p, i) => {
+         const st = SHIP_STATS[p.ship], role = roles[i];
          const ready = p.id === r.hostId ? ['on', 'HOST'] : p.ready ? ['on', 'BEREIT'] : ['', 'WARTET'];
          const via = lb.via(p.id);
          const route = via === 'direct' ? '<em class="direct" data-via="direct" title="Direkte Verbindung zum Host">direkt</em>'
@@ -328,8 +360,11 @@ class MpUI {
             <span class="n">${esc(p.name)}${p.id === lb.selfId ? '<i>DU</i>' : ''}${route}</span>
             <span class="r ${ready[0]}">${ready[1]}</span>
             ${host && p.id !== lb.selfId ? `<button class="k" data-kick="${esc(p.id)}" title="Aus dem Spiel entfernen">✕</button>` : ''}
-            <span class="s">${st ? `${classSvg(st.type, 12)}${esc(st.name)} · ${esc(st.tierRoman)} ${esc(st.type)}` : 'kein Schiff gewählt'}</span></div>`;
-      }).join('') + Array.from({ length: Math.max(0, r.max - r.players.length) }, () => '<div class="mp-slot">freier Platz</div>').join('');
+            <span class="s" ${role ? `data-role="${esc(role.name)}"` : ''}>${st ? shipLine(p.ship, role) : 'kein Schiff gewählt'}</span></div>`;
+      }).join('') + Array.from({ length: Math.max(0, r.max - r.players.length) }, (_, i) => {
+         const role = roles[r.players.length + i];
+         return `<div class="mp-slot">freier Platz${role ? ` – ${esc(role.name)}` : ''}</div>`;
+      }).join('');
       this.root.querySelectorAll('[data-kick]').forEach(b => b.addEventListener('click', () => { this._click(); lb.kick(b.dataset.kick); }));
 
       const m = getMission(r.mission), slots = coopSlots(r.mission);
@@ -338,7 +373,7 @@ class MpUI {
          <div class="mp-title">${r.locked ? LOCK + ' ' : ''}${esc(r.name)}</div>
          <div class="mp-sub">${esc(MODE_LABEL[r.mode] || r.mode)} gegen Bots · ${r.locked ? 'passwortgeschützt' : 'offen für alle'}${lobbyState ? '' : ' · GEFECHT LÄUFT'}</div>
          <div class="mp-set">
-            <b>Mission</b><span>${edit ? `<select data-cfg="mission">${coopMissions().map(x => `<option value="${esc(x.id)}" ${x.id === r.mission ? 'selected' : ''}>${esc(x.name)} — ${esc(TYPE_LABEL[x.type] || x.type)}</option>`).join('')}</select>`
+            <b>Mission</b><span>${edit ? `<select data-cfg="mission">${missionOptions(r.mission, r.players.length)}</select>`
                : `<span data-mission="${esc(r.mission)}">${esc(m?.name || r.mission)}${m ? ' — ' + esc(TYPE_LABEL[m.type] || m.type) : ''}</span>`}</span>
             <b>Schwierigkeit</b><span><div class="mp-seg">${DIFFICULTIES.map(d => `<button data-diff="${d}" class="${d === r.difficulty ? 'sel' : ''}" ${edit ? '' : 'disabled'}>${DIFF_LABEL[d]}</button>`).join('')}</div></span>
             <b>Spieler</b><span>${edit ? `<select data-cfg="max">${Array.from({ length: slots }, (_, i) => i + 1).filter(n => n >= r.players.length).map(n => `<option ${n === r.max ? 'selected' : ''}>${n}</option>`).join('')}</select>` : `max. ${r.max}`}
@@ -351,6 +386,17 @@ class MpUI {
          this.root.querySelectorAll('[data-diff]').forEach(b => b.addEventListener('click', () => { this._click(); lb.configure({ difficulty: b.dataset.diff }); }));
       }
 
+      if (roles.length) {
+         // prescribed ships: show who commands what instead of a picker (the host assigns by slot)
+         const meIdx = r.players.findIndex(p => p.id === lb.selfId);
+         $('[data-scount]').textContent = 'vorgegeben';
+         $('[data-ships]').innerHTML = roles.slice(0, r.max).map((role, i) => {
+            const st = SHIP_STATS[role.cls], p = r.players[i];
+            return `<div class="mp-ship ${i === meIdx ? 'sel' : ''}" data-role-slot="${i}" title="${esc(st?.typeName || st?.type || '')}"><span class="tr">${esc(st?.tierRoman || '')}</span>${st ? classSvg(st.type, 13) : ''}<span>${esc(role.name)}${i === 0 ? ' · Flaggschiff' : ''}</span><span class="ty">${p ? esc(p.name) : 'frei'}</span></div>`;
+         }).join('') + '<div class="mp-empty">Historische Operation: Der Host führt das Flaggschiff, alle weiteren Kapitäne übernehmen in Beitrittsreihenfolge die vorgegebenen Begleitschiffe. Sinkt das Flaggschiff, ist die Operation gescheitert.</div>';
+         this._renderTop();
+         return;
+      }
       const own = ownShips(r.mission, this.profile()), mine = lb.me?.ship;
       $('[data-scount]').textContent = `${own.length} verfügbar`;
       $('[data-ships]').innerHTML = own.length ? own.map(k => {
@@ -394,8 +440,12 @@ class MpUI {
       this.menu?.hide();
       this.root.classList.remove('hidden');
       this._show(lb?.room ? 'room' : 'list');
-      if (lb?.room) this._chatLine({ id: '', text: result?.aborted ? `Gefecht abgebrochen${result.reason ? ': ' + result.reason : '.'}` : result?.victory ? 'Gefecht beendet: Sieg!' : 'Gefecht beendet: Niederlage.' });
-      else if (this.notice) this._message('Spiel beendet', this.notice);
+      // dropped out of a match that goes on: say how to get back
+      const back = result?.aborted && lb?.rejoinable();
+      if (lb?.room) {
+         this._chatLine({ id: '', text: result?.aborted ? `Gefecht abgebrochen${result.reason ? ': ' + result.reason : '.'}` : result?.victory ? 'Gefecht beendet: Sieg!' : 'Gefecht beendet: Niederlage.' });
+         if (back && !lb.isHost && lb.room.state === 'running') this._chatLine({ id: '', text: 'Das Gefecht läuft weiter: Mit „ZURÜCK INS GEFECHT“ übernimmst du wieder dein Schiff.' });
+      } else if (this.notice) this._message('Spiel beendet', this.notice + (back ? ' Läuft das Gefecht noch, steht es in der Spielliste mit „ZURÜCKKEHREN“.' : ''));
    }
 
    // ------------------------------------------------------------ dialogs
@@ -451,7 +501,7 @@ class MpUI {
       const el = this._modal(`<div class="k">SPIEL ERSTELLEN</div>
          <label>Name des Spiels</label><input type="text" data-f="name" maxlength="32" value="${esc('Spiel von ' + lb.name)}">
          <label>Modus</label><div class="mp-seg" data-seg="mode">${MODES.map(([k, l, on]) => `<button data-v="${k}" class="${k === mode ? 'sel' : ''}" ${on ? '' : 'disabled title="bald verfügbar"'}>${esc(l)}${on ? '' : '<small>(bald verfügbar)</small>'}</button>`).join('')}</div>
-         <label>Mission</label><select data-f="mission">${missions.map(m => `<option value="${esc(m.id)}" ${m.id === startMission ? 'selected' : ''}>${esc(m.name)} — ${esc(TYPE_LABEL[m.type] || m.type)}</option>`).join('')}</select>
+         <label>Mission</label><select data-f="mission">${missionOptions(startMission)}</select>
          <div class="mp-row2">
             <div><label>Schwierigkeit</label><div class="mp-seg" data-seg="diff">${DIFFICULTIES.map(d => `<button data-v="${d}" class="${d === diff ? 'sel' : ''}">${DIFF_LABEL[d]}</button>`).join('')}</div></div>
             <div><label>Max. Spieler</label><select data-f="max"></select></div>

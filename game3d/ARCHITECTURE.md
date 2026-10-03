@@ -251,6 +251,26 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
 - **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
   (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **Historical operations in co-op.** Missions with prescribed ships are offered too (picker group
+  "Historische Operationen", with the player limit): the host commands the flagship, the others
+  the mission's own allied ships, biggest first (`historicShips` in `net/setup.js`; e.g.
+  Cerberus: Scharnhorst, Gneisenau, Prinz Eugen, Z 29). They keep the ship object the mission
+  script knows, so its objectives ("Gneisenau und Prinz Eugen dürfen nicht sinken") and its AI
+  orders for a dropped captain keep working; the bots' damage cut is lifted for a human. Losing
+  the flagship ends the operation (`world.net.flag`, `state.js`), as in singleplayer; Vian's
+  torpedo count adds every human's hits. Out: the exercise and "Letztes Gefecht" (Bismarck
+  alone). The room shows who commands which ship. Not balanced for 2-4 humans yet: an operation
+  with several full-strength captains is easier than alone.
+- **Rejoin.** A captain who dropped out (tab reloaded, network gone, left by mistake) goes back
+  in while the match runs: a seat token from the start (sessionStorage) lets the lobby re-admit
+  that tab only, the host moves the slot to the new peer id and sends the missed state as state
+  (`more` + `resync`: later ships, roster, objectives, torpedoes, smoke, own statistics and
+  telegraph), not as the missed events. `tests/playwright3d.mp.rejoin.mjs` (real brokers,
+  2026-10, measured): back in the battle ~1 s after the click, old ship, objectives and
+  statistics equal to the host's, 20 snapshots/s again; in hybrid mode the direct channel came
+  back after a reload and after a cut connection (the probe before using a channel, see
+  "Transport", covers the old "up, then down at once" report). Trystero's console error for a
+  channel the other side closed abruptly is turned into a warning in `transport_rtc.js`.
 - **Transport.** Two browsers behind home routers often get no WebRTC path (no TURN server), so
   the room never depends on one: `makeRoomTransport` reaches every peer over public MQTT brokers
   from the first moment and moves a peer to the data channel once a probe sent over it came back
@@ -261,9 +281,26 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   measured). Measured from one machine in 2026-10: relay 20 snapshots/s, round trip ~25 ms,
   largest gap ~150 ms; on the rate-limited broker alone 7.5 snapshots/s and ~175 ms. The
   interpolation delay does not look at the snapshot interval yet, so that last case stutters.
+  Everything sent in one turn leaves as one publish per peer and broker (microtask flush). On a
+  rate-limited broker one publish on the room topic carries a sealed bundle for every waiting peer
+  (`publishMulti`), so 3 clients do not split its ~8 messages/s three ways.
+- **3 and 4 players** (`tests/playwright3d.mp.multi.mjs`, one Chromium per player, real
+  brokers, one machine, 2026-10, measured): 4 players relay only: host upload 63 kB/s
+  (~0.5 Mbit/s, game data 33 kB/s; the rest are the copies to the other brokers and the
+  encryption), ~100 publishes/s (HiveMQ 63, mosquitto 28, emqx 8, no broker dropped or backed
+  up), every client 20 snapshots/s, largest gap 100–250 ms, 22 kB/s down. 3 players relay only:
+  42 kB/s up, every client 20/s. Hybrid (3 and 4 players): every client went direct, host upload
+  24 kB/s (3) / 36 kB/s (4), 20/s each. Rate-limited broker alone (`ONLY=emqx`), 4 players:
+  7.5 snapshots/s per client, largest gap ~220 ms (2.5/s and 1.2 s gaps before the shared
+  publish). The room lists 4 players without clipping at 1280x720.
 - **Tests.** `tests/net3d.test.mjs` (node, virtual clock over `makeMemoryHub`, prints the measured
   bandwidth), `tests/playwright3d.net.mjs` (two pages over `makeLocalTransport`; set
   `window.__netMeasure = true` before the start to count bytes), `tests/relay3d.test.mjs` (node,
   the room transport over a fake broker network with loss, reordering and a rate limit),
   `tests/playwright3d.mp.relay.mjs` (needs internet: two separate Chromium instances over the
-  real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality).
+  real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality),
+  `tests/playwright3d.mp.multi.mjs` (the same with `PLAYERS=3|4`, `MODE=hybrid|relayonly|blocked`,
+  `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps),
+  `tests/playwright3d.mp.rejoin.mjs` (reload and network cut mid-battle, back through the list,
+  an outsider refused; `MODE=hybrid|relayonly`), `tests/playwright3d.mp.ops.mjs` (Cerberus with
+  three captains: picker, ship assignment in the room, the match, flagship lost).

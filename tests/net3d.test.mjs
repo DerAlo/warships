@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeMemoryHub } from '../game3d/net/transport.js';
 import { createNetGame, TEXT } from '../game3d/net/game.js';
-import { coopSlots } from '../game3d/net/coop.js';
+import { coopSlots, coopRoles, coopExcluded } from '../game3d/net/coop.js';
 import { SNAP_EVERY } from '../game3d/net/host.js';
 
 const DT = 1 / 60;
@@ -22,6 +22,8 @@ function makeRoom(o = {}) {
       schedule: (fn, ms) => { q.push({ at: nowMs + ms, n: n++, fn }); },
    });
    const tps = names.map(id => hub.join(id));
+   let onRejoin = null;
+   tps[0].onRejoin = (fn) => { onRejoin = fn; };     // the lobby's part in a rejoin (lobby.js)
    const players = names.map((id, i) => ({ id, name: 'Kapitän ' + id, ship: ships[i] }));
    const ends = names.map(() => []), lost = names.map(() => []);
    const games = tps.map((transport, i) => createNetGame(
@@ -54,6 +56,17 @@ function makeRoom(o = {}) {
          }
       },
       run(seconds, until) { const N = Math.round(seconds * 60); for (let i = 0; i < N; i++) { room.step(); if (until && until()) return true; } return !until; },
+      // player i comes back under a new peer id with a fresh page (new game object)
+      rejoin(i, newId) {
+         const old = room.players[i].id;
+         const pl = (o.players || players).map(p => p.id === old ? { ...p, id: newId } : p);
+         const transport = hub.join(newId);
+         onRejoin(old, newId);
+         const g = createNetGame({ transport, mode: 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: pl, onEnd: (r) => ends[i].push(r) },
+            { now: () => nowMs / 1000, loadout: () => null, measure: true, onLost: (t) => lost[i].push(t), onReady: () => { g.readyCalls = (g.readyCalls || 0) + 1; } });
+         games[i] = g; tps[i] = transport; room.players[i] = pl[i];
+         return g;
+      },
    };
    return room;
 }
@@ -61,9 +74,64 @@ function makeRoom(o = {}) {
 function ready(room) { return room.run(12, () => room.games.every(g => g.ready)); }
 const shipOf = (world, id) => world._byId.get(id);
 
-test('coopSlots: the standard battle takes several captains, fixed-ship missions none', () => {
+test('coopSlots: the standard battle takes several captains, historical operations their allied ships', () => {
    assert.ok(coopSlots('standard') >= 3, 'standard: ' + coopSlots('standard'));
    assert.equal(coopSlots('no-such-mission'), 0);
+   assert.equal(coopSlots('rheinuebung'), 2);
+   assert.equal(coopSlots('cerberus'), 4);
+   assert.equal(coopSlots('laststand'), 0, 'the Bismarck fights alone');
+   assert.equal(coopSlots('training'), 0);
+   for (const id of Object.keys(coopExcluded())) assert.equal(coopSlots(id), 0, id);
+   assert.deepEqual(coopRoles('rheinuebung').map(r => r.name), ['Bismarck', 'Prinz Eugen']);
+   assert.deepEqual(coopRoles('cerberus').map(r => r.cls), ['Scharnhorst', 'Scharnhorst', 'Hipper', 'Z23']);
+   assert.deepEqual(coopRoles('standard'), [], 'free ship choice');
+});
+
+test('historical operation: the host keeps the flagship, the others take the mission\'s own allied ships', () => {
+   const room = makeRoom({ mission: 'cerberus', names: ['host', 'anna', 'bert', 'carl'], ships: ['Scharnhorst', 'Bismarck', 'Hipper', 'Z23'] });
+   assert.ok(ready(room), 'all peers ready');
+   const [gh, ga, gb, gc] = room.games;
+   const hw = gh.world, H = hw.net.humans, S = hw._script;
+   assert.equal(H.length, 4);
+   assert.equal(hw.net.flag, H[0]);
+   assert.equal(H[0].cls, 'Scharnhorst');
+   // the very ships the mission script watches ("Gneisenau und Prinz Eugen dürfen nicht sinken")
+   assert.equal(H[1], S.gn); assert.equal(H[2], S.eugen);
+   assert.match(H[1].name, /^Gneisenau \(Kapitän anna\)$/);
+   assert.equal(H[3].cls, 'Z23');
+   for (const h of H.slice(1)) { assert.ok(h.human); assert.equal(h.dmgMult, 1); assert.ok(h.stats); }
+   for (const [g, i] of [[ga, 1], [gb, 2], [gc, 3]]) {
+      assert.equal(g.world.player.id, H[i].id);
+      assert.equal(g.world.player.cls, H[i].cls);
+      assert.equal(g.world.player.name, H[i].name);
+   }
+   // Gneisenau answers her captain, not the escort AI
+   const cmd = { telegraph: 1, rudder: -2, aim: { x: 0, y: 0 }, lock: null };
+   room.run(8, () => { ga.control(cmd); });
+   assert.equal(H[1].telegraph, 1); assert.equal(H[1].rudderCmd, -2);
+   // losing an escort costs the optional objective, the battle goes on
+   H[2].takeDamage(1e9, null, 'pen');
+   room.run(3);
+   assert.equal(hw.phase, 'playing');
+   assert.equal(hw.mission.objectives.find(o => o.id === 'ships').state, 'failed');
+   assert.equal(gb.world.mission.objectives.find(o => o.id === 'ships').state, 'failed', 'objectives reach the clients');
+   // the flagship lost: the operation has failed for everybody
+   H[0].takeDamage(1e9, null, 'pen');
+   assert.ok(room.run(10, () => room.games.every(g => g.world.phase !== 'playing')), 'every world ended');
+   for (const g of room.games) { assert.equal(g.world.phase, 'lost'); assert.match(g.world.result.reason, /Flaggschiff/); }
+});
+
+test('historical operation: torpedo hits of every human destroyer count for Vian\'s attack', () => {
+   const room = makeRoom({ mission: 'vian', names: ['host', 'anna'], ships: ['Jervis', 'Jervis'] });
+   assert.ok(ready(room));
+   const hw = room.games[0].world, H = hw.net.humans;
+   assert.equal(H[1].name, 'HMS Maori (Kapitän anna)');
+   H[1].stats.torpHits = 2;
+   room.run(1);
+   assert.equal(hw.score.player, 2, 'a client\'s hits count');
+   H[0].stats.torpHits = 1;
+   room.run(1);
+   assert.equal(hw.score.player, 3);
 });
 
 test('start: every peer builds the same world, each with its own ship', () => {
@@ -239,6 +307,53 @@ test('a client that leaves hands its ship back to the AI; the match goes on', ()
    room.run(0.5);
    assert.equal(hw.net.humans[1].human, false);
    assert.equal(gh.host.clientIds.length, 0);
+});
+
+test('rejoin: a dropped captain comes back under a new id, catches up and takes the ship back', () => {
+   const room = makeRoom();
+   assert.ok(ready(room));
+   const [gh] = room.games;
+   const hw = gh.world, hb = hw.net.humans[2];
+   room.games[2].control({ telegraph: 2, rudder: 0, aim: null, lock: null });
+   room.run(3);
+   // the page is gone (reload): the transport drops, the AI takes over
+   room.games[2].quit();
+   room.tps[2].leave();
+   room.run(1);
+   assert.equal(hb.human, false);
+   // meanwhile: a reinforcement enters, a torpedo runs, objectives and own statistics change
+   const extra = hw.spawn('Z23', 'enemy', { x: hw.arena * 0.5, y: hw.arena * 0.5 }, 1.2, { name: 'Nachzügler' });
+   hb.stats.shotsFired = (hb.stats.shotsFired || 0) + 7;
+   const victim = hw.ships.find(s => s.side === 'enemy' && s !== extra);
+   hw.removeShip(victim, 'escaped');
+   room.run(2);
+   room.games[2].quit();
+   // back with a new id: the transport's room got the lobby's ok
+   const g = room.rejoin(2, 'bert-2');
+   assert.ok(room.run(10, () => g.ready), 'the returning client is ready');
+   assert.equal(g.readyCalls, 1, 'onReady once, after the resync');
+   room.run(2);
+   const rw = g.world;
+   assert.equal(rw.player.id, hb.id, 'same ship as before');
+   assert.equal(hb.human, true, 'the AI let go');
+   assert.deepEqual(gh.host.clientIds.slice().sort(), ['anna', 'bert-2']);
+   assert.ok(shipOf(rw, extra.id), 'reinforcement spawned on the replica');
+   const rv = shipOf(rw, victim.id);
+   assert.ok(!rv || !rv.alive, 'the ship sunk meanwhile is not alive on the replica');
+   assert.equal(rw.stats.shotsFired, hb.stats.shotsFired, 'own statistics');
+   assert.deepEqual(rw.mission ? rw.mission.objectives : null, hw.mission ? hw.mission.objectives : null);
+   assert.ok(hw.logLines.some(l => /ist zurück/.test(l.text || l)), 'German notice');
+   // and the ship obeys the new peer
+   g.control({ telegraph: -1, rudder: 1, aim: null, lock: null });
+   assert.ok(room.run(3, () => hb.telegraph === -1 && hb.rudderCmd === 1), 'commands of the new id steer the ship');
+   assert.equal(room.lost[2].length, 0);
+   // an id that never played is refused, and an unknown rejoin is ignored
+   const tx = room.hub.join('mallory');
+   let refused = false;
+   tx.on('sync', (m) => { if (m.k === 'refuse') refused = true; });
+   tx.send('sync', { k: 'hello', v: 99 }, 'host');
+   room.run(1);
+   assert.equal(refused, false, 'not in the session: no answer at all');
 });
 
 test('the match runs to its end: every client gets its own result', () => {

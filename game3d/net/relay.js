@@ -40,7 +40,7 @@ export class Bus {
    isOpen(i) { return !!this.clients[i]?.open; }
    backlog(i) { return this.clients[i]?.backlog || 0; }
    status() { let open = 0; for (const c of this.clients) if (c?.open) open++; return { open, total: this.clients.length }; }
-   stats() { return this.clients.map((c, i) => ({ url: this.brokers[i].urls[0], open: !!c?.open, ...(c ? c.stat : null) })); }
+   stats() { return this.clients.map((c, i) => ({ url: this.brokers[i].urls[0], open: !!c?.open, backlog: c ? c.backlog : 0, ...(c ? c.stat : null) })); }
    _start() {
       clearTimeout(this._linger); this._linger = null;
       this.clients.forEach((c, i) => {
@@ -198,8 +198,8 @@ export async function makeRoomTransport(o) {
    // strictly growing over the instances of one page, so a peer can tell a re-join from a late packet
    const epoch = Math.max(Date.now(), makeRoomTransport._last + 1 || 0); makeRoomTransport._last = epoch;
    const handlers = new Map(), peers = new Map(), bye = new Map();
-   const nB = bus.size, nextAt = new Array(nB).fill(0), timers = new Array(nB).fill(null), rr = new Array(nB).fill(0);
-   const st = { relayOut: 0, relayIn: 0, relayBytesOut: 0, relayBytesIn: 0, directOut: 0, directIn: 0, dups: 0, held: 0, nacks: 0, resent: 0, resets: 0, badCrypto: 0, directFail: 0, rx: {} };
+   const nB = bus.size, nextAt = new Array(nB).fill(0), timers = new Array(nB).fill(null), rr = new Array(nB).fill(0), soon = new Array(nB).fill(false);
+   const st = { relayOut: 0, relayIn: 0, relayBytesOut: 0, relayBytesIn: 0, directOut: 0, directIn: 0, directBytesOut: 0, directBytesIn: 0, dups: 0, held: 0, nacks: 0, resent: 0, resets: 0, badCrypto: 0, directFail: 0, rx: {} };
    let onJoin = null, onLeave = null, onRoute = null, left = false, carrier = null, hiN = 0, hiAt = 0;
    let txChain = Promise.resolve(), rxChain = Promise.resolve();
 
@@ -226,9 +226,14 @@ export async function makeRoomTransport(o) {
       if (!on && tell && p.epoch) emit(p, makeFrame(K_NODIRECT, ++p.latestTx, '', undefined), 'nodirect');
       if (p.joined && !left) onRoute?.(p.id, via(p));
    }
+   function sendDirect(bytes, id) {
+      if (!carrier) return;
+      st.directOut++; st.directBytesOut += bytes.length;
+      carrier.send(bytes, id);
+   }
    function probe(p) {
       p.probeAt = now();
-      st.directOut++; carrier?.send(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBE, 0, '', undefined)]), p.id);
+      sendDirect(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBE, 0, '', undefined)]), p.id);
    }
 
    // ------------------------------------------------------------ sending
@@ -240,7 +245,7 @@ export async function makeRoomTransport(o) {
       return best;
    }
    function emit(p, frame, latestKey) {
-      if (p.direct && carrier) { st.directOut++; carrier.send(makeBundle(epoch, p.txSeq, [frame]), p.id); return; }
+      if (p.direct && carrier) { sendDirect(makeBundle(epoch, p.txSeq, [frame]), p.id); return; }
       const t = now(), first = latestKey ? primary(p) : -1;
       for (let b = 0; b < nB; b++) {
          if (!bus.isOpen(b)) continue;
@@ -249,7 +254,8 @@ export async function makeRoomTransport(o) {
             if (frame[0] === K_LATEST && b !== first && !p.out[b].latest.has(latestKey)) { if (t - p.sideAt[b] < SIDE_MS) continue; p.sideAt[b] = t; }
             p.out[b].latest.set(latestKey, frame);
          } else p.out[b].rel.push(frame);
-         flush(b);
+         // everything sent in the same turn (a tick's snapshot, events and status) leaves as one publish
+         if (!soon[b]) { soon[b] = true; queueMicrotask(() => { soon[b] = false; if (!left) flush(b); }); }
       }
    }
    function pending(p, b) { return p.out[b].rel.length || p.out[b].latest.size; }
@@ -264,22 +270,63 @@ export async function makeRoomTransport(o) {
             if (!timers[b]) timers[b] = setTimeout(() => { timers[b] = null; if (!left) flush(b); }, nextAt[b] - t + 1);
             return;
          }
-         const p = list[rr[b]++ % list.length], q = p.out[b], frames = [];
-         let size = 0;
-         while (q.rel.length && (size + q.rel[0].length <= BUNDLE_MAX || !frames.length)) { size += q.rel[0].length; frames.push(q.rel.shift()); }
-         for (const f of q.latest.values()) frames.push(f);
-         q.latest.clear();
          nextAt[b] = t + gap;
-         publish(b, base + p.id, p.id, makeBundle(epoch, p.txSeq, frames));
+         if (gap && list.length > 1) {
+            // a rate-limited broker: one publish on the room topic carries a bundle for every waiting
+            // peer, otherwise each of N peers would get only 1/N of the broker's few messages per second
+            const parts = [], start = rr[b]++;
+            let size = 0;
+            for (let i = 0; i < list.length && size < BUNDLE_MAX; i++) {
+               const p = list[(start + i) % list.length], frames = take(p.out[b], BUNDLE_MAX - size);
+               for (const f of frames) size += f.length;
+               parts.push([p.id, makeBundle(epoch, p.txSeq, frames)]);
+            }
+            publishMulti(b, parts);
+            continue;
+         }
+         const p = list[rr[b]++ % list.length];
+         publish(b, base + p.id, p.id, makeBundle(epoch, p.txSeq, take(p.out[b], BUNDLE_MAX)));
       }
+   }
+   // the frames of one publish for one peer: reliable ones in order up to `room` bytes (at least
+   // one), then all waiting states
+   function take(q, room) {
+      const frames = [];
+      let size = 0;
+      while (q.rel.length && (size + q.rel[0].length <= room || !frames.length)) { size += q.rel[0].length; frames.push(q.rel.shift()); }
+      for (const f of q.latest.values()) frames.push(f);
+      q.latest.clear();
+      return frames;
+   }
+   const seal = async (to, bundle) => {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: te.encode(`${room}|${selfId}|${to}`) }, cipher, bundle));
+      const out = new Uint8Array(12 + ct.length);
+      out.set(iv, 0); out.set(ct, 12);
+      return out;
+   };
+   // several receivers in one publish on the room topic:
+   // [0][id length u8][sender id][count u8] then ([receiver id length u8][receiver id][length u32][iv 12][AES-GCM(bundle)])*
+   // each part is sealed for its receiver exactly like a single publish
+   function publishMulti(b, parts) {
+      txChain = txChain.then(async () => {
+         const sealed = [];
+         let len = 3 + idBytes.length;
+         for (const [to, bundle] of parts) { const id = te.encode(to), box = await seal(to, bundle); sealed.push([id, box]); len += 5 + id.length + box.length; }
+         const out = new Uint8Array(len), dv = new DataView(out.buffer);
+         out[0] = 0; out[1] = idBytes.length; out.set(idBytes, 2);
+         let o = 2 + idBytes.length;
+         out[o++] = sealed.length;
+         for (const [id, box] of sealed) { out[o++] = id.length; out.set(id, o); o += id.length; dv.setUint32(o, box.length); o += 4; out.set(box, o); o += box.length; }
+         const n = bus.publish(b, topicAll, out) ? 1 : 0;
+         st.relayOut += n; st.relayBytesOut += n * out.length;
+      }).catch(() => { });
    }
    // payload on the wire: [id length u8][sender id][iv 12][AES-GCM(bundle)], bound to room, sender and receiver
    function publish(b, topic, to, bundle, all = false) {
       txChain = txChain.then(async () => {
-         const iv = crypto.getRandomValues(new Uint8Array(12));
-         const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: te.encode(`${room}|${selfId}|${to}`) }, cipher, bundle));
-         const out = new Uint8Array(1 + idBytes.length + 12 + ct.length);
-         out[0] = idBytes.length; out.set(idBytes, 1); out.set(iv, 1 + idBytes.length); out.set(ct, 13 + idBytes.length);
+         const box = await seal(to, bundle), out = new Uint8Array(1 + idBytes.length + box.length);
+         out[0] = idBytes.length; out.set(idBytes, 1); out.set(box, 1 + idBytes.length);
          const n = all ? bus.publishAll(topic, out) : bus.publish(b, topic, out) ? 1 : 0;
          st.relayOut += n; st.relayBytesOut += n * out.length;
       }).catch(() => { });
@@ -299,6 +346,7 @@ export async function makeRoomTransport(o) {
    // ------------------------------------------------------------ receiving
    function onRelay(payload, b, to) {
       if (left || payload.length < 30) return;
+      if (payload[0] === 0 && to === '_') { const mine = unpackMulti(payload); if (!mine) return; payload = mine; to = selfId; }
       const n = payload[0], from = td.decode(payload.subarray(1, 1 + n));
       if (from === selfId || !validId(from)) return;
       st.relayIn++; st.relayBytesIn += payload.length;
@@ -309,6 +357,27 @@ export async function makeRoomTransport(o) {
          } catch (e) { st.badCrypto++; return; }          // wrong key or not for us
          if (!left) onBundle(from, plain, b);
       }).catch((e) => { console.warn('net: relay message failed', e); });
+   }
+   // the part of a several-receiver publish (publishMulti) addressed to us, rebuilt as a single
+   // publish: [id length][sender id][iv][ciphertext]; null when there is none or it is malformed
+   function unpackMulti(payload) {
+      const n = payload[1];
+      if (!n || payload.length < 3 + n) return null;
+      const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength), from = payload.subarray(2, 2 + n);
+      let o = 2 + n, count = payload[o++];
+      while (count-- > 0 && o < payload.length) {
+         const k = payload[o++], id = td.decode(payload.subarray(o, o + k)); o += k;
+         if (o + 4 > payload.length) return null;
+         const len = dv.getUint32(o); o += 4;
+         if (o + len > payload.length) return null;
+         if (id === selfId) {
+            const out = new Uint8Array(1 + n + len);
+            out[0] = n; out.set(from, 1); out.set(payload.subarray(o, o + len), 1 + n);
+            return out;
+         }
+         o += len;
+      }
+      return null;
    }
    function onBundle(from, bytes, b) {
       const bundle = readBundle(bytes);
@@ -331,7 +400,7 @@ export async function makeRoomTransport(o) {
          if (!f) continue;
          if (f.kind === K_BYE) { bye.set(from, bundle.epoch); drop(p); return; }
          if (f.kind === K_PROBE || f.kind === K_PROBED) {     // not part of any stream; only count when they came over the channel itself
-            if (b < 0 && f.kind === K_PROBE) { st.directOut++; carrier?.send(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBED, 0, '', undefined)]), p.id); }
+            if (b < 0 && f.kind === K_PROBE) sendDirect(makeBundle(epoch, p.txSeq, [makeFrame(K_PROBED, 0, '', undefined)]), p.id);
             if (b < 0 && f.kind === K_PROBED && p.up) setDirect(p, true);
             continue;
          }
@@ -474,7 +543,7 @@ export async function makeRoomTransport(o) {
             probe(p);                                      // also tells the peer our epoch
          },
          onDown(id) { const p = peers.get(id); if (p) { p.up = false; setDirect(p, false, true); } },
-         onData(bytes, id) { if (!left) { st.directIn++; onBundle(id, bytes, -1); } },
+         onData(bytes, id) { if (!left) { st.directIn++; st.directBytesIn += bytes.length; onBundle(id, bytes, -1); } },
          onFail() { st.directFail++; },
       })).then((c) => { if (left) c?.leave(); else carrier = c; }).catch((e) => { console.warn('net: no direct connections, the relay is used', e); });
    }

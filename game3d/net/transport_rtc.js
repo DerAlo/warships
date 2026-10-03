@@ -33,6 +33,23 @@ export function relayStatus() {
 
 const leaving = new Map();      // room id -> promise of a leave() still in flight (a re-join waits for it)
 
+// Trystero reports a data channel that the other side closed abruptly (tab reloaded or closed,
+// network gone) with console.error("Trystero peer error: OperationError: User-Initiated Abort ...").
+// That is an expected event here: the peer drops to the relay or leaves, relay.js handles both.
+// Only that one message is turned into a warning; every other error stays an error.
+if (!console.error.__ks3dRtc) {
+   const err = console.error;
+   const quiet = function (...a) {
+      if (typeof a[0] === 'string' && a[0].startsWith('Trystero peer error') && /User-Initiated Abort|Close called/.test(String(a[1] && (a[1].message || a[1])))) {
+         console.warn('net: direct channel closed by the other side', String(a[1] && a[1].message || a[1]));
+         return;
+      }
+      return err.apply(this, a);
+   };
+   quiet.__ks3dRtc = true;
+   console.error = quiet;
+}
+
 // room: room id.
 // o.password    shared secret: Trystero encrypts the session descriptions with a key derived from
 //               it (AES-GCM) and runs a challenge handshake, so a peer without it cannot connect

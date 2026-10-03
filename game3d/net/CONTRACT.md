@@ -42,7 +42,12 @@ What the real transport guarantees, and what not:
 - Brokers are QoS 0 and public: the transport publishes to all connected brokers, deduplicates,
   asks again for missing reliable messages, and paces brokers that limit the message rate. With
   only a rate-limited broker left (`gap` in `mqtt.js`, today broker.emqx.io: 10 messages/s) the
-  client receives about 7.5 snapshots/s instead of 20.
+  client receives about 7.5 snapshots/s instead of 20 — every client, also with 3 clients: on
+  such a broker one publish on the room topic carries a bundle for each waiting peer, each sealed
+  for its receiver as below (`[0][sender id length][sender id][count]` then per receiver
+  `[id length][id][length u32][iv][ciphertext]`).
+- Measured load with 4 players over the relay only: host upload ~63 kB/s, ~100 publishes/s
+  spread over the brokers; each client ~22 kB/s down (see ARCHITECTURE.md, "3 and 4 players").
 - Relayed traffic is AES-GCM encrypted with a key derived from the room password. A game
   without password uses a key derived from the public room id: obscurity, not secrecy.
 - Extras beyond the interface (optional, absent on the test transports): `link(id)` ->
@@ -72,15 +77,31 @@ session = {
 The game owns the transport channels `cmd`, `snap`, `evt`, `sync`. Matchmaking owns `room`,
 `chat`. After `onEnd` the lobby shows the room again (the transport stays connected) or the list.
 
+On the host the session transport also has `onRejoin(fn(oldId, newId))`: the lobby calls it when
+a former captain of the running match is back (see "Rejoin"); from then on `newId` is a member
+and `oldId` is not. The game moves that player's slot to `newId`.
+
 ## Co-op rules (`game3d/net/coop.js`, owned by the netcode side)
 
 ```js
-coopSlots(missionId)   // max human players incl. host (0 = mission not playable in co-op)
+coopSlots(missionId)               // max human players incl. host (0 = mission not playable in co-op)
+coopRoles(missionId, difficulty)   // historical operations: [{ cls, name }] per slot, [] otherwise
+coopExcluded()                     // { missionId: German reason } of the missions kept out on purpose
 ```
 
-Matchmaking uses it for the mission picker and the player limit. Every player picks a ship from
-their own unlocked ships (local career profile); duplicates are allowed. Missions that prescribe
-ships (`fixedShips`) are not offered in co-op for now.
+Matchmaking uses them for the mission picker, the player limit and the room. In a mission with
+free ship choice every player picks a ship from their own unlocked ships (local career profile);
+duplicates are allowed. A historical operation (`fixedShips`) prescribes the ships: slot 0 (the
+host) commands the mission's own ship, the flagship; slot i takes the i-th allied ship the
+mission brings, biggest type first (BB, CA, CL, DD, SS), equal types in spawn order; transports
+and scripted ships (convoy, route) stay bots. The host lobby sets every player's `ship` to the
+slot's class (the player cannot choose, and needs no unlock for it); the game takes the mission's
+ship object itself (name, script role, AI orders for when the captain drops) and sets its damage
+cut back to full strength. The operation is lost when the flagship sinks.
+
+Kept out: `training` (exercise for one captain, no allied ship), `laststand` (the Bismarck fights
+alone). Today's limits (measured with `coopSlots`): rheinuebung 2 (Bismarck, Prinz Eugen),
+wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 
 ## Game side behaviour (`game3d/net/game.js`)
 
@@ -103,7 +124,9 @@ ships (`fixedShips`) are not offered in co-op for now.
 | k | direction | content |
 |---|---|---|
 | `hello` | client -> host, every 0.3 s until started | `v`, `loadout` (own career modules/skills) |
-| `start` | host -> each client | `v, mission, difficulty, seed, classes, loadouts, names, self` (slot index) |
+| `start` | host -> each client | `v, mission, difficulty, seed, classes, loadouts, names, self` (slot index); `rejoin: 1` when the match is already running |
+| `more` | host -> returning client | `n`: `n` items (see `evt`) of the ships that entered the match after the start and still exist |
+| `resync` | host -> returning client, after `more` | `b` first event batch it gets, `t` tick, `kc`, `ro` roster `[id, dmg, kills, alive, hpFrac, escaped]`, `obj`, `zn`, `tp` live torpedoes `[T item, visible]`, `sm` smoke `[x, y, r, maxR, life, side, ownerId]`, `me` own statistics, `tg` own `[telegraph, rudder]` |
 | `refuse` | host -> client | not in the player list, too late, or `why: 'version'` |
 | `abort` | host -> all | host left before the end |
 | `bye` | client -> host | client left; its ship goes back to the AI |
@@ -114,6 +137,11 @@ ships (`fixedShips`) are not offered in co-op for now.
 
 The host waits up to 8 s for every player's `hello` (missing ones stay bots); a client that sees
 no `start` within 15 s gives up.
+
+A `hello` while the match runs is answered only for a slot the lobby has moved with `onRejoin`:
+`start` with `rejoin: 1`, `more`, `resync`, then snapshots and events like everybody else; the
+AI lets go of the ship. The client shows the match only after `resync` (so its controls start at
+the ship's telegraph, not at stop) and gives up after 15 s without it.
 
 `cmd` (client -> host, JSON array): `[seq, telegraph, rudder, aimX, aimY, lockId, actBase,
 actions]`. `actions` are the not yet acknowledged one-shot actions of `command.js`, numbered from
@@ -139,6 +167,17 @@ effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal.
 - Room state from the host: `{ t: 'state', room, players: [{ id, name, ship, ready, via }] }`;
   `via` is how that player is connected to the host (`'direct'`, `'relay'` or `''`), shown in the
   room as "direkt" / "über Relay". A missing direct connection is not an error.
+- **Rejoin.** At the start the host sends every client `{ t: 'seat', seat, token }` (room
+  channel, i.e. encrypted, to that player only). The client keeps `{ room, hostId, seat, token,
+  key, mission, name, at }` in `sessionStorage['warships3d.net.rejoin']` (per tab: survives a
+  reload, not a closed tab; dropped after 3 h, on a regular end, a kick or a closed room). While
+  the match runs the list shows that game with "ZURÜCKKEHREN" (the room view: "ZURÜCK INS
+  GEFECHT"). The knock then is `{ room, v, seat, proof }` with `proof = SHA-256("knock:" + token +
+  ":" + room + ":" + peerId)`; no password needed, the seat's token is the secret. Unknown seat,
+  wrong proof or no running match: `{ ok: false, why: 'norejoin' }`. After the room `hello` the
+  host gives the seat to the new peer id, calls `onRejoin(oldId, newId)` and sends it the room
+  state, the `start` of the match (player ids as they are now, `back: 1`) and its seat again.
+  Only the newest holder of a seat is in the match.
 - `?net=local` in the URL switches lobby and transport to BroadcastChannel (no network) so the
   whole flow is testable with two pages of one browser context. `?net=relay` uses the brokers
   only and never tries WebRTC.

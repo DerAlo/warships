@@ -146,6 +146,33 @@ test('a rate-limited broker alone still carries the room (bundling, pacing)', as
    a.leave(); b.leave();
 });
 
+test('a rate-limited broker alone serves three clients with one publish for all of them', async () => {
+   const net = makeNet([{ delay: 20, gap: 130, limit: 10 }]);
+   const a = await makeRoomTransport({ bus: net.bus(), selfId: 'hostA', room: 'r1', hostId: 'hostA', key: 'k' });
+   const ids = ['c1', 'c2', 'c3'], cl = [], evt = ids.map(() => []), snap = ids.map(() => []);
+   for (let i = 0; i < ids.length; i++) {
+      const c = await makeRoomTransport({ bus: net.bus(), selfId: ids[i], room: 'r1', hostId: 'hostA', key: 'k' });
+      c.on('evt', (d) => evt[i].push(d.n)); c.on('snap', (d) => snap[i].push(d.n));
+      cl.push(c);
+   }
+   await until(() => a.peers().length === 3 && cl.every(c => c.peers().includes('hostA')), 8000, 'peers');
+   const t0 = Date.now();
+   for (let i = 0; i < 60; i++) {
+      for (const id of ids) a.send('snap', { n: i }, id);
+      if (i % 3 === 0) a.send('evt', { n: i / 3 });
+      await sleep(50);
+   }
+   const secs = (Date.now() - t0) / 1000;
+   await until(() => evt.every(e => e.length === 20), 8000, 'reliable messages');
+   for (let i = 0; i < ids.length; i++) {
+      assert.deepEqual(evt[i], Array.from({ length: 20 }, (_, k) => k));
+      // with one publish per client the three would share the ~7.5 publishes/s: ~2.5 each
+      assert.ok(snap[i].length / secs >= 4.5, `client ${i}: ${(snap[i].length / secs).toFixed(1)} snapshots/s`);
+      for (let k = 1; k < snap[i].length; k++) assert.ok(snap[i][k] > snap[i][k - 1]);
+   }
+   a.leave(); for (const c of cl) c.leave();
+});
+
 test('the route switches to direct and back without losing or reordering reliable messages', async () => {
    const net = makeNet([{ delay: 30, jitter: 30, loss: 0.1 }]);
    const hub = makeDirectHub();
@@ -272,6 +299,26 @@ test('lobby: leaving and joining again at once works although the goodbye is sti
    await sleep(800);                                    // every late goodbye has arrived by now
    assert.deepEqual(host.room.players.map(p => p.id), ['hostA', 'clientB']);
    assert.deepEqual(host.rt.peers(), ['clientB']);
+   client.close(); host.close();
+   await sleep(400);
+});
+
+test('lobby: a historical operation gives every slot its prescribed ship', async () => {
+   const net = makeNet([{ delay: 5 }, { delay: 20 }]);
+   const { host, client } = await lobbyPair(net);
+   const { ownShips } = await import('../game3d/net/lobby.js');
+   host.configure({ mission: 'rheinuebung' });
+   await until(() => client.room.mission === 'rheinuebung' && client.me?.ship === 'Hipper', 3000, 'Prinz Eugen for the second captain');
+   assert.deepEqual(host.room.players.map(p => p.ship), ['Bismarck', 'Hipper'], 'host = flagship, although nobody unlocked them');
+   client.setShip('Bismarck');                                      // no choice here
+   client.setReady(true);
+   await until(() => host.room.players[1].ready, 3000, 'ready');
+   assert.equal(host.room.players[1].ship, 'Hipper');
+   assert.ok(host.canStart());
+   // back to free choice: the prescribed ship is dropped, each player picks an own one again
+   host.configure({ mission: 'standard' });
+   await until(() => client.room.mission === 'standard' && client.me?.ship, 3000, 'own ship again');
+   assert.ok(ownShips('standard', { unlocked: {} }).includes(client.me.ship), client.me.ship);
    client.close(); host.close();
    await sleep(400);
 });

@@ -42,6 +42,7 @@ export function makeHost(world, o) {
    let ids = [...clients.keys()];
    let items = [], batchSeq = 0, stepTick = world.tick + 1, muteLog = false, ended = false, objSig = '', stopped = false;
    const liveShells = new Map(), liveTorps = new Map();
+   const spawned = [];               // 'n' items of every ship that entered after the start (for a rejoin)
    const buf = new ArrayBuffer(8192), dv = new DataView(buf), u8 = new Uint8Array(buf);
    const P = World.prototype;
 
@@ -58,7 +59,8 @@ export function makeHost(world, o) {
       P.addTorpedo.call(world, t);
       liveTorps.set(t.id, t);
       t._ns = t.spotted;
-      items.push(['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick]);
+      t._it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick];
+      items.push(t._it);
    };
    world.addEffect = (kind, pos, life, size, extra) => {
       const e = P.addEffect.call(world, kind, pos, life, size, extra);
@@ -88,8 +90,9 @@ export function makeHost(world, o) {
    };
    world.spawn = (cls, side, pos, heading, opts) => {
       const s = P.spawn.call(world, cls, side, pos, heading, opts);
-      items.push(['n', s.id, cls, side, r1(s.pos.x), r1(s.pos.y), Math.round(s.heading * 1e4) / 1e4,
-         { name: s.name, speedKn: s.maxSpeedKn, maxHP: s.maxHP, telegraph: s.telegraph, depth: s.depthTarget, color: s.color, nation: s.nation }]);
+      const it = ['n', s.id, cls, side, r1(s.pos.x), r1(s.pos.y), Math.round(s.heading * 1e4) / 1e4,
+         { name: s.name, speedKn: s.maxSpeedKn, maxHP: s.maxHP, telegraph: s.telegraph, depth: s.depthTarget, color: s.color, nation: s.nation }];
+      items.push(it); spawned.push(it);
       return s;
    };
    world.removeShip = (ship, reason) => {
@@ -195,16 +198,56 @@ export function makeHost(world, o) {
       if (slow) for (const c of clients.values()) if (!c.gone) o.send('sync', { k: 'me', stats: c.ship.stats }, c.id);
    }
 
-   function sendEnd(tick) {
+   const roster = () => world.roster.map(s => [s.id, Math.round(s.dmgDealt), s.kills, s.alive ? 1 : 0, r3(s.hp / s.maxHP), s.escaped || 0]);
+   function sendEnd(tick, only = null) {
       const res = world.result || { victory: world.phase === 'won', reason: '' };
       const objectives = world.mission ? world.mission.objectives : [];
-      const ro = world.roster.map(s => [s.id, Math.round(s.dmgDealt), s.kills, s.alive ? 1 : 0, r3(s.hp / s.maxHP), s.escaped || 0]);
+      const ro = roster();
       for (const c of clients.values()) {
-         if (c.gone) continue;
+         if (c.gone || (only && c !== only)) continue;
          const rw = calcRewards({ victory: res.victory, stats: c.ship.stats, rewardMult: world.difficulty.rewardMult || 1, alive: c.ship.alive, objectives });
          o.send('sync', { k: 'end', t: tick, victory: !!res.victory, reason: res.reason || '', time: world.time, xp: rw.xp, credits: rw.credits, rewards: rw,
             stats: c.ship.stats, ro, obj: objectives }, c.id);
       }
+   }
+
+   // ---------------------------------------------------------------- rejoin
+   // A captain is back, usually under a new peer id (reload, new network). The slot moves to that
+   // id and waits, still steered by the AI, until the client has built its world from `start`
+   // and says hello: resume().
+   function rejoin(oldId, newId) {
+      const c = clients.get(oldId);
+      if (!c || (newId !== oldId && clients.has(newId))) return false;
+      clients.delete(oldId);
+      c.id = newId; c.gone = true; c.back = true;
+      clients.set(newId, c);
+      ids = ids.filter(x => x !== oldId && x !== newId);
+      return true;
+   }
+   // The returning client gets what it missed as state (k:'more' with ships that entered after the
+   // start, then k:'resync'), from then on everything else like the others, and its ship back.
+   function resume(id) {
+      const c = clients.get(id);
+      if (!c || !c.back || stopped) return false;
+      flush(world.tick);              // what happened so far: to the others as events, to this one as state
+      c.back = false; c.gone = false;
+      c.lastSeq = -1; c.nextAct = 0; c.queue.length = 0; c.cmd = makeCommand(); c.retry.n = 0;
+      ids = [...clients.values()].filter(x => !x.gone).map(x => x.id);
+      const s = c.ship, mis = world.mission, byId = world._byId;
+      const live = spawned.filter(it => { const x = byId.get(it[1]); return x && (x.alive || x.sinking); });
+      for (let i = 0; i < live.length; i += BATCH_ITEMS) o.send('sync', { k: 'more', n: live.slice(i, i + BATCH_ITEMS) }, id);
+      const torps = [];
+      for (const t of liveTorps.values()) if (t.alive && t._it) torps.push([t._it, t.spotted ? 1 : 0]);
+      o.send('sync', {
+         k: 'resync', b: batchSeq, t: world.tick, kc: world.killCount, ro: roster(),
+         obj: mis ? mis.objectives : null, zn: mis ? mis.zones : null, tp: torps,
+         sm: world.smokeClouds.map(m => [r1(m.c.x), r1(m.c.y), r1(m.r), m.maxR || 0, r3(m.life), m.side, m.ownerId]),
+         me: s.stats, tg: [s.telegraph, s.rudderCmd],
+      }, id);
+      s.human = true;
+      if (ended) sendEnd(world.tick, c);
+      else if (world.phase === 'playing') world.message((c.name || s.name) + (s.alive ? ' ist zurück und übernimmt wieder' : ' ist zurück'), 'info');
+      return true;
    }
 
    function post() {
@@ -250,7 +293,7 @@ export function makeHost(world, o) {
    }
 
    return {
-      onCmd, drop, stop,
+      onCmd, drop, stop, rejoin, resume,
       get clientIds() { return ids; },
       get ended() { return ended; },
       client(id) { return clients.get(id) || null; },
