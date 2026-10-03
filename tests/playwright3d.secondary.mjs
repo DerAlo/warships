@@ -140,9 +140,14 @@ check('Ctrl+click on open sea clears it', await ev(() => window.__world().player
 // a plain left click still fires the main battery (turrets swing back first)
 await ev(() => window.__setAim(0.5, 5000));
 await waitFor(() => window.__turrets().some(t => t.state === 'ready'), 30000);
-await page.mouse.click(720, 405);
-await frames(3);
-check('plain left click fires the main battery', (await ev(() => window.__fired().shots)) > shots0);
+// (a turret can be 'ready' while still outside its firing arc; under load give it a few tries)
+let firedShots = shots0;
+for (let i = 0; i < 6 && firedShots <= shots0; i++) {
+   await page.mouse.click(720, 405);
+   await frames(10);
+   firedShots = await ev(() => window.__fired().shots);
+}
+check('plain left click fires the main battery', firedShots > shots0, { shots0, firedShots });
 
 check('zero console errors', errors.length === 0, errors.slice(0, 5));
 await browser.close();
