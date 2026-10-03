@@ -6,8 +6,8 @@
 // without that stylesheet.
 const FALLBACK = {
    hud: '#f1e9d4', 'hud-dim': '#b9ae93', gold: '#e6c06e',
-   ally: '#5ec2f2', 'ally-soft': '#c6ebfb', enemy: '#ff6b3b', 'enemy-soft': '#ffd3c2', self: '#fff8e6', neutral: '#e8dfc8',
-   ok: '#a3dc72', warn: '#f2c14e', bad: '#ec5b42', dead: '#5e5b54',
+   ally: '#5ec2f2', 'ally-soft': '#c6ebfb', enemy: '#f5503a', 'enemy-soft': '#ffd3c2', self: '#fff8e6', neutral: '#e8dfc8',
+   ok: '#a3dc72', warn: '#f4d24c', bad: '#ec5b42', dead: '#5e5b54',
    he: '#ff9a4a', ap: '#a9d3ec', torp: '#9fe3b5', fire: '#ff6a1a', flood: '#4aa8ff',
    reticle: '#f6efdc', lead: '#ff3b22', 'lead-torp': '#4ff09a',
    'map-sea': '#163843', 'map-sea-2': '#0f2a33', 'map-land': '#8e8a62', 'map-coast': '#e1cf9a', 'map-grid': '#d8c79a', 'map-ink': '#0c1a20',

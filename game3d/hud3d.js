@@ -337,7 +337,7 @@ export class Overlay3D {
       const g = this.g;
       const bx = 27, top = y - 11, bot = y + 28, l = 6, pulse = 0.8 + 0.2 * Math.sin(this.t * 4);
       g.save();
-      g.strokeStyle = `rgba(255,150,40,${pulse})`; g.lineWidth = 2; g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
+      g.strokeStyle = `rgba(255,150,40,${pulse})`; g.lineWidth = 2.5; g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
       g.beginPath();
       for (const sx of [-1, 1]) {
          g.moveTo(x + sx * (bx - l), top); g.lineTo(x + sx * bx, top); g.lineTo(x + sx * bx, bot); g.lineTo(x + sx * (bx - l), bot);
