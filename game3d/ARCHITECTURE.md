@@ -286,6 +286,16 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   back after a reload and after a cut connection (the probe before using a channel, see
   "Transport", covers the old "up, then down at once" report). Trystero's console error for a
   channel the other side closed abruptly is turned into a warning in `transport_rtc.js`.
+- **Host migration** (`net/migrate.js`, CONTRACT.md "Host migration"). The host names a
+  successor (first captain in slot order) and sends it alone a full state once a second
+  (`mig`: ship internals, bot AI, statistics, mission script, torpedoes, weather front). When the
+  host quits, drops or falls silent for 5 s, the successor turns its replica World into the
+  authoritative one (`replica.handover()` + `restoreWorld`), builds a host over it
+  (`makeHost(..., { adopt: true })`) and announces itself; the others re-point their replica
+  (`replica.rehost`), the lobby moves room and listing to the new host and hands it the rejoin
+  seats, so the old host can come back as a captain. Shells in flight are dropped, everything
+  else carries on. Measured (node, 7v7): 13.4 kB/s to the successor only; the switch takes
+  ~0.3 s plus one network delay after a quit, ~5 s after a silent drop.
 - **Transport.** Two browsers behind home routers often get no WebRTC path (no TURN server), so
   the room never depends on one: `makeRoomTransport` reaches every peer over public MQTT brokers
   from the first moment and moves a peer to the data channel once a probe sent over it came back
@@ -318,4 +328,6 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps),
   `tests/playwright3d.mp.rejoin.mjs` (reload and network cut mid-battle, back through the list,
   an outsider refused; `MODE=hybrid|relayonly`), `tests/playwright3d.mp.ops.mjs` (Cerberus with
-  three captains: picker, ship assignment in the room, the match, flagship lost).
+  three captains: picker, ship assignment in the room, the match, flagship lost),
+  `tests/playwright3d.mp.migrate.mjs` (three captains, the host's page closed mid-battle: the
+  match goes on under the successor, the old host comes back, the battle ends).

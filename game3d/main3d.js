@@ -396,6 +396,8 @@ export function startNetGame(session) {
       },
       // host gone, connection lost or the match never started
       onLost: (text) => { if (net !== g) return; netNotice(text); toMenu(); },
+      // host migration: the match goes on under another host
+      onNotice: (text) => { if (net === g) netNotice(text); },
    });
    net = g;
    return g;

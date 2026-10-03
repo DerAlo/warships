@@ -11,7 +11,7 @@
 //   - every message is published to all connected brokers and deduplicated by sequence number
 //   - reliable, ordered delivery per peer: gaps are held back for a moment (another broker
 //     usually fills them), then requested again from the sender (NACK)
-//   - the channels in LATEST carry complete states (`snap`, `cmd`): only the newest counts, a
+//   - the channels in LATEST carry complete states (`snap`, `cmd`, `mig`): only the newest counts, a
 //     missing one is never waited for or repeated, and they go at full rate to one broker only
 //   - brokers with a rate limit (`gap`) get everything that queued up bundled into one publish
 //   - relayed traffic is AES-GCM encrypted with the room key
@@ -118,7 +118,7 @@ export function makeBusLobby(bus, selfId) {
 }
 
 // ---------------------------------------------------------------- room transport
-const LATEST = new Set(['snap', 'cmd']);
+const LATEST = new Set(['snap', 'cmd', 'mig']);
 const K_REL = 0, K_LATEST = 1, K_HI = 2, K_BYE = 3, K_PING = 4, K_PONG = 5, K_NACK = 6, K_RESET = 7;
 const K_PROBE = 8, K_PROBED = 9, K_NODIRECT = 10;      // direct channel: question, answer; "I stopped using it"
 const TICK_MS = 250;
@@ -496,8 +496,9 @@ export async function makeRoomTransport(o) {
    sayHi();
 
    const transport = {
-      selfId, hostId,
-      get isHost() { return selfId === hostId; },
+      selfId, hostId,                 // hostId: the lobby moves it after a host migration
+      get isHost() { return selfId === this.hostId; },
+      setAdmit(fn) { o.admit = fn; }, // the new host of a room gates newcomers from now on
       peers: () => [...peers.values()].filter(p => p.joined).map(p => p.id),
       send(channel, data, to) {
          if (left) return;

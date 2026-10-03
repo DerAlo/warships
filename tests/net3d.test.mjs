@@ -23,8 +23,8 @@ function makeRoom(o = {}) {
       schedule: (fn, ms) => { q.push({ at: nowMs + ms, n: n++, fn }); },
    });
    const tps = names.map(id => hub.join(id));
-   let onRejoin = null;
-   tps[0].onRejoin = (fn) => { onRejoin = fn; };     // the lobby's part in a rejoin (lobby.js)
+   const onRejoin = [];
+   tps.forEach((t, i) => { t.onRejoin = (fn) => { onRejoin[i] = fn; }; });     // the lobby's part in a rejoin (lobby.js)
    const players = names.map((id, i) => ({ id, name: 'Kapitän ' + id, ship: ships[i] }));
    const ends = names.map(() => []), lost = names.map(() => []);
    const games = tps.map((transport, i) => createNetGame(
@@ -57,12 +57,14 @@ function makeRoom(o = {}) {
          }
       },
       run(seconds, until) { const N = Math.round(seconds * 60); for (let i = 0; i < N; i++) { room.step(); if (until && until()) return true; } return !until; },
-      // player i comes back under a new peer id with a fresh page (new game object)
-      rejoin(i, newId) {
+      // player i comes back under a new peer id with a fresh page (new game object); h: the
+      // index of the peer that runs the match now
+      rejoin(i, newId, h = 0) {
          const old = room.players[i].id;
          const pl = (o.players || players).map(p => p.id === old ? { ...p, id: newId } : p);
          const transport = hub.join(newId);
-         onRejoin(old, newId);
+         transport.hostId = room.players[h].id;
+         onRejoin[h](old, newId);
          const g = createNetGame({ transport, mode: o.mode || 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: pl, onEnd: (r) => ends[i].push(r) },
             { now: () => nowMs / 1000, loadout: () => null, measure: true, onLost: (t) => lost[i].push(t), onReady: () => { g.readyCalls = (g.readyCalls || 0) + 1; } });
          games[i] = g; tps[i] = transport; room.players[i] = pl[i];
@@ -400,33 +402,119 @@ test('the match runs to its end: every client gets its own result', () => {
    }
 });
 
-test('the host leaving ends the match for everybody with a German message', () => {
+test('host migration: the host leaves, the successor carries on, the others switch over', () => {
+   const room = makeRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games;
+   room.run(5);
+   assert.equal(gh.host.successor, 'anna', 'the first captain is the successor');
+   assert.equal(gb.info().successor, 'anna', 'everybody knows it');
+   const ms = gh.host.migStats();
+   assert.ok(ms.count >= 4 && ms.count <= 7, 'full state about once a second: ' + ms.count);
+   const hw = gh.world;
+   // some state the replica alone could not know: AI, statistics, consumables, a running torpedo
+   const hb = hw.net.humans[2];
+   hb.stats.shotsFired = 17; hw.net.humans[1].stats.hits = 5;
+   const bot = hw.ships.find(s => s.side === 'player' && !s.human && !s.isPlayer && s.alive);
+   const foe = hw.ships.find(s => s.side === 'enemy' && s.alive);
+   foe.hp = Math.round(foe.maxHP * 0.6);
+   room.run(0.5);
+   const before = new Map(hw.ships.map(s => [s.id, { hp: s.hp, x: s.pos.x, y: s.pos.y, alive: s.alive }]));
+   const t0 = room.now;
+   gh.quit();
+   assert.equal(room.ends[0][0].handover, true, 'the old host hands over');
+   assert.ok(room.run(3, () => ga.isHost && gb.info().hostId === 'anna'), 'anna took over, bert follows it');
+   const took = room.now - t0;
+   assert.ok(took < 1, 'migration within a second: ' + took.toFixed(2));
+   assert.deepEqual(room.lost, [[], [], []]);
+   const aw = ga.world;
+   for (const [id, b] of before) {
+      const s = aw._byId.get(id);
+      assert.ok(s, 'ship ' + id + ' known');
+      assert.equal(s.alive, b.alive, 'ship ' + id + ' alive');
+      if (!b.alive) continue;
+      assert.ok(Math.abs(s.hp - b.hp) <= Math.max(1, b.hp * 0.02), 'hp of ' + s.name + ': ' + s.hp + ' vs ' + b.hp);
+      assert.ok(Math.hypot(s.pos.x - b.x, s.pos.y - b.y) < 200, 'position of ' + s.name);
+   }
+   assert.ok(Math.abs(aw._byId.get(foe.id).hp - foe.hp) < 1, 'damage done before the migration stays');
+   assert.equal(aw.net.humans[2].stats.shotsFired, 17, 'statistics of the others came along');
+   assert.equal(aw.stats.hits, 5, 'own statistics');
+   assert.equal(aw.player.isPlayer, true);
+   assert.ok(aw._byId.get(bot.id).ai, 'the AI runs on the new host');
+   const info = ga.info();
+   assert.ok(info.migrated && info.migrated.tick > 0);
+   // the match goes on: bert steers its ship on anna's World, the old host's ship is a bot now
+   const bs = aw.net.humans[2];
+   assert.equal(bs.human, true);
+   assert.equal(aw.net.humans[0].human, false, 'the old host\'s ship sails under the AI');
+   gb.control({ telegraph: -1, rudder: 1, aim: null, lock: null });
+   assert.ok(room.run(4, () => bs.telegraph === -1 && bs.rudderCmd === 1), 'bert commands its ship on the new host');
+   room.run(2);
+   assert.ok(gb.replica.info().synced, 'bert gets the new host\'s snapshots');
+   assert.ok(Math.abs(gb.world.tick - aw.tick) < 30, 'replica close to the new host: ' + gb.world.tick + ' / ' + aw.tick);
+   const bp = gb.world.player;
+   assert.ok(Math.hypot(bp.pos.x - bs.pos.x, bp.pos.y - bs.pos.y) < 60, 'bert sees its ship where the new host has it');
+   // ... and ends correctly
+   for (const s of aw.ships.slice()) if (s.side === 'enemy' && s.alive) s.takeDamage(1e9, aw.player, 'pen');
+   assert.ok(room.run(30, () => [ga, gb].every(g => g.world.phase !== 'playing')), 'both worlds ended');
+   assert.equal(aw.phase, 'won');
+   assert.equal(gb.world.phase, 'won');
+   assert.equal(gb.world.result.reason, aw.result.reason);
+   assert.equal(gb.world.result.stats.shotsFired >= 17, true, 'bert\'s result carries its statistics');
+   ga.quit(); gb.quit();
+   assert.equal(room.ends[1][0].aborted, false);
+   assert.equal(room.ends[2][0].aborted, false);
+   assert.equal(room.ends[2][0].victory, true);
+});
+
+test('host migration: the page of the host is gone; the old host may come back as a captain', () => {
    const room = makeRoom();
    assert.ok(ready(room));
    const [gh, ga, gb] = room.games;
    room.run(3);
-   gh.quit();
+   const hostShip = gh.world.player.id;
+   room.frozen.add(0);                 // page closed: no quit(), the transport says goodbye
+   room.tps[0].leave();
+   assert.ok(room.run(3, () => ga.isHost && gb.info().hostId === 'anna'), 'anna took over');
+   assert.deepEqual(room.lost, [[], [], []]);
    room.run(1);
-   assert.deepEqual(room.lost[1], [TEXT.hostLeft]);
-   assert.deepEqual(room.lost[2], [TEXT.hostLeft]);
-   ga.quit(); gb.quit();
-   assert.equal(room.ends[0][0].aborted, true);
-   assert.equal(room.ends[1].length, 1);
-   assert.equal(room.ends[1][0].aborted, true);
-   assert.equal(room.ends[1][0].reason, TEXT.hostLeft);
-   assert.match(TEXT.hostLeft, /Host hat das Spiel verlassen/);
+   // the old host is back under a new id (the lobby checked its seat token on anna's side)
+   const g = room.rejoin(0, 'host-2', 1);
+   room.frozen.delete(0);
+   assert.ok(room.run(10, () => g.ready), 'the old host is ready again');
+   room.run(2);
+   assert.equal(g.isHost, false);
+   assert.equal(g.world.player.id, hostShip, 'its old ship');
+   const hs = ga.world._byId.get(hostShip);
+   assert.equal(hs.human, true, 'the AI let go of it');
+   g.control({ telegraph: 3, rudder: -1, aim: null, lock: null });
+   assert.ok(room.run(3, () => hs.telegraph === 3 && hs.rudderCmd === -1), 'it steers its ship on the new host');
+   assert.deepEqual(ga.host.clientIds.slice().sort(), ['bert', 'host-2']);
+   assert.equal(room.lost[0].length, 0);
 });
 
-test('silence from the host counts as a lost connection', () => {
-   const room = makeRoom();
+test('host migration: a host cut off for a while gives way; without a successor the match ends', () => {
+   const room = makeRoom({ names: ['host', 'anna', 'bert', 'cara'], ships: ['Bismarck', 'Hipper', 'Z23', 'Z23'] });
    assert.ok(ready(room));
+   const [, ga, gb, gc] = room.games;
    room.run(3);
-   room.frozen.add(0);                 // the host stops sending without saying goodbye
-   room.run(4);
-   assert.deepEqual(room.lost[1], []);
-   room.run(3);
-   assert.deepEqual(room.lost[1], [TEXT.hostLost]);
-   assert.deepEqual(room.lost[2], [TEXT.hostLost]);
+   room.frozen.add(0);
+   assert.ok(room.run(8, () => ga.isHost && gc.info().hostId === 'anna'), 'anna took over');
+   room.frozen.delete(0);              // the old host wakes up and hears of anna
+   room.run(1);
+   assert.deepEqual(room.lost[0], [TEXT.replaced]);
+   assert.deepEqual(room.lost.slice(1), [[], [], []]);
+   room.run(2);
+   assert.equal(ga.host.successor, 'bert');
+   // host and successor gone at once: cara waits a few seconds, then gives up
+   room.frozen.add(1); room.frozen.add(2);
+   room.run(10);
+   assert.deepEqual(room.lost[3], []);
+   room.run(6);
+   assert.deepEqual(room.lost[3], [TEXT.hostLost]);
+   gc.quit(); gb.quit();
+   assert.equal(room.ends[3][0].reason, TEXT.hostLost);
+   assert.match(TEXT.hostLeft, /Host hat das Spiel verlassen/);
 });
 
 test('only the host is believed; only session players may command', () => {
@@ -488,9 +576,13 @@ test('bandwidth: a 7v7 battle stays inside the budget', () => {
    };
    room.run(60, () => { k++; drive(ga); drive(gb); });       // approach
    for (const g of room.games) g.resetStats();
+   const mig0 = gh.host.migStats();
    let shells = 0, n = 0;
    room.run(120, () => { k++; drive(ga); drive(gb); shells += hw.shells.length; n++; });
    const hi = gh.info(), ai = ga.info();
+   const mig = { bytes: hi.mig.bytes - mig0.bytes, count: hi.mig.count - mig0.count };
+   console.log(`[net] host migration full state (to the successor only): ${mig.count} in 120 s, ${(mig.bytes / mig.count / 1000).toFixed(1)} kB each, ${(mig.bytes / 120 / 1000).toFixed(1)} kB/s`);
+   assert.ok(mig.count >= 110 && mig.count <= 140, 'about one full state a second: ' + mig.count);
    const down = ai.kBpsIn, up = ai.kBpsOut;
    console.log(`[net] ${sides.player}v${sides.enemy}, 2 clients, 120 s: down ${down.toFixed(1)} kB/s per client, up ${up.toFixed(2)} kB/s, ` +
       `host out ${hi.kBpsOut.toFixed(1)} kB/s total, snapshots ${ai.snapHz.toFixed(1)}/s (every ${SNAP_EVERY} steps), mean shells in the air ${(shells / n).toFixed(0)}, ` +
@@ -619,6 +711,41 @@ test('pvp: the team that loses its captains loses; results per team with every c
    // the sinking reads as a loss for team 2, as a kill for team 1
    assert.ok(ga.world.logLines.some(l => /💀 Verlust: .*Hipper/.test(l.text || l)), 'team 2 log');
    assert.ok(gb.world.logLines.some(l => /🎯 Versenkt: .*Hipper/.test(l.text || l)), 'team 1 log');
+});
+
+test('pvp: host migration to the other team; both teams carry on and the match ends', () => {
+   const room = pvpRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb, gc] = room.games;
+   room.run(4);
+   assert.equal(gh.host.successor, 'anna', 'the successor sails in the other team');
+   const ids = gh.world.net.humans.map(s => s.id);
+   gh.quit();
+   assert.ok(room.run(3, () => ga.isHost && gb.info().hostId === 'anna' && gc.info().hostId === 'anna'), 'everybody follows anna');
+   assert.deepEqual(room.lost, [[], [], [], []]);
+   const aw = ga.world, H = aw.net.humans;
+   assert.equal(aw.player.id, ids[1]);
+   assert.deepEqual(H.map(s => s.side), ['enemy', 'player', 'enemy', 'player'], 'team 2 is the side player on the new host');
+   room.run(2);
+   // bert (team 1) still sees the battle from its own side
+   const bw = gb.world, bs = H[2];
+   assert.equal(bw.player.id, ids[2]);
+   assert.equal(bw.player.side, 'player');
+   assert.equal(bw._byId.get(ids[1]).side, 'enemy');
+   gb.control({ telegraph: 2, rudder: 1, aim: null, lock: null });
+   assert.ok(room.run(3, () => bs.telegraph === 2 && bs.rudderCmd === 1), 'bert steers on the new host');
+   room.run(1);
+   assert.ok(Math.hypot(bw.player.pos.x - bs.pos.x, bw.player.pos.y - bs.pos.y) < 60, 'bert sees its ship where anna has it');
+   assert.ok(Math.hypot(gc.world.player.pos.x - H[3].pos.x, gc.world.player.pos.y - H[3].pos.y) < 60, 'cara too');
+   // team 1 loses its captains: team 2 wins
+   H[0].takeDamage(1e9, H[1], 'pen'); H[2].takeDamage(1e9, H[1], 'pen');
+   assert.ok(room.run(30, () => [ga, gb, gc].every(g => g.world.phase !== 'playing')), 'every world ended');
+   assert.equal(aw.phase, 'won');
+   assert.equal(gc.world.phase, 'won');
+   assert.equal(bw.phase, 'lost');
+   assert.equal(bw.result.pvp.my, 1);
+   assert.equal(bw.result.pvp.win, 2);
+   assert.equal(aw.result.pvp.win, 2);
 });
 
 test('pvp: a captain who leaves does not end the match; bandwidth and encode cost per team', () => {

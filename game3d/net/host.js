@@ -8,12 +8,15 @@
 // PvP (o.pvp): the clients of each team get their own stream. Snapshots, events and slow state
 // carry only what that team can see (codec.visibleTo); the other team (World side 'enemy') gets
 // the mission's texts turned round (pvp.js). Co-op: one stream for everybody, nothing filtered.
+// Host migration: one client, the successor, also gets the full state once a second (`mig`,
+// migrate.js) so it can carry on when this host is gone; everybody learns its id from `st.hs`.
 // Nothing here touches the DOM, so the node tests drive it directly.
 import { World } from '../state.js';
 import { calcRewards } from '../progress3d.js';
 import { makeCommand, applyCommand, execAction } from './command.js';
 import { encodeShips, encodeOwn, visibleTo } from './codec.js';
 import { mirrorEvent, mirrorLog, mirrorReason } from './pvp.js';
+import { MIG_EVERY, packWorld, packScript, scriptSig } from './migrate.js';
 
 export const SNAP_EVERY = 3;        // sim steps between snapshots (20 Hz)
 const STATE_EVERY = 15;             // slow state (score, caps, timer, weather): 4 Hz
@@ -36,8 +39,12 @@ function slim(x) {
    return o;
 }
 
-// o: { send(channel, data, to), clients: [{ id, name, ship }], pvp, labels: { player, enemy } }
+// o: { send(channel, data, to), clients: [{ id, name, ship, gone? }], pvp, labels: { player, enemy },
+//      self: { id, slot }, migrate: bool, onSuccessor(id),
+//      spawned: 'n' items of ships that came in earlier, adopt: bool (after a migration) }
 // labels (PvP): the lobby's number of the team sailing as that World side (results screen).
+// gone: a captain who is not (yet) back after a migration; the AI sails the ship.
+// adopt: the torpedoes already in the World are announced again (the clients dropped them).
 export function makeHost(world, o) {
    const pvp = !!o.pvp;
    const byId = world._byId;
@@ -47,7 +54,7 @@ export function makeHost(world, o) {
    const clients = new Map();
    for (const c of o.clients) {
       clients.set(c.id, { id: c.id, name: c.name || '', ship: c.ship, team: teamOf(c.ship.side), lastSeq: -1, nextAct: 0, queue: [], cmd: makeCommand(),
-         aim: { x: 0, y: 0 }, retry: { x: 0, y: 0, n: 0 }, gone: false });
+         aim: { x: 0, y: 0 }, retry: { x: 0, y: 0, n: 0 }, gone: !!c.gone });
    }
    let ids = [];
    const refresh = () => {
@@ -58,7 +65,10 @@ export function makeHost(world, o) {
    // items: what happened since the last flush; refs[i]: what PvP filtering needs to know of items[i]
    let items = [], refs = [], stepTick = world.tick + 1, muteLog = false, ended = false, stopped = false, capPrev = null;
    const liveShells = new Map(), liveTorps = new Map();
-   const spawned = [];               // 'n' items of every ship that entered after the start (for a rejoin)
+   const spawned = (o.spawned || []).slice();   // 'n' items of every ship that entered after the start (for a rejoin)
+   // host migration
+   const self = o.self || { id: '', slot: 0 };
+   let succId = null, migAt = -1e9, migSig = '', migBytes = 0, migCount = 0;
    const buf = new ArrayBuffer(8192), dv = new DataView(buf), u8 = new Uint8Array(buf);
    const P = World.prototype;
 
@@ -272,6 +282,7 @@ export function makeHost(world, o) {
          sc: sc ? [sc.player, sc.enemy, sc.target, sc.kind] : null,
          cp: world.caps.map(c => [SIDE_CODE[c.owner] || 0, SIDE_CODE[c.capper] || 0, r3(c.progress || 0), c.contested ? 1 : 0]),
          env: [env.weather, env.frontK, f ? f.to : null, f ? f.from : null, r3(env.visibility), r3(env.seaState), r3(env.wind), env.spotCap === Infinity ? null : Math.round(env.spotCap)],
+         hs: succId,
       };
       // sonar contacts are the host team's hydrophone picture (PvP: not for the other team)
       if (world.hasSubs) {
@@ -368,7 +379,46 @@ export function makeHost(world, o) {
       if (over || tick % SNAP_EVERY === 0) { flush(tick); snapshot(); }
       if (tick % STATE_EVERY === 0 || over) state(tick);
       if (over) { ended = true; sendEnd(tick); }
+      else if (world.phase === 'playing') migrate(tick);
       stepTick = world.tick + 1;
+   }
+
+   // after a migration: the clients dropped the old host's torpedoes, they come again with the
+   // distance run (it[7]); not yet known to the other team (PvP) until it sees them
+   if (o.adopt) for (const t of world.torpedoes) {
+      if (!t.alive) continue;
+      liveTorps.set(t.id, t);
+      t._nv = false; t._to = 0;
+      t._it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick, r1(t.traveled)];
+      items.push(t._it); refs.push(t);
+   }
+
+   // ---------------------------------------------------------------- host migration
+   // The successor: the first captain still in the match (slot order of the start; one on its
+   // way back counts once it has its ship again). Gets the full state when it is named, once a second, and at once
+   // when the mission script changes its state (a phase, a flag).
+   function successor() {
+      for (const c of clients.values()) if (!c.gone && !c.back) return c.id;
+      return null;
+   }
+   function migrate(tick) {
+      if (o.migrate === false) return;
+      const sid = successor();
+      if (sid !== succId) { succId = sid; migAt = -1e9; o.onSuccessor?.(sid); }
+      if (!sid) return;
+      let scr;
+      if (tick - migAt < MIG_EVERY) {
+         if (tick % STATE_EVERY !== 0 || !world._script) return;
+         scr = packScript(world);
+         if (scriptSig(scr) === migSig) return;
+      }
+      if (scr === undefined) scr = packScript(world);
+      migSig = scriptSig(scr); migAt = tick;
+      const pl = [[self.id, self.slot, 0]];
+      for (const c of clients.values()) pl.push([c.id, c.ship.slot, c.gone || c.back ? 1 : 0]);
+      const m = { k: 'mig', ...packWorld(world, { pl, scr }) };
+      if (o.measure) { migBytes += JSON.stringify(m).length; migCount++; }
+      o.send('mig', m, sid);
    }
 
    world.update = (dt) => {
@@ -406,6 +456,10 @@ export function makeHost(world, o) {
    return {
       onCmd, drop, stop, rejoin, resume,
       get clientIds() { return ids; },
+      get successor() { return succId; },
+      migStats() { return { bytes: migBytes, count: migCount }; },
+      // this host leaves a running match: the successor gets the newest full state at once
+      handoff() { if (!ended && !stopped && world.phase === 'playing') { migAt = -1e9; migrate(world.tick); } },
       get ended() { return ended; },
       client(id) { return clients.get(id) || null; },
    };
