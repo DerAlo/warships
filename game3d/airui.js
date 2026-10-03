@@ -17,6 +17,7 @@ const MAX_MARKS = 24, FAN_PTS = 9, ELL_PTS = 28;
 const STEER_MOUSE = 0.0026;       // rad of wanted heading per mouse px
 const STEER_KEYS = 1.1;           // rad/s of wanted heading while A / D are held
 const STEER_MAX = 1.1;            // wanted heading at most this far off the current heading
+const RELEASE_AHEAD = 6000;       // m: a released bomber flight without a target flies on this far
 const DIST_MIN = 140, DIST_MAX = 900, DIST0 = 330;
 const LOOK_AHEAD = { tb: 700, db: 620, ft: 1100 };
 const TYPE_KEYS = { 1: 'tb', 2: 'db', 3: 'ft' };
@@ -153,6 +154,11 @@ export class AirUi {
       if (sq && sq.human) {
          sq.human = false; sq.aiming = false; sq.throttle = 0;
          if (sq.type === 'ft' && sq.state !== 'return') orderPatrol(world, sq, sq.pos);
+         else if (sq.type !== 'ft' && !sq.order) {
+            // no target given yet: the flight keeps its course and looks for one before it turns home
+            sq.order = { kind: 'strike', targetId: null,
+               pos: { x: sq.pos.x + Math.cos(sq.heading) * RELEASE_AHEAD, y: sq.pos.y + Math.sin(sq.heading) * RELEASE_AHEAD } };
+         }
       }
       this._close();
    }
