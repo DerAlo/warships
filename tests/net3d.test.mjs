@@ -6,7 +6,12 @@ import { makeMemoryHub } from '../game3d/net/transport.js';
 import { createNetGame, TEXT } from '../game3d/net/game.js';
 import { coopSlots, coopRoles, coopExcluded } from '../game3d/net/coop.js';
 import { SNAP_EVERY } from '../game3d/net/host.js';
-import { makeSnap, decodeSnap, encodeShips } from '../game3d/net/codec.js';
+import { makeSnap, decodeSnap, encodeShips, encodeOwn, decodeOwn, SQ_STATES, SQ_BYTES } from '../game3d/net/codec.js';
+import { execAction, applyAirControl } from '../game3d/net/command.js';
+import { packWorld } from '../game3d/net/migrate.js';
+import { World } from '../game3d/state.js';
+import { AIR, AIR_TYPES, launchSquadron, orderPatrol, squadById, squadVisibleTo } from '../game3d/air.js';
+import { angleDelta } from '../game3d/utils.js';
 
 const DT = 1 / 60;
 
@@ -814,4 +819,333 @@ test('pvp: a captain who leaves does not end the match; bandwidth and encode cos
    assert.equal(hw.phase, 'playing');
    assert.equal(hw.net.humans[1].human, false);
    assert.equal(gc.world.phase, 'playing');
+});
+
+// ---------------------------------------------------------------- carriers
+const AIRDT = 1 / 60;
+// a carrier battle in singleplayer form: the player sails an Essex (carriers on both sides)
+function cvWorld(seed = 3) {
+   const w = new World('normal', { mission: 'standard', ship: 'Essex', seed });
+   w.phase = 'playing';
+   return w;
+}
+const ownCv = (w) => w.player;
+const foeCv = (w) => w.ships.find(s => s.side === 'enemy' && s.air);
+function launched(w, cv, type) {
+   cv.air.deckT = 0;
+   const q = launchSquadron(w, cv, type, null, true);
+   assert.ok(q, 'launched ' + type);
+   return q;
+}
+
+test('carrier codec: one entry per squadron, quantized, round trip; own detail carries hangars and fuel', () => {
+   const w = cvWorld();
+   const me = ownCv(w), foe = foeCv(w);
+   assert.ok(me.air && foe, 'carriers on both sides');
+   const tb = launched(w, me, 'tb'), ft = launched(w, me, 'ft'), db = launched(w, foe, 'db');
+   for (let i = 0; i < 6 * 60; i++) w.update(AIRDT);
+   orderPatrol(w, ft, { x: 1234.4, y: -987.6 });
+   tb.aiming = true; tb.aimT = 1.25; tb.human = true; tb.want = tb.heading + 0.4;
+   db.visible = true;                               // seen by the player team
+   const dv = new DataView(new ArrayBuffer(8192));
+   const end = encodeShips(dv, w, 'player');
+   const S = makeSnap();
+   assert.ok(decodeSnap(new DataView(dv.buffer, 0, end), S));
+   const live = w.squadrons.filter(q => q.n > 0 && q.state !== 'land' && squadVisibleTo(q, 'player'));
+   assert.equal(S.nq, live.length);
+   assert.ok(S.nq >= 3, 'squadrons in the snapshot: ' + S.nq);
+   const ang = (a, b) => Math.abs(((a - b) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+   for (const q of live) {
+      const i = Array.from(S.qid.subarray(0, S.nq)).indexOf(q.id);
+      assert.ok(i >= 0, 'squadron ' + q.id + ' listed');
+      const b = S.qb[i];
+      assert.equal(S.qown[i], q.ownerId);
+      assert.equal(AIR_TYPES[b & 3], q.type);
+      assert.equal(SQ_STATES[(b >> 2) & 7], q.state);
+      assert.equal(!!(b & 32), q.side === 'enemy');
+      assert.equal(!!(b & 64), !!q.aiming);
+      assert.equal(!!(b & 128), !!q.human);
+      assert.equal(S.qn[i] & 15, q.n);
+      assert.equal(S.qn[i] >> 4, q.armed);
+      assert.ok(Math.abs(S.qx[i] - q.pos.x) <= 0.5 && Math.abs(S.qy[i] - q.pos.y) <= 0.5, 'position to 1 m');
+      assert.ok(ang(S.qh[i], q.heading) < 2e-4 && ang(S.qw[i], q.want) < 2e-4, 'headings');
+      assert.ok(Math.abs(S.qalt[i] - q.alt) <= 2.5, 'altitude to 5 m');
+      assert.ok(Math.abs(S.qsp[i] - q.speed) <= 1, 'speed to 2 m/s');
+      assert.ok(Math.abs(S.qaim[i] - q.aimT) <= 0.025, 'attack run to 0.05 s');
+      if (q === ft) assert.ok(S.qc[i] === 1 && Math.abs(S.qcx[i] - 1234) <= 0.5 && Math.abs(S.qcy[i] + 988) <= 0.5, 'patrol point');
+      else assert.equal(S.qc[i], 0);
+   }
+   // size: 21 bytes a flight (+4 with a patrol point)
+   const bytes = live.length * SQ_BYTES + 4 * live.filter(q => q.type === 'ft' && q.center).length;
+   const all = w.squadrons.slice();
+   w.squadrons.length = 0;
+   const end0 = encodeShips(dv, w, 'player');
+   assert.equal(end - end0, bytes, 'bytes of the squadron section');
+   w.squadrons.push(...all);
+   // own detail: hangars, deck, service, own flights' fuel / boost / throttle
+   tb.fuel = 77.4; tb.boost = 1.5; tb.throttle = -1;
+   const o = encodeOwn(dv, 0, me, w);
+   const keep = { h: me.air.tb.hangar, d: me.air.deckT };
+   me.air.tb.hangar = 99; me.air.deckT = 42;
+   assert.ok(decodeOwn(dv, 0, me, w, 0));
+   assert.equal(me.air.tb.hangar, keep.h);
+   assert.ok(Math.abs(me.air.deckT - keep.d) < 0.01);
+   const d = w._sqOwn.get(tb.id);
+   assert.ok(d && d[0] === 77 && d[1] === 1.5 && d[2] === -1 && d[3] === tb.n0, 'own squadron detail ' + d);
+   assert.ok(!w._sqOwn.has(db.id), 'the enemy\'s flights are not in the own detail');
+   assert.ok(o < 400, 'own detail bytes ' + o);
+});
+
+test('carrier codec: a team gets only the flights it sees (PvP fog of war)', () => {
+   const w = cvWorld();
+   const me = ownCv(w), foe = foeCv(w);
+   const a = launched(w, me, 'tb'), b = launched(w, foe, 'tb');
+   a.visible = true; a.visE = false;               // the player team's flight, unseen by the enemy
+   b.visible = false; b.visE = true;               // the enemy's flight, unseen by the player team
+   const dv = new DataView(new ArrayBuffer(8192)), S = makeSnap();
+   const ids = (side) => { const e = encodeShips(dv, w, side); assert.ok(decodeSnap(new DataView(dv.buffer, 0, e), S)); return Array.from(S.qid.subarray(0, S.nq)); };
+   assert.deepEqual(ids('player'), [a.id]);
+   assert.deepEqual(ids('enemy'), [b.id]);
+   b.visible = true;
+   assert.deepEqual(ids('player').sort(), [a.id, b.id].sort());
+   // the enemy bit is the host's side: the team-2 client turns it round (codec.localSide)
+   ids('enemy');
+   assert.equal(!!(S.qb[0] & 32), true);
+});
+
+test('carrier commands: only own squadrons, valid types, clamped steering, drops only with a run', () => {
+   const w = cvWorld();
+   const me = ownCv(w), foe = foeCv(w);
+   const bb = w.ships.find(s => s.side === 'player' && !s.air && s.alive);
+   assert.equal(execAction(bb, w, ['L', 'tb']), 0, 'no carrier: no launch');
+   assert.equal(execAction(me, w, ['L', 'xx']), 0, 'unknown type');
+   assert.equal(execAction(me, w, ['L', 'constructor']), 0, 'no prototype keys');
+   const q = execAction(me, w, ['L', 'tb']);
+   assert.ok(q && q.ownerId === me.id && q.human, 'launched into the captain\'s hands');
+   assert.equal(execAction(me, w, ['L', 'tb']), 0, 'one squadron per type');
+   assert.equal(execAction(me, w, ['L', 'db']), 0, 'deck busy');
+   const other = launched(w, foe, 'tb');
+   for (const a of [['P', other.id], ['H', other.id], ['R', other.id], ['W', other.id, 0, 0], ['B', other.id], ['P', 'x'], ['R', null], ['W', q.id, NaN, 0]])
+      assert.ok(!execAction(me, w, a), 'refused: ' + JSON.stringify(a));
+   assert.ok(!execAction(bb, w, ['R', q.id]), 'another ship cannot recall it');
+   // continuous control: wanted heading at most STEER_MAX off, throttle -1 / 0 / 1
+   for (let i = 0; i < 15 * 60 && q.state === 'launch'; i++) w.update(AIRDT);
+   assert.equal(q.state, 'fly');
+   assert.ok(applyAirControl(me, w, [q.id, q.heading + 3, 7, 1]));
+   assert.ok(Math.abs(angleDelta(q.heading, q.want)) <= 1.3 + 1e-9, 'steering clamped');
+   assert.equal(q.throttle, 1);
+   assert.equal(q.aiming, true);
+   assert.equal(applyAirControl(me, w, [other.id, 0, 0, 1]), false, 'foreign flight');
+   assert.equal(applyAirControl(bb, w, [q.id, 0, 0, 1]), false, 'not a carrier');
+   // a snap drop is refused, a held run drops
+   assert.equal(execAction(me, w, ['B', q.id]), 0, 'run too short');
+   for (let i = 0; i < 2 * 60; i++) { applyAirControl(me, w, [q.id, q.heading, 0, 1]); w.update(AIRDT); }
+   assert.ok(execAction(me, w, ['B', q.id]) > 0, 'drop after a held run');
+   // hand back: the flight flies on under its pilots; recall turns it home
+   assert.ok(execAction(me, w, ['H', q.id]));
+   assert.equal(q.human, false);
+   assert.ok(q.order, 'bombers keep an order');
+   assert.ok(execAction(me, w, ['R', q.id]));
+   assert.equal(q.state, 'return');
+   assert.ok(!execAction(me, w, ['P', q.id]), 'a returning flight cannot be taken');
+   // AA focus for any ship
+   assert.ok(execAction(bb, w, ['F', 1]));
+   assert.equal(bb.aaFocus, 1);
+   assert.ok(!execAction(bb, w, ['F', 'x']));
+});
+
+// host: Essex, anna: Essex (a client carrier), bert: Hipper
+function cvRoom(o = {}) {
+   return makeRoom({ ships: ['Essex', 'Essex', 'Hipper'], ...o });
+}
+const findSq = (w, id) => w.squadrons.find(q => q.id === id);
+// an order as main3d gives it: the host runs it, a client sends it
+const order = (g, a) => g.isHost ? execAction(g.world.player, g.world, a) : g.act(a);
+
+test('carriers: a client launches and flies a squadron, everybody sees it, the strike hits, recall', () => {
+   const room = cvRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games;
+   const hw = gh.world, A = hw.net.humans[1];
+   assert.ok(A.air && ga.world.player.air, 'anna captains a carrier');
+   assert.ok(hw.ships.some(s => s.side === 'enemy' && s.air), 'bot carrier on the other side');
+   // launch: the replica does not predict it, the host launches into anna's hands
+   assert.equal(ga.act(['L', 'tb']), 1);
+   assert.ok(room.run(2, () => hw.squadrons.some(q => q.ownerId === A.id && q.type === 'tb')), 'host launched it');
+   const hq = hw.squadrons.find(q => q.ownerId === A.id && q.type === 'tb');
+   assert.equal(hq.human, true);
+   assert.ok(room.run(2, () => findSq(ga.world, hq.id) && findSq(gb.world, hq.id)), 'both clients see it');
+   assert.ok(room.run(15, () => hq.state === 'fly'), 'climbed out');
+   // the strike: an enemy held still, broadside on, no flak; the flight put in front of it
+   const E = hw.ships.find(s => s.side === 'enemy' && s.alive && !s.air && !s.sub && s.type !== 'TR');
+   E.ai = { _init: true, passive: true, desired: E.heading, tel: 0, dodged: new Set(), dodgeT: 0, reverseT: 99999, stuckT: 0 };
+   E.telegraph = 0; E.speed = 0; E.aa = { range: 0, dps: 0, bands: [] };
+   const h = E.heading + Math.PI / 2, gap = 1750 + hq.cfg.speed * 1.4;
+   hq.pos.x = E.pos.x - Math.cos(h) * gap; hq.pos.y = E.pos.y - Math.sin(h) * gap; hq.heading = hq.want = h;
+   hq.speed = hq.cfg.speed; hq.alt = AIR.cruiseAlt;
+   let hits = 0;
+   const pe = hw.pushEvent;
+   hw.pushEvent = (t, d) => { if (t === 'torp' && d && d.srcId === A.id && d.dstId === E.id) hits++; return pe.call(hw, t, d); };
+   const cmd = { telegraph: 0, rudder: 0, aim: null, lock: null, air: null };
+   // hold the attack run, then release: the drop rides in the same command as aiming = 0
+   cmd.air = [hq.id, h, 0, 1]; ga.control(cmd);
+   assert.ok(room.run(3, () => hq.aimT >= AIR.tbAimMin + 0.05), 'the host flies the run: aimT ' + hq.aimT);
+   const armed0 = hq.armed;
+   cmd.air = [hq.id, h, 0, 0]; ga.control(cmd);
+   assert.equal(ga.act(['B', hq.id]), 1);
+   assert.ok(room.run(1, () => hq.armed < armed0), 'dropped');
+   assert.ok(room.run(1, () => ga.world.torpedoes.some(t => t.air && t.ownerId === A.id)), 'the client runs the aerial torpedoes');
+   const ct = ga.world.torpedoes.find(t => t.air), ht = hw.torpedoes.find(t => t.id === ct.id);
+   assert.ok(ht && Math.abs(ct.speed - ht.speed) < 1e-6 && ct.range === ht.range, 'with the aerial torpedo\'s speed and range');
+   assert.ok(room.run(30, () => hits > 0), 'torpedo hit on the target');
+   // recall
+   cmd.air = null; ga.control(cmd);
+   assert.equal(ga.act(['R', hq.id]), 1);
+   assert.ok(room.run(1, () => hq.state === 'return'), 'host: returning');
+   assert.ok(room.run(1, () => findSq(ga.world, hq.id)?.state === 'return'), 'client: returning');
+   // bert cannot order anna's planes (his replica sends nothing, the host would refuse)
+   assert.equal(gb.act(['R', hq.id]), 0);
+});
+
+test('carriers: a captain who leaves hands his flight to its pilots; migration carries the air war on', () => {
+   const room = cvRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games;
+   const hw = gh.world, A = hw.net.humans[1];
+   assert.equal(ga.act(['L', 'db']), 1);
+   assert.ok(room.run(2, () => hw.squadrons.some(q => q.ownerId === A.id)));
+   // the host launches too
+   assert.ok(order(gh, ['L', 'tb']), 'the host launches');
+   room.run(10);
+   const mine = hw.squadrons.filter(q => q.ownerId === hw.player.id);
+   const anna = hw.squadrons.find(q => q.ownerId === A.id);
+   assert.ok(mine.length && anna && anna.human, 'flights of host and anna in the air');
+   const ids = hw.squadrons.filter(q => q.n > 0 && q.state !== 'land').map(q => q.id).sort((a, b) => a - b);
+   // the host leaves: who carries on knows every squadron (the successor is a client)
+   gh.quit();
+   assert.ok(room.run(5, () => [ga, gb].some(g => g.isHost)), 'a successor took over');
+   const nh = [ga, gb].find(g => g.isHost), w = nh.world;
+   const now = w.squadrons.map(q => q.id);
+   const kept = ids.filter(id => now.includes(id));
+   assert.ok(kept.length >= ids.length - 1, 'squadrons carried over: ' + JSON.stringify({ ids, now }));
+   for (const q of w.squadrons) assert.ok(q.cfg && q.prev && q.ai, 'full squadron objects');
+   const old = w.squadrons.filter(q => q.ownerId === hw.player.id);
+   assert.ok(old.every(q => !q.human), 'the old host\'s flights fly on under their pilots');
+   room.run(5);
+   assert.equal(w.phase, 'playing');
+});
+
+test('bandwidth: 7v7 with carriers and squadrons in the air, and the full state for migration', () => {
+   const room = cvRoom({ history: false });
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games;
+   const hw = gh.world;
+   const cvs = hw.ships.filter(s => s.air);
+   assert.ok(cvs.some(s => s.side === 'enemy') && cvs.filter(s => s.side === 'player').length >= 2, 'carriers: ' + cvs.map(s => s.cls + '/' + s.side));
+   const cmd = { telegraph: 4, rudder: 0, aim: { x: 0, y: 0 }, lock: null, air: null };
+   let k = 0, flyId = null;
+   const drive = (g) => {
+      const p = g.world.player, foe = g.world.ships.find(s => s.side === 'enemy' && s.alive) || p;
+      cmd.aim.x = foe.pos.x + Math.sin(k * 0.05) * 200; cmd.aim.y = foe.pos.y + Math.cos(k * 0.031) * 200;
+      cmd.air = null;
+      if (g === ga) {
+         // anna flies her torpedo bombers: the stick moves every frame
+         const q = g.world.squadrons.find(q => q.ownerId === p.id && q.type === 'tb' && q.state !== 'return');
+         flyId = q ? q.id : null;
+         if (q) cmd.air = [q.id, q.heading + Math.sin(k * 0.02) * 0.6, k % 400 < 100 ? 1 : 0, 0];
+      }
+      g.control(cmd);
+      if (k % 30 === 0 && !p.air) order(g, ['f', cmd.aim.x, cmd.aim.y]);
+      // carriers keep every type in the air; the flights not flown by hand go to their pilots
+      if (p.air && k % 120 === 0) {
+         for (const t of ['tb', 'db', 'ft']) order(g, ['L', t]);
+         for (const q of g.world.squadrons) if (q.ownerId === p.id && q.human && q.id !== flyId && q.state !== 'launch') order(g, ['H', q.id]);
+      }
+   };
+   room.run(60, () => { k++; drive(ga); drive(gb); drive(gh); });
+   for (const g of room.games) g.resetStats();
+   const mig0 = gh.host.migStats();
+   let sq = 0, n = 0, maxSq = 0;
+   const S = makeSnap(), tp = room.tps[0], send = tp.send.bind(tp);
+   let snapBytes = 0, snaps = 0;
+   tp.send = (ch, data, dst) => {
+      if (ch === 'snap' && dst === 'anna') { snapBytes += data.byteLength; snaps++; }
+      return send(ch, data, dst);
+   };
+   room.run(120, () => { k++; drive(ga); drive(gb); drive(gh); const m = hw.squadrons.length; sq += m; n++; if (m > maxSq) maxSq = m; });
+   tp.send = send;
+   const hi = gh.info(), ai = ga.info();
+   const mig = { bytes: hi.mig.bytes - mig0.bytes, count: hi.mig.count - mig0.count };
+   const full = JSON.stringify(packWorld(hw, { pl: [] })).length;
+   console.log(`[net] carriers 7v7, 2 clients, 120 s: mean squadrons in the air ${(sq / n).toFixed(1)} (max ${maxSq}), down ${ai.kBpsIn.toFixed(1)} kB/s per client ` +
+      `(snapshots ${(snapBytes / snaps).toFixed(0)} B each, ${(snapBytes / 120 / 1000).toFixed(1)} kB/s), up ${ai.kBpsOut.toFixed(2)} kB/s, host out ${hi.kBpsOut.toFixed(1)} kB/s total; ` +
+      `migration full state ${(mig.bytes / mig.count / 1000).toFixed(1)} kB each (now ${(full / 1000).toFixed(1)} kB)`);
+   assert.ok(sq / n >= 3, 'squadrons in the air: ' + (sq / n));
+   assert.ok(ai.kBpsIn < 40, 'downstream within 1.5x of the 26.7 kB/s budget: ' + ai.kBpsIn.toFixed(1));
+   assert.ok(ai.kBpsOut < 5, 'upstream ' + ai.kBpsOut.toFixed(2));
+   assert.ok(mig.bytes / mig.count < 16000 && full < 16000, 'full state under 16 kB');
+   assert.ok(Math.abs(ai.snapHz - 60 / SNAP_EVERY) < 1.5, 'snapshot rate ' + ai.snapHz);
+   void flyId;
+});
+
+// PvP: host + bert (team 1) against anna + cara (team 2), carriers on both teams
+test('pvp carriers: a team never gets a hostile flight it has not spotted; its own flights always', () => {
+   const names = ['host', 'anna', 'bert', 'cara'], ships = ['Essex', 'Akagi', 'Z23', 'Hipper'], teams = [1, 2, 1, 2];
+   const players = names.map((id, i) => ({ id, name: 'Kapitän ' + id, ship: ships[i], team: teams[i] }));
+   const room = makeRoom({ names, players, mode: 'pvp' });
+   assert.ok(ready(room));
+   const [gh, ga] = room.games;
+   const hw = gh.world, H = hw.net.humans;
+   assert.ok(H[0].air && H[1].air && H[1].side === 'enemy');
+   const bad = [], seenFoe = { anna: 0, host: 0 }, own = { anna: 0 };
+   const tp = room.tps[0], send = tp.send.bind(tp), S = makeSnap();
+   tp.send = (ch, data, dst) => {
+      if (ch === 'snap' && dst === 'anna' && decodeSnap(new DataView(data.buffer, data.byteOffset, data.byteLength), S)) {
+         for (let i = 0; i < S.nq; i++) {
+            const q = squadById(hw, S.qid[i]);
+            if (!q) continue;
+            if (q.side === 'player') { seenFoe.anna++; if (!q.visE) bad.push(q.id); }
+            else if (q.ownerId === H[1].id) own.anna++;
+         }
+      }
+      return send(ch, data, dst);
+   };
+   assert.ok(order(gh, ['L', 'ft'])); ga.act(['L', 'tb']);
+   room.run(10);
+   assert.ok(order(gh, ['L', 'tb'])); ga.act(['L', 'ft']);
+   room.run(2);
+   // the host's fighters wait where no ship or plane of team 2 is near (seen: air.seeByShip / seeByPlane)
+   const far = hw.squadrons.find(q => q.ownerId === H[0].id && q.type === 'ft');
+   assert.ok(far, 'host fighters up');
+   const A = hw.arena;
+   let spot = null;
+   for (let x = -A; x <= A && !spot; x += 1000) for (let y = -A; y <= A && !spot; y += 1000) {
+      const p = { x, y };
+      if (hw.ships.every(s => s.side !== 'enemy' || !s.alive || Math.hypot(s.pos.x - x, s.pos.y - y) > AIR.seeByShip + 3000)
+         && hw.squadrons.every(q => q.side !== 'enemy' || Math.hypot(q.pos.x - x, q.pos.y - y) > AIR.seeByPlane + 3000)) spot = p;
+   }
+   assert.ok(spot, 'a quiet corner');
+   let hidden = 0, farSent = 0, held = 0;
+   const keep = () => { far.pos.x = spot.x; far.pos.y = spot.y; far.prev.x = spot.x; far.prev.y = spot.y; };
+   const spy = tp.send;
+   tp.send = (ch, data, dst) => {
+      if (ch === 'snap' && dst === 'anna' && held > 2 && decodeSnap(new DataView(data.buffer, data.byteOffset, data.byteLength), S))
+         for (let i = 0; i < S.nq; i++) if (S.qid[i] === far.id) farSent++;
+      return spy(ch, data, dst);
+   };
+   room.run(20, () => { if (far.n > 0) { keep(); held++; } for (const q of hw.squadrons) if (q.side === 'player' && !q.visE) hidden++; });
+   assert.equal(farSent, 0, 'the hidden flight never went to team 2');
+   // flown over anna's carrier, it is seen and sent
+   const B = H[1];
+   spot = { x: B.pos.x + 2000, y: B.pos.y };
+   assert.ok(room.run(3, () => { if (far.n > 0) keep(); return farSent > 0; }), 'seen over team 2, sent to team 2');
+   tp.send = send;
+   assert.deepEqual(bad, [], 'hostile flights sent unseen');
+   assert.ok(own.anna > 0, 'anna gets her own flights');
+   assert.ok(hidden > 0, 'team 1 flew unseen by team 2 at some point');
+   // anna's replica: her flights are hers ('player'), the host's are the enemy's
+   const aw = ga.world;
+   assert.ok(aw.squadrons.some(q => q.ownerId === H[1].id && q.side === 'player'), 'anna\'s flights are hers on her replica');
+   for (const q of aw.squadrons) { const s = aw.shipById(q.ownerId); if (s) assert.equal(q.side, s.side); }
+   console.log(`[net] pvp carriers: hostile flight entries anna saw ${seenFoe.anna}, own ${own.anna}, team-1 flight-ticks hidden from team 2 ${hidden}`);
 });
