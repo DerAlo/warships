@@ -76,9 +76,14 @@ bands) and `aaFocus` (-1 port, +1 starboard, 0 even).
   (`cam3.override` pose), the air and AA panels, the aim fan/ellipse and plane markers
   (`drawAir` from `hud3d.js`, `drawAirMap` from `minimap3d.js`). `AirModels` (`air3d.js`) draws
   every plane, wreck and falling bomb with three `InstancedMesh`es (3 draw calls in all).
-- **Singleplayer only.** `updateAir` returns early when `world.net` is set, random battles add
-  carriers only when `!world.coop`, and Midway lists `playableShips: ['Enterprise']`. The net
-  snapshot codec does not carry squadrons, bombs or aerial torpedo flags yet.
+- **Multiplayer.** Carriers sail in co-op, historical co-op operations and PvP. The host runs
+  `updateAir`; a client's replica only lays out what the snapshot says (`net/codec.js`
+  `encodeSquads`: one 21-byte entry per flight, the captain's own carrier detail in the own-ship
+  part, `world._sqOwn`), bombs come as `b` event items, aerial torpedoes as `T` with `it[8]` = 1.
+  Orders go through `net/command.js` (`L P H R W B F`, continuous `c.air`); the client does not
+  predict them. PvP: `squadVisibleTo` / `sq.visE`, a flight is sent to the other team only once
+  one of its ships (`AIR.seeByShip`) or planes (`AIR.seeByPlane`) sees it. Host migration
+  carries the flights and the carriers' decks (`net/migrate.js`).
 
 ## Coordinates & scale
 
