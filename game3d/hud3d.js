@@ -4,6 +4,7 @@
 // full-screen tactical map. Pure drawing from the `ui` snapshot main3d.js builds each frame.
 import { paintMap, drawClassIcon, COL } from './minimap3d.js';
 import { drawSubUnder, drawPeriscope } from './subui.js';
+import { drawAir } from './airui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -43,6 +44,8 @@ export class Overlay3D {
       if (ui.mapOpen) { this._tacticalMap(ui); return; }
       if (ui.sub) drawSubUnder(g, ui, this.W, this.H, this.t);
       this._markers(ui);
+      if (ui.air) drawAir(g, ui, this.W, this.H, this.t);   // squadron markers, attack-run aim (airui.js)
+      if (ui.air?.flying) return;                            // squadron view: no ship reticle
       if (ui.torpFan && ui.alive) this._torpFan(ui);
       if (ui.scopeT > 0.01) { if (ui.sub?.peri) drawPeriscope(g, ui, this.W, this.H); else this._binoculars(ui); }
       if (ui.alive) {

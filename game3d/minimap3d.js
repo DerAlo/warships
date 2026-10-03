@@ -6,6 +6,7 @@
 // camera/intel extras, so the renderer's instance stays a harmless no-op either way.
 import { WORLD } from './config.js';
 import { drawSubMap } from './subui.js';
+import { drawAirMap } from './airui.js';
 
 const TAU = Math.PI * 2;
 const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
@@ -259,6 +260,9 @@ function paintMapInner(g, world, x0, y0, size, opts) {
          g.fillText(s.name || s.cls || '', x, y + sz * 0.7);
       }
    }
+
+   // squadrons the team can see (airui.js)
+   if (world.squadrons?.length) drawAirMap(g, world, p, mx, my, big, opts.airCtl ?? null);
 
    // aim point
    if (opts.aimPoint && p?.alive) {
