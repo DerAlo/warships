@@ -1092,6 +1092,21 @@ export class FX {
       this._light(x, y + 4, z, (citadel ? 3e5 : 8e4) * k * k, citadel ? 0.5 : 0.25, 1, 0.55, 0.25);
    }
 
+   // heavy AA burst: a flash, then a dark oily puff that hangs in the air
+   _flak(x, y, z, k = 1) {
+      const G = this.glow, P = this.puff;
+      let p = G.t();
+      p.x = x; p.y = y; p.z = z; p.life = 0.16; p.s0 = 5 * k; p.s1 = 11 * k; p.grow = 3;
+      p.r = 40; p.g = 20; p.b = 6; p.r1 = 6; p.g1 = 2; p.b1 = 0.3; p.fin = 0; p.fout = 0.2; p.shape = 0;
+      G.emit();
+      p = P.t();
+      p.x = x; p.y = y; p.z = z; p.vx = rr(-1.5, 1.5); p.vy = rr(0, 1.5); p.vz = rr(-1.5, 1.5); p.drag = 0.8; p.grav = 0;
+      p.life = rr(3.5, 5.5); p.s0 = 6 * k; p.s1 = 20 * k; p.grow = 3;
+      p.r = 0.035; p.g = 0.033; p.b = 0.03; p.r1 = 0.14; p.g1 = 0.135; p.b1 = 0.13;
+      p.a = 0.85; p.fin = 0.03; p.fout = 0.45; p.shape = 1; p.lit = 0.5; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
+      P.emit();
+   }
+
    _landHit(x, y, z, cal) {
       const P = this.puff;
       const k = clamp(cal / 380, 0.3, 1.5);
@@ -1305,6 +1320,8 @@ export class FX {
          const kind = e.kind;
          // depth charge: a broad white dome and column, no flash above the water
          if (kind === 'depthCharge' && e.pos) { this._splash(e.pos.x, e.pos.y, 560, true); continue; }
+         // AA shell bursts around a squadron (air.js); planeDown wrecks are drawn by air3d.js
+         if (kind === 'flak' && e.pos) { this._flak(e.pos.x, Number(e.alt) || 300, e.pos.y, 1); continue; }
          if ((kind !== 'splash' && kind !== 'explosion' && kind !== 'hit') || !e.pos) continue;
          // match the impact we derived from the vanished projectile (same frame, close by)
          let best = null, bd = 70 * 70;

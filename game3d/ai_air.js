@@ -224,11 +224,25 @@ function carrierLaunches(b, w, d, cx, cy) {
       // easier bots wait longer for a full deck
       if (a[type].hangar < pc.squad && w.rng() < 0.6 * (1 - d.smarts)) continue;
       const tgt = pickStrikeTarget(w, b.side, b.pos, type, false);
-      if (!tgt) return;
+      if (!tgt) { scout(b, w, cx, cy); return; }
       const p = w.canSee(b.side, tgt) ? tgt.pos : b.side === 'player' ? tgt.lastSeen : tgt.pos;
       launchSquadron(w, b, type, { kind: 'strike', targetId: tgt.id, pos: { x: p.x, y: p.y } });
       return;
    }
+}
+
+// Nothing known to strike (the player side plans on sightings only): send one fighter flight out
+// as a scout, toward the map centre or, from there, ahead of the fleet.
+function scout(b, w, cx, cy) {
+   const a = b.air;
+   if (!canLaunch(w, b, 'ft') || a.ft.hangar < 2) return;
+   for (const q of w.squadrons) if (q.ownerId === b.id && q.type === 'ft' && q.state !== 'land') return;
+   let dx = -cx, dy = -cy, l = Math.sqrt(dx * dx + dy * dy);
+   if (l < 3000) { dx = Math.cos(b.heading); dy = Math.sin(b.heading); l = 1; }
+   const r = 11000 + w.rng() * 4000, sp = (w.rng() - 0.5) * 0.9;
+   const ang = Math.atan2(dy, dx) + sp, lim = w.arena - 1500;
+   const pos = { x: clamp(cx + Math.cos(ang) * r, -lim, lim), y: clamp(cy + Math.sin(ang) * r, -lim, lim) };
+   launchSquadron(w, b, 'ft', { kind: 'patrol', pos, scout: true });
 }
 
 // ---------------------------------------------------------------- every bot ship

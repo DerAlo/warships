@@ -924,7 +924,7 @@ const AIR = (tb, db, ft, o = {}) => ({
    tb: { squad: 6, flight: 3, hp: 1250, speed: 150, restock: 42, ...tb, weapon: { speedKn: 40, range: 3200, dmg: 6200, flood: 0.3, ...tb.weapon } },
    db: { squad: 6, flight: 3, hp: 1150, speed: 168, restock: 40, ...db, weapon: { dmg: 4300, pen: 60, fire: 0.3, ap: false, ...db.weapon } },
    ft: { squad: 4, flight: 4, hp: 1400, speed: 195, restock: 34, dps: 115, ammo: 16, ...ft },
-   service: 18, fuel: 170, ...o,
+   service: 18, fuel: 200, ...o,
 });
 const CV_DETECT = (surface) => ({ surface, fire: surface + 2500, smokeFire: 6500, torp: 1300 });
 Object.assign(SHIPS, {
@@ -952,7 +952,7 @@ Object.assign(SHIPS, {
       key: 'Akagi', name: 'Akagi', className: 'Akagi', playable: true, tier: 7,
       desc: 'Umgebauter Schlachtkreuzer und Flaggschiff des Angriffs auf Pearl Harbor: große Hangars, schnelle Torpedoflieger, schwache Flak.',
       sisters: ['Akagi', 'Kaga'],
-      hull: { type: 'CV', L: 261, beam: 31.3, draft: 8.7, deckH: 13, nation: 'jp',
+      hull: { type: 'CV', L: 261, beam: 31.3, draft: 8.7, deckH: 13, nation: 'jp', islandPort: true,
          sup: { x: 20, len: 18, w: 6, h: 18 }, funnels: [{ x: 4, r: 5, h: 10 }] },
       hp: 60000, speedKn: 31, accel: 26, turnR: 960, rudderShift: 13.5,
       detect: CV_DETECT(14200),
@@ -991,7 +991,7 @@ Object.assign(SHIPS, {
    ArkRoyal: ship({
       key: 'ArkRoyal', name: 'HMS Ark Royal', className: 'Ark Royal', playable: true, tier: 6,
       desc: 'Ihre Swordfish trafen die Bismarck am Ruder: langsame Doppeldecker, die sich kaum abschießen lassen, und eine dichte Flak.',
-      hull: { type: 'CV', L: 240, beam: 28.9, draft: 8.5, deckH: 13, nation: 'uk',
+      hull: { type: 'CV', L: 240, beam: 28.9, draft: 8.5, deckH: 13, nation: 'uk', deckLen: 1.0,
          sup: { x: 10, len: 30, w: 7, h: 20 }, funnels: [{ x: 6, r: 5, h: 12 }] },
       hp: 52000, speedKn: 30.75, accel: 24, turnR: 860, rudderShift: 12,
       detect: CV_DETECT(13200),
@@ -1092,7 +1092,7 @@ SHIPS.Hiryu = variant(SHIPS.Shokaku, {
    key: 'Hiryu', name: 'Hiryū', className: 'Hiryū', tier: 7,
    desc: 'Leichter Flottenträger der 2. Trägerdivision.',
    sisters: ['Hiryū', 'Sōryū'],
-   hull: { L: 227.4, beam: 22.3, sup: { x: 2, len: 14, w: 5, h: 16 } },
+   hull: { L: 227.4, beam: 22.3, islandPort: true, sup: { x: 2, len: 14, w: 5, h: 16 } },
    hp: 52000, speedKn: 34.3,
    armor: { belt: 90, deck: 25 },
 });

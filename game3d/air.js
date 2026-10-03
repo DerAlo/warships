@@ -325,7 +325,9 @@ export function updateAir(world, dt) {
    // visibility of squadrons to the player team
    world._airSpotT = (world._airSpotT || 0) - dt;
    if (world._airSpotT <= 0) { world._airSpotT = SPOT_DT; squadVisibility(world); }
-   if (sqs.some(q => q.n <= 0)) world.squadrons = sqs.filter(q => q.n > 0);
+   let dead = false;
+   for (const q of sqs) if (q.n <= 0) { dead = true; break; }
+   if (dead) world.squadrons = sqs.filter(q => q.n > 0);
 }
 
 function stepSquad(world, sq, dt) {
