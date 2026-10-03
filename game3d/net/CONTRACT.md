@@ -62,12 +62,12 @@ When the host starts the match, every peer's lobby code calls `startNetGame(sess
 ```js
 session = {
    transport,                 // Transport, already connected to the room
-   mode: 'coop',              // later 'pvp'
+   mode: 'coop',              // 'coop' | 'pvp'
    mission: 'standard',       // mission id
    difficulty: 'normal',      // 'easy' | 'normal' | 'hard'
    seed: 123456789,           // uint32 chosen by the host
    players: [                 // host first; order = slot order
-      { id: 'peerId', name: 'Kapitän Müller', ship: 'Bismarck' },
+      { id: 'peerId', name: 'Kapitän Müller', ship: 'Bismarck' },   // PvP: plus team: 1 | 2
    ],
    onEnd(result) {},          // called once when the match is over or aborted:
                               // { aborted: bool, reason: string, victory: bool|null }
@@ -103,6 +103,35 @@ Kept out: `training` (exercise for one captain, no allied ship), `laststand` (th
 alone). Today's limits (measured with `coopSlots`): rheinuebung 2 (Bismarck, Prinz Eugen),
 wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 
+## PvP rules (`game3d/net/pvp.js`)
+
+```js
+PVP_MAX = 4, TEAM_MAX = 3          // captains per match / per team
+pvpMissions()                      // the battles PvP offers: standard, domination
+pvpSlots(missionId)                // captains a PvP mission takes (0 = not in PvP)
+```
+
+Two teams of human captains; the free places of both fleets are bots, so the fleets are always
+even (1v1, 2v2, 2v1 plus a bot, ...). Still host-authoritative: the host's team sails as the
+World's side `'player'`, the other team as `'enemy'`; a client of the other team turns its World
+round (`setup.flipSides`) and reads every side on the wire through `codec.localSide(side, flip)`.
+Bots fight at difficulty `normal` whatever the lobby said. The match is over when every captain of
+one team is sunk (or the mission ends otherwise: domination points, time); a captain who leaves
+hands the ship to the AI and the match goes on. Rewards and progression as in co-op, each team
+from its own objectives. Historical operations stay co-op only. Ship choice: the mission's
+`playableShips` (`validClass` / `allowedShips`), as in co-op.
+
+Fairness: each team gets its own `snap` and `evt` stream. A snapshot carries only the ships the
+receiving team may see: its own, the spotted ones of the other team, and wrecks
+(`codec.visibleTo`). Events about a ship the team cannot see are dropped (shells it fires,
+effects on it, spotting events); torpedoes are announced to the other team only once they are
+visible (`T` with the current position and `it[7]` = distance already run), log lines, objective
+texts, kill feed and the end reason are mirrored for team 2. Sonar contacts go to the host's team
+only. Measured (node test, 2v2, 3 clients, 90 s): 11 to 13 kB/s download per client, host upload
+37 kB/s; encoding the snapshots of both teams costs 7 to 8 µs per snapshot tick instead of 4. Over
+the relay (browser test, 2v2, 42 s, ships mostly unspotted): 7.6 kB/s per client, 23 kB/s host
+upload, about 325 bytes per snapshot for either team.
+
 ## Game side behaviour (`game3d/net/game.js`)
 
 - `startNetGame(session)` returns at once; the match starts after the handshake below.
@@ -124,7 +153,7 @@ wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 | k | direction | content |
 |---|---|---|
 | `hello` | client -> host, every 0.3 s until started | `v`, `loadout` (own career modules/skills) |
-| `start` | host -> each client | `v, mission, difficulty, seed, classes, loadouts, names, self` (slot index); `rejoin: 1` when the match is already running |
+| `start` | host -> each client | `v, mission, difficulty, seed, classes, loadouts, names, self` (slot index); `rejoin: 1` when the match is already running; PvP: `teams` = lobby team (1 / 2) per slot, slot 0's team is the World's `'player'` side |
 | `more` | host -> returning client | `n`: `n` items (see `evt`) of the ships that entered the match after the start and still exist |
 | `resync` | host -> returning client, after `more` | `b` first event batch it gets, `t` tick, `kc`, `ro` roster `[id, dmg, kills, alive, hpFrac, escaped]`, `obj`, `zn`, `tp` live torpedoes `[T item, visible]`, `sm` smoke `[x, y, r, maxR, life, side, ownerId]`, `me` own statistics, `tg` own `[telegraph, rudder]` |
 | `refuse` | host -> client | not in the player list, too late, or `why: 'version'` |
@@ -133,7 +162,7 @@ wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 | `st` | host -> all, 4 Hz | tick, time left, kills, score, caps, weather; objectives/zones when changed; sonar contacts; roster damage/kills at 1 Hz |
 | `me` | host -> each client, 1 Hz | that player's statistics |
 | `own` | host -> one client | log line for the own ship only (fire / flooding on board) |
-| `end` | host -> each client | `victory`, `reason`, that player's final statistics and rewards |
+| `end` | host -> each client | `victory`, `reason`, that player's final statistics and rewards; PvP: `pvp: { win, my, pl: [[name, team, dmg, kills, afloat]] }` (winning team, the receiver's team, every captain) |
 
 The host waits up to 8 s for every player's `hello` (missing ones stay bots); a client that sees
 no `start` within 15 s gives up.
@@ -152,7 +181,9 @@ ships, then the receiver's own-ship detail.
 
 `evt` (host -> all, JSON `[batchSeq, tick, items]`), items by first element: `e` world event,
 `s`/`x` shell spawn / removal, `T`/`X` torpedo spawn / removal, `v` torpedo visibility, `f`
-effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal.
+effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal. In PvP every team has its own
+batch numbering and its own filtered items (see "PvP rules"); a `T` that reaches the other team
+late carries the distance already run in `it[7]`.
 
 ## Matchmaking
 
@@ -164,7 +195,14 @@ effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal.
   of the brokers (on request `who`, on change, and every 4 s; an entry not refreshed for 13 s is
   dropped). The knock (password proof) and its answer go to per-peer topics. All of this is
   public, plain JSON and unauthenticated; the lobby treats it as untrusted input.
-- Room state from the host: `{ t: 'state', room, players: [{ id, name, ship, ready, via }] }`;
+- Modes: `coop` (Koop gegen Bots) and `pvp`. The list filter filters by mode.
+- PvP room: every player has `team` (1 / 2); a newcomer joins the smaller team. A player asks for a
+  team with `{ t: 'set', team }`; the host refuses it while `room.teamsLocked`, for a full team
+  (`TEAM_MAX`) or outside the lobby. The host moves players, balances (latest joiners move, the
+  teams end at most one apart) and locks the teams. Starting needs both teams non-empty. The
+  `start` message's players carry `team`.
+- Room state from the host: `{ t: 'state', room, players: [{ id, name, ship, ready, via, team }] }`
+  (`room.teamsLocked` in PvP);
   `via` is how that player is connected to the host (`'direct'`, `'relay'` or `''`), shown in the
   room as "direkt" / "über Relay". A missing direct connection is not an error.
 - **Rejoin.** At the start the host sends every client `{ t: 'seat', seat, token }` (room

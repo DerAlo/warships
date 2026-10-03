@@ -306,14 +306,14 @@ export function makeHost(world, o) {
    function sendEnd(tick, only = null) {
       const res = world.result || { victory: world.phase === 'won', reason: '' };
       const ro = roster(), pv = pvpResult();
-      if (pv && world.result) world.result.pvp = pv;
+      if (pv && world.result) world.result.pvp = { ...pv, my: (o.labels || { player: 1 }).player };
       for (const c of clients.values()) {
          if (c.gone || (only && c !== only)) continue;
          const own = c.team.side === 'player', victory = own ? !!res.victory : !res.victory;
          const objectives = teamObjectives(c.team.side) || [];
          const rw = calcRewards({ victory, stats: c.ship.stats, rewardMult: world.difficulty.rewardMult || 1, alive: c.ship.alive, objectives });
          o.send('sync', { k: 'end', t: tick, victory, reason: own ? res.reason || '' : mirrorReason(res.reason || ''), time: world.time, xp: rw.xp, credits: rw.credits, rewards: rw,
-            stats: c.ship.stats, ro, obj: objectives, ...(pv ? { pvp: pv } : null) }, c.id);
+            stats: c.ship.stats, ro, obj: objectives, ...(pv ? { pvp: { ...pv, my: (o.labels || { player: 1, enemy: 2 })[c.team.side] } } : null) }, c.id);
       }
    }
 

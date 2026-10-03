@@ -28,13 +28,15 @@
 //   (BroadcastChannel, test only) just the knock applies.
 import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots, coopRoles } from './coop.js';
+import { pvpMissions, pvpSlots, TEAM_MAX } from './pvp.js';
 import { MISSIONS, getMission } from '../missions.js';
 import { PLAYABLE, SHIPS } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
 
 export { NET_VERSION };
 export const NAME_KEY = 'warships3d.net.name';
-export const MODES = [['coop', 'Koop gegen Bots', true], ['pvp', 'PvP', false]];
+export const MODES = [['coop', 'Koop gegen Bots', true], ['pvp', 'PvP', true]];
+export const TEAMS = [1, 2];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 const HEARTBEAT_MS = 4000, STALE_MS = 13000, TICK_MS = 1000;
 const KNOCK_MS = 10000, KNOCK_AGAIN_MS = 2000, CONNECT_MS = 15000, SEAT_MS = 30000;
@@ -56,6 +58,10 @@ async function deriveKey(password, roomId) {
 const proofOf = async (key, roomId, peerId) => hex(await crypto.subtle.digest('SHA-256', enc(`knock:${key}:${roomId}:${peerId}`)));
 
 export const coopMissions = () => MISSIONS.filter(m => coopSlots(m.id) > 0);
+// missions of a mode and how many captains one takes (0 = not in that mode)
+export const modeMissions = (mode) => mode === 'pvp' ? pvpMissions() : coopMissions();
+export const modeSlots = (mode, missionId) => mode === 'pvp' ? pvpSlots(missionId) : coopSlots(missionId);
+const MIN_PLAYERS = { coop: 1, pvp: 2 };
 export const allowedShips = (missionId) => getMission(missionId)?.playableShips || PLAYABLE;
 // the player's own choice for a mission: allowed there and unlocked in the local career profile
 export const ownShips = (missionId, profile) => allowedShips(missionId).filter(k => SHIPS[k] && isUnlocked(profile, k));
@@ -183,7 +189,7 @@ export class Lobby {
       this.net = backend; this.selfId = backend.selfId; this.getProfile = getProfile; this.cb = cb;
       this.name = loadName();
       this.games = new Map();       // host peer id -> { entry, seen }
-      this.room = null;             // { id, name, mode, mission, difficulty, max, locked, state, hostId, players: [{ id, name, ship, ready }] }
+      this.room = null;             // { id, name, mode, mission, difficulty, max, locked, teamsLocked, state, hostId, players: [{ id, name, ship, ready, team }] }
       this.chat = [];
       this.session = null;
       this.lt = null; this.rt = null;
@@ -254,18 +260,19 @@ export class Lobby {
    // opts: { name, mode, mission, difficulty, max, password }
    async host(opts) {
       if (this.room) throw new NetError('busy', 'Du bist bereits in einem Spiel.');
-      const mission = coopSlots(opts.mission) > 0 ? opts.mission : coopMissions()[0]?.id;
+      const mode = opts.mode === 'pvp' ? 'pvp' : 'coop';
+      const mission = modeSlots(mode, opts.mission) > 0 ? opts.mission : modeMissions(mode)[0]?.id;
       if (!mission) throw new NetError('nomission', 'Keine Mission für den Mehrspielermodus verfügbar.');
       const id = randId(10), password = String(opts.password || '');
       const key = await deriveKey(password, id);
       this._key = key; this._approved.clear(); this._banned.clear();
       const ship = this._ship = pickShip(mission, this.getProfile(), this._ship);
       this.room = {
-         id, name: cleanName(opts.name, 32) || `Spiel von ${this.name}`, mode: 'coop', mission,
+         id, name: cleanName(opts.name, 32) || `Spiel von ${this.name}`, mode, mission,
          difficulty: DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : 'normal',
-         max: Math.min(coopSlots(mission), Math.max(1, Math.floor(opts.max) || coopSlots(mission))),
-         locked: !!password, state: 'lobby', hostId: this.selfId,
-         players: [{ id: this.selfId, name: this.name, ship, ready: false }],
+         max: Math.min(modeSlots(mode, mission), Math.max(MIN_PLAYERS[mode], Math.floor(opts.max) || modeSlots(mode, mission))),
+         locked: !!password, teamsLocked: false, state: 'lobby', hostId: this.selfId,
+         players: [{ id: this.selfId, name: this.name, ship, ready: false, team: mode === 'pvp' ? 1 : 0 }],
       };
       this.chat = [];
       try {
@@ -300,17 +307,62 @@ export class Lobby {
    configure(o) {
       const r = this.room;
       if (!this.isHost || r.state !== 'lobby') return;
-      if (o.mission && o.mission !== r.mission && coopSlots(o.mission) >= Math.max(1, r.players.length)) {
+      const slots = (id) => modeSlots(r.mode, id);
+      if (o.mission && o.mission !== r.mission && slots(o.mission) >= Math.max(1, r.players.length)) {
          // a prescribed ship is no choice of the player (maybe not even unlocked): everybody picks anew
          const wasFixed = coopRoles(r.mission, r.difficulty).length > 0;
          r.mission = o.mission;
-         r.max = Math.max(r.players.length, Math.min(r.max, coopSlots(r.mission)));
+         r.max = Math.max(r.players.length, Math.min(r.max, slots(r.mission)));
          const allowed = allowedShips(r.mission);
          for (const p of r.players) { p.ready = false; if (wasFixed || !allowed.includes(p.ship)) p.ship = null; }
          this._fixOwnShip();
       }
       if (o.difficulty && DIFFICULTIES.includes(o.difficulty)) r.difficulty = o.difficulty;
-      if (o.max) r.max = Math.max(r.players.length, Math.min(coopSlots(r.mission), Math.floor(o.max) || r.max));
+      if (o.max) r.max = Math.max(r.players.length, MIN_PLAYERS[r.mode] || 1, Math.min(slots(r.mission), Math.floor(o.max) || r.max));
+      this._sync();
+   }
+   // ------------------------------------------------------------ PvP teams
+   teamSize(team) { return this.room ? this.room.players.filter(p => p.team === team).length : 0; }
+   // the team a newcomer joins: the smaller one (team 1 when even)
+   _freeTeam() { return this.teamSize(1) <= this.teamSize(2) ? 1 : 2; }
+   // may player p move to `team`? (the host may also while the teams are locked)
+   _teamOk(p, team, byHost) {
+      const r = this.room;
+      return r.mode === 'pvp' && r.state === 'lobby' && TEAMS.includes(team) && p.team !== team && (byHost || !r.teamsLocked) && this.teamSize(team) < TEAM_MAX;
+   }
+   // the local player asks for a team (host: moves itself)
+   chooseTeam(team) {
+      const r = this.room;
+      if (!r || r.mode !== 'pvp') return;
+      if (this.isHost) this.setTeam(this.selfId, team);
+      else this.rt?.send('room', { t: 'set', team }, r.hostId);
+   }
+   // host: move a player to a team
+   setTeam(id, team) {
+      const p = this.isHost && this.room.players.find(x => x.id === id);
+      if (!p || !this._teamOk(p, team, true)) return;
+      p.team = team; p.ready = p.id === this.selfId ? p.ready : false;
+      this._sync();
+   }
+   // host: even out the teams (the latest to join move), at most one apart
+   balanceTeams() {
+      const r = this.room;
+      if (!this.isHost || r.mode !== 'pvp' || r.state !== 'lobby') return;
+      for (;;) {
+         const a = this.teamSize(1), b = this.teamSize(2);
+         if (Math.abs(a - b) <= 1) break;
+         const from = a > b ? 1 : 2, p = [...r.players].reverse().find(x => x.team === from && x.id !== this.selfId);
+         if (!p) break;
+         p.team = 3 - from; p.ready = false;
+      }
+      this._say(null, 'Teams ausgeglichen.');
+      this._sync();
+   }
+   // host: players may (not) change teams themselves
+   lockTeams(on) {
+      const r = this.room;
+      if (!this.isHost || r.mode !== 'pvp') return;
+      r.teamsLocked = !!on;
       this._sync();
    }
    kick(id) {
@@ -327,13 +379,14 @@ export class Lobby {
    canStart() {
       const r = this.room;
       if (!this.isHost || r.state !== 'lobby') return false;
+      if (r.mode === 'pvp' && (!this.teamSize(1) || !this.teamSize(2))) return false;   // somebody to fight
       return r.players.every(p => p.ship && (p.id === this.selfId || p.ready));
    }
    start() {
       if (!this.canStart()) return false;
       const r = this.room;
       const msg = { t: 'start', mode: r.mode, mission: r.mission, difficulty: r.difficulty, seed: crypto.getRandomValues(new Uint32Array(1))[0],
-         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship })) };
+         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ...(r.mode === 'pvp' ? { team: p.team } : null) })) };
       r.state = 'running';
       for (const p of r.players) p.ready = false;
       this.rt.send('room', msg);
@@ -475,7 +528,8 @@ export class Lobby {
          if (p) { this.rt.send('room', this._state(), from); return; }
          const why = this._banned.has(from) ? 'banned' : !this._approved.has(from) ? 'gone' : r.state !== 'lobby' ? 'running' : r.players.length >= r.max ? 'full' : null;
          if (why) { this.rt.send('room', { t: 'deny', why }, from); return; }
-         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now() };
+         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now(),
+            team: r.mode === 'pvp' ? this._freeTeam() : 0 };
          r.players.push(p);
          this._say(null, `${p.name} ist beigetreten.`);
          this._sync();
@@ -485,6 +539,7 @@ export class Lobby {
          if (typeof m.name === 'string' && cleanName(m.name)) p.name = cleanName(m.name);
          if ('ship' in m) { p.ship = allowedShips(r.mission).includes(m.ship) ? m.ship : null; if (!p.ship) p.ready = false; }
          if ('ready' in m) p.ready = !!m.ready && !!p.ship;
+         if ('team' in m && this._teamOk(p, m.team, false)) p.team = m.team;
          this._sync();
       } else if (m.t === 'bye') {
          this._unseat(from, p);
@@ -501,9 +556,9 @@ export class Lobby {
          const base = cur || pend; if (!base) return;
          this.room = {
             id: base.id, hostId: base.hostId, name: cleanName(m.room.name, 32), mode: String(m.room.mode), mission: String(m.room.mission), difficulty: String(m.room.difficulty),
-            max: Number(m.room.max) || 1, locked: !!m.room.locked, state: m.room.state === 'running' ? 'running' : 'lobby',
+            max: Number(m.room.max) || 1, locked: !!m.room.locked, teamsLocked: !!m.room.teamsLocked, state: m.room.state === 'running' ? 'running' : 'lobby',
             players: m.players.slice(0, 16).map(p => ({ id: String(p.id), name: cleanName(p.name) || '?', ship: SHIPS[p.ship] ? p.ship : null, ready: !!p.ready,
-               via: p.via === 'direct' || p.via === 'relay' ? p.via : '' })),
+               via: p.via === 'direct' || p.via === 'relay' ? p.via : '', team: TEAMS.includes(p.team) ? p.team : 0 })),
          };
          const me = this.me;
          if (me && this._hello) this._hello('ok');
@@ -526,8 +581,8 @@ export class Lobby {
    _forgetSeat() { const s = loadSeat(); if (s && this.room && s.room === this.room.id) saveSeat(null); }
    _state() {
       const r = this.room;
-      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, state: r.state },
-         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ready: p.ready, via: this.via(p.id) })) };
+      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, teamsLocked: !!r.teamsLocked, state: r.state },
+         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ready: p.ready, via: this.via(p.id), team: p.team || 0 })) };
    }
    // how a player is connected to the host: 'direct' | 'relay' | '' (the host itself, or unknown).
    // The host and the player concerned know it first-hand, the others from the room state.
@@ -590,7 +645,7 @@ export class Lobby {
    // ------------------------------------------------------------ match hand-over
    _begin(m) {
       if (this.session) return;
-      const players = m.players.map(p => ({ id: String(p.id), name: String(p.name), ship: String(p.ship) }));
+      const players = m.players.map(p => ({ id: String(p.id), name: String(p.name), ship: String(p.ship), ...(TEAMS.includes(p.team) ? { team: p.team } : null) }));
       let done = false;
       const transport = sessionTransport(this.rt, players.map(p => p.id), () => this.leaveRoom());
       const session = {

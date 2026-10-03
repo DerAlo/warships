@@ -630,17 +630,23 @@ export class Menu3D {
       const allies = roster.filter(s => s.side === 'player'), enemies = roster.filter(s => s.side !== 'player');
       const next = MISSIONS[(MISSIONS.findIndex(x => x.id === opts.mission) + 1) % MISSIONS.length];
       const win = !!res.victory;
+      // PvP: the winning team and every human captain of both teams
+      const pv = res.pvp && Array.isArray(res.pvp.pl) ? res.pvp : null;
+      const pvRow = (r) => `<tr class="${r[4] ? '' : 'dead'} ${r[0] === p?.captain ? 'me' : ''}"><td class="${r[1] === pv.my ? 'm3-ally' : 'm3-enemy'}">T${r[1]}</td><td class="n">${esc(r[0])}</td>
+         <td class="d">${fmtInt(r[2])}</td><td class="d">${r[3]}</td><td class="d">${r[4] ? 'schwimmt' : 'versenkt'}</td></tr>`;
+      const pvBox = pv ? `<div class="m3-h" data-pvp-win="${pv.win}"><span>Kapitäne · Team ${pv.win} gewinnt</span></div>
+         <table data-pvp>${head}${[...pv.pl].sort((x, y) => (x[1] === pv.my ? 0 : 1) - (y[1] === pv.my ? 0 : 1) || y[2] - x[2]).map(pvRow).join('')}</table>` : '';
       this.resRoot.className = 'm3r ' + (win ? 'win' : 'lose');
       this.resRoot.innerHTML = `
          <div class="m3r-head">
             <div class="m3r-title">${win ? 'SIEG' : 'NIEDERLAGE'}</div>
-            <div class="m3r-reason">${esc(res.reason || '')}</div>
+            <div class="m3r-reason">${pv ? `Team ${pv.win} gewinnt${pv.my ? ` · du warst in Team ${pv.my}` : ''} · ` : ''}${esc(res.reason || '')}</div>
             <div class="m3r-meta">${esc(m.name)} · ${esc(p?.name || '')} · ${mmss(res.time ?? world.time)} · ${esc(DIFFS.find(d => d[0] === opts.difficulty)?.[1] || '')}</div>
          </div>
          <div class="m3r-body">
             <div class="m3r-box"><div class="m3-h"><span>Persönliche Leistung</span></div><div class="m3r-grid">${tiles}</div>
                ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${rwBox}</div>
-            <div class="m3r-box"><div class="m3r-teams">
+            <div class="m3r-box">${pvBox}<div class="m3r-teams" ${pv ? 'style="margin-top:14px"' : ''}>
                <div><div class="m3-h"><span class="m3-ally">Eigenes Team</span></div><table>${head}${allies.map(row).join('')}</table></div>
                <div><div class="m3-h"><span class="m3-enemy">Gegner</span></div><table>${head}${enemies.map(row).join('')}</table></div>
             </div>

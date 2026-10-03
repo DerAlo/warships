@@ -613,7 +613,9 @@ test('pvp: the team that loses its captains loses; results per team with every c
    assert.deepEqual(pv.pl.map(p => p[1]), [1, 2, 1, 2]);
    assert.equal(pv.pl[1][2], 1234);
    assert.equal(pv.pl[1][4], 0);
-   assert.deepEqual(hw.result.pvp, pv);
+   assert.equal(pv.my, 2, 'anna sails in team 2');
+   assert.equal(gb.world.result.pvp.my, 1);
+   assert.deepEqual(hw.result.pvp, { ...pv, my: 1 });
    // the sinking reads as a loss for team 2, as a kill for team 1
    assert.ok(ga.world.logLines.some(l => /💀 Verlust: .*Hipper/.test(l.text || l)), 'team 2 log');
    assert.ok(gb.world.logLines.some(l => /🎯 Versenkt: .*Hipper/.test(l.text || l)), 'team 1 log');

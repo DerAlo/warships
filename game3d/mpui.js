@@ -4,7 +4,8 @@
 // network-related — runs in a singleplayer session. `?net=local` uses BroadcastChannel instead
 // of the internet (two pages of one browser, for tests); `?net=relay` never tries a direct
 // WebRTC connection and plays over the relay only.
-import { Lobby, makeBackend, filterGames, coopMissions, ownShips, cleanName, MODES, DIFFICULTIES, NET_VERSION } from './net/lobby.js';
+import { Lobby, makeBackend, filterGames, coopMissions, modeMissions, modeSlots, ownShips, cleanName, MODES, TEAMS, DIFFICULTIES, NET_VERSION } from './net/lobby.js';
+import { TEAM_MAX } from './net/pvp.js';
 import { coopSlots, coopRoles } from './net/coop.js';
 import { getMission } from './missions.js';
 import { SHIP_STATS } from './config.js';
@@ -19,14 +20,17 @@ const TYPE_LABEL = {
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const misName = (id) => getMission(id)?.name || id;
-// <option>s of the co-op missions: free ship choice first, then the historical operations
-// (prescribed ships, see coopRoles), each with its player limit
-const missionOptions = (sel, need = 1) => {
-   const opt = (m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''} ${coopSlots(m.id) < need ? 'disabled' : ''}>${esc(m.name)} — ${esc(TYPE_LABEL[m.type] || m.type)} · bis ${coopSlots(m.id)} Spieler</option>`;
-   const all = coopMissions(), free = all.filter(m => !m.fixedShips), ops = all.filter(m => m.fixedShips);
+// <option>s of the missions of a mode: co-op lists free ship choice first, then the historical
+// operations (prescribed ships, see coopRoles; co-op only), each with its player limit
+const missionOptions = (sel, need = 1, mode = 'coop') => {
+   const n = (m) => modeSlots(mode, m.id);
+   const opt = (m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''} ${n(m) < need ? 'disabled' : ''}>${esc(m.name)} — ${esc(TYPE_LABEL[m.type] || m.type)} · bis ${n(m)} Spieler</option>`;
+   const all = modeMissions(mode), free = all.filter(m => !m.fixedShips), ops = all.filter(m => m.fixedShips);
+   if (mode === 'pvp') return `<optgroup label="PvP – Team gegen Team, freie Plätze mit Bots">${free.map(opt).join('')}</optgroup>`;
    return `<optgroup label="Gefechte – freie Schiffswahl">${free.map(opt).join('')}</optgroup>`
       + (ops.length ? `<optgroup label="Historische Operationen – Schiffe vorgegeben">${ops.map(opt).join('')}</optgroup>` : '');
 };
+const MIN_PLAYERS = { coop: 1, pvp: 2 };
 const LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
 
 const CSS = `
@@ -217,7 +221,8 @@ class MpUI {
       if (this.view === 'list') { main.textContent = 'SPIEL ERSTELLEN'; main.disabled = !lb; main.dataset.kind = 'create'; }
       else if (r && lb.isHost) {
          main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : 'GEFECHT!'; main.disabled = !lb.canStart(); main.dataset.kind = 'start';
-         main.title = main.disabled && r.state === 'lobby' ? 'Alle Mitspieler müssen bereit sein' : '';
+         main.title = !main.disabled || r.state !== 'lobby' ? ''
+            : r.mode === 'pvp' && (!lb.teamSize(1) || !lb.teamSize(2)) ? 'Beide Teams brauchen mindestens einen Kapitän' : 'Alle Mitspieler müssen bereit sein';
       } else if (r && r.state === 'running' && !lb.session && lb.canRejoin({ id: r.id, hostId: r.hostId, state: r.state })) {
          main.textContent = 'ZURÜCK INS GEFECHT'; main.disabled = false; main.dataset.kind = 'rejoin';
       } else if (r) {
@@ -350,7 +355,8 @@ class MpUI {
       // historical operation: the ship of each slot is prescribed (host = flagship)
       const roles = coopRoles(r.mission, r.difficulty);
       const shipLine = (k, role) => { const st = SHIP_STATS[k]; return st ? `${classSvg(st.type, 12)}${esc(role ? role.name : st.name)} · ${esc(st.tierRoman)} ${esc(st.type)}` : ''; };
-      $('[data-players]').innerHTML = r.players.map((p, i) => {
+      const pvp = r.mode === 'pvp';
+      const row = (p, i) => {
          const st = SHIP_STATS[p.ship], role = roles[i];
          const ready = p.id === r.hostId ? ['on', 'HOST'] : p.ready ? ['on', 'BEREIT'] : ['', 'WARTET'];
          const via = lb.via(p.id);
@@ -359,31 +365,56 @@ class MpUI {
          return `<div class="mp-player ${p.id === lb.selfId ? 'me' : ''}" data-id="${esc(p.id)}">
             <span class="n">${esc(p.name)}${p.id === lb.selfId ? '<i>DU</i>' : ''}${route}</span>
             <span class="r ${ready[0]}">${ready[1]}</span>
-            ${host && p.id !== lb.selfId ? `<button class="k" data-kick="${esc(p.id)}" title="Aus dem Spiel entfernen">✕</button>` : ''}
+            ${host && pvp && lobbyState ? `<span style="grid-row:1 / span 2;grid-column:3;display:flex;gap:4px">
+               <button class="k" data-move="${esc(p.id)}" data-team="${3 - p.team}" title="In Team ${3 - p.team} verschieben">⇄</button>
+               ${p.id !== lb.selfId ? `<button class="k" data-kick="${esc(p.id)}" title="Aus dem Spiel entfernen">✕</button>` : ''}</span>`
+            : host && p.id !== lb.selfId ? `<button class="k" data-kick="${esc(p.id)}" title="Aus dem Spiel entfernen">✕</button>` : ''}
             <span class="s" ${role ? `data-role="${esc(role.name)}"` : ''}>${st ? shipLine(p.ship, role) : 'kein Schiff gewählt'}</span></div>`;
-      }).join('') + Array.from({ length: Math.max(0, r.max - r.players.length) }, (_, i) => {
-         const role = roles[r.players.length + i];
-         return `<div class="mp-slot">freier Platz${role ? ` – ${esc(role.name)}` : ''}</div>`;
-      }).join('');
+      };
+      const free = Math.max(0, r.max - r.players.length);
+      if (pvp) {
+         // two teams; the free places of both are taken by bots in the battle
+         const meTeam = lb.me?.team;
+         $('[data-players]').innerHTML = TEAMS.map(t => {
+            const list = r.players.filter(p => p.team === t), n = list.length;
+            const join = lobbyState && meTeam !== t && n < TEAM_MAX && (host || !r.teamsLocked)
+               ? `<button class="mp-btn" data-join-team="${t}">WECHSELN</button>` : '';
+            return `<div class="mp-h" data-team-head="${t}"><span>Team ${t}${meTeam === t ? ' · dein Team' : ''}</span><span>${n} Kapitän${n === 1 ? '' : 'e'} ${join}</span></div>`
+               + list.map(p => row(p, r.players.indexOf(p))).join('');
+         }).join('') + (free ? `<div class="mp-slot">${free} freie${free === 1 ? 'r' : ''} Platz${free === 1 ? '' : 'e'} – Team frei wählbar</div>` : '')
+            + `<div class="mp-empty">Freie Plätze beider Flotten übernehmen Bots, die Teams sind immer gleich stark.${r.teamsLocked ? ' Der Host hat die Teams gesperrt.' : ''}</div>`;
+         this.root.querySelectorAll('[data-join-team]').forEach(b => b.addEventListener('click', () => { this._click(); lb.chooseTeam(Number(b.dataset.joinTeam)); }));
+         this.root.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', () => { this._click(); lb.setTeam(b.dataset.move, Number(b.dataset.team)); }));
+      } else {
+         $('[data-players]').innerHTML = r.players.map(row).join('') + Array.from({ length: free }, (_, i) => {
+            const role = roles[r.players.length + i];
+            return `<div class="mp-slot">freier Platz${role ? ` – ${esc(role.name)}` : ''}</div>`;
+         }).join('');
+      }
       this.root.querySelectorAll('[data-kick]').forEach(b => b.addEventListener('click', () => { this._click(); lb.kick(b.dataset.kick); }));
 
-      const m = getMission(r.mission), slots = coopSlots(r.mission);
+      const m = getMission(r.mission), slots = modeSlots(r.mode, r.mission);
       const edit = host && lobbyState;
       $('[data-settings]').innerHTML = `
          <div class="mp-title">${r.locked ? LOCK + ' ' : ''}${esc(r.name)}</div>
-         <div class="mp-sub">${esc(MODE_LABEL[r.mode] || r.mode)} gegen Bots · ${r.locked ? 'passwortgeschützt' : 'offen für alle'}${lobbyState ? '' : ' · GEFECHT LÄUFT'}</div>
+         <div class="mp-sub">${pvp ? 'PvP · Team gegen Team' : esc(MODE_LABEL[r.mode] || r.mode) + ' gegen Bots'} · ${r.locked ? 'passwortgeschützt' : 'offen für alle'}${lobbyState ? '' : ' · GEFECHT LÄUFT'}</div>
          <div class="mp-set">
-            <b>Mission</b><span>${edit ? `<select data-cfg="mission">${missionOptions(r.mission, r.players.length)}</select>`
+            <b>Mission</b><span>${edit ? `<select data-cfg="mission">${missionOptions(r.mission, r.players.length, r.mode)}</select>`
                : `<span data-mission="${esc(r.mission)}">${esc(m?.name || r.mission)}${m ? ' — ' + esc(TYPE_LABEL[m.type] || m.type) : ''}</span>`}</span>
-            <b>Schwierigkeit</b><span><div class="mp-seg">${DIFFICULTIES.map(d => `<button data-diff="${d}" class="${d === r.difficulty ? 'sel' : ''}" ${edit ? '' : 'disabled'}>${DIFF_LABEL[d]}</button>`).join('')}</div></span>
-            <b>Spieler</b><span>${edit ? `<select data-cfg="max">${Array.from({ length: slots }, (_, i) => i + 1).filter(n => n >= r.players.length).map(n => `<option ${n === r.max ? 'selected' : ''}>${n}</option>`).join('')}</select>` : `max. ${r.max}`}
+            ${pvp ? '<b>Bots</b><span>Normal (beide Flotten gleich stark)</span>'
+               : `<b>Schwierigkeit</b><span><div class="mp-seg">${DIFFICULTIES.map(d => `<button data-diff="${d}" class="${d === r.difficulty ? 'sel' : ''}" ${edit ? '' : 'disabled'}>${DIFF_LABEL[d]}</button>`).join('')}</div></span>`}
+            <b>Spieler</b><span>${edit ? `<select data-cfg="max">${Array.from({ length: slots }, (_, i) => i + 1).filter(n => n >= r.players.length && n >= MIN_PLAYERS[r.mode]).map(n => `<option ${n === r.max ? 'selected' : ''}>${n}</option>`).join('')}</select>` : `max. ${r.max}`}
                ${host ? '' : '<span class="mp-note" style="margin-left:10px">Nur der Host ändert die Einstellungen.</span>'}</span>
+            ${pvp ? `<b>Teams</b><span>${edit ? `<button class="mp-btn" data-balance>AUSGLEICHEN</button> <button class="mp-btn" data-lock-teams>${r.teamsLocked ? 'ENTSPERREN' : 'SPERREN'}</button>`
+               : r.teamsLocked ? 'gesperrt (nur der Host verschiebt)' : 'frei wählbar'}</span>` : ''}
          </div>
          ${m ? `<div class="mp-brief">${esc(m.briefing)}</div>` : ''}`;
       if (edit) {
          $('[data-cfg="mission"]').addEventListener('change', (e) => lb.configure({ mission: e.target.value }));
          $('[data-cfg="max"]').addEventListener('change', (e) => lb.configure({ max: Number(e.target.value) }));
          this.root.querySelectorAll('[data-diff]').forEach(b => b.addEventListener('click', () => { this._click(); lb.configure({ difficulty: b.dataset.diff }); }));
+         $('[data-balance]')?.addEventListener('click', () => { this._click(); lb.balanceTeams(); });
+         $('[data-lock-teams]')?.addEventListener('click', () => { this._click(); lb.lockTeams(!r.teamsLocked); });
       }
 
       if (roles.length) {
@@ -503,7 +534,7 @@ class MpUI {
          <label>Modus</label><div class="mp-seg" data-seg="mode">${MODES.map(([k, l, on]) => `<button data-v="${k}" class="${k === mode ? 'sel' : ''}" ${on ? '' : 'disabled title="bald verfügbar"'}>${esc(l)}${on ? '' : '<small>(bald verfügbar)</small>'}</button>`).join('')}</div>
          <label>Mission</label><select data-f="mission">${missionOptions(startMission)}</select>
          <div class="mp-row2">
-            <div><label>Schwierigkeit</label><div class="mp-seg" data-seg="diff">${DIFFICULTIES.map(d => `<button data-v="${d}" class="${d === diff ? 'sel' : ''}">${DIFF_LABEL[d]}</button>`).join('')}</div></div>
+            <div data-f="diffbox"><label>Schwierigkeit</label><div class="mp-seg" data-seg="diff">${DIFFICULTIES.map(d => `<button data-v="${d}" class="${d === diff ? 'sel' : ''}">${DIFF_LABEL[d]}</button>`).join('')}</div></div>
             <div><label>Max. Spieler</label><select data-f="max"></select></div>
          </div>
          <label>Passwort (optional)</label><input type="password" data-f="password" maxlength="64" autocomplete="new-password" placeholder="leer = offen für alle">
@@ -511,9 +542,21 @@ class MpUI {
          <div class="err"></div>
          <div class="bt"><button class="mp-btn" data-cancel>ABBRECHEN</button><button class="mp-btn pri" data-ok>ERSTELLEN</button></div>`);
       const f = (k) => el.querySelector(`[data-f="${k}"]`);
-      const fillMax = () => { const n = coopSlots(f('mission').value), cur = Number(f('max').value) || n; f('max').innerHTML = Array.from({ length: n }, (_, i) => `<option ${i + 1 === Math.min(cur, n) ? 'selected' : ''}>${i + 1}</option>`).join(''); };
+      const fillMax = () => {
+         const n = modeSlots(mode, f('mission').value), lo = MIN_PLAYERS[mode], cur = Number(f('max').value) || n;
+         f('max').innerHTML = Array.from({ length: n }, (_, i) => i + 1).filter(k => k >= lo).map(k => `<option ${k === Math.max(lo, Math.min(cur, n)) ? 'selected' : ''}>${k}</option>`).join('');
+      };
       fillMax();
       f('mission').addEventListener('change', fillMax);
+      // PvP: its own missions, bots always at normal strength
+      el.querySelectorAll('[data-seg="mode"] button').forEach(b => b.addEventListener('click', () => {
+         if (b.disabled || b.dataset.v === mode) return;
+         mode = b.dataset.v; el.querySelectorAll('[data-seg="mode"] button').forEach(x => x.classList.toggle('sel', x === b));
+         const list = modeMissions(mode), cur = f('mission').value;
+         f('mission').innerHTML = missionOptions(list.some(m => m.id === cur) ? cur : list.find(m => m.id === 'standard')?.id || list[0]?.id, 1, mode);
+         f('diffbox').style.visibility = mode === 'pvp' ? 'hidden' : '';
+         f('max').value = ''; fillMax();
+      }));
       el.querySelectorAll('[data-seg="diff"] button').forEach(b => b.addEventListener('click', () => {
          diff = b.dataset.v; el.querySelectorAll('[data-seg="diff"] button').forEach(x => x.classList.toggle('sel', x === b));
       }));

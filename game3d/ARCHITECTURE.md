@@ -196,17 +196,20 @@ menu.loadout(ship)                   // career snapshot { modules, skills } -> n
 
 ## Multiplayer (`net/`)
 
-Serverless co-op, host-authoritative. The interfaces to matchmaking and the wire protocol are in
+Serverless co-op and PvP, host-authoritative. The interfaces to matchmaking and the wire protocol are in
 `net/CONTRACT.md`; this is how the game side is put together.
 
 ```
 net/coop.js      coopSlots(missionId)            humans a mission takes (0 = not playable in co-op)
+net/pvp.js       pvpSlots, pvpMissions,          PvP limits; mirrored log/event texts for the team
+                 mirrorLog / mirrorEvent         that sails as 'enemy' on the host
 net/setup.js     buildNetWorld(o)                same World on every peer: seed, mission, difficulty,
-                 validClass, cleanLoadout        humans in place of allied bots (slot order = players)
+                 validClass, cleanLoadout        humans in place of bots (slot order = players);
+                 flipSides(w)                    PvP: the other team's client turns its World round
 net/command.js   makeCommand / applyCommand      continuous controls (telegraph, rudder, aim, lock)
                  execAction(ship, world, a)      one-shot actions; used by singleplayer too
 net/codec.js     encodeShips / decodeSnap,       binary ship snapshot; localSide() is the one place
-                 encodeOwn / decodeOwn           that maps host sides to local sides (PvP later)
+                 encodeOwn / decodeOwn           that maps host sides to local sides; visibleTo()
 net/host.js      makeHost(world, o)              applies commands, records events, sends snap/evt/sync
 net/replica.js   makeReplica(world, o)           client: replaces world.update, applies host state
 net/game.js      createNetGame(session, hooks)   handshake, channel wiring, quit/onEnd, byte counters
@@ -251,6 +254,18 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
 - **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
   (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **PvP.** Two teams of captains, the free places of both fleets bots (always even). The host's
+  team is the World's `'player'` side; a client of the other team builds the same World and flips
+  every side (`flipSides`, `localSide(side, flip)`), so renderer, HUD and minimap need nothing
+  special. `makeHost` keeps one stream per team (`teams[]`: own batch numbers, own `objSig`):
+  snapshots carry only `visibleTo(ship, side)`, events are filtered per team (shells of hidden
+  ships, effects on them, torpedoes until spotted: a late `T` with the run distance) and log /
+  event / objective texts are mirrored for the other team (`net/pvp.js`). The replica of a PvP
+  client keeps a ship that left its snapshots as hidden (not spotted) instead of removing it. The
+  match ends when all captains of one side are sunk (`world.net.check` in `state.js`), or by the
+  mission's own end (domination points, time). Results carry `pvp: { win, my, pl }` for the table
+  of all captains. Lobby: team per player, team choice, host moves / balances / locks
+  (`lobby.js`), the room groups players by team (`mpui.js`).
 - **Historical operations in co-op.** Missions with prescribed ships are offered too (picker group
   "Historische Operationen", with the player limit): the host commands the flagship, the others
   the mission's own allied ships, biggest first (`historicShips` in `net/setup.js`; e.g.
