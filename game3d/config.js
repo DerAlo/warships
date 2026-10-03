@@ -74,7 +74,7 @@ function ship(def) {
       m.vRatio = m.vRatio ?? 0.55;
       if (m.ap) { m.ap.ricochet = m.ap.ricochet || [45, 60]; m.ap.fuse = m.ap.fuse ?? WORLD.FUSE_TRAVEL; }
       // legacy aliases (old HUD / main3d read these)
-      m.dmg = (m.he || m.ap).dmg; m.type = m.he ? 'HE' : 'AP'; m.ap_ = m.ap;
+      m.dmg = (m.he || m.ap).dmg; m.type = m.he ? 'HE' : 'AP'; m.ap_ = m.ap || null;
    }
    if (def.sec) {
       const s = def.sec, K = WORLD.DRAG_K;
@@ -897,6 +897,209 @@ Object.assign(SHIPS, {
       ai: { prefRange: [2500, 5000], role: 'ss', value: 32 },
    }),
 });
+
+// ---- aircraft carriers (hull type CV, class "Flugzeugträger") ----
+// A carrier is a normal ship with an `air` block (air.js runs the hangar, the squadrons, the
+// attack runs and the flak). The guns are dual-purpose side mounts on the deck edge: each sweeps
+// its own beam (arcC +-90 deg), so a carrier only ever fights with one side.
+//    tb / db / ft   torpedo bombers / dive bombers / fighters:
+//       hangar  planes aboard at the start (and the restock ceiling)
+//       squad   planes launched as one squadron;  flight  planes per attack run
+//       hp      per plane;  speed  m/s cruise;  restock  s per replacement plane
+//       weapon  tb: aerial torpedo (speedKn, range, dmg, flood);  db: one bomb per plane
+//               (dmg, pen, fire, ap: armour-piercing deck bomb);  ft: dps per plane, ammo s
+//    service   s a landed plane needs before it is ready again
+const CV_CONS = (heal = 0.005) => [
+   C('damageControl', { charges: Infinity, dur: 15, cd: 70 }),
+   C('repair', { charges: 3, dur: 24, cd: 90, heal }),
+];
+// side mount: x from midships, sy = +1 starboard / -1 port
+const DP = (x, sy, guns, beam) => ({ off: { x, y: sy * beam * 0.48 }, guns, arcC: sy * Math.PI / 2, arcW: 80 * DEG });
+const dpGuns = (caliber, layout, beam, o = {}) => ({
+   caliber, turrets: layout.map(([x, sy, g]) => DP(x, sy, g, beam)),
+   traverse: 12, reload: 5, range: 8500, tMax: 5.6, fallMax: 20, dispH: 130, vRatio: 0.55, sigma: 1.6,
+   he: { dmg: 1800, pen: 21, fire: 0.05 }, ...o,
+});
+const AIR = (tb, db, ft, o = {}) => ({
+   tb: { squad: 6, flight: 3, hp: 1250, speed: 150, restock: 42, ...tb, weapon: { speedKn: 40, range: 3200, dmg: 6200, flood: 0.3, ...tb.weapon } },
+   db: { squad: 6, flight: 3, hp: 1150, speed: 168, restock: 40, ...db, weapon: { dmg: 4300, pen: 60, fire: 0.3, ap: false, ...db.weapon } },
+   ft: { squad: 4, flight: 4, hp: 1400, speed: 195, restock: 34, dps: 115, ammo: 16, ...ft },
+   service: 18, fuel: 170, ...o,
+});
+const CV_DETECT = (surface) => ({ surface, fire: surface + 2500, smokeFire: 6500, torp: 1300 });
+Object.assign(SHIPS, {
+   GrafZeppelin: ship({
+      key: 'GrafZeppelin', name: 'Graf Zeppelin', className: 'Graf-Zeppelin-Klasse', playable: true, tier: 7,
+      desc: 'Der nie vollendete deutsche Träger: Katapultstart, Kasemattgeschütze wie ein Kreuzer und Stukas mit panzerbrechenden Bomben.',
+      sisters: ['Graf Zeppelin', 'Peter Strasser'],
+      hull: { type: 'CV', L: 262.5, beam: 31.5, draft: 8.5, deckH: 13, nation: 'de',
+         sup: { x: 13, len: 30, w: 8, h: 22 }, funnels: [{ x: 10, r: 5, h: 14 }] },
+      hp: 58000, speedKn: 33.8, accel: 26, turnR: 920, rudderShift: 13,
+      detect: CV_DETECT(13800),
+      armor: { belt: 100, deck: 40, ends: 30, sup: 16, cit: 60, citLen: 0.5, tds: 0.32, turtle: 0.4 },
+      main: dpGuns(150, [[72, 1, 2], [66, -1, 2], [60, 1, 2], [54, -1, 2], [-54, -1, 2], [-60, 1, 2], [-66, -1, 2], [-72, 1, 2]], 31.5,
+         { reload: 7.5, range: 10500, tMax: 6, traverse: 9, ap: { dmg: 3100, pen: 190 }, he: { dmg: 2000, pen: 38, fire: 0.08 } }),
+      sec: null,
+      aa: { range: 5200, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'Fi 167', hangar: 10, weapon: { dmg: 6000, speedKn: 38 } },
+         { name: 'Ju 87 C', hangar: 13, speed: 160, weapon: { dmg: 4600, pen: 160, fire: 0.1, ap: true } },
+         { name: 'Bf 109 T', hangar: 8, speed: 205, dps: 125 }, { service: 16 }),
+      consumables: CV_CONS(0.005),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
+   }),
+   Akagi: ship({
+      key: 'Akagi', name: 'Akagi', className: 'Akagi', playable: true, tier: 7,
+      desc: 'Umgebauter Schlachtkreuzer und Flaggschiff des Angriffs auf Pearl Harbor: große Hangars, schnelle Torpedoflieger, schwache Flak.',
+      sisters: ['Akagi', 'Kaga'],
+      hull: { type: 'CV', L: 261, beam: 31.3, draft: 8.7, deckH: 13, nation: 'jp',
+         sup: { x: 20, len: 18, w: 6, h: 18 }, funnels: [{ x: 4, r: 5, h: 10 }] },
+      hp: 60000, speedKn: 31, accel: 26, turnR: 960, rudderShift: 13.5,
+      detect: CV_DETECT(14200),
+      armor: { belt: 152, deck: 79, ends: 30, sup: 16, cit: 60, citLen: 0.5, tds: 0.3, turtle: 0.4 },
+      main: dpGuns(200, [[-40, 1, 1], [-47, -1, 1], [-54, 1, 1], [-61, -1, 1], [-68, 1, 1], [-75, -1, 1]], 31.3,
+         { reload: 11, range: 11500, tMax: 7, traverse: 7, ap: { dmg: 4600, pen: 300 }, he: { dmg: 2700, pen: 50, fire: 0.14 } }),
+      sec: null,
+      aa: { range: 4500, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'B5N2', hangar: 14, speed: 156, weapon: { dmg: 6600, speedKn: 42, range: 3500 } },
+         { name: 'D3A1', hangar: 12, speed: 165, weapon: { dmg: 3900, pen: 55, fire: 0.32 } },
+         { name: 'A6M2', hangar: 9, speed: 200, hp: 1250, dps: 125 }),
+      consumables: CV_CONS(0.005),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
+   }),
+   Shokaku: ship({
+      key: 'Shokaku', name: 'Shōkaku', className: 'Shōkaku-Klasse', playable: true, tier: 8,
+      desc: 'Der beste japanische Träger des Krieges: schnell, gut geschützt, mit großer Luftgruppe und weitreichenden Torpedobombern.',
+      sisters: ['Shōkaku', 'Zuikaku'],
+      hull: { type: 'CV', L: 257.5, beam: 29, draft: 8.9, deckH: 13, nation: 'jp',
+         sup: { x: 30, len: 16, w: 6, h: 18 }, funnels: [{ x: 4, r: 5, h: 10 }] },
+      hp: 62000, speedKn: 34.2, accel: 25, turnR: 940, rudderShift: 12.5,
+      detect: CV_DETECT(14000),
+      armor: { belt: 165, deck: 65, ends: 30, sup: 16, cit: 65, citLen: 0.5, tds: 0.34, turtle: 0.4 },
+      main: dpGuns(127, [[80, 1, 2], [75, -1, 2], [70, 1, 2], [65, -1, 2], [-60, 1, 2], [-66, -1, 2], [-72, 1, 2], [-78, -1, 2]], 29,
+         { reload: 4.5, range: 9000, tMax: 5.8, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
+      sec: null,
+      aa: { range: 5200, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'B6N1 Tenzan', hangar: 15, speed: 162, hp: 1450, weapon: { dmg: 7000, speedKn: 44, range: 3800 } },
+         { name: 'D4Y1 Suisei', hangar: 14, speed: 180, hp: 1250, weapon: { dmg: 4400, pen: 60, fire: 0.34 } },
+         { name: 'A6M5', hangar: 10, speed: 210, hp: 1450, dps: 135 }),
+      consumables: CV_CONS(0.0055),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 62 },
+   }),
+   ArkRoyal: ship({
+      key: 'ArkRoyal', name: 'HMS Ark Royal', className: 'Ark Royal', playable: true, tier: 6,
+      desc: 'Ihre Swordfish trafen die Bismarck am Ruder: langsame Doppeldecker, die sich kaum abschießen lassen, und eine dichte Flak.',
+      hull: { type: 'CV', L: 240, beam: 28.9, draft: 8.5, deckH: 13, nation: 'uk',
+         sup: { x: 10, len: 30, w: 7, h: 20 }, funnels: [{ x: 6, r: 5, h: 12 }] },
+      hp: 52000, speedKn: 30.75, accel: 24, turnR: 860, rudderShift: 12,
+      detect: CV_DETECT(13200),
+      armor: { belt: 114, deck: 89, ends: 25, sup: 16, cit: 60, citLen: 0.48, tds: 0.3, turtle: 0.4 },
+      main: dpGuns(114, [[72, 1, 2], [67, -1, 2], [62, 1, 2], [57, -1, 2], [-58, 1, 2], [-63, -1, 2], [-68, 1, 2], [-73, -1, 2]], 28.9,
+         { reload: 4.2, range: 8200, tMax: 5.5, he: { dmg: 1500, pen: 19, fire: 0.05 } }),
+      sec: null,
+      aa: { range: 5000, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'Swordfish', hangar: 15, speed: 122, hp: 1600, weapon: { dmg: 5600, speedKn: 36, range: 2800 } },
+         { name: 'Skua', hangar: 9, speed: 160, hp: 1100, weapon: { dmg: 3600, pen: 50, fire: 0.25 } },
+         { name: 'Fulmar', hangar: 8, speed: 185, hp: 1500, dps: 110 }, { service: 16 }),
+      consumables: CV_CONS(0.005),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 50 },
+   }),
+   Illustrious: ship({
+      key: 'Illustrious', name: 'HMS Illustrious', className: 'Illustrious-Klasse', playable: true, tier: 7,
+      desc: 'Der Träger mit dem gepanzerten Flugdeck: kleinere Luftgruppe, aber zäh wie ein Kreuzer. Ihre Albacores schlugen bei Matapan zu.',
+      sisters: ['HMS Illustrious', 'HMS Victorious', 'HMS Formidable'],
+      hull: { type: 'CV', L: 230, beam: 29.2, draft: 8.6, deckH: 13, nation: 'uk',
+         sup: { x: 10, len: 28, w: 7, h: 20 }, funnels: [{ x: 6, r: 5, h: 12 }] },
+      hp: 58000, speedKn: 30.5, accel: 24, turnR: 860, rudderShift: 12,
+      detect: CV_DETECT(13400),
+      armor: { belt: 114, deck: 76, ends: 25, sup: 30, cit: 76, citLen: 0.52, tds: 0.32, turtle: 0.5 },
+      main: dpGuns(114, [[70, 1, 2], [65, -1, 2], [60, 1, 2], [55, -1, 2], [-56, 1, 2], [-61, -1, 2], [-66, 1, 2], [-71, -1, 2]], 29.2,
+         { reload: 4.2, range: 8200, tMax: 5.5, he: { dmg: 1500, pen: 19, fire: 0.05 } }),
+      sec: null,
+      aa: { range: 5200, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'Albacore', hangar: 12, speed: 135, hp: 1550, weapon: { dmg: 6000, speedKn: 38, range: 3000 } },
+         { name: 'Barracuda', hangar: 10, speed: 165, hp: 1300, weapon: { dmg: 4000, pen: 55, fire: 0.28 } },
+         { name: 'Martlet', hangar: 8, speed: 195, hp: 1450, dps: 120 }),
+      consumables: CV_CONS(0.0055),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
+   }),
+   Enterprise: ship({
+      key: 'Enterprise', name: 'USS Enterprise', className: 'Yorktown-Klasse', playable: true, tier: 7,
+      desc: 'Die „Big E“: bei Midway versenkten ihre Dauntless zwei japanische Träger in Minuten. Starke Sturzkampfbomber, robuste Flak.',
+      sisters: ['USS Enterprise', 'USS Yorktown', 'USS Hornet'],
+      hull: { type: 'CV', L: 251.4, beam: 26.2, draft: 7.9, deckH: 12, nation: 'us',
+         sup: { x: 12, len: 30, w: 7, h: 22 }, funnels: [{ x: 8, r: 5, h: 14 }] },
+      hp: 57000, speedKn: 32.5, accel: 24, turnR: 900, rudderShift: 12.5,
+      detect: CV_DETECT(13600),
+      armor: { belt: 102, deck: 30, ends: 25, sup: 16, cit: 60, citLen: 0.5, tds: 0.3, turtle: 0.4 },
+      main: dpGuns(127, [[72, 1, 1], [67, -1, 1], [62, 1, 1], [57, -1, 1], [-57, -1, 1], [-62, 1, 1], [-67, -1, 1], [-72, 1, 1]], 26.2,
+         { reload: 4, range: 8800, tMax: 5.7, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
+      sec: null,
+      aa: { range: 5200, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'TBD Devastator', hangar: 12, speed: 140, hp: 1300, weapon: { dmg: 5800, speedKn: 35, range: 2800 } },
+         { name: 'SBD Dauntless', hangar: 15, speed: 170, hp: 1300, weapon: { dmg: 4600, pen: 70, fire: 0.33 } },
+         { name: 'F4F Wildcat', hangar: 10, speed: 195, hp: 1500, dps: 120 }),
+      consumables: CV_CONS(0.005),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
+   }),
+   Essex: ship({
+      key: 'Essex', name: 'USS Essex', className: 'Essex-Klasse', playable: true, tier: 8,
+      desc: 'Rückgrat der Fast Carrier Task Force: die größte Luftgruppe, schnelle Hellcats und eine Flak, die den Himmel verdunkelt.',
+      sisters: ['USS Essex', 'USS Intrepid', 'USS Lexington', 'USS Yorktown', 'USS Bunker Hill', 'USS Franklin', 'USS Hornet'],
+      hull: { type: 'CV', L: 266, beam: 28.3, draft: 8.7, deckH: 13, nation: 'us',
+         sup: { x: 12, len: 32, w: 7, h: 24 }, funnels: [{ x: 6, r: 5, h: 15 }] },
+      hp: 66000, speedKn: 33, accel: 25, turnR: 940, rudderShift: 12.5,
+      detect: CV_DETECT(14200),
+      armor: { belt: 102, deck: 64, ends: 25, sup: 16, cit: 64, citLen: 0.5, tds: 0.34, turtle: 0.45 },
+      main: dpGuns(127, [[60, -1, 1], [45, 1, 2], [40, -1, 1], [-25, 1, 2], [-40, -1, 1], [-55, -1, 1]], 28.3,
+         { reload: 3.6, range: 9000, tMax: 5.8, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
+      sec: null,
+      aa: { range: 5800, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'TBF Avenger', hangar: 14, speed: 158, hp: 1700, weapon: { dmg: 6600, speedKn: 40, range: 3400 } },
+         { name: 'SB2C Helldiver', hangar: 15, speed: 178, hp: 1500, weapon: { dmg: 5000, pen: 80, fire: 0.34 } },
+         { name: 'F6F Hellcat', hangar: 12, speed: 215, hp: 1700, dps: 140 }),
+      consumables: CV_CONS(0.0055),
+      ai: { prefRange: [10000, 14000], role: 'cv', value: 64 },
+   }),
+   Bearn: ship({
+      key: 'Bearn', name: 'Béarn', className: 'Béarn', playable: true, tier: 5,
+      desc: 'Frankreichs einziger Träger, auf dem Rumpf eines Normandie-Schlachtschiffs gebaut: langsam, aber mit kräftigen 155-mm-Kasematten.',
+      hull: { type: 'CV', L: 182.6, beam: 27.1, draft: 9.3, deckH: 12, nation: 'fr',
+         sup: { x: 4, len: 26, w: 6, h: 18 }, funnels: [{ x: 2, r: 5, h: 12 }] },
+      hp: 44000, speedKn: 21.5, accel: 22, turnR: 760, rudderShift: 12,
+      detect: CV_DETECT(12600),
+      armor: { belt: 83, deck: 25, ends: 25, sup: 16, cit: 70, citLen: 0.5, tds: 0.3, turtle: 0.4 },
+      main: dpGuns(155, [[50, 1, 1], [44, -1, 1], [38, 1, 1], [32, -1, 1], [-38, 1, 1], [-44, -1, 1], [-50, 1, 1], [-56, -1, 1]], 27.1,
+         { reload: 7, range: 9500, tMax: 6, traverse: 9, ap: { dmg: 3200, pen: 200 }, he: { dmg: 2100, pen: 39, fire: 0.08 } }),
+      sec: null,
+      aa: { range: 4000, reload: 0.5 },
+      torp: null,
+      air: AIR({ name: 'Levasseur PL.7', hangar: 10, speed: 120, hp: 1150, weapon: { dmg: 5400, speedKn: 35, range: 2600 } },
+         { name: 'Vought V-156F', hangar: 10, speed: 150, hp: 1050, weapon: { dmg: 3400, pen: 50, fire: 0.25 } },
+         { name: 'Dewoitine D.373', hangar: 6, speed: 170, hp: 1100, dps: 95 }, { service: 20 }),
+      consumables: CV_CONS(0.005),
+      ai: { prefRange: [9000, 13000], role: 'cv', value: 44 },
+   }),
+});
+// Midway (missions.js): the other two Kido Butai carriers, op-only
+SHIPS.Hiryu = variant(SHIPS.Shokaku, {
+   key: 'Hiryu', name: 'Hiryū', className: 'Hiryū', tier: 7,
+   desc: 'Leichter Flottenträger der 2. Trägerdivision.',
+   sisters: ['Hiryū', 'Sōryū'],
+   hull: { L: 227.4, beam: 22.3, sup: { x: 2, len: 14, w: 5, h: 16 } },
+   hp: 52000, speedKn: 34.3,
+   armor: { belt: 90, deck: 25 },
+});
+SHIPS.Hiryu.main.turrets = [[70, 1, 2], [65, -1, 2], [60, 1, 2], [-55, -1, 2], [-60, 1, 2], [-65, -1, 2]].map(([x, sy, g]) => DP(x, sy, g, 22.3));
+SHIPS.Hiryu.main.guns = 12;
+SHIPS.Hiryu.air.tb.hangar = 9; SHIPS.Hiryu.air.db.hangar = 9; SHIPS.Hiryu.air.ft.hangar = 7;
+export const isCarrier = (cfgOrKey) => (typeof cfgOrKey === 'string' ? SHIPS[cfgOrKey] : cfgOrKey)?.hull?.type === 'CV';
 // Player-selectable classes, in port order (grouped by nation there). The four original ships
 // stay in front; op-only ships (Washington, Duke of York) are not listed.
 export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst', 'Gneisenau',
@@ -906,9 +1109,13 @@ export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst'
    'Richelieu', 'Algerie', 'LeFantasque',
    'Littorio', 'Zara',
    'Kirov', 'Gnevny',
-   'U96', 'U505', 'Triton', 'Gato', 'I19', 'S13'];
+   'U96', 'U505', 'Triton', 'Gato', 'I19', 'S13',
+   'GrafZeppelin', 'ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Akagi', 'Shokaku', 'Bearn'];
 // Submarines for random battles, by bloc (missions.js swaps at most one destroyer slot per side).
 export const BOT_SUBS = { axis: ['U96', 'U505', 'I19'], allies: ['Triton', 'Gato', 'S13'] };
+// Carriers for random battles, by bloc (missions.js swaps at most one light-cruiser slot per side,
+// always on both sides at once; never in co-op).
+export const BOT_CVS = { axis: ['GrafZeppelin', 'Akagi', 'Shokaku'], allies: ['ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Bearn'] };
 
 // Random battles (missions.js spawnTeam): every slot of the standard Axis / Allied line-ups draws
 // from a pool of comparable classes. The pools are index-aligned, so both teams roll the same
@@ -941,6 +1148,29 @@ export const DIFFICULTY = {
 
 export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 60 };
 
+// ---- anti-aircraft fire (air.js) ----
+// Every ship's flak, derived from class, era (tier) and navy unless cfg.aa.dps overrides it.
+// Three nested bands as in the real ships: long-range heavy guns (out to aa.range), mid-range
+// 37-40 mm (60 %), short-range 20 mm (35 %, at most 1.5 km). A plane is shot at by every band it
+// is inside; dps is damage per second spread over the squadron (air.js applies it to the lead
+// plane, so a squadron loses planes one by one).
+const AA_BASE = { BB: 70, CA: 70, CL: 85, DD: 30, CV: 60, SS: 5, TR: 0 };
+const AA_SCALE = 0.42;    // tuned so a lone battleship downs ~1 plane of a 6-plane torpedo strike
+const AA_NATION = { us: 1.3, uk: 1.05, jp: 0.95, de: 1, it: 0.9, fr: 0.9, su: 0.85 };
+export function aaProfile(c) {
+   const range = c.aa?.range || 0;
+   const dps = c.aa?.dps ?? (AA_BASE[c.hull.type] ?? 30) * AA_SCALE * (0.6 + 0.08 * ((c.tier || 6) - 4)) * (AA_NATION[c.hull.nation] ?? 1);
+   if (!range || !(dps > 0)) return { range: 0, dps: 0, bands: [] };
+   return {
+      range, dps,
+      bands: [
+         { r: range, dps: dps * 0.6 },
+         { r: range * 0.6, dps: dps * 0.7 },
+         { r: Math.min(1500, range * 0.35), dps: dps * 0.9 },
+      ],
+   };
+}
+
 // Per-class display stats for the ship picker (menu3d.js). Ratings are 0..100 relative to the
 // playable line-up so the menu can draw bars without knowing the raw numbers.
 // cfgIn: optional modified copy (career modules/skills, progress3d.applyLoadout).
@@ -952,6 +1182,9 @@ export function shipStats(key, cfgIn) {
    for (const tr of m.turrets) layout[tr.guns] = (layout[tr.guns] || 0) + 1;
    const salvo = m.guns * (m.ap || m.he).dmg;
    const rate = (x, lo, hi) => Math.round(Math.max(0, Math.min(1, (x - lo) / (hi - lo))) * 100);
+   const a = c.air, aa = aaProfile(c);
+   // a carrier's punch is its strike: one torpedo run plus one bombing run
+   const strike = a ? a.tb.flight * a.tb.weapon.dmg + a.db.flight * a.db.weapon.dmg : 0;
    return {
       key, name: c.name, className: c.className, type: c.hull.type, typeName: CLASS_NAMES[c.hull.type],
       tier: c.tier || 0, tierRoman: TIER_ROMAN[c.tier] || '', desc: c.desc || '',
@@ -964,13 +1197,17 @@ export function shipStats(key, cfgIn) {
       torp: t ? { tubes: t.tubes, launchers: t.launchers.length, rangeKm: +(t.range / 1000).toFixed(1), speedKn: t.speedKn, dmg: t.dmg, reload: t.reload } : null,
       detectKm: +(c.detect.surface / 1000).toFixed(1), belt: c.armor.belt,
       consumables: c.consumables.map(k => CONSUMABLES[k.key].name),
+      air: a ? Object.fromEntries(['tb', 'db', 'ft'].map(k => [k, { name: a[k].name, hangar: a[k].hangar, squad: a[k].squad, speed: a[k].speed }])) : null,
+      aaKm: +(aa.range / 1000).toFixed(1), aaDps: Math.round(aa.dps),
       ratings: {
          // boats: one deck gun and a pressure hull would rate 0 on the surface-ship scales
-         firepower: Math.max(c.hull.type === 'SS' ? 6 : 0, Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2)),
+         firepower: a ? rate(strike, 5000, 40000)
+            : Math.max(c.hull.type === 'SS' ? 6 : 0, Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2)),
          survivability: c.hull.type === 'SS' ? rate(c.hp, 4000, 60000) : rate(c.hp * (1 + c.armor.belt / 400), 15000, 110000),
          mobility: rate(c.speedKn * 1000 / c.turnR, 25, 60),
          concealment: rate(-c.detect.surface, -16500, -7000),
-         torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 100000) : 0,
+         torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 100000) : a ? rate(a.tb.flight * a.tb.weapon.dmg, 0, 30000) : 0,
+         antiAir: rate(aa.dps, 0, 110),
       },
    };
 }

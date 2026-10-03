@@ -290,7 +290,7 @@ export function resolveTorpedoes(world, dt) {
       for (const o of world.obstacles) {
          if (o.kind === 'island' && obstacleT(o, t.pos) < 1) { t.alive = false; world.addEffect('splash', t.pos, 1.2, 12); break; }
       }
-      if (!t.alive || t.traveled < 120) continue;       // arming distance
+      if (!t.alive || t.traveled < (t.arm ?? 120)) continue;   // arming distance (aerial torpedoes: longer)
       for (const ship of world.ships) {
          if (!ship.alive || ship.side === t.side || ship.depth === 2) continue;   // runs over a deep boat
          const r = ship.cfg.hull.L / 2 + step + 10;

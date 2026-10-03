@@ -184,6 +184,8 @@ export class ChaseCamera {
       cam.position.set(o.px, y, o.pz);
       cam.lookAt(o.tx, o.ty, o.tz);
       cam.updateMatrixWorld();
+      // keep pose current (squadron view: HUD compass, minimap view cone, picking)
+      this._storePose(o.px, y, o.pz, o.tx, o.ty, o.tz, fov, Math.atan2(o.tz - o.pz, o.tx - o.px));
       if (this.sun?.target) { this.sun.target.position.set(o.tx, 0, o.tz); this.sun.target.updateMatrixWorld(); }
    }
 

@@ -8,6 +8,7 @@ import { resolveShells, resolveTorpedoes } from './combat.js';
 import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
 import { updateSubs, hullContact, PERI_PROX } from './submarine.js';
+import { updateAir, airSpots } from './air.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -28,7 +29,7 @@ export function makeStats() {
    return {
       dmg: 0, kills: 0, citadels: 0, pens: 0, overpens: 0, ricochets: 0, shatters: 0, heHits: 0, secHits: 0,
       fires: 0, floods: 0, torpHits: 0, torpsFired: 0, shotsFired: 0, hits: 0, spottingDmg: 0, tanked: 0,
-      potential: 0, healed: 0, caps: 0, spotted: 0,
+      potential: 0, healed: 0, caps: 0, spotted: 0, bombHits: 0, planesDown: 0, planesLost: 0,
    };
 }
 const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
@@ -58,7 +59,10 @@ export class World {
       this.depthCharges = [];   // pooled (alive flag), see submarine.js
       this.smokeClouds = [];
       this.effects = [];
-      this.planes = [];
+      this.planes = [];         // legacy (unused)
+      this.squadrons = [];      // airborne squadrons (air.js)
+      this.bombs = [];          // falling bombs, pooled (alive flag), see air.js
+      this.coop = !!opts.coop;  // co-op world: missions keep carriers out (singleplayer only for now)
       this.events = [];
       this._eventSeq = 0;
       this.obstacles = [];
@@ -241,6 +245,7 @@ export class World {
       if (!st) return;
       // main-battery accuracy = hits / shotsFired: secondaries fire on their own and are counted apart
       if (type === 'torp') st.torpHits++;
+      else if (proj?.kind === 'bomb') st.bombHits++;   // aircraft hits are not gun accuracy
       else if (proj?.kind !== 'sec') st.hits++;   // secondary shatters too
       if (type === 'citadel') st.citadels++;
       else if (type === 'pen') st.pens++;
@@ -315,6 +320,7 @@ export class World {
       updateBots(this, dt);
       for (const s of this.ships) s.update(dt, this);
       updateSubs(this, dt);
+      updateAir(this, dt);
       this._collideShips();
       resolveShells(this, dt);
       resolveTorpedoes(this, dt);
@@ -367,6 +373,8 @@ export class World {
             }
             if (sees) { seen = true; if (O.isPlayer) byPlayer = true; else if (O.human) mask |= 1 << O.slot; }
          }
+         // aircraft overhead (air.js): 2 = a squadron of the player's own carrier
+         if (!byPlayer && this.squadrons.length) { const a = airSpots(this, T); if (a) { seen = true; if (a === 2) byPlayer = true; } }
          const was = T.detected;
          T.detected = seen;
          T.spottedByPlayer = byPlayer;

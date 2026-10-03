@@ -34,6 +34,10 @@ export const TECH_TREE = [
    // U-Boote
    ['U96', 7000, 100000, null], ['U505', 15000, 230000, 'U96'], ['Triton', 7000, 100000, null],
    ['Gato', 15000, 230000, null], ['I19', 11000, 170000, null], ['S13', 11000, 170000, null],
+   // Flugzeugträger
+   ['GrafZeppelin', 16000, 240000, null], ['ArkRoyal', 9000, 130000, null], ['Illustrious', 14000, 210000, 'ArkRoyal'],
+   ['Enterprise', 15000, 220000, null], ['Essex', 27000, 400000, 'Enterprise'],
+   ['Akagi', 15000, 220000, null], ['Shokaku', 22000, 320000, 'Akagi'], ['Bearn', 6000, 90000, null],
 ];
 export const UNLOCK_XP = Object.fromEntries(TECH_TREE.map(r => [r[0], r[1]]));
 export const UNLOCK_CREDITS = Object.fromEntries(TECH_TREE.map(r => [r[0], r[2]]));
