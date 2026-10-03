@@ -6,6 +6,7 @@ import { makeMemoryHub } from '../game3d/net/transport.js';
 import { createNetGame, TEXT } from '../game3d/net/game.js';
 import { coopSlots, coopRoles, coopExcluded } from '../game3d/net/coop.js';
 import { SNAP_EVERY } from '../game3d/net/host.js';
+import { makeSnap, decodeSnap, encodeShips } from '../game3d/net/codec.js';
 
 const DT = 1 / 60;
 
@@ -27,7 +28,7 @@ function makeRoom(o = {}) {
    const players = names.map((id, i) => ({ id, name: 'Kapitän ' + id, ship: ships[i] }));
    const ends = names.map(() => []), lost = names.map(() => []);
    const games = tps.map((transport, i) => createNetGame(
-      { transport, mode: 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: o.players || players, onEnd: (r) => ends[i].push(r) },
+      { transport, mode: o.mode || 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: o.players || players, onEnd: (r) => ends[i].push(r) },
       { now: () => nowMs / 1000, loadout: () => null, measure: true, onLost: (t) => lost[i].push(t) }));
    const room = {
       hub, tps, games, ends, lost, players, frozen: new Set(), hist: new Map(),
@@ -62,7 +63,7 @@ function makeRoom(o = {}) {
          const pl = (o.players || players).map(p => p.id === old ? { ...p, id: newId } : p);
          const transport = hub.join(newId);
          onRejoin(old, newId);
-         const g = createNetGame({ transport, mode: 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: pl, onEnd: (r) => ends[i].push(r) },
+         const g = createNetGame({ transport, mode: o.mode || 'coop', mission: o.mission || 'standard', difficulty: 'normal', seed: o.seed ?? 20260924, players: pl, onEnd: (r) => ends[i].push(r) },
             { now: () => nowMs / 1000, loadout: () => null, measure: true, onLost: (t) => lost[i].push(t), onReady: () => { g.readyCalls = (g.readyCalls || 0) + 1; } });
          games[i] = g; tps[i] = transport; room.players[i] = pl[i];
          return g;
@@ -498,4 +499,159 @@ test('bandwidth: a 7v7 battle stays inside the budget', () => {
    assert.ok(down < 30, 'downstream ' + down.toFixed(1) + ' kB/s');
    assert.ok(up < 5, 'upstream ' + up.toFixed(2) + ' kB/s');
    assert.ok(Math.abs(ai.snapHz - 60 / SNAP_EVERY) < 1.5, 'snapshot rate ' + ai.snapHz);
+});
+
+// ---------------------------------------------------------------- PvP
+// 2v2: host + bert (team 1) against anna + cara (team 2)
+function pvpRoom(o = {}) {
+   const names = ['host', 'anna', 'bert', 'cara'], ships = ['Bismarck', 'Hipper', 'Z23', 'Hipper'], teams = [1, 2, 1, 2];
+   const players = names.map((id, i) => ({ id, name: 'Kapitän ' + id, ship: ships[i], team: teams[i] }));
+   return makeRoom({ names, players, mode: 'pvp', ...o });
+}
+// the ship ids in every snapshot the host sends to `to`
+function snapIds(room, to) {
+   const seen = [], tp = room.tps[0], send = tp.send.bind(tp), S = makeSnap();
+   tp.send = (ch, data, dst) => {
+      if (ch === 'snap' && dst === to && decodeSnap(new DataView(data.buffer, data.byteOffset, data.byteLength), S)) seen.push(Array.from(S.id.subarray(0, S.n)));
+      return send(ch, data, dst);
+   };
+   return seen;
+}
+
+test('pvp: two teams, bots fill both fleets, the other team sees the battle from its side', () => {
+   const room = pvpRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb, gc] = room.games;
+   const hw = gh.world, H = hw.net.humans;
+   assert.equal(hw.net.pvp, true);
+   assert.deepEqual(H.map(h => h.side), ['player', 'enemy', 'player', 'enemy']);
+   const n = (w, side) => w.ships.filter(s => s.side === side && s.type !== 'TR').length;
+   assert.equal(n(hw, 'player'), n(hw, 'enemy'), 'even fleets');
+   assert.equal(hw.difficulty.vsPlayer, 1);
+   // team 2 sails as 'player' in its own world; the host's team is its enemy
+   for (const [g, i] of [[ga, 1], [gc, 3]]) {
+      const w = g.world;
+      assert.equal(w.player.id, H[i].id);
+      assert.equal(w.player.side, 'player');
+      assert.equal(w._byId.get(H[0].id).side, 'enemy');
+      assert.equal(w._byId.get(H[i === 1 ? 3 : 1].id).side, 'player', 'team mate on the own side');
+   }
+   assert.equal(gb.world._byId.get(H[0].id).side, 'player');
+   assert.equal(gb.world._byId.get(H[1].id).side, 'enemy');
+});
+
+test('pvp: a snapshot holds no enemy its team has not spotted', () => {
+   const room = pvpRoom();
+   const toA = snapIds(room, 'anna'), toB = snapIds(room, 'bert');
+   assert.ok(ready(room));
+   const hw = room.games[0].world;
+   let checked = 0, hiddenA = 0, hiddenB = 0;
+   room.run(40, () => {
+      if (hw.tick % 30) return;
+      // the snapshots just sent were encoded at this tick
+      const lastA = toA[toA.length - 1], lastB = toB[toB.length - 1];
+      if (!lastA || !lastB) return;
+      for (const s of hw.ships) {
+         const inA = lastA.includes(s.id), inB = lastB.includes(s.id);
+         if (s.side === 'player') { assert.ok(inB); if (s.alive && !s.detected) { assert.ok(!inA, 'unspotted host-team ship sent to team 2'); hiddenA++; } }
+         else { assert.ok(inA); if (s.alive && !s.detected) { assert.ok(!inB, 'unspotted team-2 ship sent to team 1'); hiddenB++; } }
+      }
+      checked++;
+   });
+   assert.ok(checked > 50, 'checked ' + checked);
+   assert.ok(hiddenA > 0 && hiddenB > 0, 'hidden ships seen: ' + hiddenA + '/' + hiddenB);
+   // the client of team 2 shows an enemy out of sight (one the last second of snapshots left out)
+   // as unspotted, not as sunk
+   const wa = room.games[1].world, recent = toA.slice(-20).flat();
+   let out = 0;
+   for (const s of hw.ships) {
+      if (s.side !== 'player' || !s.alive || recent.includes(s.id)) continue;
+      out++;
+      const r = wa._byId.get(s.id);
+      assert.equal(r.spotted, false);
+      assert.equal(r.alive, true, 'out of sight is not sunk');
+   }
+   assert.ok(out > 0, 'some host-team ship out of sight at the end');
+});
+
+test('pvp: domination score and caps are turned round for team 2', () => {
+   const room = pvpRoom({ mission: 'domination' });
+   assert.ok(ready(room));
+   const hw = room.games[0].world, wa = room.games[1].world;
+   hw.caps[0].owner = 'player'; hw.caps[1].owner = 'enemy';
+   hw.score.player = 450; hw.score.enemy = 380;
+   room.run(1);
+   assert.ok(Math.abs(wa.score.player - hw.score.enemy) < 20 && Math.abs(wa.score.enemy - hw.score.player) < 20, JSON.stringify([wa.score, hw.score]));
+   assert.equal(wa.caps[0].owner, 'enemy');
+   assert.equal(wa.caps[1].owner, 'player');
+   assert.equal(room.games[2].world.caps[0].owner, 'player');
+});
+
+test('pvp: the team that loses its captains loses; results per team with every captain', () => {
+   const room = pvpRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb, gc] = room.games;
+   const hw = gh.world, H = hw.net.humans;
+   room.run(3);
+   H[1].stats.dmg = 1234; H[1].stats.kills = 1;
+   H[1].takeDamage(1e9, H[0], 'pen');
+   room.run(2);
+   assert.equal(hw.phase, 'playing', 'one captain of team 2 is still afloat');
+   H[3].takeDamage(1e9, H[2], 'pen');
+   assert.ok(room.run(30, () => room.games.every(g => g.world.phase !== 'playing')), 'every world ended');
+   assert.equal(hw.phase, 'won');
+   assert.equal(gb.world.result.victory, true);
+   for (const g of [ga, gc]) {
+      assert.equal(g.world.phase, 'lost');
+      assert.equal(g.world.result.victory, false);
+      assert.match(g.world.result.reason, /Ihres Teams/);
+      assert.ok(g.world.result.rewards && g.world.result.xp > 0, 'rewards for the losers too');
+   }
+   const pv = ga.world.result.pvp;
+   assert.equal(pv.win, 1);
+   assert.equal(pv.pl.length, 4);
+   assert.deepEqual(pv.pl.map(p => p[1]), [1, 2, 1, 2]);
+   assert.equal(pv.pl[1][2], 1234);
+   assert.equal(pv.pl[1][4], 0);
+   assert.deepEqual(hw.result.pvp, pv);
+   // the sinking reads as a loss for team 2, as a kill for team 1
+   assert.ok(ga.world.logLines.some(l => /💀 Verlust: .*Hipper/.test(l.text || l)), 'team 2 log');
+   assert.ok(gb.world.logLines.some(l => /🎯 Versenkt: .*Hipper/.test(l.text || l)), 'team 1 log');
+});
+
+test('pvp: a captain who leaves does not end the match; bandwidth and encode cost per team', () => {
+   const room = pvpRoom({ history: false });
+   assert.ok(ready(room));
+   const [gh, ga, gb, gc] = room.games;
+   const hw = gh.world;
+   const cmd = { telegraph: 4, rudder: 0, aim: { x: 0, y: 0 }, lock: null };
+   let k = 0;
+   const drive = (g) => {
+      const p = g.world.player, foe = g.world.ships.find(s => s.side === 'enemy' && s.alive && s.spotted !== false) || p;
+      cmd.aim.x = foe.pos.x + Math.sin(k * 0.05) * 200; cmd.aim.y = foe.pos.y + Math.cos(k * 0.031) * 200;
+      g.control(cmd);
+      if (k % 30 === 0) g.act(['f', cmd.aim.x, cmd.aim.y]);
+   };
+   room.run(60, () => { k++; for (const g of [ga, gb, gc]) drive(g); });
+   for (const g of room.games) g.resetStats();
+   room.run(90, () => { k++; for (const g of [ga, gb, gc]) drive(g); });
+   const hi = gh.info(), down = [ga, gb, gc].map(g => g.info().kBpsIn);
+   // encode cost: one snapshot for everybody (co-op) against one per team
+   const dv = new DataView(new ArrayBuffer(8192));
+   const N = 2000;
+   let t = performance.now();
+   for (let i = 0; i < N; i++) encodeShips(dv, hw);
+   const one = (performance.now() - t) / N;
+   t = performance.now();
+   for (let i = 0; i < N; i++) { encodeShips(dv, hw, 'player'); encodeShips(dv, hw, 'enemy'); }
+   const two = (performance.now() - t) / N;
+   console.log(`[net] pvp 2v2, 3 clients, 90 s: down ${down.map(x => x.toFixed(1)).join(' / ')} kB/s (anna, bert, cara), host out ${hi.kBpsOut.toFixed(1)} kB/s total; ` +
+      `snapshot encode ${(one * 1000).toFixed(1)} µs shared vs ${(two * 1000).toFixed(1)} µs for both teams`);
+   assert.ok(down.every(x => x < 30), 'downstream ' + down);
+   // anna leaves: the AI sails her ship, the match goes on
+   ga.quit();
+   room.run(2);
+   assert.equal(hw.phase, 'playing');
+   assert.equal(hw.net.humans[1].human, false);
+   assert.equal(gc.world.phase, 'playing');
 });

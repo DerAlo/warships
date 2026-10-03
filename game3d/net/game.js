@@ -5,7 +5,9 @@
 //
 // Start handshake (channel `sync`):
 //   client -> host   { k:'hello', v, loadout }          repeated until the start arrives
-//   host -> client   { k:'start', v, mission, difficulty, seed, classes, loadouts, names, self }
+//   host -> client   { k:'start', v, mission, difficulty, seed, classes, loadouts, names, self, teams? }
+// teams (PvP only): the lobby team (1 / 2) of every slot. Slot 0's team sails as the World's side
+// 'player'; a client of the other team turns its World round (setup.flipSides).
 // The host waits a few seconds for every player of the session; whoever does not answer is left
 // out (an allied bot keeps that place). Then both sides build the same World and the host starts
 // sending snapshots.
@@ -15,7 +17,7 @@
 //   host -> client   { ...start, self, rejoin: 1 }, then { k:'more' }* and { k:'resync' }
 // and its ship back from the AI.
 import { NET_VERSION } from './transport.js';
-import { buildNetWorld, validClass, cleanLoadout, MAX_HUMANS } from './setup.js';
+import { buildNetWorld, flipSides, validClass, cleanLoadout, MAX_HUMANS } from './setup.js';
 import { makeHost } from './host.js';
 import { makeReplica } from './replica.js';
 
@@ -47,6 +49,7 @@ export function createNetGame(session, hooks) {
    const isHost = !!tp.isHost;
    const hostId = tp.hostId, selfId = tp.selfId;
    const players = (session.players || []).slice(0, MAX_HUMANS);
+   const pvp = session.mode === 'pvp';
    const now = hooks.now;
    const t0 = now();
    const stat = { out: 0, in: 0, snapIn: 0, snapOut: 0, since: t0 };
@@ -79,12 +82,15 @@ export function createNetGame(session, hooks) {
          list.push(p); lo.push(hello.get(p.id));
       }
       const start = {
-         k: 'start', v: NET_VERSION, mission, difficulty: session.difficulty, seed: session.seed >>> 0,
+         k: 'start', v: NET_VERSION, mission, difficulty: pvp ? 'normal' : session.difficulty, seed: session.seed >>> 0,
          classes: list.map(p => validClass(mission, p.ship)), loadouts: lo, names: list.map(p => String(p.name || '').slice(0, 32)), self: 0,
       };
+      // PvP: both fleets at the same strength, whatever the lobby's difficulty said
+      if (pvp) start.teams = list.map(p => (p.team | 0) || 1);
       try { world = buildNetWorld(start); } catch (e) { console.error('[net] world build failed', e); send('sync', { k: 'abort' }); lose(TEXT.build); return; }
       const humans = world.net.humans;
-      host = makeHost(world, { send, clients: list.slice(1).map((p, i) => ({ id: p.id, name: p.name, ship: humans[i + 1] })) });
+      const labels = pvp ? { player: start.teams[0], enemy: 3 - start.teams[0] } : null;
+      host = makeHost(world, { send, pvp, labels, clients: list.slice(1).map((p, i) => ({ id: p.id, name: p.name, ship: humans[i + 1] })) });
       startMsg = start;
       for (let i = 1; i < list.length; i++) { slots.set(list[i].id, i); send('sync', { ...start, self: i }, list[i].id); }
       for (const p of players) if (p.id !== selfId && !list.includes(p)) send('sync', { k: 'refuse' }, p.id);
@@ -112,11 +118,14 @@ export function createNetGame(session, hooks) {
    // ---------------------------------------------------------------- client
    function clientStart(m) {
       if (m.v !== NET_VERSION) { lose(TEXT.version); return; }
+      const teams = Array.isArray(m.teams) && m.teams.length === (m.classes || []).length ? m.teams : null;
+      const flip = !!teams && teams[m.self | 0] !== teams[0];
       try {
-         world = buildNetWorld({ mission: String(m.mission), difficulty: String(m.difficulty), seed: m.seed >>> 0, classes: m.classes, loadouts: m.loadouts, names: m.names, self: m.self | 0 });
+         world = buildNetWorld({ mission: String(m.mission), difficulty: String(m.difficulty), seed: m.seed >>> 0, classes: m.classes, loadouts: m.loadouts, names: m.names, self: m.self | 0, teams });
+         if (flip) flipSides(world);
       } catch (e) { console.error('[net] world build failed', e); lose(TEXT.build); return; }
       replica = makeReplica(world, {
-         send: (channel, data) => send(channel, data, hostId), now,
+         send: (channel, data) => send(channel, data, hostId), now, pvp: !!teams, flip,
          onLost: (why) => lose(why === 'timeout' ? TEXT.hostLost : TEXT.hostLeft),
          // back in a running match: show it once the world has caught up (own telegraph included)
          onResync: () => { if (waitResync) { waitResync = 0; hooks.onReady?.(world); } },
