@@ -5,11 +5,14 @@
 // The replica already knows ships, smoke, score, caps, objectives, timer and weather from the
 // normal stream; this message adds what a client never sees: ship internals (reloads, fires,
 // floods, modules, consumables, damage statistics), bot AI state, the mission script's state,
-// torpedoes, the full weather front and every ship out of the team's sight (PvP).
+// torpedoes, the full weather front and every ship out of the team's sight (PvP), the carriers'
+// hangars and every squadron in the air (orders, fuel, AI; PvP also the ones out of sight).
+// Lost on the way: shells and bombs in the air, flak bursts.
 // No DOM in here.
 import { makeStats } from '../state.js';
 import { WORLD } from '../config.js';
-import { localSide } from './codec.js';
+import { AIR, AIR_TYPES, releaseSquadron, sqIdFloor } from '../air.js';
+import { localSide, SQ_STATES } from './codec.js';
 
 export const MIG_EVERY = 60;         // sim steps between two full states (1 s)
 const MAX_DEPTH = 4, MAX_LIST = 64;
@@ -19,7 +22,7 @@ const SIDE_CODE = { player: 1, enemy: 2 };
 const SHIP_KEYS = ['pos', 'heading', 'speed', 'omega', 'telegraph', 'rudderCmd', 'rudder', 'heel', 'grounded', 'maxHP', 'hp', 'sinkT',
    'dmgMult', 'healPool', 'ammo', 'lockTarget', 'secTarget', 'secLostT', 'lastMainFire', 'lastTorpFire', 'lastHitT', 'lastAttackerId',
    '_smokeT', 'ramT', 'pingT', 'dmgDealt', 'dmgTaken', 'kills', 'shotsFired', 'hits', 'human', 'maxSpeedKn', 'fires', 'floods',
-   'modules', 'depth', 'depthF', 'depthTarget', 'depthM', 'battery', 'batteryLock', 'asw', 'sonarSeen', 'sec', 'ai'];
+   'modules', 'depth', 'depthF', 'depthTarget', 'depthM', 'battery', 'batteryLock', 'asw', 'sonarSeen', 'sec', 'ai', 'air', 'aaFocus'];
 const SCRIPT_SKIP = new Set(['def', 'timers', 'onSink']);
 // what the newest snapshot knows better than the full state (a ship it carried)
 const FRESH = new Set(['pos', 'heading', 'speed', 'omega', 'rudder', 'heel', 'hp', 'sinkT', 'depthF', 'depth', 'telegraph', 'rudderCmd', 'grounded']);
@@ -104,9 +107,79 @@ export function packWorld(world, o = {}) {
       tn: S ? S.timers.map(x => r3(x.t)) : [],
       fr: env.front ? pk(env.front, 3) : null,
       tp: world.torpedoes.filter(t => t.alive).map(t => [t.id, t.ownerId, Math.round(t.pos.x * 10) / 10, Math.round(t.pos.y * 10) / 10, r3(t.heading),
-         Math.round(t.traveled), Math.round(t.range), Math.round(t.dmg), r3(t.flood || 0), SIDE_CODE[t.side] || 0, r3(t.detect || 0)]),
+         Math.round(t.traveled), Math.round(t.range), Math.round(t.dmg), r3(t.flood || 0), SIDE_CODE[t.side] || 0, r3(t.detect || 0), t.air ? 1 : 0]),
+      sq: world.squadrons.filter(q => q.n > 0 && q.state !== 'land').map(q => packSquad(q, pk)),
       pl: o.pl || [],
    };
+}
+
+// a squadron: [id, ownerId, type, state, n, n0, armed, hp, x, y, alt, altT, heading, want, speed,
+// t, fuel, ammo, boost, patrolT, ditchT, human, order, center, foeId, ai]
+function packSquad(q, pk) {
+   return [q.id, q.ownerId, AIR_TYPES.indexOf(q.type), SQ_STATES.indexOf(q.state), q.n, q.n0, q.armed, rn(q.hp),
+      rn(q.pos.x), rn(q.pos.y), rn(q.alt), rn(q.altT), r3(q.heading), r3(q.want), rn(q.speed),
+      r3(q.t), rn(q.fuel), rn(q.ammo), r3(q.boost), rn(q.patrolT), rn(q.ditchT), q.human ? 1 : 0,
+      pk(q.order, 2) ?? null, q.center ? [rn(q.center.x), rn(q.center.y)] : null, q.foeId ?? null, pk(q.ai, 2) ?? null];
+}
+
+// The squadrons as the successor runs them: from the full state, moved to where the replica saw
+// them last (younger); flights launched after the full state from the replica alone (orders
+// restarted). Flights of a captain who is gone go back to their pilots.
+function restoreSquads(world, m, o, dtm, uk) {
+   const byId = world._byId, seen = new Map();
+   for (const q of world.squadrons) seen.set(q.id, q);
+   const out = [];
+   let maxId = 0;
+   for (const r of Array.isArray(m.sq) ? m.sq : []) {
+      if (!Array.isArray(r) || r.length < 26) continue;
+      const owner = byId.get(r[1]), type = AIR_TYPES[r[2]];
+      const cfg = owner && owner.cfg.air && owner.cfg.air[type];
+      if (!cfg) continue;
+      const v = seen.get(r[0]);
+      seen.delete(r[0]);
+      const h = r[12];
+      const q = {
+         id: r[0], side: owner.side, ownerId: owner.id, type, cfg, n: r[4], n0: r[5], armed: r[6], hp: r[7],
+         pos: { x: r[8] + Math.cos(h) * r[14] * dtm, y: r[9] + Math.sin(h) * r[14] * dtm }, alt: r[10], altT: r[11],
+         prev: { x: 0, y: 0, alt: 0, h: 0 }, heading: h, want: r[13], speed: r[14], throttle: 0, boost: r[18],
+         state: SQ_STATES[r[3]] || 'fly', t: r[15], fuel: r[16] - dtm, order: null, human: !!r[21],
+         aiming: false, aimT: 0, aimPt: { x: 0, y: 0 }, spread: AIR.tbSpread[0], ellipse: AIR.dbEllipse[0],
+         ammo: r[17], foeId: r[24], patrolT: r[19], center: Array.isArray(r[23]) ? { x: r[23][0], y: r[23][1] } : null,
+         visible: owner.side === 'player', visE: owner.side === 'enemy', seenT: 0, flakT: 0, underFire: 0, ditchT: r[20],
+         ai: Object.assign({ t: 0, phase: 0, errL: 0, errP: { x: 0, y: 0 } }, r[25] && typeof r[25] === 'object' ? uk(r[25]) : {}),
+      };
+      if (r[22] && typeof r[22] === 'object') {
+         q.order = uk(r[22]);
+         if (q.order.kind === 'patrol' && q.center) q.order.pos = q.center;
+      }
+      // the replica saw it later: its position, heading, planes and state count
+      if (v) {
+         q.pos.x = v.pos.x; q.pos.y = v.pos.y; q.alt = v.alt; q.heading = v.heading; q.speed = v.speed;
+         q.n = Math.min(q.n, v.n); q.armed = Math.min(q.armed, v.armed);
+         if (v.state === 'return' && q.state !== 'return') q.state = 'return';
+      }
+      out.push(q);
+   }
+   // launched after the full state: the replica's copy, handed back to its pilots below
+   for (const v of seen.values()) {
+      if (v.n <= 0 || !byId.get(v.ownerId)) continue;
+      v.human = v.state !== 'return'; v.order = null; v.visible = v.side === 'player'; v.visE = v.side === 'enemy';
+      v.net = undefined;
+      out.push(v);
+   }
+   for (const q of out) {
+      q.prev.x = q.pos.x; q.prev.y = q.pos.y; q.prev.alt = q.alt; q.prev.h = q.heading;
+      if (q.id > maxId) maxId = q.id;
+   }
+   world.squadrons = out;
+   world.hasAir = world.hasAir || out.length > 0;
+   for (const b of world.bombs) b.alive = false;
+   sqIdFloor(maxId);
+   // a flight whose captain is not at the controls any more (the old host, a launch the full state
+   // missed) flies on under its pilots: bombers look for a target, fighters patrol
+   const at = (s) => !!s && (s === o.me || s.human);
+   for (const q of out) if (q.human && !at(byId.get(q.ownerId))) releaseSquadron(world, q);
+   return out.length;
 }
 
 // The successor takes over. Its World is a replica brought up to date with every event and the
@@ -145,6 +218,7 @@ export function restoreWorld(world, m, o) {
          }
          else if (k === 'sec') { if (s.sec && v) Object.assign(s.sec, ukPlain(v)); }
          else if (k === 'asw') { if (s.asw && v) Object.assign(s.asw, v); }
+         else if (k === 'air') { if (s.air && v && typeof v === 'object') restoreAir(s.air, v); }
          else s[k] = ukPlain(v);
       }
       // a ship out of the team's sight ran on since the full state: dead reckoning
@@ -192,8 +266,9 @@ export function restoreWorld(world, m, o) {
       const side = owner ? owner.side : localSide(SIDES[r[9]] || 'enemy', flip);
       const t = { id: r[0], pos: { x: r[2], y: r[3] }, start: { x: r[2], y: r[3] }, heading: r[4], dir: r[4], speed: 0, speedKn: 0, side, owner: side, ownerId: r[1],
          dmg: r[7], flood: r[8], range: r[6], detect: r[10], traveled: r[5], age: 0, alive: true, spotted: side === 'player' };
-      const tc = owner && owner.cfg.torp;
+      const tc = torpCfg(owner, !!r[11]);
       t.speed = tc ? tc.speed : 0; t.speedKn = tc ? tc.speedKn : 0;
+      if (r[11]) { t.air = true; t.arm = AIR.tbArm; }
       const q = mine.get(t.id);
       mine.delete(t.id);
       const run = q ? q.traveled : t.traveled + t.speed * dtm;
@@ -204,18 +279,44 @@ export function restoreWorld(world, m, o) {
    }
    // launched after the full state: built from what the replica knows and the launcher's data
    for (const q of mine.values()) {
-      const owner = byId.get(q.ownerId), tc = owner && owner.cfg.torp;
+      const owner = byId.get(q.ownerId), tc = torpCfg(owner, !!q.air);
       if (!tc) continue;
-      torps.push({ id: q.id, pos: { x: q.pos.x, y: q.pos.y }, start: { x: q.pos.x, y: q.pos.y }, heading: q.heading, dir: q.heading, speed: tc.speed, speedKn: tc.speedKn,
+      const t = { id: q.id, pos: { x: q.pos.x, y: q.pos.y }, start: { x: q.pos.x, y: q.pos.y }, heading: q.heading, dir: q.heading, speed: tc.speed, speedKn: tc.speedKn,
          side: owner.side, owner: owner.side, ownerId: owner.id, dmg: tc.dmg * owner.dmgMult, flood: tc.flood, range: q.range, detect: tc.detect,
-         traveled: q.traveled, age: 0, alive: true, spotted: owner.side === 'player' });
+         traveled: q.traveled, age: 0, alive: true, spotted: owner.side === 'player' };
+      if (q.air) { t.air = true; t.arm = AIR.tbArm; }
+      torps.push(t);
    }
    world.torpedoes = torps;
+   const squads = restoreSquads(world, m, o, dtm, uk);
    const shells = world.shells.length;
    world.shells = [];
    if (world.depthCharges) for (const d of world.depthCharges) d.alive = false;
    world._nextId = Math.max(m.nid || 1, 1 + Math.max(0, ...world.roster.map(s => s.id))) + 1000;
    const me = o.me;
    if (me) { me.human = false; me.isPlayer = true; }
-   return { shells, timers: timersLost };
+   return { shells, timers: timersLost, squads };
+}
+
+// a ship's torpedoes, or (air) its torpedo bombers' (air.dropWeapons)
+function torpCfg(owner, air) {
+   if (!owner) return null;
+   if (!air) return owner.cfg.torp || null;
+   const w = owner.cfg.air?.tb?.weapon;
+   return w ? { speed: w.speedKn * 2.6, speedKn: w.speedKn, range: w.range, dmg: w.dmg, flood: w.flood, detect: AIR.tbDetect } : null;
+}
+
+// a carrier's hangars, deck and restock timers
+function restoreAir(a, v) {
+   if (typeof v.deckT === 'number') a.deckT = v.deckT;
+   if (typeof v.strikeT === 'number') a.strikeT = v.strikeT;
+   if (AIR_TYPES.includes(v.sel)) a.sel = v.sel;
+   for (const t of AIR_TYPES) {
+      const h = a[t], x = v[t];
+      if (!x || typeof x !== 'object') continue;
+      if (typeof x.hangar === 'number') h.hangar = x.hangar;
+      if (typeof x.max === 'number') h.max = x.max;
+      if (typeof x.restockT === 'number') h.restockT = x.restockT;
+      if (Array.isArray(x.service)) h.service = x.service.filter(e => e && typeof e.n === 'number').map(e => ({ n: e.n, t: e.t || 0 }));
+   }
 }

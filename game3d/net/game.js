@@ -29,6 +29,7 @@ import { buildNetWorld, flipSides, validClass, cleanLoadout, MAX_HUMANS } from '
 import { makeHost } from './host.js';
 import { makeReplica } from './replica.js';
 import { restoreWorld } from './migrate.js';
+import { releaseSquadron } from '../air.js';
 
 const HELLO_EVERY = 0.3;            // s between a client's hellos
 const HELLO_WAIT = 8;               // s the host waits for the players
@@ -241,6 +242,8 @@ export function createNetGame(session, hooks) {
             if (off) gone.add(id);
             clients.push({ id, name: nameOf(id) || name, ship, gone: off });
          }
+         // flights of captains who are gone fly on under their pilots
+         for (const q of world.squadrons) { const s = q.human && world.shipById(q.ownerId); if (s && s !== world.player && !s.human) releaseSquadron(world, q); }
          startMsg = { ...startIn, self: 0, rejoin: undefined, ht: myTeam || undefined };
          const labels = pvp ? { player: myTeam, enemy: 3 - myTeam } : null;
          host = makeHost(world, { send, pvp, labels, clients, self: { id: selfId, slot: mySlot }, spawned: h.arrived, adopt: true,

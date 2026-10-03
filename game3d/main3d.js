@@ -588,7 +588,7 @@ function frameInput(dt) {
 
    subui.frame(p, world, cam3, dt);
    // carrier keys (1-3 plane type, E launch / take over, 4 AA focus); true = squadron view
-   if (airui.input(inp, p, world, dt, { mapOpen: ctl.mapOpen, sens: settings.sens, net: !!net })) { cam3.bino = false; return; }
+   if (airui.input(inp, p, world, dt, { mapOpen: ctl.mapOpen, sens: settings.sens, client: !!net && !net.isHost, act })) { cam3.bino = false; return; }
    if (!p || !p.alive) { cam3.bino = false; return; }
 
    // --- engine telegraph / rudder: persistent steps, hold repeats
@@ -835,7 +835,7 @@ function applyControls(dt) {
       p.aim = { x: bx / bl, y: by / bl };
       if ('lockTarget' in p) p.lockTarget = ctl.lockId;
    }
-   if (net) net.control(cmd);
+   if (net) { cmd.air = airui.netCtl; net.control(cmd); }   // air: the flight a net client flies (airui.js)
    turretCache = computeTurrets(p);
 
    if (airui.flying) return;            // squadron view: the ship holds fire
