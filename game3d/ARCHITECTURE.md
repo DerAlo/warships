@@ -261,9 +261,23 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   measured). Measured from one machine in 2026-10: relay 20 snapshots/s, round trip ~25 ms,
   largest gap ~150 ms; on the rate-limited broker alone 7.5 snapshots/s and ~175 ms. The
   interpolation delay does not look at the snapshot interval yet, so that last case stutters.
+  Everything sent in one turn leaves as one publish per peer and broker (microtask flush). On a
+  rate-limited broker one publish on the room topic carries a sealed bundle for every waiting peer
+  (`publishMulti`), so 3 clients do not split its ~8 messages/s three ways.
+- **3 and 4 players** (`tests/playwright3d.mp.multi.mjs`, one Chromium per player, real
+  brokers, one machine, 2026-10, measured): 4 players relay only: host upload 63 kB/s
+  (~0.5 Mbit/s, game data 33 kB/s; the rest are the copies to the other brokers and the
+  encryption), ~100 publishes/s (HiveMQ 63, mosquitto 28, emqx 8, no broker dropped or backed
+  up), every client 20 snapshots/s, largest gap 100–250 ms, 22 kB/s down. 3 players relay only:
+  42 kB/s up, every client 20/s. Hybrid (3 and 4 players): every client went direct, host upload
+  24 kB/s (3) / 36 kB/s (4), 20/s each. Rate-limited broker alone (`ONLY=emqx`), 4 players:
+  7.5 snapshots/s per client, largest gap ~220 ms (2.5/s and 1.2 s gaps before the shared
+  publish). The room lists 4 players without clipping at 1280x720.
 - **Tests.** `tests/net3d.test.mjs` (node, virtual clock over `makeMemoryHub`, prints the measured
   bandwidth), `tests/playwright3d.net.mjs` (two pages over `makeLocalTransport`; set
   `window.__netMeasure = true` before the start to count bytes), `tests/relay3d.test.mjs` (node,
   the room transport over a fake broker network with loss, reordering and a rate limit),
   `tests/playwright3d.mp.relay.mjs` (needs internet: two separate Chromium instances over the
-  real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality).
+  real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality),
+  `tests/playwright3d.mp.multi.mjs` (the same with `PLAYERS=3|4`, `MODE=hybrid|relayonly|blocked`,
+  `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps).

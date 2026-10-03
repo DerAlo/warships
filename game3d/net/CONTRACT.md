@@ -42,7 +42,12 @@ What the real transport guarantees, and what not:
 - Brokers are QoS 0 and public: the transport publishes to all connected brokers, deduplicates,
   asks again for missing reliable messages, and paces brokers that limit the message rate. With
   only a rate-limited broker left (`gap` in `mqtt.js`, today broker.emqx.io: 10 messages/s) the
-  client receives about 7.5 snapshots/s instead of 20.
+  client receives about 7.5 snapshots/s instead of 20 — every client, also with 3 clients: on
+  such a broker one publish on the room topic carries a bundle for each waiting peer, each sealed
+  for its receiver as below (`[0][sender id length][sender id][count]` then per receiver
+  `[id length][id][length u32][iv][ciphertext]`).
+- Measured load with 4 players over the relay only: host upload ~63 kB/s, ~100 publishes/s
+  spread over the brokers; each client ~22 kB/s down (see ARCHITECTURE.md, "3 and 4 players").
 - Relayed traffic is AES-GCM encrypted with a key derived from the room password. A game
   without password uses a key derived from the public room id: obscurity, not secrecy.
 - Extras beyond the interface (optional, absent on the test transports): `link(id)` ->

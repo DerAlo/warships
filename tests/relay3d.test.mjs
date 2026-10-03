@@ -146,6 +146,33 @@ test('a rate-limited broker alone still carries the room (bundling, pacing)', as
    a.leave(); b.leave();
 });
 
+test('a rate-limited broker alone serves three clients with one publish for all of them', async () => {
+   const net = makeNet([{ delay: 20, gap: 130, limit: 10 }]);
+   const a = await makeRoomTransport({ bus: net.bus(), selfId: 'hostA', room: 'r1', hostId: 'hostA', key: 'k' });
+   const ids = ['c1', 'c2', 'c3'], cl = [], evt = ids.map(() => []), snap = ids.map(() => []);
+   for (let i = 0; i < ids.length; i++) {
+      const c = await makeRoomTransport({ bus: net.bus(), selfId: ids[i], room: 'r1', hostId: 'hostA', key: 'k' });
+      c.on('evt', (d) => evt[i].push(d.n)); c.on('snap', (d) => snap[i].push(d.n));
+      cl.push(c);
+   }
+   await until(() => a.peers().length === 3 && cl.every(c => c.peers().includes('hostA')), 8000, 'peers');
+   const t0 = Date.now();
+   for (let i = 0; i < 60; i++) {
+      for (const id of ids) a.send('snap', { n: i }, id);
+      if (i % 3 === 0) a.send('evt', { n: i / 3 });
+      await sleep(50);
+   }
+   const secs = (Date.now() - t0) / 1000;
+   await until(() => evt.every(e => e.length === 20), 8000, 'reliable messages');
+   for (let i = 0; i < ids.length; i++) {
+      assert.deepEqual(evt[i], Array.from({ length: 20 }, (_, k) => k));
+      // with one publish per client the three would share the ~7.5 publishes/s: ~2.5 each
+      assert.ok(snap[i].length / secs >= 4.5, `client ${i}: ${(snap[i].length / secs).toFixed(1)} snapshots/s`);
+      for (let k = 1; k < snap[i].length; k++) assert.ok(snap[i][k] > snap[i][k - 1]);
+   }
+   a.leave(); for (const c of cl) c.leave();
+});
+
 test('the route switches to direct and back without losing or reordering reliable messages', async () => {
    const net = makeNet([{ delay: 30, jitter: 30, loss: 0.1 }]);
    const hub = makeDirectHub();
