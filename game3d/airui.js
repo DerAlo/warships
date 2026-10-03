@@ -6,10 +6,14 @@
 // `ui.air` snapshot with drawAir(), minimap3d.js the squadrons with drawAirMap(). Nothing here
 // allocates per frame (marker and polyline points are pooled).
 //
-// Singleplayer only for now: the snapshot codec carries no squadrons, so a net game never offers
-// a carrier and this module only handles the AA focus key there (see `net` in input()).
-import { AIR, AIR_TYPES, AIR_NAMES, planeCount, activeSquad, canLaunch, launchSquadron, recallSquadron,
-   orderPatrol, dropWeapons, squadById, cycleAaFocus } from './air.js';
+// Every order goes through the command actions of net/command.js (launch 'L', take 'P', hand
+// back 'H', recall 'R', patrol 'W', drop 'B', AA focus 'F'), run directly in singleplayer and on
+// a net host, sent to the host by a net client (main3d's act()). The stick of the flight in hand
+// (wanted heading, throttle, attack run) is written to the squadron directly, or on a net client
+// handed to main3d as `netCtl` for the command stream (CONTRACT.md); a client sees its planes
+// from the host's snapshots.
+import { AIR, AIR_TYPES, AIR_NAMES, planeCount, activeSquad, canLaunch, squadById, nextAaFocus } from './air.js';
+import { execAction } from './net/command.js';
 import { angleDelta, clamp, clamp01 } from './utils.js';
 import { T, rgba } from './theme.js';
 
@@ -18,7 +22,7 @@ const MAX_MARKS = 24, FAN_PTS = 9, ELL_PTS = 28;
 const STEER_MOUSE = 0.0026;       // rad of wanted heading per mouse px
 const STEER_KEYS = 1.1;           // rad/s of wanted heading while A / D are held
 const STEER_MAX = 1.1;            // wanted heading at most this far off the current heading
-const RELEASE_AHEAD = 6000;       // m: a released bomber flight without a target flies on this far
+const LAUNCH_WAIT = 4;            // s a net client waits for the flight it launched to show up
 const DIST_MIN = 140, DIST_MAX = 900, DIST0 = 330;
 const LOOK_AHEAD = { tb: 700, db: 620, ft: 1100 };
 const TYPE_KEYS = { 1: 'tb', 2: 'db', 3: 'ft' };
@@ -72,6 +76,10 @@ export class AirUi {
       this.camH = 0;              // smoothed camera heading
       this.wasDown = false;       // LMB state last frame (release = drop)
       this.lingerT = 0;           // s the camera stays on a flight that just turned home
+      this.aiming = false;        // attack run held (LMB)
+      this.aimHold = 0;           // s it has been held
+      this.pending = null;        // net client: { type, t } a launch on its way to the host
+      this.netCtl = null;         // net client: [sqId, want, throttle, aiming] for the command stream
       this.cam3 = null;
       this.pose = { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 55 };
       this.focus = { x: 0, y: 0 };          // renderer shadow focus while flying
@@ -119,6 +127,7 @@ export class AirUi {
       this.cam3 = cam3 || this.cam3;
       this._close(false);
       this.dist = DIST0; this.lingerT = 0; this.wasDown = false;
+      this.aiming = false; this.aimHold = 0; this.pending = null; this.netCtl = null;
       this.msgT.lost = -9; this.msgT.down = -9;
       this.seen.clear();
       const p = world?.player, d = this.dom;
@@ -132,9 +141,9 @@ export class AirUi {
    squad(world) { return this.flying && world ? squadById(world, this.sqId) : null; }
 
    // ---- view switching
-   _take(world, sq) {
-      sq.human = true;
-      this.sqId = sq.id;
+   _take(world, sq, run) {
+      run(['P', sq.id]);
+      this.sqId = sq.id; this.aiming = false; this.aimHold = 0; this.pending = null;
       this.want = sq.heading; this.camH = sq.heading; this.lingerT = 0;
       this.wasDown = true;                     // a held button must be released first
       if (!this.flying) { this.flying = true; this.onView(true); }
@@ -151,44 +160,39 @@ export class AirUi {
       if (msg) this.audio.uiClick?.();
    }
    // hand the flight back to its pilots: bombers pick a target themselves, fighters patrol here
-   _release(world, sq) {
-      if (sq && sq.human) {
-         sq.human = false; sq.aiming = false; sq.throttle = 0;
-         if (sq.type === 'ft' && sq.state !== 'return') orderPatrol(world, sq, sq.pos);
-         else if (sq.type !== 'ft' && !sq.order) {
-            // no target given yet: the flight keeps its course and looks for one before it turns home
-            sq.order = { kind: 'strike', targetId: null,
-               pos: { x: sq.pos.x + Math.cos(sq.heading) * RELEASE_AHEAD, y: sq.pos.y + Math.sin(sq.heading) * RELEASE_AHEAD } };
-         }
-      }
+   // (air.releaseSquadron)
+   _release(world, sq, run) {
+      if (sq) run(['H', sq.id]);
       this._close();
    }
 
    // Per frame (main3d frameInput). Returns true while the squadron view owns the controls (the
-   // ship's helm, guns and camera keys are skipped). net: running net game (only the AA key).
+   // ship's helm, guns and camera keys are skipped). act: main3d's act() (orders); client: a net
+   // client (the host flies the planes; the stick goes out as `netCtl`, see the header).
    input(inp, p, world, dt, opts) {
-      const { mapOpen = false, sens = 1, net = false } = opts || {};
+      const { mapOpen = false, sens = 1, client = false, act = null } = opts || {};
+      const run = act || ((a) => execAction(p, world, a));
+      this.netCtl = null;
       if (!p) return false;
       if (inp.tapped('4')) {
-         if (net || !p.alive || !p.aa?.range) this.audio.denied?.();
-         else { cycleAaFocus(world, p); this.audio.uiClick?.(); }
+         if (!p.alive || !p.aa?.range || !run(['F', nextAaFocus(p.aaFocus)])) this.audio.denied?.();
+         else this.audio.uiClick?.();
       }
-      if (net) return false;
       if (this.flying) {
          const sq = this.squad(world);
          if (!sq || sq.n <= 0 || !p.alive) {
-            if (sq?.n > 0) this._release(world, sq); else this._close();
+            if (sq?.n > 0) this._release(world, sq, run); else this._close();
             if (p.alive) this.hud.msg(sq ? 'Zurück auf der Brücke' : 'Staffel verloren – zurück auf der Brücke', 'warn');
             return false;
          }
-         if (inp.tapped('E')) { this._release(world, sq); return true; }
+         if (inp.tapped('E')) { this._release(world, sq, run); return true; }
          if (sq.state === 'return' || sq.state === 'land') {
             // the flight turned home (weapons gone, fuel, recall): watch it for a moment
             if ((this.lingerT += dt) > 3) this._close();
             this._wheel(inp, mapOpen);
             return true;
          }
-         if (inp.tapped('F')) { recallSquadron(world, sq); this._close(); return true; }
+         if (inp.tapped('F')) { run(['R', sq.id]); this._close(); return true; }
          this._wheel(inp, mapOpen);
          // steering: wanted heading from A / D and the mouse, never far off the current heading
          let w = this.want;
@@ -198,42 +202,56 @@ export class AirUi {
          const off = clamp(angleDelta(sq.heading, w), -STEER_MAX, STEER_MAX);
          this.want = sq.heading + off;
          sq.want = this.want;
-         sq.throttle = inp.down('W') ? 1 : inp.down('S') ? -1 : 0;
-         // weapons
+         const th = inp.down('W') ? 1 : inp.down('S') ? -1 : 0;
+         if (!client) sq.throttle = th;
+         // weapons: hold for the attack run, release to drop (fighters: click = patrol ahead)
          const down = !mapOpen && inp.mouse.down, click = !mapOpen && inp.mouse.clicked;
          if (sq.type === 'ft') {
+            this.aiming = false;
             if (click) {
                const h = sq.heading;
-               orderPatrol(world, sq, { x: sq.pos.x + Math.cos(h) * 900, y: sq.pos.y + Math.sin(h) * 900 });
+               run(['W', sq.id, sq.pos.x + Math.cos(h) * 900, sq.pos.y + Math.sin(h) * 900]);
                this._close();
                return true;
             }
-            this._fighterFoe(world, sq);
          } else if (sq.armed > 0 && sq.state !== 'launch') {
-            if (down && !this.wasDown) sq.aiming = true;
-            else if (!down && (this.wasDown || click) && sq.aiming) {
-               if (!dropWeapons(world, sq)) { sq.aiming = false; this.audio.denied?.(); this.hud.msg('Anflug zu kurz – Taste länger halten', 'warn'); }
+            if (down && !this.wasDown) { this.aiming = true; this.aimHold = 0; }
+            else if (!down && (this.wasDown || click) && this.aiming) {
+               // a net client knows the run's length from its own hold (the host's lags by the ping)
+               const need = sq.type === 'tb' ? AIR.tbAimMin : AIR.dbAimMin;
+               if ((client && this.aimHold < need) || !run(['B', sq.id])) { this.audio.denied?.(); this.hud.msg('Anflug zu kurz – Taste länger halten', 'warn'); }
+               this.aiming = false;
             }
-            if (!down && !click) sq.aiming = false;
-         }
+            if (!down && !click) this.aiming = false;
+            if (this.aiming) this.aimHold += dt;
+         } else this.aiming = false;
+         if (!client) sq.aiming = this.aiming;
          this.wasDown = down;
+         if (client) this.netCtl = [sq.id, this.want, th, this.aiming ? 1 : 0];
          return true;
       }
       // ship view of a carrier: 1/2/3 pick the plane type, E launches it or takes over the flight
-      if (!p.air || !p.alive) return false;
+      if (!p.air || !p.alive) { this.pending = null; return false; }
+      // a net client: the flight it launched shows up in a snapshot a moment later
+      if (this.pending) {
+         const q = activeSquad(world, p, this.pending.type);
+         if (q && q.n > 0) { this._take(world, q, run); return true; }
+         if ((this.pending.t -= dt) <= 0) this.pending = null;
+      }
       for (const k in TYPE_KEYS) {
          if (inp.tapped(k)) {
             const t = TYPE_KEYS[k];
             if (p.air.sel !== t) { p.air.sel = t; this.audio.ammoSwitch?.(); }
          }
       }
-      if (inp.tapped('E')) {
+      if (inp.tapped('E') && !this.pending) {
          const t = p.air.sel;
          const q = activeSquad(world, p, t);
-         if (q) this._take(world, q);
+         if (q) this._take(world, q, run);
          else if (canLaunch(world, p, t)) {
-            const s = launchSquadron(world, p, t, null, true);
-            if (s) this._take(world, s);
+            const s = run(['L', t]);
+            if (s && typeof s === 'object') this._take(world, s, run);
+            else if (s) this.pending = { type: t, t: LAUNCH_WAIT };
          } else {
             this.audio.denied?.();
             const c = planeCount(world, p, t);
@@ -247,22 +265,6 @@ export class AirUi {
    _wheel(inp, mapOpen) {
       const w = inp.mouse.wheel;
       if (!mapOpen && w) this.dist = clamp(this.dist * Math.pow(1.15, Math.sign(w)), DIST_MIN, DIST_MAX);
-   }
-
-   // a fighter flight in the player's hands engages the enemy planes it is pointed at
-   _fighterFoe(world, sq) {
-      let best = null, bd = 1100 * 1100;
-      const c = Math.cos(sq.heading), s = Math.sin(sq.heading);
-      for (const q of world.squadrons) {
-         if (q.side === sq.side || q.n <= 0 || q.state === 'land' || q.state === 'launch') continue;
-         const dx = q.pos.x - sq.pos.x, dy = q.pos.y - sq.pos.y;
-         if (dx * c + dy * s < -200) continue;            // behind
-         const d2 = dx * dx + dy * dy;
-         if (d2 < bd) { bd = d2; best = q; }
-      }
-      sq.foeId = best ? best.id : null;
-      if (best && sq.state === 'fly') sq.state = 'attack';
-      else if (!best && sq.state === 'attack') sq.state = 'fly';
    }
 
    // Sim events main3d does not handle (its switch default).

@@ -22,7 +22,7 @@
 // The real transport also offers link(id) -> { via: 'direct'|'relay', rtt }, onRoute(fn) and
 // stats(); callers must treat them as optional.
 
-export const NET_VERSION = 1;
+export const NET_VERSION = 2;          // 2: squadrons in the snapshot, air commands (carriers in net games)
 
 class BaseTransport {
    constructor(selfId, hostId) {

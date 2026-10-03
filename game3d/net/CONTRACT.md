@@ -122,10 +122,17 @@ alone), `wahoo` (one US boat, no allied ship). Today's limits (measured with `co
 rheinuebung 2 (Bismarck, Prinz Eugen), wolfpack 3, guadalcanal / nordkap / cerberus / vian /
 barents / narvik / matapan / dakar / spartivento 4.
 
-Carriers stay out of net games until the snapshot carries aircraft: `validClass` and
-`allowedShips` drop carrier classes, `replaceableBots` skips CV bots, and every net World is built
-with `coop: true`, which keeps bot carriers off the roster (`updateAir` returns early with
-`world.net` set).
+Carriers sail in every net game (co-op, historical operations, PvP), as captains' ships and as
+bots: `validClass` / `allowedShips` take the mission's `playableShips` as they are, CV bots can be
+replaced by a captain (the AI keeps the carrier role when the captain leaves) and random battles
+roll bot carriers as in singleplayer. The host runs the air war (`updateAir`); a captain orders
+his carrier with the air actions of `cmd` (see "Wire protocol"), the host checks every one: only
+a squadron of the sender's own ship, in the air, flown by him where that matters (`B`, `c.air`),
+wanted heading clamped to +-1.3 rad of the flight's heading, throttle to -1..1. Measured (node
+test, 7v7 standard battle with 2 carrier captains + bot carriers, 2 clients, 120 s, 11.7 flights
+in the air on average): 30.5 kB/s download per client (without carriers 24.1, before this change
+26.9), 1.6 kB/s upload, host upload 48.1 kB/s. Browser (local transport, 3 captains, 3 flights):
+21.5 kB/s per client, host upload 33.1 kB/s.
 
 ## PvP rules (`game3d/net/pvp.js`)
 
@@ -151,7 +158,10 @@ receiving team may see: its own, the spotted ones of the other team, and wrecks
 effects on it, spotting events); torpedoes are announced to the other team only once they are
 visible (`T` with the current position and `it[7]` = distance already run), log lines, objective
 texts, kill feed and the end reason are mirrored for team 2. Sonar contacts go to the host's team
-only. Measured (node test, 2v2, 3 clients, 90 s): 11 to 13 kB/s download per client, host upload
+only. Squadrons follow the same rule (`air.squadVisibleTo`): the other team gets a flight only
+while one of its ships (within `AIR.seeByShip`, 8 km) or planes (`AIR.seeByPlane`, 4 km) sees it;
+events about a hidden flight (its bombs, launches, losses, effects) are dropped; its aerial
+torpedoes follow the torpedo rule above. Measured (node test, 2v2, 3 clients, 90 s): 11 to 13 kB/s download per client, host upload
 37 kB/s; encoding the snapshots of both teams costs 7 to 8 µs per snapshot tick instead of 4. Over
 the relay (browser test, 2v2, 42 s, ships mostly unspotted): 7.6 kB/s per client, 23 kB/s host
 upload, about 325 bytes per snapshot for either team.
@@ -169,8 +179,9 @@ upload, about 325 bytes per snapshot for either team.
   mission does not allow falls back to the mission's recommended ship.
 - No snapshot for 5 s while the match runs counts as "connection to host lost" (then host
   migration, see below).
-- Every message stays far below 16 kB (snapshot of a 7v7 about 0.6 kB, event batches split at
-  60 items), except `mig`: about 13–15 kB in a 7v7. Neither route limits the size (Trystero
+- Every message stays far below 16 kB (snapshot of a 7v7 about 0.6 kB, plus 21 bytes per flight
+  in the air, at most 64 flights; event batches split at 60 items), except `mig`: about 11–13 kB
+  in a 7v7 with carriers (measured 12.1 kB, 10.8 kB without carriers). Neither route limits the size (Trystero
   splits data-channel messages into 16 kB chunks, the brokers take far more).
 
 ## Host migration
@@ -183,8 +194,11 @@ It is a JSON object (`migrate.js`, `packWorld`): `t` tick, `tm` time, `nid` next
 ship with its internals (health, reloads, fires, floods, modules, consumables, turrets,
 launchers, statistics, the bot AI's state), `st` every captain's statistics, `scr` the mission
 script's state, `tn` its timers, `fr` the weather front, `tp` live torpedoes, `pl` the captains
-`[peerId, slot, gone]`. Measured (node test, 7v7, 120 s): 13.4 kB per message, 13.4 kB/s to the
-successor, nothing more for the others. Browser (standard battle, 3 captains): 11.5 kB per
+`[peerId, slot, gone]`, `sq` the squadrons in the air, `ak` the key table of the bot AI states.
+Measured (node test, 7v7, 120 s): 10.8 kB per message without carriers, 12.1 kB with two carrier
+captains, bot carriers and 11.7 flights in the air on average (before the compact AI and squadron
+rows: 13.4 kB without any aircraft); about that many kB/s to the successor, nothing more for the
+others. Browser (standard battle, 3 captains): 11.5 kB per
 message, about 10 kB/s.
 
 The host is gone when it says `left` (it quit on purpose), when the transport reports it gone, or
@@ -222,9 +236,14 @@ The old host may come back as a captain: the lobby gave it a seat at the start l
 
 What is lost in a migration (by design):
 
-- Shells and depth charges in flight disappear (the console logs the count). Torpedoes survive.
+- Shells and depth charges in flight disappear (the console logs the count), so do falling bombs
+  and the flak bookkeeping (the AA damage on a flight builds up again at the next AA tick).
+  Torpedoes survive, aerial ones included.
 - The bot AI keeps its state from the full state (up to 1 s old); long route lists that did not
-  fit on the wire are re-planned. Aircraft (when there are any) are not carried over.
+  fit on the wire are re-planned. Squadrons in the air are carried over (position, planes, fuel,
+  ammo, order, whether the captain flies it, the pilots' attack-run state), so are the carriers'
+  decks (hangar, service queue, restock and deck timers, selected type); a flight whose carrier is
+  gone is dropped (counted as `squads` in the log).
 - Up to 1 s of what the successor could not see: reloads, fire and flooding timers, statistics,
   the positions of ships out of its sight (dead reckoning from the full state).
 - Mission script timers that were set after the newest full state.
@@ -265,19 +284,40 @@ AI lets go of the ship. The client shows the match only after `resync` (so its c
 the ship's telegraph, not at stop) and gives up after 15 s without it.
 
 `cmd` (client -> host, JSON array): `[seq, telegraph, rudder, aimX, aimY, lockId, actBase,
-actions]`. `actions` are the not yet acknowledged one-shot actions of `command.js`, numbered from
-`actBase`; the host executes each once and acknowledges the count in every snapshot.
+actions, air?]`. `actions` are the not yet acknowledged one-shot actions of `command.js`, numbered
+from `actBase`; the host executes each once and acknowledges the count in every snapshot. Air
+actions (carriers; `sqId` must be a squadron of the sender's ship, else ignored): `['L', type]`
+launch `tb`/`db`/`ft` flown by the captain, `['P', sqId]` take the controls, `['H', sqId]` hand it
+back to the pilots, `['R', sqId]` recall, `['W', sqId, x, y]` fighters patrol a point, `['B',
+sqId]` release the weapons (attack run, only a flight the captain flies); `['F', focus]` AA focus
+-1 / 0 / +1 for every ship with AA. `air` (index 8, only while the captain flies a squadron):
+`[sqId, wantedHeading, throttle -1|0|1, aiming 0|1]`; the host clamps it (see "Co-op rules"). The
+client does not predict air actions; it waits for the snapshot.
 
 `snap` (host -> client, binary, see the header of `codec.js`): tick, action ack, command echo, all
-ships, then the receiver's own-ship detail.
+ships, the squadrons the receiver's team sees (`u8` count, 21 bytes each, +4 with a patrol
+point: id, owner, type/state/side/aiming/flown bits, planes and armed, position, heading, wanted
+heading, altitude, speed, aim time, flak on it), then the receiver's own-ship detail; for a
+carrier (detail bit 16) also the deck timer, per type hangar / in service / max / next ready, and
+per own flight in the air: fuel, boost, throttle, planes at launch, fighter ammo.
 
 `evt` (host -> all, JSON `[batchSeq, tick, items]`), items by first element: `e` world event,
-`s`/`x` shell spawn / removal, `T`/`X` torpedo spawn / removal, `v` torpedo visibility, `f`
-effect, `k` smoke, `l` log line, `n`/`r` ship spawn / removal. In PvP every team has its own
-batch numbering and its own filtered items (see "PvP rules"); a `T` that reaches the other team
-late carries the distance already run in `it[7]`.
+`s`/`x` shell spawn / removal, `T`/`X` torpedo spawn / removal (`T` = `[T, id, owner, x, y,
+heading, tick, run?, air?]`, `air` = 1 for an aerial torpedo), `v` torpedo visibility, `f` effect
+(no `flak` bursts: the clients draw them around a flight with flak on it), `b` falling bomb `[b,
+x, y, sx, sy, salt, delay, heading, tick]`, `k` smoke, `l` log line, `n`/`r` ship spawn /
+removal. In PvP every team has its own batch numbering and its own filtered items (see "PvP
+rules"); a `T` that reaches the other team late carries the distance already run in `it[7]`.
 
-`mig` (host -> successor only, JSON, latest wins): the full state, see "Host migration".
+`mig` (host -> successor only, JSON, latest wins): the full state, see "Host migration". The bot
+AI of each ship is a value array in the order of the key table `ak` (`'~'` = key absent); a
+ship's `air` is `[deckT, strikeT, sel, then per type tb, db, ft: hangar, max, restockT, [n, t,
+...] service queue]`; a squadron in `sq` is a row `[id, owner, type, state, n, n0, armed, hp, x,
+y, alt, altT, heading, want, speed, t, fuel, ammo, boost, patrolT, ditchT, human, order, center,
+foeId, ai]` with `order` = 0 | `[kind 0 strike / 1 patrol, targetId, x, y, scout]`, `center` = 0 |
+`[x, y]`, `ai` = 0 (as launched) | `[t, phase, errL, errPx, errPy, outT, dropR]`.
+
+`NET_VERSION` is 2 since carriers joined (version 1 peers are listed as incompatible).
 
 ## Matchmaking
 

@@ -3,7 +3,7 @@
 // roster and ship ids come out identical on every peer.
 import { World, makeStats } from '../state.js';
 import { Ship } from '../ship.js';
-import { SHIPS, PLAYABLE, isCarrier } from '../config.js';
+import { SHIPS, PLAYABLE } from '../config.js';
 import { getMission } from '../missions.js';
 import { applyLoadout } from '../progress3d.js';
 import { PVP_WIN, PVP_LOSS } from './pvp.js';
@@ -20,16 +20,15 @@ export function replaceableBots(world, side = 'player') {
       if (v instanceof Ship) held.add(v);
       else if (Array.isArray(v)) for (const x of v) if (x instanceof Ship) held.add(x);
    }
-   return world.bots.filter(b => b.side === side && b.alive && b.type !== 'TR' && b.type !== 'CV' && !(b.ai && (b.ai.passive || b.ai.route)) && !held.has(b));
+   return world.bots.filter(b => b.side === side && b.alive && b.type !== 'TR' && !(b.ai && (b.ai.passive || b.ai.route)) && !held.has(b));
 }
 
 // The host cannot trust the ship a client claims: unknown or not allowed -> the mission's choice.
 export function validClass(missionId, cls) {
    const def = getMission(missionId) || getMission('standard');
-   // carriers stay out of net games until the snapshot carries aircraft (CONTRACT.md)
-   const allowed = (def.playableShips || PLAYABLE).filter(k => !isCarrier(k));
+   const allowed = def.playableShips || PLAYABLE;
    if (typeof cls === 'string' && SHIPS[cls] && allowed.includes(cls)) return cls;
-   return def.recommendedShip && !isCarrier(def.recommendedShip) ? def.recommendedShip : allowed[0];
+   return def.recommendedShip || allowed[0];
 }
 
 // Career loadouts arrive over the network too: keep only the shape applyLoadout() reads.
@@ -64,7 +63,7 @@ export function historicShips(world) {
 // `self` is the local slot: world.player becomes that ship, so renderer, HUD, camera and audio
 // read the world exactly as in a singleplayer match.
 export function buildNetWorld(o) {
-   const w = new World(o.difficulty, { mission: o.mission, ship: o.classes[0], seed: o.seed >>> 0, loadout: o.loadouts[0] || null, coop: true });
+   const w = new World(o.difficulty, { mission: o.mission, ship: o.classes[0], seed: o.seed >>> 0, loadout: o.loadouts[0] || null });
    const pvp = Array.isArray(o.teams);
    const fixed = !pvp && !!getMission(o.mission)?.fixedShips;
    const host = w.player;
@@ -82,7 +81,8 @@ export function buildNetWorld(o) {
       // historical: the very ship the mission script knows. Missions cut the damage of allied bots
       // so they do not fight the player's battle for him; a captain fights at full strength.
       if (old && fixed) { ship = old; ship.dmgMult = 1; }
-      else if (old) ship = w.replaceShip(old, cls, { cfg, ai: old.ai });
+      // the AI keeps the ship when its captain leaves: a carrier needs the carrier role (ai.js)
+      else if (old) ship = w.replaceShip(old, cls, { cfg, ai: { ...(old.ai || {}), role: SHIPS[cls].ai?.role || old.ai?.role } });
       // no bot left to replace (fleet roll smaller than expected): an extra ship abeam of the host
       else {
          const a = side === 'player' ? host : (w.ships.find(s => s.side === side) || host);
@@ -143,7 +143,7 @@ export function missionSlots(missionId) {
       n = MAX_HUMANS;
       try {
          for (const seed of [11, 4242, 987654321]) {
-            const w = new World('normal', { mission: def.id, ship: validClass(def.id, null), seed, coop: true });
+            const w = new World('normal', { mission: def.id, ship: validClass(def.id, null), seed });
             n = Math.min(n, 1 + (def.fixedShips ? historicShips(w) : replaceableBots(w)).length);
          }
       } catch (e) { n = 0; }
@@ -163,7 +163,7 @@ export function missionRoles(missionId, difficulty = 'normal') {
    let roles = roleCache.get(key);
    if (!roles) {
       try {
-         const w = new World(difficulty, { mission: def.id, ship: validClass(def.id, null), seed: 11, coop: true });
+         const w = new World(difficulty, { mission: def.id, ship: validClass(def.id, null), seed: 11 });
          roles = [w.player, ...historicShips(w)].slice(0, n).map(s => ({ cls: s.cls, name: s.name }));
       } catch (e) { roles = []; }
       roleCache.set(key, roles);

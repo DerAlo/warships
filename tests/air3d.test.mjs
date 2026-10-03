@@ -12,6 +12,7 @@ import {
 } from '../game3d/air.js';
 import { TECH_TREE } from '../game3d/progress3d.js';
 import { getMission } from '../game3d/missions.js';
+import { buildNetWorld } from '../game3d/net/setup.js';
 
 const DT = 1 / 60;
 const CVS = ['GrafZeppelin', 'Akagi', 'Shokaku', 'ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Bearn'];
@@ -232,14 +233,14 @@ test('fuel runs out: the squadron turns home; carrier lost: the planes ditch', (
    assert.ok(!w.squadrons.includes(f));
 });
 
-test('updateAir is a no-op in a net world (codec carries no planes yet)', () => {
+test('updateAir runs on the host of a net world (squadrons go out in the snapshot)', () => {
    const w = blank();
    const cv = hold(w.spawn('Enterprise', 'player', P(0, 0), 0, { isPlayer: true }));
    const q = airborne(w, cv, 'tb', P(3000, 0), 0);
    const x = q.pos.x;
    w.net = { humans: [cv] };
    updateAir(w, 1);
-   assert.strictEqual(q.pos.x, x);
+   assert.notStrictEqual(q.pos.x, x);
 });
 
 test('bot carrier: launches a strike at a spotted enemy and hurts it', () => {
@@ -254,7 +255,7 @@ test('bot carrier: launches a strike at a spotted enemy and hurts it', () => {
    void cv;
 });
 
-test('random battles: carriers on both sides in some battles, always with a player carrier, never in co-op', () => {
+test('random battles: carriers on both sides in some battles, always with a player carrier, co-op too', () => {
    const cvs = (w) => w.ships.filter(s => s.air);
    let some = 0, seedWith = -1;
    for (let seed = 1; seed <= 30; seed++) {
@@ -266,8 +267,9 @@ test('random battles: carriers on both sides in some battles, always with a play
       }
    }
    assert.ok(some >= 3 && some <= 18, 'carrier battles in 30: ' + some);
-   const coop = new World('normal', { mission: 'standard', ship: 'Bismarck', seed: seedWith, coop: true });
-   assert.strictEqual(cvs(coop).length, 0, 'co-op: no carriers');
+   // net games build the very same World (setup.buildNetWorld): carriers are part of co-op now
+   const coop = buildNetWorld({ mission: 'standard', difficulty: 'normal', seed: seedWith, classes: ['Bismarck', 'Hipper'], loadouts: [], self: 0 });
+   assert.ok(cvs(coop).some(s => s.side === 'player') && cvs(coop).some(s => s.side === 'enemy'), 'co-op: carriers as in singleplayer');
    for (const seed of [2, 3, 4]) {
       const w = new World('normal', { mission: 'standard', ship: 'Enterprise', seed });
       assert.ok(w.player.air && cvs(w).some(s => s.side === 'enemy'), 'player carrier meets an enemy carrier');

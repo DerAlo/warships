@@ -13,7 +13,8 @@
 // Nothing here touches the DOM, so the node tests drive it directly.
 import { World } from '../state.js';
 import { calcRewards } from '../progress3d.js';
-import { makeCommand, applyCommand, execAction } from './command.js';
+import { makeCommand, applyCommand, applyAirControl, execAction } from './command.js';
+import { squadById, squadVisibleTo, releaseSquadron } from '../air.js';
 import { encodeShips, encodeOwn, visibleTo } from './codec.js';
 import { mirrorEvent, mirrorLog, mirrorReason } from './pvp.js';
 import { MIG_EVERY, packWorld, packScript, scriptSig } from './migrate.js';
@@ -29,6 +30,16 @@ const SIDE_CODE = { player: 1, enemy: 2 };
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const r1 = (v) => Math.round(v * 10) / 10;
 const r3 = (v) => Math.round(v * 1000) / 1000;
+// a torpedo as the clients get it: ['T', id, ownerId, x, y, heading, tick, run?, air?]
+// (run: the distance it has already run, when it is announced late; air: dropped by a plane)
+function torpItem(t, tick, run) {
+   const it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, tick];
+   if (run !== undefined || t.air) it.push(run ? r1(run) : 0);
+   if (t.air) it.push(1);
+   return it;
+}
+// a squadron a recorded item is about (PvP: shown to a team only while it sees that squadron)
+const sqRef = (world, id) => (id == null ? null : squadById(world, id));
 // shallow copy for the wire: numbers shortened, positions rounded to 0.1 m
 function slim(x) {
    const o = {};
@@ -85,15 +96,21 @@ export function makeHost(world, o) {
       P.addTorpedo.call(world, t);
       liveTorps.set(t.id, t);
       t._nv = t.visibleToOpp; t._to = 0;       // _to: a bit per team that knows of it
-      t._it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick];
+      t._it = torpItem(t, stepTick);
       items.push(t._it); refs.push(t);
    };
    world.addEffect = (kind, pos, life, size, extra) => {
       const e = P.addEffect.call(world, kind, pos, life, size, extra);
       // a shell falling into the sea at the end of its flight: the client makes that splash itself
       if (kind === 'splash' && pos.nat === 1) { pos.nat = 2; return e; }
-      items.push(['f', kind, r1(e.pos.x), r1(e.pos.y), r3(e.life), r3(e.size), extra ? slim(extra) : 0]); refs.push(null);
+      // flak bursts: many a second; the clients burst them around a squadron under fire themselves
+      if (kind === 'flak') return e;
+      items.push(['f', kind, r1(e.pos.x), r1(e.pos.y), r3(e.life), r3(e.size), extra ? slim(extra) : 0]); refs.push(extra ? sqRef(world, extra.sqId) : null);
       return e;
+   };
+   // falling bombs: ['b', x, y, sx, sy, salt, delay, heading, tick] (impact effects come as their own items)
+   world.onBomb = (b, sq, delay) => {
+      items.push(['b', r1(b.x), r1(b.y), r1(b.sx), r1(b.sy), Math.round(b.salt), r3(delay), Math.round(b.heading * 1e4) / 1e4, stepTick]); refs.push(sq);
    };
    world.addSmoke = (c) => {
       P.addSmoke.call(world, c);
@@ -101,7 +118,7 @@ export function makeHost(world, o) {
    };
    world.pushEvent = (type, data) => {
       const e = P.pushEvent.call(world, type, data);
-      items.push(['e', type, data ? slim(data) : 0]); refs.push(null);
+      items.push(['e', type, data ? slim(data) : 0]); refs.push(data ? sqRef(world, data.sqId) : null);
       if (type === 'cap' && data) capPrev = data.prev;      // for the log line that follows
       return e;
    };
@@ -129,7 +146,8 @@ export function makeHost(world, o) {
    };
 
    // ---------------------------------------------------------------- commands
-   // [seq, telegraph, rudder, aimX, aimY, lock, firstActionId, actions]
+   // [seq, telegraph, rudder, aimX, aimY, lock, firstActionId, actions, air?]
+   // air: [sqId, wanted heading, throttle, aiming] while the captain flies a squadron (command.js)
    function onCmd(d, from) {
       const c = clients.get(from);
       if (!c || c.gone || !Array.isArray(d) || !fin(d[0])) return;
@@ -140,6 +158,8 @@ export function makeHost(world, o) {
          m.rudder = fin(d[2]) ? d[2] : 0;
          if (fin(d[3]) && fin(d[4])) { c.aim.x = Math.max(-A, Math.min(A, d[3])); c.aim.y = Math.max(-A, Math.min(A, d[4])); m.aim = c.aim; }
          m.lock = fin(d[5]) ? d[5] : null;
+         const a = d[8];
+         m.air = Array.isArray(a) && fin(a[0]) && fin(a[1]) ? [a[0], a[1], fin(a[2]) ? a[2] : 0, a[3] ? 1 : 0] : null;
       }
       // every message repeats the actions the client has not seen acknowledged: take the new ones
       const acts = d[7];
@@ -154,7 +174,7 @@ export function makeHost(world, o) {
       for (const c of clients.values()) {
          if (c.gone) continue;
          const s = c.ship;
-         if (s.alive && c.lastSeq >= 0) applyCommand(s, c.cmd);
+         if (s.alive && c.lastSeq >= 0) { applyCommand(s, c.cmd); if (c.cmd.air) applyAirControl(s, world, c.cmd.air); }
          const rt = c.retry;
          if (rt.n > 0) { rt.n--; if (!s.alive || s.fireMain(world, rt) > 0) rt.n = 0; }
          const q = c.queue;
@@ -180,7 +200,7 @@ export function makeHost(world, o) {
       // PvP: the other team hears of a torpedo only once it sees it, then where it is now
       // (it[7]: the distance it has run, so the client knows where it runs out)
       if (pvp && t.visibleToOpp && !(t._to & teams[t.side === 'player' ? 1 : 0].bit)) {
-         items.push(['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick, r1(t.traveled)]); refs.push(t);
+         items.push(torpItem(t, stepTick, t.traveled)); refs.push(t);
       }
       // seen by the other side or not (co-op: only the enemy's torpedoes matter to the clients)
       if ((pvp || t.side !== 'player') && t.visibleToOpp !== t._nv) { t._nv = t.visibleToOpp; items.push(['v', id, t.visibleToOpp ? 1 : 0]); refs.push(t); }
@@ -188,6 +208,9 @@ export function makeHost(world, o) {
 
    // ---- PvP: what a team gets to see of a recorded item (null: nothing)
    const hidden = (id, side) => { const s = id == null ? null : byId.get(id); return !!s && !visibleTo(s, side); };
+   // an item about a squadron (bombs, plane losses, launches ...): only while the team sees it
+   const isSq = (ref) => !!ref && ref.cfg !== undefined && ref.armed !== undefined;
+   const sqSeen = (q, side) => q.side === side || squadVisibleTo(q, side);
    // the mission's objectives as a team reads them (the host's World writes them for side 'player')
    function teamObjectives(side) {
       const mis = world.mission;
@@ -213,7 +236,8 @@ export function makeHost(world, o) {
          }
          case 'v': return ref && (ref._to & team.bit) && ref.side !== S ? it : null;
          case 'X': return ref && (ref._to & team.bit) ? it : null;
-         case 'f': return it[6] && hidden(it[6].shipId, S) ? null : it;
+         case 'f': return isSq(ref) ? (sqSeen(ref, S) ? it : null) : it[6] && hidden(it[6].shipId, S) ? null : it;
+         case 'b': return ref && !sqSeen(ref, S) ? null : it;
          case 'l': {
             if (S === 'player') return it;
             const [text, type] = mirrorLog(it[1], it[2], ref);
@@ -226,7 +250,8 @@ export function makeHost(world, o) {
                const s = byId.get(d.dstId), own = /^(Sie wurden|Nicht mehr)/.test(d.text || '');
                return s && (own ? s.side === S : s.side !== S) ? it : null;
             }
-            if (hidden(d.dstId, S) || (d.dstId == null && hidden(d.srcId, S))) return null;
+            if (isSq(ref)) { if (!sqSeen(ref, S)) return null; }
+            else if (hidden(d.dstId, S) || (d.dstId == null && hidden(d.srcId, S))) return null;
             if (S === 'player') return it;
             if (it[1] === 'objective' && d.objId) {
                const x = (teamObjectives(S) || []).find(q => q.id === d.objId);
@@ -389,7 +414,7 @@ export function makeHost(world, o) {
       if (!t.alive) continue;
       liveTorps.set(t.id, t);
       t._nv = false; t._to = 0;
-      t._it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, stepTick, r1(t.traveled)];
+      t._it = torpItem(t, stepTick, t.traveled);
       items.push(t._it); refs.push(t);
    }
 
@@ -436,6 +461,8 @@ export function makeHost(world, o) {
       refresh();
       const s = c.ship;
       s.human = false;
+      // the squadrons the captain flew go back to their pilots
+      for (const q of world.squadrons) if (q.ownerId === s.id && q.human) releaseSquadron(world, q);
       if (world.phase !== 'playing') return true;
       world.message((c.name || s.name) + (s.alive ? ' hat das Gefecht verlassen – KI übernimmt' : ' hat das Gefecht verlassen'), 'warn');
       const H = world.net && world.net.humans;
@@ -450,7 +477,7 @@ export function makeHost(world, o) {
    function stop() {
       if (stopped) return;
       stopped = true;
-      for (const k of ['addShell', 'addTorpedo', 'addEffect', 'addSmoke', 'pushEvent', 'log', 'onStatus', 'spawn', 'removeShip', 'update']) delete world[k];
+      for (const k of ['addShell', 'addTorpedo', 'addEffect', 'addSmoke', 'pushEvent', 'log', 'onStatus', 'spawn', 'removeShip', 'update', 'onBomb']) delete world[k];
    }
 
    return {

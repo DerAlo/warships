@@ -186,7 +186,7 @@ function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({}
       let hc = (Math.imul((w.seed >>> 0) ^ 0x2c1b3c6d, 2654435761) >>> 0);
       hc ^= hc >>> 15; hc = Math.imul(hc, 2246822519) >>> 0; hc ^= hc >>> 13;
       S.cvHash = hc >>> 0;
-      S.cvs = !w.coop && !!S.def?.carriers && (pCV || S.cvHash % 100 < CV_CHANCE * 100);
+      S.cvs = !!S.def?.carriers && (pCV || S.cvHash % 100 < CV_CHANCE * 100);
    }
    let cl = -1;
    slots.forEach((s, i) => { if (SHIPS[s[0]].hull.type === 'CL') cl = i; });

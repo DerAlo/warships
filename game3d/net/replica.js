@@ -6,6 +6,8 @@
 //   - replays the host's recorded events, effects, smoke, log lines and ship arrivals at the
 //     moment the render clock reaches them
 //   - flies shells and torpedoes locally from their spawn data (same ballistics as combat.js)
+//   - interpolates the squadrons the snapshot lists like ships, drops bombs from their 'b'
+//     items and bursts flak around squadrons under fire (all drawn, nothing decided here)
 //   - predicts the own ship's controls: telegraph / rudder read-outs, turret traverse, firing
 //     (muzzle flash, reload, shells), consumables, depth orders. The hull itself is NOT
 //     predicted; it follows the host like every other ship.
@@ -14,10 +16,11 @@
 // World up to date for the successor, which then runs it as the authoritative one (game.js).
 import { WORLD, TUNE } from '../config.js';
 import { flightTime, horizDist, apexHeight, fallAngle, arcAlt } from '../combat.js';
-import { execAction } from './command.js';
+import { execAction, AIR_ACTS } from './command.js';
+import { AIR, AIR_TYPES } from '../air.js';
 import {
    SIM_DT, MAX_TURRETS, F_ALIVE, F_SINKING, F_DETECTED, F_SMOKE, F_BLOOM, F_GROUNDED,
-   makeSnap, decodeSnap, decodeOwn, snapTick, depthMetres, localSide,
+   makeSnap, decodeSnap, decodeOwn, snapTick, depthMetres, localSide, SQ_STATES,
 } from './codec.js';
 
 const RING = 32;                    // snapshots kept (1.6 s)
@@ -30,11 +33,12 @@ const SIDES = [null, 'player', 'enemy'];
 const TAU = Math.PI * 2;
 const KN = WORLD.KN_TO_MS;
 // events the client already raised itself when it predicted the action
-const PREDICTED = { ammo: 1, consumable: 1, subInfo: 1, dcDrop: 1, depth: 1 };
+const PREDICTED = { ammo: 1, consumable: 1, subInfo: 1, dcDrop: 1, depth: 1, aaFocus: 1 };
 const HIT_SHAKE = { citadel: 1.4, pen: 0.5, overpen: 0.5, ricochet: 0.5, shatter: 0.5, he: 0.5, sec: 0.5, torp: 1.6, dc: 1, ram: 1.2 };
 
 const angD = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU; return d; };
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+const clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 function fitN(list, n) {
    while (list.length > n) list.pop();
    while (list.length < n) list.push({ zone: list.length, t: 30, dur: 30, srcId: null, mult: 1 });
@@ -62,11 +66,13 @@ export function makeReplica(world, o) {
    const batches = new Map();
    let nextBatch = 0, gapSince = 0;
    // commands
-   const ctl = { telegraph: 0, rudder: 0, ax: null, ay: null, lock: null };
+   const ctl = { telegraph: 0, rudder: 0, ax: null, ay: null, lock: null, air: null };
    let seq = 0, dirty = true, sinceSend = 99, actBase = 0, actsNew = false, ack = 0;
    const unacked = [];
    // shells / torpedoes
    const shellByHost = new Map(), torpByHost = new Map(), predQ = [];
+   // squadrons (by host id) and the newest snapshot tick they were listed in
+   const sqByHost = new Map();
    let pendingEnd = null, endAt = 0, ended = false, lost = false, lastSt = -1;
    const _p = { x: 0, y: 0 };
    // host migration: the newest snapshot's bytes (own-ship detail) and the ships that came in later
@@ -89,6 +95,13 @@ export function makeReplica(world, o) {
 
    function act(a) {
       if (!me || !me.alive || ended || lost) return 0;
+      // squadron orders: not predicted, the host launches / steers and the snapshot shows it
+      if (AIR_ACTS[a[0]]) {
+         if (!me.air) return 0;
+         if (a[0] === 'W') { a[2] = Math.round(a[2]); a[3] = Math.round(a[3]); }
+         unacked.push(a); actsNew = true;
+         return 1;
+      }
       if (a[0] === 'f') { a[1] = Math.round(a[1] * 10) / 10; a[2] = Math.round(a[2] * 10) / 10; }
       const r = execAction(me, world, a);
       if (r) { unacked.push(a); actsNew = true; }
@@ -103,6 +116,13 @@ export function makeReplica(world, o) {
          ctl.telegraph = c.telegraph; ctl.rudder = c.rudder; ctl.ax = ax; ctl.ay = ay; ctl.lock = lock;
          dirty = true;
       }
+      // the squadron this captain flies: [sqId, wanted heading, throttle, aiming]
+      const a = c.air, o = ctl.air;
+      if (!a) { if (o) { ctl.air = null; dirty = true; } }
+      else {
+         const w = Math.round(a[1] * 1000) / 1000, th = a[2] > 0 ? 1 : a[2] < 0 ? -1 : 0, am = a[3] ? 1 : 0;
+         if (!o || o[0] !== a[0] || o[1] !== w || o[2] !== th || o[3] !== am) { ctl.air = [a[0], w, th, am]; dirty = true; }
+      }
    }
 
    // at most 30 messages a second while something changes, 10 a second otherwise
@@ -110,7 +130,9 @@ export function makeReplica(world, o) {
       sinceSend++;
       if (!(((dirty || actsNew) && sinceSend >= 2) || sinceSend >= 6)) return;
       while (unacked.length && actBase < ack) { unacked.shift(); actBase++; }
-      o.send('cmd', [seq, ctl.telegraph, ctl.rudder, ctl.ax, ctl.ay, ctl.lock, actBase, unacked]);
+      const m = [seq, ctl.telegraph, ctl.rudder, ctl.ax, ctl.ay, ctl.lock, actBase, unacked];
+      if (ctl.air) m.push(ctl.air);
+      o.send('cmd', m);
       sentAt[seq & 63] = o.now(); sentSeq[seq & 63] = seq & 0xffff;
       seq++; sinceSend = 0; dirty = false; actsNew = false;
    }
@@ -301,18 +323,27 @@ export function makeReplica(world, o) {
       shellByHost.set(s.hid, s);
    }
 
-   // it: ['T', id, ownerId, x, y, heading, tick, run?]  (PvP: a torpedo first seen on its way,
-   // at where it is now; run = the distance it has already run)
+   // the run of a torpedo: the ship's tubes, or (air) the carrier's torpedo bombers' weapon
+   function torpCfg(owner, air) {
+      if (!owner) return null;
+      if (!air) return owner.cfg.torp || null;
+      const w = owner.cfg.air?.tb?.weapon;
+      return w ? { speed: w.speedKn * 2.6, speedKn: w.speedKn, range: w.range, detect: AIR.tbDetect } : null;
+   }
+
+   // it: ['T', id, ownerId, x, y, heading, tick, run?, air?]  (PvP: a torpedo first seen on its
+   // way, at where it is now; run = the distance it has already run; air: dropped by a plane)
    function spawnTorp(it) {
       const owner = byId.get(it[2]);
-      const tc = owner && owner.cfg.torp;
+      const tc = torpCfg(owner, it[8] === 1);
       if (!tc) return;
       const t = {
          id: it[1], pos: { x: it[3], y: it[4] }, start: { x: it[3], y: it[4] }, heading: it[5], dir: it[5],
          speed: tc.speed, speedKn: tc.speedKn, side: owner.side, owner: owner.side, ownerId: owner.id, dmg: 0, flood: 0,
          range: tc.range - (fin(it[7]) ? it[7] : 0), detect: tc.detect, traveled: 0, age: 0, alive: true, spotted: owner.side === 'player', visibleToOpp: false,
-         t0: (it[6] - 1) * SIM_DT, cx: Math.cos(it[5]), cy: Math.sin(it[5]),
+         t0: (it[6] - 1) * SIM_DT, cx: Math.cos(it[5]), cy: Math.sin(it[5]), full: tc.range,
       };
+      if (it[8] === 1) t.air = true;
       world.torpedoes.push(t);
       torpByHost.set(t.id, t);
    }
@@ -360,6 +391,7 @@ export function makeReplica(world, o) {
          }
          case 'k': _p.x = it[1]; _p.y = it[2]; world.addSmoke({ c: _p, r: it[3], maxR: it[4] || undefined, life: it[5], side: sideOf(it[6]), ownerId: it[7] }); break;
          case 'l': world.log(null, String(it[1]), it[2]); break;
+         case 'b': dropBomb(it); break;
          case 'n': spawnShip(it); break;
          case 'r': { const s = byId.get(it[1]); if (s) world.removeShip(s, it[2] || 'escaped'); break; }
       }
@@ -468,12 +500,12 @@ export function makeReplica(world, o) {
       let i = n - 1;
       while (i > 0 && snaps[i].t > rt) i--;
       const A = snaps[i];
-      if (A.t > rt) applyShips(A, A, 0, A, dt);                         // before the oldest snapshot
-      else if (i < n - 1) { const B = snaps[i + 1]; applyShips(A, B, (rt - A.t) / (B.t - A.t), A, dt); }
+      if (A.t > rt) { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); }       // before the oldest snapshot
+      else if (i < n - 1) { const B = snaps[i + 1], k = (rt - A.t) / (B.t - A.t); applyShips(A, B, k, A, dt); applySquads(A, B, k, A, dt); }
       else if (n > 1) {                                                  // past the newest: run on a little
-         const Q = snaps[n - 2];
-         applyShips(Q, A, 1 + Math.min(rt - A.t, EXTRAPOLATE) / (A.t - Q.t), A, dt);
-      } else applyShips(A, A, 0, A, dt);
+         const Q = snaps[n - 2], k = 1 + Math.min(rt - A.t, EXTRAPOLATE) / (A.t - Q.t);
+         applyShips(Q, A, k, A, dt); applySquads(Q, A, k, A, dt);
+      } else { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); }
    }
 
    // The own ship's read-outs between two own-detail updates.
@@ -540,6 +572,109 @@ export function makeReplica(world, o) {
       if (dead) world.torpedoes = T.filter(t => t.alive);
    }
 
+   // ---------------------------------------------------------------- squadrons, bombs
+   function sqIndex(S, id, hint) {
+      if (hint < S.nq && S.qid[hint] === id) return hint;
+      for (let i = 0; i < S.nq; i++) if (S.qid[i] === id) return i;
+      return -1;
+   }
+
+   function makeSquad(F, i) {
+      const owner = byId.get(F.qown[i]);
+      const b = F.qb[i], type = AIR_TYPES[b & 3];
+      const cfg = owner && owner.cfg.air && owner.cfg.air[type];
+      if (!cfg) return null;
+      const n = F.qn[i] & 15;
+      return {
+         id: F.qid[i], side: sideOf(b & 32 ? 'enemy' : 'player'), ownerId: owner.id, type, cfg, n, n0: n,
+         armed: 0, hp: cfg.hp, pos: { x: F.qx[i], y: F.qy[i] }, alt: F.qalt[i], altT: F.qalt[i],
+         prev: { x: F.qx[i], y: F.qy[i], alt: F.qalt[i], h: F.qh[i] },
+         heading: F.qh[i], want: F.qh[i], speed: F.qsp[i], throttle: 0, boost: AIR.boostMax,
+         state: 'fly', t: 0, fuel: owner.cfg.air.fuel, order: null, human: false,
+         aiming: false, aimT: 0, aimPt: { x: 0, y: 0 }, spread: AIR.tbSpread[0], ellipse: AIR.dbEllipse[0],
+         ammo: cfg.ammo || 0, foeId: null, patrolT: 0, center: null,
+         visible: true, visE: true, seenT: 0, flakT: 0, underFire: 0, ditchT: 0, net: true,
+         ai: { t: 0, phase: 0, errL: 0, errP: { x: 0, y: 0 } },
+      };
+   }
+
+   // like applyShips: A, B blended by k (position, heading, altitude), F for the rest
+   function applySquads(A, B, k, F, dt) {
+      const sqs = world.squadrons;
+      for (let j = 0; j < sqs.length; j++) { const q = sqs[j]; q.prev.x = q.pos.x; q.prev.y = q.pos.y; q.prev.alt = q.alt; q.prev.h = q.heading; }
+      const own = world._sqOwn;
+      let changed = false;
+      for (let i = 0; i < F.nq; i++) {
+         const id = F.qid[i];
+         let q = sqByHost.get(id);
+         if (!q) {
+            q = makeSquad(F, i);
+            if (!q) continue;
+            sqByHost.set(id, q); sqs.push(q); world.hasAir = true;
+         }
+         q._seen = F.tick;
+         let ia = sqIndex(A, id, i), ib = sqIndex(B, id, i);
+         const SA = ia < 0 ? B : A, SB = ib < 0 ? A : B;
+         if (ia < 0) ia = ib; if (ib < 0) ib = ia;
+         const kk = k > 1 ? 1 : k;
+         const dh = angD(SA.qh[ia], SB.qh[ib]);
+         q.pos.x = SA.qx[ia] + (SB.qx[ib] - SA.qx[ia]) * k; q.pos.y = SA.qy[ia] + (SB.qy[ib] - SA.qy[ia]) * k;
+         q.heading = (((SA.qh[ia] + dh * k) % TAU) + TAU) % TAU;
+         q.alt = SA.qalt[ia] + (SB.qalt[ib] - SA.qalt[ia]) * kk;
+         q.speed = SA.qsp[ia] + (SB.qsp[ib] - SA.qsp[ia]) * kk;
+         const b = F.qb[i];
+         q.state = SQ_STATES[(b >> 2) & 7] || 'fly';
+         q.aiming = !!(b & 64); q.human = !!(b & 128);
+         q.n = F.qn[i] & 15; q.armed = F.qn[i] >> 4;
+         if (!q.human || q.ownerId !== me?.id) q.want = F.qw[i];      // own flight: the stick is local
+         q.aimT = F.qaim[i]; q.underFire = F.qfire[i];
+         if (q.type === 'tb') q.spread = AIR.tbSpread[0] + (AIR.tbSpread[1] - AIR.tbSpread[0]) * clamp01((q.aimT - AIR.tbAimMin) / (AIR.tbAimFull - AIR.tbAimMin));
+         else if (q.type === 'db') q.ellipse = AIR.dbEllipse[0] + (AIR.dbEllipse[1] - AIR.dbEllipse[0]) * clamp01(q.aimT / AIR.dbAimFull);
+         if (F.qc[i]) { const c = q.center || (q.center = { x: 0, y: 0 }); c.x = F.qcx[i]; c.y = F.qcy[i]; } else q.center = null;
+         const d = own && own.get(id);
+         if (d) { q.fuel = d[0]; q.boost = d[1]; q.throttle = d[2]; q.n0 = Math.max(q.n, d[3]); q.ammo = d[4]; }
+         // flak around a squadron under fire (the host does not send its bursts)
+         if (q.underFire > 0 && q.n > 0 && dt > 0) {
+            q.flakT -= dt;
+            let m = 0;
+            while (q.flakT <= 0 && m < 3) {
+               q.flakT += AIR.flakGap * Math.min(3, Math.max(0.5, 120 / q.underFire));
+               _p.x = q.pos.x + Math.cos(q.heading) * 120 + (Math.random() - 0.5) * 420;
+               _p.y = q.pos.y + Math.sin(q.heading) * 120 + (Math.random() - 0.5) * 420;
+               world.addEffect('flak', _p, 1.6, 9, { alt: Math.max(25, q.alt + (Math.random() - 0.4) * 140) });
+               m++;
+            }
+         } else q.flakT = 0;
+      }
+      // squadrons the newest snapshot no longer lists: landed, shot down, or (PvP) out of sight
+      for (let j = 0; j < sqs.length; j++) if (sqs[j]._seen !== F.tick) { changed = true; break; }
+      if (changed) {
+         world.squadrons = sqs.filter(q => { if (q._seen === F.tick) return true; sqByHost.delete(q.id); return false; });
+      }
+   }
+
+   // it: ['b', x, y, sx, sy, salt, delay, heading, tick]
+   function dropBomb(it) {
+      let b = null;
+      for (const o of world.bombs) if (!o.alive) { b = o; break; }
+      if (!b) {
+         if (world.bombs.length >= AIR.maxBombs) return;
+         b = { alive: false, x: 0, y: 0, sx: 0, sy: 0, salt: 0, t: 0, fall: AIR.bombFall, heading: 0, t0: 0 };
+         world.bombs.push(b);
+      }
+      b.alive = true; b.x = it[1]; b.y = it[2]; b.sx = it[3]; b.sy = it[4]; b.salt = it[5];
+      b.t0 = (it[8] - 1) * SIM_DT + (fin(it[6]) ? it[6] : 0); b.t = -1; b.fall = AIR.bombFall; b.heading = it[7];
+      world.hasAir = true;
+   }
+
+   function fallBombs() {
+      for (const b of world.bombs) {
+         if (!b.alive) continue;
+         b.t = rt - b.t0;
+         if (b.t >= b.fall) b.alive = false;      // the splash / hit comes from the host
+      }
+   }
+
    // ---------------------------------------------------------------- the step
    function step(dt) {
       const now = o.now();
@@ -556,6 +691,7 @@ export function makeReplica(world, o) {
       ownStep(dt);
       flyShells(dt);
       runTorps();
+      fallBombs();
       world._updateSmoke(dt);
       world._updateEffects(dt);
       if (world._shake) { world._shake *= Math.pow(0.02, dt); if (world._shake < 0.02) world._shake = 0; }
@@ -579,6 +715,7 @@ export function makeReplica(world, o) {
       for (const s of world.shells) if (!s.pred) s.alive = false;
       shellByHost.clear();
       world.torpedoes = []; torpByHost.clear();
+      world.squadrons = []; sqByHost.clear(); world.bombs.length = 0; ctl.air = null;
       lost = false;
    }
 
@@ -600,10 +737,9 @@ export function makeReplica(world, o) {
       const seen = new Set();
       if (N) for (let i = 0; i < N.n; i++) seen.add(N.id[i]);
       for (const t of world.torpedoes) {
-         const owner = byId.get(t.ownerId), tc = owner && owner.cfg.torp;
          t.traveled = t.speed * Math.max(0, rt - t.t0);
          t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled;
-         if (tc) { t.traveled += tc.range - t.range; t.range = tc.range; }
+         if (t.full) { t.traveled += t.full - t.range; t.range = t.full; }
       }
       for (const k of ['update', 'addShell', 'addTorpedo']) delete world[k];
       world.net = net0;
