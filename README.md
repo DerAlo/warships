@@ -139,6 +139,35 @@ see `game3d/ARCHITECTURE.md`):
     *Geleitzugschlacht* puts you in U 96 against
     an escorted convoy. Code: `game3d/submarine.js`, `game3d/ai_sub.js`,
     `game3d/subui.js`.
+  - **Aircraft carriers (Flugzeugträger):** Graf Zeppelin (DE, tier 7), Akagi
+    (JP, 7), Shōkaku (JP, 8), Ark Royal (UK, 6), Illustrious (UK, 7),
+    Enterprise (US, 7), Essex (US, 8) and Béarn (FR, 5), each with its
+    historical torpedo bomber, dive bomber and fighter (e.g. TBD Devastator,
+    SBD Dauntless, F4F Wildcat on Enterprise). Hangar per type; a squadron of
+    6 bombers (4 fighters) takes off one at a time from the deck, flies on
+    limited fuel (200 s), attacks in flights of 3 (two runs per squadron),
+    returns, lands and needs about 18 s of servicing; planes shot down are
+    replaced slowly (one per ~40 s per type). Planes spot for their team
+    (60 % of a ship's surface detectability, at most 8 km).
+    **Playing a carrier:** 1/2/3 pick the plane type, E launches the squadron
+    and switches to it (E again: back to the ship, the squadron flies on and
+    picks a target). In the squadron: A/D or the mouse steer, W/S speed (boost
+    is limited), mouse wheel camera distance. Hold the left button for the
+    attack run — torpedo bombers show a fan that narrows, dive bombers an
+    ellipse that shrinks — and release to drop; F recalls. Fighters patrol
+    where you click and engage enemy squadrons. The carrier's own dual-purpose
+    guns still fire from the ship view.
+    **Anti-aircraft fire:** every ship has flak by class, era and navy
+    (long-range heavy guns, 37–40 mm mid band, 20 mm close band), shown as
+    bursts around the planes; squadrons lose planes one by one. Key 4 shifts
+    the flak to port or starboard (stronger there, weaker on the other side).
+    Bot ships under air attack turn into the run and stay close to their
+    group; bot carriers send strikes at spotted targets and keep fighters
+    over the fleet. About 30 % of the random battles have one carrier per side
+    (singleplayer only); the historical operation *Schlacht um Midway* puts
+    you on Enterprise against the four carriers of the Kido Butai. Carriers
+    and aircraft are not available in co-op yet. Code: `game3d/air.js`,
+    `game3d/ai_air.js`, `game3d/airui.js`, `game3d/air3d.js`.
   - **Kill camera:** a short cut (about 2 s) to a ship you just sank. Any key or
     click skips it. It never starts during danger, stops as soon as you take
     fire, and can be turned off in the pause menu ("Versenkungs-Kamera").

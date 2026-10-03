@@ -1098,7 +1098,8 @@ SHIPS.Hiryu = variant(SHIPS.Shokaku, {
 });
 SHIPS.Hiryu.main.turrets = [[70, 1, 2], [65, -1, 2], [60, 1, 2], [-55, -1, 2], [-60, 1, 2], [-65, -1, 2]].map(([x, sy, g]) => DP(x, sy, g, 22.3));
 SHIPS.Hiryu.main.guns = 12;
-SHIPS.Hiryu.air.tb.hangar = 9; SHIPS.Hiryu.air.db.hangar = 9; SHIPS.Hiryu.air.ft.hangar = 7;
+// June 1942: the same plane types as Akagi (the Tenzan / Suisei of the Shōkaku came later)
+SHIPS.Hiryu.air = { ...SHIPS.Akagi.air, tb: { ...SHIPS.Akagi.air.tb, hangar: 9 }, db: { ...SHIPS.Akagi.air.db, hangar: 9 }, ft: { ...SHIPS.Akagi.air.ft, hangar: 7 } };
 export const isCarrier = (cfgOrKey) => (typeof cfgOrKey === 'string' ? SHIPS[cfgOrKey] : cfgOrKey)?.hull?.type === 'CV';
 // Player-selectable classes, in port order (grouped by nation there). The four original ships
 // stay in front; op-only ships (Washington, Duke of York) are not listed.
