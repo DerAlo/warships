@@ -20,7 +20,7 @@ export const DEPTH_NAMES = ['Aufgetaucht', 'Sehrohrtiefe', 'Getaucht'];
 export const SUB_TUBE_ARC = 28 * DEG;     // bow / stern tubes: gyro angle either side of the keel line
 export const SUB_BLOOM_T = 14;            // s a torpedo salvo from periscope depth gives the boat away
 export const PERI_PROX = 900;             // m: a periscope is always seen this close
-export const PERI_SHELL_MULT = 0.5;       // shell damage against a boat at periscope depth
+export const PERI_SHELL_MULT = 0.35;      // shell damage against a boat at periscope depth (tower only)
 export const DEEP_M = 24;                 // m the hull goes further down between periscope depth and deep
 export const BATTERY_LOCK = 0.15;         // charge needed before an emptied boat may dive again
 // passive sonar of surface ships against a submerged boat (m); a creeping boat is harder to hear
@@ -29,7 +29,15 @@ export const SONAR_DT = 0.5;
 export const SONAR_KEEP = 8;              // s a sonar contact stays on the plot
 // depth-charge racks by hull type: charges per pattern, s between patterns
 export const ASW = { DD: { charges: 6, reload: 24 }, CL: { charges: 4, reload: 32 } };
-export const DC = { sink: 2.6, gap: 0.28, full: 45, reach: 135, dmg: 1500, max: 64, throwY: 34 };
+// (round 7: a full pattern no longer sinks a Type VII outright, and the charges sink a little
+// longer, so a boat that turns hard on the 'Wasserbomben' warning can get out of the pattern)
+export const DC = { sink: 3.1, gap: 0.28, full: 38, reach: 120, dmg: 1200, max: 64, throwY: 34 };
+// the hydrophone consumable hears a boat's screws at this share of its range against surface ships
+export const HYDRO_SUB = 0.45;
+// a hunter's own screws drown its passive sonar: above half speed the range shrinks to this share
+export const SONAR_DEAF = 0.6;
+// s the turbulence of its own pattern blinds a hunter's sonar: the moment to slip away
+export const DC_DEAF_T = 7;
 
 // hull sinkage (m) at periscope depth: the tower top ends ~1.5 m under the surface
 export function periDepthM(cfg) { const h = cfg.hull; return h.deckH + (h.sup ? h.sup.h : 5) + 1.5; }
@@ -48,6 +56,7 @@ export function initSubState(ship) {
    ship.batteryLock = false;
    ship.sonarSeen = null;        // enemy sonar contact on this boat { x, y, t, by }
    ship.pingT = -999;            // last time an enemy sonar held this boat
+   ship.sonarDeafT = -999;       // hunters: own depth charges drown the sonar until then
    ship.lastTorpFire = -999;
    ship.ramT = -999;
    const a = ASW[cfg.hull.type];
@@ -115,7 +124,10 @@ function stepSub(s, world, dt) {
    const sb = s.sub, bat = sb.battery;
    if (s.depthF > 0.5) {
       const k = clamp01(s.depthF - 1);                     // 0 at periscope depth .. 1 deep
-      s.battery = Math.max(0, s.battery - dt * ((1 - k) / bat.peri + k / bat.deep));
+      // the motors draw with speed: a boat creeping deep (silent running) outlasts a hunt
+      const vmax = s.maxSpeed * subSpeedFactor(s);
+      const draw = 0.4 + 0.6 * clamp01(Math.abs(s.speed) / (vmax || 1));
+      s.battery = Math.max(0, s.battery - dt * draw * ((1 - k) / bat.peri + k / bat.deep));
       if (s.battery <= 0 && !s.batteryLock) {
          s.batteryLock = true;
          if (s.depthTarget > 0) {
@@ -150,14 +162,15 @@ function updateSonar(world) {
       let by = null, bd = Infinity;
       for (let j = 0; j < ships.length; j++) {
          const O = ships[j];
-         if (!O.alive || O.side === T.side) continue;
-         let r = (SONAR_RANGE[O.type] ?? 1200) * loud;
-         if (O.consumableActive('hydro')) r = Math.max(r, O.consumable('hydro').range || 0);
+         if (!O.alive || O.side === T.side || O.sonarDeafT > now) continue;
+         const fast = clamp01((Math.abs(O.speed) / (O.maxSpeed || 1) - 0.5) * 2);
+         let r = (SONAR_RANGE[O.type] ?? 1200) * loud * (1 - (1 - SONAR_DEAF) * fast);
+         if (O.consumableActive('hydro')) r = Math.max(r, (O.consumable('hydro').range || 0) * HYDRO_SUB * loud);
          const d2 = dist2(O.pos, T.pos);
          if (d2 < r * r && d2 < bd) { bd = d2; by = O; }
       }
       if (!by) { if (T.sonarSeen && now - T.sonarSeen.t > SONAR_KEEP) T.sonarSeen = null; continue; }
-      const noise = T.depth === 2 ? 70 : 30;
+      const noise = T.depth === 2 ? 90 : 40;
       const c = T.sonarSeen || (T.sonarSeen = { x: 0, y: 0, t: 0, by: 0, evT: -99 });
       c.x = T.pos.x + (world.rng() * 2 - 1) * noise; c.y = T.pos.y + (world.rng() * 2 - 1) * noise;
       c.t = now; c.by = by.id;
@@ -230,6 +243,7 @@ function stepCharges(world, dt) {
 
 function explodeCharge(world, c) {
    const shooter = world.shipById(c.ownerId);
+   if (shooter) shooter.sonarDeafT = world.time + DC_DEAF_T;
    world.addEffect('depthCharge', c.pos, 2.2, 34, { big: true });
    world.pushEvent('depthCharge', { srcId: c.ownerId, pos: { x: c.pos.x, y: c.pos.y } });
    for (const s of world.ships) {
