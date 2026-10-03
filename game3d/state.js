@@ -7,7 +7,7 @@ import { Ship } from './ship.js';
 import { resolveShells, resolveTorpedoes } from './combat.js';
 import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
-import { updateSubs, hullContact, PERI_PROX } from './submarine.js';
+import { updateSubs, hullContact, PERI_PROX, HYDRO_SUB } from './submarine.js';
 import { updateAir, airSpots } from './air.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
@@ -367,7 +367,7 @@ export class World {
             let sees = d2 < tprox2;
             if (!sees) {
                const radar = td === 0 && O.consumableActive('radar') ? O.consumable('radar').range : 0;
-               const hydro = O.consumableActive('hydro') ? O.consumable('hydro').range : 0;
+               const hydro = O.consumableActive('hydro') ? O.consumable('hydro').range * (td === 1 ? HYDRO_SUB : 1) : 0;
                if (d2 < Math.max(radar, hydro) ** 2) sees = true;
                else if (T.detectRange > 0 && d2 < T.detectRange * T.detectRange) {
                   sees = !this.losBlocked(O.pos, T.pos) && (T.inSmoke || !this.smokeBlocks(O.pos, T.pos));

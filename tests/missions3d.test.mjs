@@ -10,7 +10,7 @@ import { obstacleT } from '../game3d/utils.js';
 
 const DT = 1 / 60;
 const BATTLES = ['strait', 'rearguard', 'fleet'];
-const OPS = { cerberus: 'Scharnhorst', vian: 'Jervis', barents: 'Fiji', narvik: 'Jervis' };
+const OPS = { cerberus: 'Scharnhorst', vian: 'Jervis', barents: 'Fiji', narvik: 'Jervis', matapan: 'Warspite', dakar: 'Richelieu', wahoo: 'Gato', spartivento: 'Littorio' };
 const NEW = [...BATTLES, ...Object.keys(OPS)];
 const byName = (w, n) => w.ships.find(s => s.name === n);
 const sink = (s, by) => s.takeDamage(s.hp + 1, by, 'citadel');
@@ -268,4 +268,102 @@ test('Narvik: freighters first, then the withdrawal to the Vestfjord wins', () =
    w.timeLeft = 0; w.update(DT);
    assert.strictEqual(w.phase, 'lost');
    assert.strictEqual(obj(w, 'sink').state, 'failed');
+});
+
+test('Matapan: the first hit wakes the Italians, two of three cruisers sunk win, two escaping lose', () => {
+   let w = world('matapan');
+   const S = w._script, p = w.player;
+   assert.strictEqual(S.targets.length, 3);
+   assert.ok(S.italians.every(s => s.ai.passive), 'the column steams on unaware');
+   S.cruisers[0].takeDamage(100, p, 'he');
+   w.update(DT);
+   assert.ok(S.dds.every(d => !d.ai.passive), 'the destroyers react at once');
+   assert.ok(S.cruisers.every(c => c.ai.passive), 'the cruisers are still surprised');
+   runTo(w, w.time + S.surprise + 1);
+   assert.ok(S.cruisers.every(c => !c.alive || !c.ai.passive), 'then the cruisers run');
+   sink(S.pola, p);
+   assert.strictEqual(w.phase, 'playing');
+   sink(S.cruisers[1], p);
+   assert.strictEqual(w.phase, 'won');
+   assert.strictEqual(obj(w, 'cruisers').state, 'done');
+   // the fleet is noticed after a while anyway
+   w = world('matapan');
+   runTo(w, w._script.wakeT + 1);
+   assert.ok(w._script.awake);
+   // two cruisers reaching the open sea: lost
+   w = world('matapan');
+   for (const c of w._script.cruisers) put(c, w._script.exit);
+   w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+   w = world('matapan');
+   w.timeLeft = 0; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+});
+
+test('Dakar: both battleships broken off win, two transports landed lose, the clock wins', () => {
+   let w = world('dakar');
+   const S = w._script;
+   assert.ok(w.player.maxSpeedKn <= 12.5, 'Richelieu cannot leave the roads at speed');
+   for (const b of S.bbs) b.hp = b.maxHP * 0.3;
+   runTo(w, w.time + 60);
+   assert.strictEqual(w.phase, 'won', 'both battleships turn away');
+   assert.strictEqual(obj(w, 'bbs').state, 'done');
+   w = world('dakar');
+   put(w._script.transports[0], w._script.landing); w.update(DT);
+   assert.strictEqual(w.phase, 'playing', 'one landing is survivable');
+   put(w._script.transports[1], w._script.landing); w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+   assert.strictEqual(obj(w, 'landing').state, 'failed');
+   // the submarine's torpedo slows the second battleship
+   w = world('dakar');
+   const r = w._script.bbs[1], hp0 = r.hp;
+   runTo(w, w._script.torpT + 1);
+   if (r.alive && !r.ai.retreating) assert.ok(r.hp < hp0 && r.maxSpeedKn <= 12);
+   w = world('dakar');
+   w.timeLeft = 0; w.update(DT);
+   assert.strictEqual(w.phase, 'won');
+});
+
+test('Wahoo: the boat alone, enough ships sunk win, the convoy escaping loses', () => {
+   let w = world('wahoo');
+   const S = w._script, p = w.player;
+   assert.strictEqual(p.cls, 'Gato');
+   assert.ok(!w.ships.some(s => s.side === 'player' && s !== p), 'no allied ship');
+   assert.strictEqual(S.transports.length, 4);
+   for (let i = 0; i < S.need - 1; i++) sink(S.transports[i], p);
+   assert.strictEqual(w.phase, 'playing');
+   sink(S.escorts[0], p);
+   assert.strictEqual(obj(w, 'dd').state, 'done');
+   sink(S.transports[S.need - 1], p);
+   assert.strictEqual(w.phase, 'won');
+   w = world('wahoo');
+   for (let i = 0; i <= 4 - w._script.need; i++) put(w._script.transports[i], w._script.exit);
+   w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+   w = world('wahoo');
+   w.timeLeft = 0; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+});
+
+test('Spartivento: cruisers sunk, then the withdrawal east wins; a mauled flagship loses', () => {
+   let w = world('spartivento');
+   const S = w._script, p = w.player;
+   put(p, S.exit); w.update(DT);
+   assert.strictEqual(w.phase, 'playing', 'no withdrawal before the cruiser screen is broken');
+   for (let i = 0; i < S.need; i++) sink(S.cruisers[i], p);
+   assert.ok(S.phase2 && obj(w, 'out'), 'withdrawal ordered');
+   assert.strictEqual(obj(w, 'berwick').state, 'done');
+   w.update(DT);
+   assert.strictEqual(w.phase, 'won');
+   // the heavy ships come up later
+   w = world('spartivento');
+   runTo(w, 250);
+   assert.ok(w._script.heavy.length >= 1, 'Renown arrives');
+   // Supermarina's order: the battleship is not to be risked
+   w = world('spartivento');
+   w.player.hp = w.player.maxHP * (w._script.limit - 0.01); w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
+   w = world('spartivento');
+   w.timeLeft = 0; w.update(DT);
+   assert.strictEqual(w.phase, 'lost');
 });

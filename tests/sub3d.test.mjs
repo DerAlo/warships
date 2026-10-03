@@ -115,7 +115,7 @@ test('battery: drains under water (faster deep), forces the boat up when empty, 
    const b0 = u.battery;
    run(w, 30);
    assert.ok(b0 - u.battery > peri * 1.8, 'deep drains much faster');
-   u.battery = 0.01;
+   u.battery = 0.004;                 // a stopped boat draws less: keep the margin small
    run(w, 5);
    assert.strictEqual(u.depthTarget, 0, 'forced surfacing');
    assert.ok(w.events.some(e => e.type === 'depth' && e.forced));

@@ -100,8 +100,9 @@ ship object itself (name, script role, AI orders for when the captain drops) and
 cut back to full strength. The operation is lost when the flagship sinks.
 
 Kept out: `training` (exercise for one captain, no allied ship), `laststand` (the Bismarck fights
-alone). Today's limits (measured with `coopSlots`): rheinuebung 2 (Bismarck, Prinz Eugen),
-wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
+alone), `wahoo` (one US boat, no allied ship). Today's limits (measured with `coopSlots`):
+rheinuebung 2 (Bismarck, Prinz Eugen), wolfpack 3, guadalcanal / nordkap / cerberus / vian /
+barents / narvik / matapan / dakar / spartivento 4.
 
 Carriers stay out of net games until the snapshot carries aircraft: `validClass` and
 `allowedShips` drop carrier classes, `replaceableBots` skips CV bots, and every net World is built

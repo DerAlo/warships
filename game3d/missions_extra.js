@@ -30,7 +30,8 @@ export function extraMissions(H) {
             const S = w._script, hard = w.difficulty.key === 'hard';
             S.harbour = zone(w, 8300, 0, 1500, 'Hafen', 'goal');
             S.runners = []; S.broke = 0; S.kills = 0; S.total = 0;
-            spawnTeam(w, 'player', [['Hipper', 0, 0], ['Scharnhorst', -900, 900], ['Nuernberg', 300, -2200], ['Z23', 900, 1900], ['Z23', 900, -900]], P(4300, 0), Math.PI, shipKey);
+            // hard: a third destroyer joins the line (measured: without it the line fell before wave three)
+            spawnTeam(w, 'player', [['Hipper', 0, 0], ['Scharnhorst', -900, 900], ['Nuernberg', 300, -2200], ['Z23', 900, 1900], ['Z23', 900, -900], ...(hard ? [['Z23', 1700, 500]] : [])], P(4300, 0), Math.PI, shipKey);
             // runners hold their course for the harbour (and shoot on the way); a ship without a route is cover
             const run = (cls, y, lane) => {
                const s = add(w, cls, 'enemy', P(-10200, y), 0, { telegraph: 4, minDist: S.total ? 9000 : 0,
@@ -47,7 +48,6 @@ export function extraMissions(H) {
                w.message('Dritte Welle! Ein Schlachtschiff deckt den Durchbruch.', 'warn');
                add(w, 'KGV', 'enemy', P(-10300, 600), 0, { telegraph: 3, minDist: 11000 }); S.total++;
                run('Fiji', -2500, -1500); run('Jervis', 3600, 1600);
-               if (hard) run('Jervis', -5000, -1800);
                S.wavesDone = true;
             });
             objective(w, 'hold', 'Höchstens 2 Schiffe durchbrechen lassen (0 durchgebrochen)');
@@ -502,6 +502,9 @@ export function extraMissions(H) {
             if (S.phase2) return;
             S.phase2 = true;
             const key = w.difficulty.key, p = w.player;
+            const rDmg = w.difficulty.botDmg * 0.7;
+            // on hard they come in numbers: the leader of each group hunts Hardy, the rest pick on the flotilla
+            const prey = i => { const f = S.flot.filter(s => s.alive); return key === 'hard' && i > 0 && f.length ? f[(i - 1) % f.length].id : p ? p.id : null; };
             setObj(w, 'sink', 'done');
             objective(w, 'out', 'Rückzug: Erreichen Sie den Vestfjord im Westen');
             radio(w, 'Captain Warburton-Lee', 'Auftrag erfüllt. Flottille: kehrt, mit Höchstfahrt nach Westen ablaufen!');
@@ -510,12 +513,12 @@ export function extraMissions(H) {
             later(S, w.time + 12, () => {
                radio(w, 'HMS Hostile', 'Zerstörer aus dem Herjangsfjord – sie kommen von Norden!', 'warn');
                const names = key === 'easy' ? ['Wolfgang Zenker'] : key === 'hard' ? ['Wolfgang Zenker', 'Erich Giese', 'Erich Koellner'] : ['Wolfgang Zenker', 'Erich Giese'];
-               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(5200 - i * 900, -6300), 1.9, { name, telegraph: 4, minDist: 6500, dmgMult: w.difficulty.botDmg * 0.7, ai: { huntId: p ? p.id : null } })));
+               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(5200 - i * 900, -6300), 1.9, { name, telegraph: 4, minDist: 6500, dmgMult: rDmg, ai: { huntId: prey(i) } })));
             });
             later(S, w.time + 55, () => {
-               radio(w, 'HMS Hardy', 'Zwei Zerstörer voraus – Georg Thiele und Bernd von Arnim verlegen uns den Weg!', 'warn');
-               const names = key === 'hard' ? ['Georg Thiele', 'Bernd von Arnim'] : ['Georg Thiele'];
-               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(-3800, 5600 - i * 1100), -0.9, { name, telegraph: 4, minDist: 6500, dmgMult: w.difficulty.botDmg * 0.7, ai: { huntId: p ? p.id : null } })));
+               radio(w, 'HMS Hardy', 'Zerstörer voraus – die Georg Thiele verlegt uns den Weg nach Westen!', 'warn');
+               const names = ['Georg Thiele'];
+               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(-3800, 5600 - i * 1100), -0.9, { name, telegraph: 4, minDist: 6500, dmgMult: rDmg, ai: { huntId: prey(i) } })));
             });
          },
          update(w, dt, S) {
@@ -619,6 +622,365 @@ export function extraMissions(H) {
             w.end(true, `${S.sunk} Frachter versenkt – das Rudel hat den Geleitzug zerschlagen.`);
          },
          timeout(w, S) { setObj(w, 'sink', 'failed'); w.end(false, `Nur ${S.sunk} Frachter versenkt – der Geleitzug ist entkommen.`); },
+      },
+
+      // ------------------------------------------------------------ op: night action off Cape Matapan
+      // The Italian column steams unaware towards the stopped Pola; the first hit (or a British ship
+      // close aboard) wakes it, and the cruisers run west at full speed. Italian destroyers: the
+      // Soviet Project 7 (Gnevny) was drawn up with Italian help after the Maestrale/Folgore type,
+      // so it stands in for the Oriani/Alfieri class.
+      {
+         id: 'matapan', group: 'ops', name: 'Nacht vor Kap Matapan', subtitle: 'Östliches Mittelmeer · Nacht zum 29. März 1941',
+         fleet: { own: 'HMS Warspite, Valiant, Barham · Zerstörer Jervis, Janus', foe: 'Schwere Kreuzer Zara, Fiume, Pola · Zerstörer der 9. Flottille' },
+         briefing: 'Ein Lufttorpedo hat den schweren Kreuzer Pola gestoppt; er liegt bewegungslos in der Dunkelheit. ' +
+            'Admiral Cattaneo kehrt mit Zara, Fiume und vier Zerstörern um, um ihn abzuschleppen – ohne zu ahnen, dass die britische Schlachtflotte keine fünf Kilometer südlich steht. ' +
+            'Sie führen die Warspite an der Spitze der Linie. Lassen Sie die Italiener herankommen und eröffnen Sie das Feuer auf kurze Entfernung. ' +
+            'Nach dem ersten Schuss brauchen die überraschten Kreuzer einige Augenblicke, dann laufen sie mit Höchstfahrt nach Westen ab; die Zerstörer werfen sich sofort mit Torpedos dazwischen. ' +
+            'Erreicht ein Kreuzer die offene See im Westen, ist er entkommen.',
+         debrief: 'Um 22.27 Uhr eröffneten Warspite, Valiant und Barham auf rund 3.500 Meter das Feuer; der Zerstörer Greyhound hielt seinen Scheinwerfer auf die Fiume. ' +
+            'Zara und Fiume wurden in wenigen Minuten zusammengeschossen, die Zerstörer Alfieri und Carducci sanken. Jervis und Nubian versenkten in der Nacht die Pola. ' +
+            'Rund 2.300 italienische Seeleute kamen ums Leben. Radar und Nachtgefechtsausbildung hatten den Ausschlag gegeben – die italienische Flotte mied danach lange das östliche Mittelmeer.',
+         env: { time: 'night', weather: 'clear', visibility: 0.85 }, type: 'fleet', playableShips: ['Warspite'], recommendedShip: 'Warspite',
+         arena: 13500, timeLimit: 12 * 60, stars: 2,
+         setup(w, shipKey) {
+            islands(w, []);
+            const S = w._script, key = w.difficulty.key;
+            S.need = 2;   // of Zara, Fiume and the stopped Pola
+            S.wakeR = key === 'easy' ? 2800 : key === 'hard' ? 4200 : 3500;   // a British ship this close is sighted
+            S.wakeT = key === 'easy' ? 260 : key === 'hard' ? 170 : 210;       // ... or they notice the fleet anyway
+            S.surprise = key === 'easy' ? 90 : key === 'hard' ? 50 : 70;
+            S.fleeKn = key === 'easy' ? 22 : key === 'hard' ? 27 : 24;          // boilers not yet at full pressure
+            S.exit = zone(w, -11900, -4200, 1400,'Offene See', 'danger');
+            S.pola = add(w, 'Zara', 'enemy', P(5200, -400), 0.5, { name: 'Pola', nation: 'it', telegraph: 0, speedKn: 0.1, ai: { passive: true, patrol: [P(5200, -400)] } });
+            S.pola.hp = S.pola.maxHP * 0.55;
+            S.polaHP = S.pola.hp;
+            const toPola = [P(1800, -150), P(4500, -350)];
+            S.cruisers = [['Zara', P(-2400, 0)], ['Fiume', P(-3300, 0)]].map(([name, pos]) =>
+               add(w, 'Zara', 'enemy', pos, 0, { name, nation: 'it', telegraph: 3, speedKn: 16, ai: { passive: true, route: toPola.map(p => P(p.x, p.y + pos.y)) } }));
+            const dds = key === 'easy' ? 1 : key === 'hard' ? 3 : 2;
+            S.dds = [['Alfieri', P(-1500, -200)], ['Carducci', P(-4200, 100)], ['Gioberti', P(-2800, -800)]].slice(0, dds).map(([name, pos]) =>
+               add(w, 'Gnevny', 'enemy', pos, 0, { name, nation: 'it', telegraph: 3, speedKn: 16, ai: { passive: true, route: toPola.map(p => P(p.x, p.y + pos.y)) } }));
+            S.italians = [...S.cruisers, ...S.dds];
+            S.targets = [...S.cruisers, S.pola];
+            const north = -Math.PI / 2;
+            const me = add(w, shipKey, 'player', P(1400, 4600), north - 0.3, { isPlayer: true, name: 'HMS Warspite', telegraph: 2 });
+            me.ai.huntId = S.cruisers[0].id; me.ai.press = true;   // only read by the autopilot (tests)
+            S.line = [
+               add(w, 'Warspite', 'player', P(1700, 5500), north - 0.3, { name: 'HMS Valiant', telegraph: 2, dmgMult: 0.75, ai: { huntId: S.cruisers[0].id } }),
+               add(w, 'Warspite', 'player', P(2000, 6400), north - 0.3, { name: 'HMS Barham', telegraph: 2, dmgMult: 0.75, ai: { huntId: S.cruisers[1].id } }),
+               add(w, 'Jervis', 'player', P(300, 4000), north - 0.3, { name: 'HMS Jervis', telegraph: 2, dmgMult: 0.6, ai: { huntId: S.pola.id } }),
+               add(w, 'Jervis', 'player', P(2800, 4100), north - 0.3, { name: 'HMS Janus', telegraph: 2, dmgMult: 0.6, ai: { huntId: S.dds[0].id } }),
+            ];
+            later(S, 4, () => radio(w, 'Admiral Cunningham', 'Schlachtflotte: Gefechtsbereitschaft, Feuer erst auf Befehl. Valiant hat ein stilles Ziel im Radar.'));
+            later(S, 25, () => radio(w, 'HMS Valiant', 'Weitere Kontakte im Westen – große Schiffe in Kiellinie, Kurs auf das gestoppte Schiff.'));
+            objective(w, 'cruisers', 'Versenken Sie zwei der drei Kreuzer (0/2)');
+            objective(w, 'dds', `Versenken Sie die italienischen Zerstörer (0/${dds})`, { optional: true });
+            objective(w, 'line', 'Kein britisches Schiff geht verloren', { optional: true });
+            w.score = { kind: 'kills', player: 0, enemy: 0, target: S.need };
+            S.sunk = 0; S.escaped = 0;
+         },
+         // first shots: the destroyers react at once, the cruisers (guns trained fore and aft, crews
+         // not at action stations) only after S.surprise seconds; then they run west
+         _wake(w, S) {
+            if (S.awake) return;
+            S.awake = true; S.alarmT = w.time;
+            radio(w, 'HMS Greyhound', 'Scheinwerfer an! Kreuzer in Kiellinie – ihre Türme stehen noch längsschiffs!', 'warn');
+            const p = w.player;
+            for (const d of S.dds) if (d.alive) {
+               d.ai.passive = false; d.ai.route = null; d.maxSpeedKn = d.cfg.speedKn; d.setTelegraph(4);
+               d.ai.huntId = p ? p.id : null; d.ai.press = true;
+            }
+         },
+         update(w, dt, S) {
+            if (w.phase !== 'playing') return;
+            if (!S.awake) {
+               const near = (a, b) => (a.pos.x - b.pos.x) ** 2 + (a.pos.y - b.pos.y) ** 2 < S.wakeR ** 2;
+               const brit = w.ships.filter(s => s.alive && s.side === 'player');
+               if (w.time > S.wakeT || S.pola.hp < S.polaHP || S.italians.some(i => i.alive && (i.hp < i.maxHP || brit.some(b => near(b, i))))) this._wake(w, S);
+            } else if (!S.fleeing && w.time - S.alarmT > S.surprise) {
+               S.fleeing = true;
+               radio(w, 'HMS Jervis', 'Die Kreuzer drehen ab – sie laufen mit Höchstfahrt nach Westen!', 'warn');
+               for (const c of S.cruisers) if (c.alive) {
+                  c.ai.passive = false; c.ai.route = [P(c.pos.x - 2500, -5000), P(S.exit.x, S.exit.y)]; c.ai.routeIdx = 0;   // away from the British line first
+                  c.maxSpeedKn = S.fleeKn; c.setTelegraph(4);
+               }
+            }
+            for (const c of S.cruisers) {
+               if (!c.alive || !inZone(c, S.exit)) continue;
+               w.removeShip(c, 'escaped');
+               S.escaped++;
+               w.message(`${c.name} ist in der Dunkelheit entkommen.`, 'warn');
+               if (S.escaped > 3 - S.need) { setObj(w, 'cruisers', 'failed'); w.end(false, 'Die italienischen Kreuzer sind in der Nacht entkommen.'); return; }
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (S.dds.includes(ship)) {
+               const n = S.dds.filter(s => !s.alive && !s.escaped).length;
+               objText(w, 'dds', `Versenken Sie die italienischen Zerstörer (${n}/${S.dds.length})`);
+               if (n >= S.dds.length) setObj(w, 'dds', 'done');
+            } else if (S.line.includes(ship)) setObj(w, 'line', 'failed');
+            else if (S.targets.includes(ship)) {
+               S.sunk++;
+               w.score.player = S.sunk;
+               objText(w, 'cruisers', `Versenken Sie zwei der drei Kreuzer (${Math.min(S.sunk, 2)}/2)`);
+               if (S.sunk < S.need) return;
+               setObj(w, 'cruisers', 'done');
+               if (S.line.every(s => s.alive)) setObj(w, 'line', 'done');
+               w.end(true, 'Die italienischen Kreuzer sind versenkt – ein Sieg der Nacht vor Kap Matapan.');
+            }
+         },
+         timeout(w, S) { setObj(w, 'cruisers', 'failed'); w.end(false, 'Die italienischen Kreuzer sind in der Dunkelheit entkommen.'); },
+      },
+
+      // ------------------------------------------------------------ op: Dakar, the French side
+      // Richelieu cannot leave the roads (damaged shaft: speed capped). The British battleships break
+      // off once badly hit; troop transports try to land at Rufisque. The submarine Bevéziers is a
+      // radio event, no boat on the map.
+      {
+         id: 'dakar', group: 'ops', name: 'Vor Dakar', subtitle: 'Westafrika · Unternehmen Menace · 24. September 1940',
+         fleet: { own: 'Richelieu (manövrierbehindert) · Zerstörer Le Fantasque, L’Audacieux, Le Malin', foe: 'HMS Barham, HMS Resolution · Kreuzer Cumberland, Australia · Zerstörer · Truppentransporter' },
+         briefing: 'Ein britischer Verband mit freifranzösischen Truppen steht vor Dakar und fordert die Übergabe der Kolonie. Der Gouverneur lehnt ab. ' +
+            'Die Richelieu liegt mit beschädigter Welle auf der Reede und läuft kaum zwölf Knoten – ihre 380-mm-Türme sind trotzdem die stärkste Waffe des Hafens. ' +
+            'Im Morgennebel nähern sich die Schlachtschiffe Barham und Resolution von Westen; Kreuzer und Zerstörer decken Truppentransporter, die bei Rufisque im Osten landen sollen. ' +
+            'Halten Sie stand, bis der Gegner abbricht, oder zwingen Sie beide Schlachtschiffe zum Abdrehen. Landen zwei Transporter, ist Dakar gefallen.',
+         debrief: 'Drei Tage lang beschossen sich Flotte und Hafen. Die Richelieu erhielt einen 15-Zoll-Treffer, in einem ihrer eigenen Türme zerbarst ein Rohr. ' +
+            'Am 25. September traf das U-Boot Bévéziers die Resolution mit einem Torpedo; sie musste abgeschleppt werden. Die Landung bei Rufisque war schon im Nebel gescheitert, ' +
+            'und die Alliierten brachen das Unternehmen ab. Erst nach der Landung in Nordafrika 1942 trat Französisch-Westafrika auf die Seite der Alliierten – die Richelieu wurde in New York modernisiert und kämpfte bis 1945 im Pazifik.',
+         env: { time: 'dawn', weather: 'overcast', visibility: 0.45 }, type: 'defense', playableShips: ['Richelieu'], recommendedShip: 'Richelieu',
+         arena: 12000, timeLimit: 13 * 60, stars: 3,
+         setup(w, shipKey) {
+            islands(w, [
+               { c: P(11000, -3200), r: 2900, height: 70, seed: 1201, lobes: 7, elong: 1.5, rot: 0.5, rough: 0.6, name: 'Kap Verde' },
+               { c: P(11800, 7200), r: 2300, height: 50, seed: 1203, lobes: 6, elong: 1.4, rot: -0.3, rough: 0.6, name: 'Rufisque' },
+               { c: P(4200, 2500), r: 330, height: 40, seed: 1207, lobes: 4, rough: 0.5, name: 'Gorée' },
+            ]);
+            const S = w._script, key = w.difficulty.key;
+            S.landing = zone(w, 8200, 4400, 1300, 'Landeplatz', 'danger');
+            const me = add(w, shipKey, 'player', P(5800, 0), Math.PI, { isPlayer: true, name: 'Richelieu', telegraph: 1, speedKn: 12 });
+            S.french = [['Le Fantasque', P(4700, -1500)], ['L’Audacieux', P(5000, 1400)], ['Le Malin', P(6400, 2200)]]
+               .map(([name, pos]) => add(w, 'LeFantasque', 'player', pos, Math.PI, { name, telegraph: 2, dmgMult: 0.6 }));
+            // the British gunners fired into fog and smoke screens: few hits, so their damage is cut
+            const retreatBelow = key === 'easy' ? 0.7 : key === 'hard' ? 0.6 : 0.62;
+            const fog = w.difficulty.botDmg * 0.55, fogBB = w.difficulty.botDmg * 0.42;
+            S.bbs = [['HMS Barham', P(-8600, -1600)], ['HMS Resolution', P(-9500, -900)]].map(([name, pos]) =>
+               add(w, 'Warspite', 'enemy', pos, 0.05, { name, telegraph: 3, dmgMult: fogBB, ai: { huntId: me.id, retreatBelow, retreatTo: P(-11200, -2500) } }));
+            me.ai.huntId = S.bbs[0].id;   // only read by the autopilot (tests)
+            const route = [P(4200, 5600), P(S.landing.x, S.landing.y)];
+            S.transports = ['Westernland', 'Pennland', 'Ettrick'].map((name, i) =>
+               add(w, 'Transport', 'enemy', P(-1200 - i * 800, 6200 + (i & 1 ? 500 : -300)), 0.05,
+                  { name, telegraph: 4, speedKn: 12, hpMult: 1.2 * w.difficulty.botHP, ai: { route: route.map(p => P(p.x - i * 400, p.y + (i & 1 ? 350 : -350))), routeIdx: 0, passive: true, convoy: true } }));
+            S.cruisers = [['HMS Cumberland', P(-2600, 4300)], ['HMS Australia', P(-3400, 7400)]].map(([name, pos], i) =>
+               add(w, 'Norfolk', 'enemy', pos, 0.05, { name, telegraph: 3, dmgMult: fog, ai: { escortId: S.transports[i].id } }));
+            const dds = key === 'easy' ? ['HMS Fury'] : ['HMS Fury', 'HMS Foresight'];
+            dds.forEach((name, i) => add(w, 'Jervis', 'enemy', P(-1800 + i * 600, 3600 - i * 700), 0.05, { name, telegraph: 3, dmgMult: fog, ai: { escortId: S.transports[i % 3].id } }));
+            S.torpT = key === 'hard' ? 330 : 240;
+            later(S, 4, () => radio(w, 'Admiral Landriau', 'Britischer Verband im Westen, Truppentransporter im Nebel! Richelieu: Feuer frei, sobald Sie ein Ziel haben.', 'warn'));
+            later(S, S.torpT, () => {
+               const r = S.bbs[1];
+               if (!r.alive || r.ai.retreating || w.phase !== 'playing') return;
+               radio(w, 'U-Boot Bévéziers', 'Torpedotreffer auf dem zweiten Schlachtschiff! Es liegt schwer über und dreht ab.');
+               r.hp = Math.max(1, r.hp - r.maxHP * 0.3);
+               r.maxSpeedKn = Math.min(r.maxSpeedKn, 12);
+            });
+            objective(w, 'hold', 'Halten Sie Dakar, bis der Gegner abbricht');
+            objective(w, 'landing', 'Höchstens 1 Transporter landen lassen (0 gelandet)');
+            objective(w, 'bbs', 'Zwingen Sie Barham und Resolution zum Abdrehen (0/2)', { optional: true });
+            objective(w, 'dds', 'Kein französischer Zerstörer geht verloren', { optional: true });
+            w.score = { kind: 'convoy', player: 0, enemy: 0, target: 2 };
+            S.landed = 0;
+         },
+         _won(w, S, reason) {
+            setObj(w, 'hold', 'done'); setObj(w, 'landing', 'done');
+            if (S.french.every(s => s.alive)) setObj(w, 'dds', 'done');
+            w.end(true, reason);
+         },
+         update(w, dt, S) {
+            if (w.phase !== 'playing') return;
+            for (const t of S.transports) {
+               if (!t.alive || !inZone(t, S.landing)) continue;
+               w.removeShip(t, 'landed');
+               S.landed++;
+               w.score.enemy = S.landed;
+               w.message(`${t.name} setzt Truppen bei Rufisque an Land.`, 'warn');
+               objText(w, 'landing', `Höchstens 1 Transporter landen lassen (${S.landed} gelandet)`);
+               if (S.landed >= 2) { setObj(w, 'landing', 'failed'); setObj(w, 'hold', 'failed'); w.end(false, 'Die Truppen sind bei Rufisque gelandet – Dakar ist gefallen.'); return; }
+            }
+            // a battleship that broke off leaves the field once out of reach of the harbour guns
+            for (const b of S.bbs) {
+               if (!b.alive || !b.ai.retreating) continue;
+               if (!b._goneT) { b._goneT = w.time; radio(w, 'Ausguck', `${b.name} dreht schwer getroffen nach Westen ab!`); }
+               if (w.time - b._goneT > 35 || b.pos.x < -w.arena + 900) w.removeShip(b, 'retreated');
+            }
+            const out = S.bbs.filter(b => !b.alive || b.escaped || b.ai.retreating).length;
+            objText(w, 'bbs', `Zwingen Sie Barham und Resolution zum Abdrehen (${out}/2)`);
+            if (out >= 2) {
+               setObj(w, 'bbs', 'done');
+               this._won(w, S, 'Beide Schlachtschiffe drehen ab – der Verband bricht das Unternehmen ab.');
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (S.french.includes(ship)) setObj(w, 'dds', 'failed');
+            else if (S.transports.includes(ship)) w.score.player++;
+         },
+         timeout(w, S) { this._won(w, S, 'Der Gegner bricht das Unternehmen ab – Dakar bleibt in französischer Hand.'); },
+      },
+
+      // ------------------------------------------------------------ op: Wahoo against a convoy (US boat, alone)
+      {
+         id: 'wahoo', group: 'ops', name: 'Die Wahoo greift an', subtitle: 'Nördlich von Neuguinea · 26. Januar 1943',
+         fleet: { own: 'USS Wahoo (Gato-Klasse)', foe: 'Japanischer Geleitzug aus vier Schiffen · Geleitzerstörer' },
+         briefing: 'Am Morgen sichtet die Wahoo unter Lieutenant Commander Dudley Morton einen japanischen Geleitzug: vier Frachter und Transporter auf Westkurs, gesichert von Zerstörern. ' +
+            'Ihr Boot steht vor dem Geleit. Tauchen Sie mit F auf Sehrohrtiefe und schießen Sie Fächer aus Bug- und Heckrohren – die Gato-Klasse trägt zehn Rohre. ' +
+            'Die Zerstörer horchen: Wer schnell läuft, ist laut. Gehen Sie nach dem Schuss tief und laufen Sie langsam ab. ' +
+            'Versenken Sie drei Schiffe, bevor der Geleitzug die Küstensicherung im Westen erreicht.',
+         debrief: 'Morton versenkte an diesem Tag die Transporter Buyo Maru und Fukuei Maru Nr. 2; zwei Tage zuvor hatte er im Hafen von Wewak den Zerstörer Harusame torpediert. ' +
+            'Die Wahoo wurde zu einem der bekanntesten Boote der US-Marine und ging im Oktober 1943 in der La-Pérouse-Straße mit der ganzen Besatzung verloren. ' +
+            'Amerikanische U-Boote versenkten mehr als die Hälfte aller japanischen Handelsschiffe, die im Krieg verloren gingen – Japan wurde von Öl und Rohstoffen abgeschnitten.',
+         env: { time: 'day', weather: 'clear' }, type: 'raid', playableShips: ['Gato'], recommendedShip: 'Gato',
+         arena: 12000, timeLimit: 17 * 60, stars: 3,
+         setup(w, shipKey) {
+            islands(w, []);
+            const S = w._script, key = w.difficulty.key;
+            S.need = key === 'easy' ? 2 : 3;
+            S.exit = zone(w, -10200, -1600, 1400, 'Küstensicherung', 'danger');
+            const route = [P(4000, 1400), P(-3000, 200), P(S.exit.x, S.exit.y)];
+            S.transports = ['Buyo Maru', 'Fukuei Maru Nr. 2', 'Kaiun Maru', 'Shinyu Maru'].map((name, i) => {
+               const lane = i & 1 ? 450 : -450;
+               return add(w, 'Transport', 'enemy', P(9600 + (i >> 1) * 800, 2300 + lane), Math.PI + 0.12,
+                  { name, nation: 'jp', telegraph: 4, speedKn: 9, hpMult: 0.8 * w.difficulty.botHP, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true, zigzag: true } });
+            });
+            const esc = key === 'easy' ? 1 : key === 'hard' ? 3 : 2;
+            S.escorts = [[P(8000, 900), 0], [P(10600, 3900), 3], [P(11200, 1000), 2]].slice(0, esc)
+               .map(([pos, t]) => add(w, 'Fubuki', 'enemy', pos, Math.PI + 0.12, { nation: 'jp', ai: { escortId: S.transports[t].id } }));
+            // huntId is read by the autopilot (tests)
+            add(w, shipKey, 'player', P(1200, 5200), -0.94, { isPlayer: true, name: 'USS Wahoo', telegraph: 2, ai: { huntId: S.transports[1].id } });
+            later(S, 4, () => radio(w, 'Lt. Cdr. Morton', 'Alle Mann auf Gefechtsstation. Geleitzug im Osten, Kurs West – wir lassen sie herankommen.'));
+            later(S, 50, () => radio(w, 'Lt. Richard O’Kane', 'Zerstörer an der Spitze des Geleits, er zackt. Rechtzeitig auf Sehrohrtiefe gehen!', 'warn'));
+            objective(w, 'sink', `Versenken Sie ${S.need} Schiffe des Geleitzugs (0/${S.need})`);
+            objective(w, 'escape', `Höchstens ${4 - S.need} Schiffe entkommen lassen (0 entkommen)`);
+            objective(w, 'dd', 'Versenken Sie einen Geleitzerstörer', { optional: true });
+            objective(w, 'hull', 'Das Boot bleibt über der Hälfte seiner Stärke', { optional: true });
+            w.score = { kind: 'raid', player: 0, enemy: 0, target: S.need };
+            S.sunk = 0; S.escaped = 0;
+            w.message('Geleitzug im Osten. F: tauchen · G: auftauchen.');
+         },
+         update(w, dt, S) {
+            if (w.phase !== 'playing') return;
+            const p = w.player;
+            if (p && p.alive && p.hp < p.maxHP * 0.5) { S.hurt = true; setObj(w, 'hull', 'failed'); }
+            for (const t of S.transports) {
+               if (!t.alive || !inZone(t, S.exit)) continue;
+               w.removeShip(t, 'escaped');
+               S.escaped++;
+               w.score.enemy = S.escaped;
+               w.message(`${t.name} hat die Küstensicherung erreicht.`, 'warn');
+               objText(w, 'escape', `Höchstens ${4 - S.need} Schiffe entkommen lassen (${S.escaped} entkommen)`);
+               if (S.escaped > 4 - S.need) { setObj(w, 'escape', 'failed'); setObj(w, 'sink', 'failed'); w.end(false, 'Der Geleitzug ist entkommen.'); return; }
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (S.escorts.includes(ship)) { setObj(w, 'dd', 'done'); return; }
+            if (!S.transports.includes(ship)) return;
+            S.sunk++;
+            w.score.player = S.sunk;
+            objText(w, 'sink', `Versenken Sie ${S.need} Schiffe des Geleitzugs (${Math.min(S.sunk, S.need)}/${S.need})`);
+            if (S.sunk < S.need) return;
+            setObj(w, 'sink', 'done'); setObj(w, 'escape', 'done');
+            if (!S.hurt) setObj(w, 'hull', 'done');
+            w.end(true, `${S.sunk} Schiffe versenkt – die Wahoo läuft mit einem Besen am Sehrohr heim.`);
+         },
+         timeout(w, S) { setObj(w, 'sink', 'failed'); w.end(false, `Nur ${S.sunk} Schiffe versenkt – der Geleitzug ist entkommen.`); },
+      },
+
+      // ------------------------------------------------------------ op: Cape Spartivento, the Italian side
+      // Two phases: break up the British cruiser screen, then withdraw east before the battleships
+      // close in. Supermarina's order not to risk the flagship is a lose condition.
+      {
+         id: 'spartivento', group: 'ops', name: 'Kap Spartivento', subtitle: 'Südlich von Sardinien · 27. November 1940',
+         fleet: { own: 'Vittorio Veneto · I. Kreuzerdivision: Pola, Fiume, Gorizia', foe: 'HMS Renown, HMS Ramillies · Kreuzer Berwick, Manchester, Sheffield · Zerstörer' },
+         briefing: 'Ein britischer Geleitzug läuft durch das westliche Mittelmeer nach Malta. Admiral Campioni steht mit der Vittorio Veneto und der I. Kreuzerdivision südlich von Sardinien. ' +
+            'Die britischen Kreuzer werfen sich Ihnen entgegen, die Schlachtschiffe Renown und Ramillies folgen. ' +
+            'Zerschlagen Sie den Kreuzerschirm und laufen Sie dann nach Osten ab, bevor die schweren Schiffe heran sind. ' +
+            'Supermarina hat befohlen, das Schlachtschiff nicht aufs Spiel zu setzen: Ist die Vittorio Veneto zu schwer getroffen (etwa drei Viertel ihrer Stärke verloren), wird das Gefecht abgebrochen.',
+         debrief: 'Das Gefecht dauerte knapp eine Stunde. Die italienischen Kreuzer trafen die Berwick zweimal, die Vittorio Veneto schoss aus großer Entfernung auf die britischen Kreuzer, ' +
+            'der Zerstörer Lanciere wurde schwer beschädigt. Campioni brach das Gefecht befehlsgemäß ab, und der Geleitzug erreichte Malta. ' +
+            'In London kam Admiral Somerville vor einen Untersuchungsausschuss, weil er die Verfolgung aufgegeben hatte – er wurde entlastet.',
+         env: { time: 'day', weather: 'clear', front: { at: 420, dur: 80, to: 'overcast', text: 'Dunst zieht über das Gefechtsfeld' } },
+         type: 'fleet', playableShips: ['Littorio'], recommendedShip: 'Littorio',
+         arena: 12000, timeLimit: 15 * 60, stars: 3,
+         setup(w, shipKey) {
+            islands(w, [
+               { c: P(6500, -10400), r: 2400, height: 380, seed: 1301, lobes: 7, elong: 2, rot: 0.2, rough: 0.7, name: 'Sardinien' },
+            ]);
+            const S = w._script, key = w.difficulty.key;
+            S.need = key === 'easy' ? 1 : 2;
+            S.limit = key === 'easy' ? 0.2 : key === 'hard' ? 0.3 : 0.25;
+            S.exit = zone(w, 10300, -3600, 1500,'Kurs Neapel', 'goal');
+            const sw = 2.45;   // course towards the south-west
+            const me = add(w, shipKey, 'player', P(3800, -1600), sw, { isPlayer: true, name: 'Vittorio Veneto', telegraph: 3 });
+            S.div = [['Pola', P(2200, 400)], ['Fiume', P(1300, 1200)], ['Gorizia', P(3000, 1400)]]
+               .map(([name, pos]) => add(w, 'Zara', 'player', pos, sw, { name, nation: 'it', telegraph: 3, dmgMult: 0.6 }));
+            S.foe = [['HMS Berwick', 'Norfolk', P(-6200, 4600)], ['HMS Manchester', 'Fiji', P(-5200, 5400)], ['HMS Sheffield', 'Fiji', P(-7000, 5900)]];
+            if (key === 'hard') S.foe.push(['HMS Southampton', 'Fiji', P(-4300, 6400)]);
+            // the cruisers went for the Italian cruisers; their 6-inch fire at long range scored little
+            S.cruisers = S.foe.map(([name, cls, pos], i) => add(w, cls, 'enemy', pos, -0.7, { name, telegraph: 4, hpMult: w.difficulty.botHP * 0.85, dmgMult: w.difficulty.botDmg * 0.5, ai: { huntId: S.div[i % 3].id } }));
+            S.berwick = S.cruisers[0];
+            me.ai.huntId = S.berwick.id;   // only read by the autopilot (tests)
+            const dds = key === 'easy' ? [] : key === 'hard' ? ['HMS Faulknor', 'HMS Firedrake'] : ['HMS Faulknor'];
+            dds.forEach((name, i) => add(w, 'Jervis', 'enemy', P(-4600 - i * 900, 3700 + i * 500), -0.7, { name, telegraph: 4, dmgMult: w.difficulty.botDmg * 0.7, ai: { huntId: S.div[i % 3].id, press: true } }));
+            S.heavy = [];
+            later(S, 4, () => radio(w, 'Admiral Campioni', 'Britische Kreuzer im Südwesten. Division: Feuer frei auf die Spitze der Linie!'));
+            later(S, key === 'easy' ? 300 : key === 'hard' ? 180 : 240, () => {
+               radio(w, 'Pola', 'Schweres Schiff im Südwesten – ein Schlachtkreuzer, Kurs auf uns!', 'warn');
+               S.heavy.push(add(w, 'Hood', 'enemy', P(-9800, 7400), -0.7, { name: 'HMS Renown', telegraph: 4, speedKn: 29, minDist: 9000, dmgMult: w.difficulty.botDmg * 0.8, ai: { huntId: me.id } }));
+            });
+            later(S, key === 'easy' ? 450 : key === 'hard' ? 300 : 380, () => {
+               radio(w, 'Gorizia', 'Ein zweites Schlachtschiff dahinter – langsam, aber schwer bewaffnet.', 'warn');
+               S.heavy.push(add(w, 'Warspite', 'enemy', P(-10400, 9000), -0.7, { name: 'HMS Ramillies', telegraph: 4, speedKn: 20, minDist: 9500, ai: { huntId: me.id } }));
+            });
+            objective(w, 'cruisers', `Versenken Sie ${S.need} britische Kreuzer (0/${S.need})`);
+            objective(w, 'berwick', 'Versenken Sie die Berwick', { optional: true });
+            objective(w, 'div', 'Kein Kreuzer der Division geht verloren', { optional: true });
+            w.score = { kind: 'kills', player: 0, enemy: 0, target: S.need };
+            S.sunk = 0;
+         },
+         _withdraw(w, S) {
+            if (S.phase2) return;
+            S.phase2 = true;
+            setObj(w, 'cruisers', 'done');
+            objective(w, 'out', 'Rückzug: Erreichen Sie Kurs Neapel im Osten');
+            radio(w, 'Admiral Campioni', 'Befehl von Supermarina: Gefecht abbrechen. Alle Einheiten mit Höchstfahrt nach Osten!');
+            const p = w.player;
+            if (p && p.alive) { p.ai.huntId = null; p.ai.press = false; p.ai.route = [P(6000, -2600), P(S.exit.x, S.exit.y)]; p.ai.routeIdx = 0; }
+            for (const s of S.div) if (s.alive) s.ai.escortId = p ? p.id : null;
+         },
+         update(w, dt, S) {
+            const p = w.player;
+            if (!p || !p.alive || w.phase !== 'playing') return;
+            if (p.hp < p.maxHP * S.limit) {
+               if (S.phase2) setObj(w, 'out', 'failed'); else setObj(w, 'cruisers', 'failed');
+               w.end(false, 'Supermarina bricht das Gefecht ab – die Vittorio Veneto ist zu schwer getroffen.');
+               return;
+            }
+            if (S.phase2 && inZone(p, S.exit)) {
+               setObj(w, 'out', 'done', 'Die Flotte hat sich nach Osten abgesetzt');
+               if (S.div.every(s => s.alive)) setObj(w, 'div', 'done');
+               w.end(true, 'Der Kreuzerschirm ist zerschlagen – die Flotte setzt sich unbeschadet nach Neapel ab.');
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (S.div.includes(ship)) setObj(w, 'div', 'failed');
+            if (ship === S.berwick) setObj(w, 'berwick', 'done');
+            if (!S.cruisers.includes(ship)) return;
+            S.sunk++;
+            w.score.player = S.sunk;
+            objText(w, 'cruisers', `Versenken Sie ${S.need} britische Kreuzer (${Math.min(S.sunk, S.need)}/${S.need})`);
+            if (S.sunk >= S.need) this._withdraw(w, S);
+         },
+         timeout(w, S) {
+            if (!S.phase2) setObj(w, 'cruisers', 'failed'); else setObj(w, 'out', 'failed');
+            w.end(false, S.phase2 ? 'Die britischen Schlachtschiffe haben die Flotte gestellt.' : 'Der britische Kreuzerschirm hält – der Geleitzug läuft nach Malta durch.');
+         },
       },
    ];
 }

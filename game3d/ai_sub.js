@@ -5,10 +5,13 @@
 //   BB / CA / CV   turn away from a known boat and zigzag
 // Returns { want, tel, goal } or null (= ai.js carries on with its normal navigation).
 import { DEG, dist2, angleDelta, interceptPoint } from './utils.js';
-import { orderDepth, dropDepthCharges, SONAR_KEEP } from './submarine.js';
+import { orderDepth, dropDepthCharges, SONAR_KEEP, PERI_PROX } from './submarine.js';
 
 const HUNT_RANGE = { DD: 5000, CL: 2600 };
 const AVOID_RANGE = 6000;
+// an escort may not lose its charge: a contact this far from the escorted ship is left alone (the
+// escort rejoins; a boat that stays deep and slow is left behind by the convoy)
+const ESCORT_LEASH = 3000;
 const _plan = { want: 0, tel: 3, goal: null };
 const _pos = { x: 0, y: 0 };
 
@@ -33,10 +36,12 @@ function contact(w, e) {
 function hunt(b, w) {
    const R = HUNT_RANGE[b.type] || 2600;
    let best = null, bd = R * R;
+   const esc = b.ai.escortId != null ? w.shipById(b.ai.escortId) : null;
+   const leash = esc && esc.alive ? esc.pos : null;
    for (const e of w.ships) {
       if (!e.alive || !e.sub || e.side === b.side || e.depth === 0) continue;
       const p = contact(w, e);
-      if (!p) continue;
+      if (!p || (leash && dist2(leash, p) > ESCORT_LEASH * ESCORT_LEASH)) continue;
       const d2 = dist2(b.pos, p);
       if (d2 < bd) { bd = d2; best = p; }
    }
@@ -79,6 +84,11 @@ export function subFireRange(b, tgt) {
    return tgt.type === 'DD' ? 1300 : Math.min(b.cfg.torp.range * 0.55, 4200);
 }
 
+// a hunter heading at the boat (within 25 deg of the bearing to it)
+function runIn(h, b) {
+   return Math.abs(angleDelta(h.heading, Math.atan2(b.pos.y - h.pos.y, b.pos.x - h.pos.x))) < 25 * DEG;
+}
+
 function subCaptain(b, w, d, tgt, threat, searchGoal) {
    const ai = b.ai, now = w.time, sb = b.sub;
    // nearest enemy the boat knows of (sighted by the team, or heard on its own hydrophone) and
@@ -103,7 +113,8 @@ function subCaptain(b, w, d, tgt, threat, searchGoal) {
    // a hunter coming in with tubes loaded: come up for a snap shot instead of waiting for the charges
    // (bow tubes, or a stern tube when the hunter is already astern)
    const hb = hunter ? Math.abs(angleDelta(b.heading, Math.atan2(hunter.pos.y - b.pos.y, hunter.pos.x - b.pos.x))) : 0;
-   const duel = !!hunter && dh < 3600 && dh > 520 && (bowReady || (sternReady && hb > 115 * DEG)) && b.battery > 0.1 && !b.batteryLock;
+   // (never inside PERI_PROX: a periscope that close is seen and shot at once)
+   const duel = !!hunter && dh < 3600 && dh > PERI_PROX + 150 && (bowReady || (sternReady && hb > 115 * DEG)) && b.battery > 0.1 && !b.batteryLock;
    const hunted = !duel && ((hunter && dh < 2400) || dn < 600 || (pinged && dh < 3600 && !bowReady) || (b.depth > 0 && now - b.lastHitT < 6));
    if (hunted) ai.deepUntil = Math.max(ai.deepUntil || 0, now + 8);
    if (duel) { ai.deepUntil = 0; if (ai.target !== hunter && w.canSee(b.side, hunter)) { ai.target = hunter; ai.targetSince = now - 5; ai.targetT = 2; } }
@@ -141,8 +152,10 @@ function subCaptain(b, w, d, tgt, threat, searchGoal) {
          const brg = Math.atan2(from.pos.y - b.pos.y, from.pos.x - b.pos.x);
          const df = from === hunter ? dh : dn;
          if (from === hunter && bowReady && df > 700) { _plan.want = brg; _plan.tel = 1; }          // lie in wait, bow on
-         else if (df < 800) { _plan.want = brg + s * 90 * DEG; _plan.tel = 4; }                      // sidestep the run-in
-         else { _plan.want = brg + Math.PI + s * 25 * DEG; _plan.tel = pinged ? 4 : 1; }             // creep away, quiet
+         // sidestep only a real run-in (the hunter coming straight at us); an escort pinging or merely
+         // passing overhead is crept away from – full speed deep drains the battery within minutes
+         else if (df < 800 && from === hunter && runIn(from, b)) { _plan.want = brg + s * 90 * DEG; _plan.tel = 4; }
+         else { _plan.want = brg + Math.PI + s * 25 * DEG; _plan.tel = 1; }                           // creep away, quiet
       }
    } else if (tgt) {
       const tc = b.cfg.torp;

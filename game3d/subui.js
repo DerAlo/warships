@@ -4,6 +4,7 @@
 // main3d.js owns one SubUi and calls reset / input / event / frame / fill; hud3d.js calls the two
 // draw functions with the `ui.sub` snapshot. Nothing here allocates per frame.
 import { DEPTH_NAMES, SONAR_KEEP, hydrophoneContacts } from './submarine.js';
+import { angleDelta } from './utils.js';
 import { execAction } from './net/command.js';
 import { T, FONT, MONO } from './theme.js';
 
@@ -51,6 +52,7 @@ export class SubUi {
       this.peri = { x: 0, y: 3 };          // camera3d rig: tower position ahead of the centre, lens height
       this.wasUnder = false;
       this.warnT = 0; this.pingShown = false;
+      this.runInT = 0; this.runInMsgT = -99; this.pingMsgT = -99;
       this.hyd = [];                       // hydrophoneContacts() scratch
       this.hydT = 0; this.hydN = 0;
       const pt = () => ({ x: 0, y: 0, visible: false });
@@ -88,6 +90,7 @@ export class SubUi {
       this._build();
       const p = world?.player, d = this.dom;
       this.warnT = 0; this.hydT = 0; this.hydN = 0;
+      this.runInT = 0; this.runInMsgT = -99; this.pingMsgT = -99;
       this.ui.nLines = 0; this.ui.nContacts = 0; this.ui.map.nHydro = 0; this.ui.map.nSonar = 0;
       this.wasUnder = !!(p && p.depth > 0);
       this.audio.setSubmerged?.(this.wasUnder);
@@ -135,7 +138,10 @@ export class SubUi {
          case 'subInfo': if (mine && e.text) { hud.msg(e.text, e.level || 'info'); A.denied?.(); } break;
          case 'sonar': {
             const src = byId(world, e.srcId);
-            if (onMe) A.sonarPing?.(e.dist || 0);
+            if (onMe) {
+               A.sonarPing?.(e.dist || 0);
+               if (world.time > this.pingMsgT) { this.pingMsgT = world.time + 25; hud.msg('Sonarkontakt – wir werden geortet! Langsam und tief gehen.', 'warn'); }
+            }
             else if (src && src.side === p.side) {
                A.sonarPing?.(Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y));
                if (mine) hud.msg('Sonarkontakt: U-Boot', 'warn');
@@ -235,6 +241,20 @@ export class SubUi {
          setText(d.pct, p.batteryLock ? 'leer – lädt' : pct + ' %');
          const pinged = world.time - p.pingT < 3;
          setCls(d.ping, 'on', pinged);
+         // a sub hunter running in at speed on the submerged boat (heard on the hydrophone):
+         // the alert lamp, and one line in the log
+         if (p.depth > 0 && world.time >= this.runInT) {
+            this.runInT = world.time + 0.5;
+            for (const e of world.ships) {
+               if (!e.alive || !e.asw || e.side === p.side) continue;
+               const dx = p.pos.x - e.pos.x, dy = p.pos.y - e.pos.y, dd = Math.hypot(dx, dy);
+               if (dd > 1500 || dd < 150 || Math.abs(e.speed) < e.maxSpeed * 0.5) continue;
+               if (Math.abs(angleDelta(e.heading, Math.atan2(dy, dx))) > 15 * DEG) continue;
+               this.warnT = Math.max(this.warnT, 1.5);
+               if (world.time > this.runInMsgT) { this.runInMsgT = world.time + 20; this.hud.msg(`${e.name} läuft an – Kurs ändern, tief gehen!`, 'warn'); }
+               break;
+            }
+         }
          setCls(d.alert, 'hidden', !(this.warnT > 0));
       } else if (p.asw) {
          const a = p.asw, show = world.hasSubs || a.reload > 0;

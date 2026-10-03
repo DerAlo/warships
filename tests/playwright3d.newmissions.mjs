@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URL3D || 'http://localhost:8772/index-3d.html';
 const OUT = process.env.OUT || 'tests/shots';
 const VW = Number(process.env.VW) || 1440, VH = Number(process.env.VH) || 810;
-const ALL = { strait: null, rearguard: null, fleet: null, cerberus: 'Scharnhorst', vian: 'Jervis', barents: 'Fiji', narvik: 'Jervis' };
+const ALL = { strait: null, rearguard: null, fleet: null, cerberus: 'Scharnhorst', vian: 'Jervis', barents: 'Fiji', narvik: 'Jervis', matapan: 'Warspite', dakar: 'Richelieu', wahoo: 'Gato', spartivento: 'Littorio' };
 const ids = (process.env.MISSIONS || Object.keys(ALL).join(',')).split(',');
 mkdirSync(OUT, { recursive: true });
 const errors = [], results = [];
