@@ -404,6 +404,9 @@ export function startNetGame(session) {
 }
 window.__startNetGame = startNetGame;
 window.__net = () => (net ? net.info() : null);
+// the host's page is closed or reloaded: say so while the page still can (the successor takes
+// over at once instead of after 5 s of silence); best effort, the silence still counts
+addEventListener('pagehide', () => { if (net && net.isHost) { try { net.quit(); } catch { /* page is going */ } } });
 
 // A hidden tab gets no animation frames, but a net host must keep simulating for the others: a
 // worker timer (not throttled like the page's own timers) steps the world meanwhile.
