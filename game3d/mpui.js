@@ -10,11 +10,12 @@ import { getMission } from './missions.js';
 import { SHIP_STATS } from './config.js';
 import { loadProfile } from './progress3d.js';
 import { classSvg } from './hud.js';
+import { logoSvg } from './theme.js';
 
 const DIFF_LABEL = { easy: 'Einfach', normal: 'Normal', hard: 'Schwer' };
 const MODE_LABEL = { coop: 'Koop', pvp: 'PvP' };
 const TYPE_LABEL = {
-   training: 'Übung', annihilation: 'Vernichtung', domination: 'Herrschaft', escort: 'Geleitschutz', historic: 'Historisch', survival: 'Überleben',
+   training: 'Übung', annihilation: 'Vernichtung', domination: 'Seeraum', escort: 'Geleitschutz', historic: 'Historisch', survival: 'Überleben',
    raid: 'Handelskrieg', defense: 'Verteidigung', delay: 'Nachhut', fleet: 'Flottenschlacht', breakout: 'Durchbruch', torpedo: 'Torpedoangriff', harbour: 'Hafenüberfall',
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -30,72 +31,96 @@ const missionOptions = (sel, need = 1) => {
 const LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
 
 const CSS = `
-.mp { position:absolute; inset:0; z-index:22; display:flex; flex-direction:column; color:#e6f0fa; font-family:var(--font,"Segoe UI",sans-serif); pointer-events:auto;
-   background: radial-gradient(ellipse 70% 60% at 55% 38%, rgba(4,12,22,.5), rgba(3,8,14,.86) 70%, rgba(2,5,10,.96)); }
+/* Lobby in the port's "Kartenhaus" style (tokens: index-3d.html :root). The masthead and the main
+   button reuse the port's .m3-top/.m3-capt/.m3-battle rules; the body is a set of paper sheets on
+   the dimmed sea: the filter sheet, the list of open games as ledger rows, the room's three sheets. */
+.mp { position:absolute; inset:0; z-index:22; display:flex; flex-direction:column; color:var(--ink); font-family:var(--font); pointer-events:auto; --cls-bar:var(--paper);
+   background:linear-gradient(90deg, rgba(9,15,19,.92), rgba(9,15,19,.66) 30%, rgba(9,15,19,.66) 70%, rgba(9,15,19,.92)); }
 .mp * { box-sizing:border-box; }
-.mp-top { flex:none; height:66px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; padding:0 22px; user-select:none;
-   background:linear-gradient(180deg, rgba(3,9,16,.96), rgba(3,9,16,.72)); border-bottom:1px solid rgba(150,190,230,.16); box-shadow:0 6px 24px rgba(0,0,0,.35); }
-.mp-left { display:flex; align-items:center; gap:22px; } .mp-right { display:flex; justify-content:flex-end; align-items:center; gap:14px; }
-.mp-btn { cursor:pointer; border:1px solid rgba(150,190,230,.3); border-radius:3px; padding:7px 12px; background:rgba(0,0,0,.3); color:#cfe0f0; font:800 12px var(--font,"Segoe UI"); letter-spacing:1.5px; white-space:nowrap; }
-.mp-btn:hover:not(:disabled) { border-color:#8fc3ff; color:#fff; } .mp-btn:disabled { opacity:.4; cursor:not-allowed; }
-.mp-btn.pri { border-color:rgba(255,190,120,.5); background:linear-gradient(180deg,#f07a2c,#b8420e); color:#fff; }
-.mp-btn.warn { border-color:rgba(230,110,90,.5); color:#ffb4a4; }
-.mp-net { font-size:11.5px; color:#9db4c8; text-align:right; line-height:1.35; white-space:nowrap; } .mp-net b { color:#8dffb0; } .mp-net b.bad { color:#ff8f82; }
-.mp-body { flex:1; min-height:0; display:grid; gap:18px; padding:16px 22px 14px; }
+.mp-top { flex:none; height:64px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; padding:0 20px; user-select:none; color:var(--paper);
+   background:var(--navy); border-bottom:3px double var(--brass); box-shadow:0 8px 24px rgba(0,0,0,.35); }
+.mp-top .m3-logo .ks-logo svg { height:38px; } .mp-top .m3-logo .ks-logo .wm b { font-size:23px; }
+.mp-top .m3-battle { flex:none; height:44px; min-width:270px; font-size:17px; }
+.mp-left { display:flex; align-items:center; gap:18px; min-width:0; } .mp-right { display:flex; justify-content:flex-end; align-items:center; gap:14px; }
+.mp-btn { cursor:pointer; border:1px solid var(--ink-2); padding:6px 12px; background:var(--paper); color:var(--ink); font:600 12px var(--font); letter-spacing:1.5px; white-space:nowrap; }
+.mp-btn:hover:not(:disabled) { background:var(--navy); border-color:var(--navy); color:var(--paper); } .mp-btn:disabled { opacity:.4; cursor:not-allowed; }
+.mp-btn.pri { border-color:var(--signal-lo); background:var(--signal); color:var(--flag-w); }
+.mp-btn.pri:hover:not(:disabled) { background:var(--signal-hi); border-color:var(--signal-lo); }
+.mp-btn.warn { border-color:var(--signal); color:var(--signal-lo); }
+.mp-top .mp-btn { background:transparent; border-color:rgba(226,189,110,.42); color:var(--brass-hi); }
+.mp-top .mp-btn:hover { background:var(--navy-2); color:var(--paper); }
+.mp-net { font-size:11.5px; color:var(--hud-dim); text-align:right; line-height:1.35; white-space:nowrap; } .mp-net b { color:var(--ok); } .mp-net b.bad { color:var(--bad); }
+.mp-body { flex:1; min-height:0; display:grid; gap:20px; padding:16px 20px 14px; }
 .mp-body.list { grid-template-columns:290px minmax(0,1fr); } .mp-body.room { grid-template-columns:320px minmax(0,1fr) 300px; }
 .mp-col { min-height:0; min-width:0; display:flex; flex-direction:column; gap:8px; }
-.mp-h { flex:none; font-size:11px; letter-spacing:2.5px; font-weight:800; color:#7f9bb5; text-transform:uppercase; padding:2px 2px 4px; display:flex; justify-content:space-between; user-select:none; }
-.mp-box { padding:14px 16px; border-radius:4px; background:rgba(6,14,24,.84); border:1px solid rgba(150,190,230,.14); }
-.mp-scroll { min-height:0; overflow:auto; scrollbar-width:thin; scrollbar-color:#5a86ad rgba(255,255,255,.06); }
-.mp label { display:block; font-size:11px; letter-spacing:1.5px; font-weight:800; color:#7f9bb5; text-transform:uppercase; margin:10px 0 4px; }
+.mp-h { flex:none; font:600 10.5px var(--font); letter-spacing:2.5px; color:var(--brass-hi); text-transform:uppercase; padding:2px 0 4px; display:flex; justify-content:space-between;
+   border-bottom:1px solid rgba(226,189,110,.45); text-shadow:0 1px 2px rgba(0,0,0,.8); user-select:none; }
+.mp-box { padding:14px 16px; background:var(--paper); border:1px solid var(--paper-edge); box-shadow:0 6px 18px rgba(0,0,0,.35); }
+.mp-scroll { min-height:0; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--brass) transparent; }
+.mp label { display:block; font-size:10.5px; letter-spacing:1.5px; font-weight:600; color:var(--ink-2); text-transform:uppercase; margin:10px 0 4px; }
 .mp label:first-child { margin-top:0; }
-.mp input[type=text], .mp input[type=password], .mp select { width:100%; padding:8px 10px; border-radius:3px; border:1px solid rgba(150,190,230,.25); background:rgba(0,0,0,.45); color:#e6f0fa; font:600 13px var(--font,"Segoe UI"); outline:none; }
-.mp input:focus, .mp select:focus { border-color:#5aa0e0; } .mp select option { background:#0b1622; color:#e6f0fa; }
-.mp label.chk { display:flex; align-items:center; gap:8px; margin:8px 0 0; font-size:12.5px; letter-spacing:0; font-weight:600; color:#c9d8e6; text-transform:none; cursor:pointer; }
-.mp-note { font-size:11.5px; line-height:1.5; color:#8aa3ba; } .mp-note b { color:#c9d8e6; }
-.mp-warn { flex:none; padding:8px 12px; border-radius:3px; border:1px solid rgba(214,178,94,.45); background:rgba(60,44,10,.45); color:#ffe2a8; font-size:12.5px; line-height:1.45; }
-.mp-seg { display:flex; gap:4px; background:rgba(0,0,0,.3); border:1px solid rgba(150,190,230,.16); border-radius:4px; padding:3px; width:max-content; max-width:100%; }
-.mp-seg button { cursor:pointer; border:0; border-radius:3px; padding:6px 12px; font:700 12px var(--font,"Segoe UI"); color:#8fa8bf; background:transparent; letter-spacing:.5px; }
-.mp-seg button.sel { color:#fff; background:linear-gradient(180deg,#2f6ea8,#1f4d7a); box-shadow:0 0 12px rgba(70,150,230,.35); }
-.mp-seg button:disabled { cursor:not-allowed; opacity:.5; } .mp-seg button small { font-weight:600; opacity:.8; margin-left:4px; }
-.mp-games { display:flex; flex-direction:column; gap:6px; padding-right:6px; }
+.mp input[type=text], .mp input[type=password], .mp select { width:100%; padding:7px 9px; border:1px solid var(--paper-edge); border-bottom:2px solid var(--ink-2); background:var(--flag-w); color:var(--ink);
+   font:500 13px var(--font); outline:none; }
+.mp input:focus, .mp select:focus { border-bottom-color:var(--signal); } .mp select option { background:var(--flag-w); color:var(--ink); }
+.mp label.chk { display:flex; align-items:center; gap:8px; margin:8px 0 0; font-size:12.5px; letter-spacing:0; font-weight:500; color:var(--ink); text-transform:none; cursor:pointer; }
+.mp label.chk input { accent-color:var(--signal); }
+.mp-note { font-size:11.5px; line-height:1.5; color:var(--ink-2); } .mp-note b { color:var(--ink); }
+.mp-warn { flex:none; padding:8px 12px; border:1px solid var(--brass); border-left:4px solid var(--signal); background:var(--paper-2); color:var(--ink); font-size:12.5px; line-height:1.45; }
+.mp-seg { display:flex; border:1px solid var(--ink-2); width:max-content; max-width:100%; }
+.mp-seg button { cursor:pointer; border:0; border-left:1px solid var(--ink-2); padding:5px 12px; font:600 12px var(--font); color:var(--ink-2); background:transparent; letter-spacing:.5px; }
+.mp-seg button:first-child { border-left:0; }
+.mp-seg button.sel { color:var(--paper); background:var(--navy); }
+.mp-seg button:disabled { cursor:not-allowed; } .mp-seg button:disabled:not(.sel) { opacity:.5; } .mp-seg button small { font-weight:500; opacity:.8; margin-left:4px; }
+.mp-games { display:flex; flex-direction:column; padding-right:6px; background:var(--paper); border:1px solid var(--paper-edge); box-shadow:0 6px 18px rgba(0,0,0,.35); }
 .mp-grow, .mp-game { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) 62px minmax(0,1.2fr) 82px 64px 92px 118px; gap:10px; align-items:center; }
-.mp-grow { flex:none; padding:0 18px 0 14px; font-size:10.5px; letter-spacing:1.5px; font-weight:800; color:#7f9bb5; text-transform:uppercase; user-select:none; }
-.mp-game { flex:none; padding:9px 12px 9px 14px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12); font-size:13px; }
-.mp-game:hover { background:rgba(14,30,48,.86); border-color:rgba(150,190,230,.3); }
-.mp-game > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-game .n { font-weight:800; font-size:14.5px; } .mp-game .n svg { color:#ffd479; margin-right:5px; }
-.mp-game .st { font-size:11px; font-weight:800; letter-spacing:1px; } .mp-game .st.lobby { color:#8dffb0; } .mp-game .st.running { color:#ffd479; } .mp-game .st.bad { color:#ff8f82; }
+.mp-grow { flex:none; padding:0 18px 0 14px; font-size:10px; letter-spacing:1.5px; font-weight:600; color:var(--brass-hi); text-transform:uppercase; user-select:none; text-shadow:0 1px 2px rgba(0,0,0,.8); }
+.mp-game { flex:none; padding:8px 12px 8px 14px; border-bottom:1px solid var(--rule); font-size:13px; color:var(--ink); }
+.mp-game:nth-child(even) { background:rgba(27,42,53,.035); }
+.mp-game:hover { background:var(--paper-2); box-shadow:inset 4px 0 0 var(--signal); }
+.mp-game > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-game .n { font-weight:700; font-size:14px; } .mp-game .n svg { color:var(--brass-lo); margin-right:5px; }
+.mp-game .st { font-size:10.5px; font-weight:700; letter-spacing:1.5px; } .mp-game .st.lobby { color:var(--seal); } .mp-game .st.running { color:var(--brass-lo); } .mp-game .st.bad { color:var(--signal); }
 .mp-game.off { opacity:.55; } .mp-game .mp-btn { justify-self:end; }
-.mp-empty { padding:40px 20px; text-align:center; color:#8aa3ba; font-size:14px; line-height:1.6; }
-.mp-player { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:2px 8px; align-items:center; padding:8px 10px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12); }
-.mp-player.me { border-color:#5aa0e0; background:linear-gradient(90deg, rgba(38,92,140,.6), rgba(14,34,56,.8)); }
-.mp-player .n { font-weight:800; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-player .n i { font-style:normal; font-size:9.5px; font-weight:800; letter-spacing:1px; padding:1px 5px; border-radius:2px; background:#ffc94a; color:#1b1300; margin-left:6px; vertical-align:2px; }
-.mp-player .n em { font-style:normal; font-size:9.5px; font-weight:700; letter-spacing:.5px; padding:1px 5px; border-radius:2px; border:1px solid rgba(214,178,94,.55); color:#ffe2a8; margin-left:6px; vertical-align:2px; } .mp-player .n em.direct { border-color:rgba(110,230,150,.5); color:#8dffb0; }
-.mp-player .s { grid-column:1; font-size:12px; color:#b6cadb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-player .s svg { margin-right:4px; }
-.mp-player .r { grid-row:1 / span 2; grid-column:2; font-size:10.5px; font-weight:800; letter-spacing:1px; color:#8aa3ba; } .mp-player .r.on { color:#6dff9e; }
-.mp-player .k { grid-row:1 / span 2; grid-column:3; cursor:pointer; width:24px; height:24px; border-radius:3px; border:1px solid rgba(230,110,90,.5); background:rgba(60,14,10,.5); color:#ffb4a4; font:800 12px var(--font,"Segoe UI"); }
-.mp-slot { padding:10px; border-radius:4px; border:1px dashed rgba(150,190,230,.18); color:#5f7892; font-size:12px; text-align:center; }
-.mp-set { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; align-items:center; font-size:13px; } .mp-set > b { font-size:11px; letter-spacing:1.5px; color:#7f9bb5; text-transform:uppercase; }
+.mp-empty { padding:40px 20px; text-align:center; color:var(--ink-2); font-size:14px; line-height:1.6; background:var(--paper); }
+.mp-ships .mp-empty { border:1px solid var(--paper-edge); }
+.mp-player { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:2px 8px; align-items:center; padding:8px 10px; background:var(--paper); border:1px solid var(--paper-edge); color:var(--ink); }
+.mp-player.me { background:var(--paper-2); box-shadow:inset 4px 0 0 var(--signal); --cls-bar:var(--paper-2); }
+.mp-player .n { font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mp-player .n i { font-style:normal; font-size:9.5px; font-weight:700; letter-spacing:1px; padding:1px 5px; background:var(--navy); color:var(--paper); margin-left:6px; vertical-align:2px; }
+.mp-player .n em { font-style:normal; font-size:9.5px; font-weight:600; letter-spacing:.5px; padding:0 5px; border:1px solid var(--brass); color:var(--brass-lo); margin-left:6px; vertical-align:2px; }
+.mp-player .n em.direct { border-color:var(--seal); color:var(--seal); }
+.mp-player .s { grid-column:1; font-size:12px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-player .s svg { margin-right:4px; }
+.mp-player .r { grid-row:1 / span 2; grid-column:2; font-size:10.5px; font-weight:700; letter-spacing:1.5px; color:var(--ink-3); }
+.mp-player .r.on { color:var(--seal); padding:1px 6px; border:1.5px solid var(--seal); }
+.mp-player .k { grid-row:1 / span 2; grid-column:3; cursor:pointer; width:24px; height:24px; border:1px solid var(--signal); background:transparent; color:var(--signal); font:700 12px var(--font); }
+.mp-player .k:hover { background:var(--signal); color:var(--flag-w); }
+.mp-slot { padding:10px; border:1px dashed rgba(226,189,110,.4); color:var(--hud-dim); font-size:12px; text-align:center; }
+.mp-set { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; align-items:center; font-size:13px; }
+.mp-set > b { font-size:10.5px; font-weight:600; letter-spacing:1.5px; color:var(--ink-2); text-transform:uppercase; }
 .mp-set select { width:auto; max-width:100%; }
-.mp-title { font-size:24px; font-weight:900; letter-spacing:.5px; line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-title svg { color:#ffd479; }
-.mp-sub { color:#8fd3ff; font-size:12.5px; font-weight:700; letter-spacing:1px; margin:3px 0 12px; }
-.mp-brief { font-size:12.5px; line-height:1.5; color:#c9d8e6; margin-top:10px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.mp-title { font:700 24px/1.15 var(--font-serif); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .mp-title svg { color:var(--brass-lo); }
+.mp-sub { color:var(--signal-lo); font-size:11.5px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; margin:4px 0 12px; padding-bottom:8px; border-bottom:1px solid var(--rule); }
+.mp-brief { font:13px/1.55 var(--font-serif); color:var(--ink-2); margin-top:12px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .mp-chat { flex:1; min-height:0; display:flex; flex-direction:column; padding:10px 12px; }
 .mp-chat-log { flex:1; min-height:60px; overflow:auto; scrollbar-width:thin; font-size:13px; line-height:1.5; user-select:text; }
-.mp-chat-line b { color:#8fd3ff; margin-right:6px; } .mp-chat-line.me b { color:#ffd479; } .mp-chat-line.sys { color:#8aa3ba; font-style:italic; }
+.mp-chat-line b { color:var(--flag-b); margin-right:6px; } .mp-chat-line.me b { color:var(--signal-lo); } .mp-chat-line.sys { color:var(--ink-3); font-style:italic; }
 .mp-chat-in { flex:none; display:flex; gap:8px; margin-top:8px; }
-.mp-ship { cursor:pointer; flex:none; display:flex; align-items:center; gap:7px; padding:7px 10px; border-radius:4px; background:rgba(6,14,24,.78); border:1px solid rgba(150,190,230,.12); font-size:13px; font-weight:700; user-select:none; }
-.mp-ship:hover { border-color:rgba(150,190,230,.4); } .mp-ship.sel { border-color:#8fd3ff; background:linear-gradient(90deg, rgba(40,96,146,.9), rgba(12,30,50,.94)); }
-.mp-ship .tr { font-size:10.5px; color:#d6b25e; min-width:20px; } .mp-ship .ty { margin-left:auto; font-size:10.5px; color:#9db4c8; letter-spacing:1px; }
-.mp-ships { display:flex; flex-direction:column; gap:5px; padding-right:6px; }
-.mp-modal { position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:rgba(2,6,12,.72); }
-.mp-modal .box { width:460px; max-width:calc(100% - 32px); max-height:calc(100% - 32px); overflow:auto; padding:22px 26px; border-radius:4px; background:linear-gradient(180deg, rgba(20,30,42,.98), rgba(8,14,22,.98)); border:1px solid rgba(150,190,230,.3); box-shadow:0 0 40px rgba(0,0,0,.6); }
-.mp-modal .k { font-size:11px; letter-spacing:3px; font-weight:800; color:#8fd3ff; margin-bottom:12px; }
-.mp-modal p { font-size:13.5px; line-height:1.55; color:#d4e0ec; margin:0 0 6px; }
+.mp-ship { cursor:pointer; flex:none; display:flex; align-items:center; gap:7px; padding:6px 10px; background:var(--paper); border:1px solid var(--paper-edge); color:var(--ink); font-size:13px; font-weight:600; user-select:none; }
+.mp-ship:hover { background:var(--paper-2); --cls-bar:var(--paper-2); }
+.mp-ship.sel { background:var(--navy); border-color:var(--brass); color:var(--paper); --cls-bar:var(--navy); box-shadow:inset 4px 0 0 var(--signal); }
+.mp-ship .tr { min-width:22px; padding:1px 0; text-align:center; font-size:11px; font-weight:700; background:var(--ink); color:var(--paper); }
+.mp-ship.sel .tr { background:var(--brass); color:var(--navy); }
+.mp-ship .ty { margin-left:auto; font-size:10.5px; color:var(--ink-3); letter-spacing:1px; } .mp-ship.sel .ty { color:var(--hud-dim); }
+.mp-ships { display:flex; flex-direction:column; gap:4px; padding-right:6px; }
+.mp-modal { position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:var(--veil); }
+.mp-modal .box { width:460px; max-width:calc(100% - 32px); max-height:calc(100% - 32px); overflow:auto; padding:22px 26px; background:var(--paper); color:var(--ink);
+   border:1px solid var(--paper-edge); outline:3px double var(--brass); outline-offset:-8px; box-shadow:0 18px 50px rgba(0,0,0,.6); }
+.mp-modal .k { font-size:10.5px; letter-spacing:3px; font-weight:600; color:var(--signal-lo); margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--ink-2); }
+.mp-modal p { font-size:13.5px; line-height:1.55; color:var(--ink); margin:0 0 6px; }
 .mp-modal .bt { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; }
-.mp-modal .err { color:#ff8f82; font-size:12.5px; margin-top:8px; min-height:16px; }
+.mp-modal .err { color:var(--signal); font-size:12.5px; margin-top:8px; min-height:16px; }
 .mp-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-@media (max-width: 1150px) { .mp-body.room { grid-template-columns:270px minmax(0,1fr) 240px; } .mp-grow, .mp-game { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr) 64px 92px 118px; } .mp-grow .c-mode, .mp-game .c-mode, .mp-grow .c-diff, .mp-game .c-diff { display:none; } }
+@media (max-width: 1150px) { .mp-body.room { grid-template-columns:270px minmax(0,1fr) 240px; } .mp-grow, .mp-game { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr) 64px 92px 118px; } .mp-grow .c-mode, .mp-game .c-mode, .mp-grow .c-diff, .mp-game .c-diff { display:none; }
+   .mp-top .m3-logo .ks-logo .wm i { display:none; } .mp-top .m3-battle { min-width:200px; } }
 `;
 
 let ui = null;
@@ -183,7 +208,7 @@ class MpUI {
       const room = view === 'room';
       this.root.innerHTML = `
          <div class="mp-top">
-            <div class="mp-left"><div class="m3-logo">KRIEGSSCHIFFE<small>3D · MEHRSPIELER</small></div>
+            <div class="mp-left"><div class="m3-logo">${logoSvg('Mehrspieler')}</div>
                <button class="mp-btn" data-act="back">${room ? '◂ SPIEL VERLASSEN' : '◂ ZUM HAFEN'}</button></div>
             <button class="m3-battle" data-act="main"></button>
             <div class="mp-right"><div class="mp-net"></div><button class="m3-capt" data-act="name" title="Spielername ändern"></button></div>
@@ -349,7 +374,7 @@ class MpUI {
       $('[data-pcount]').textContent = `${r.players.length}/${r.max}`;
       // historical operation: the ship of each slot is prescribed (host = flagship)
       const roles = coopRoles(r.mission, r.difficulty);
-      const shipLine = (k, role) => { const st = SHIP_STATS[k]; return st ? `${classSvg(st.type, 12)}${esc(role ? role.name : st.name)} · ${esc(st.tierRoman)} ${esc(st.type)}` : ''; };
+      const shipLine = (k, role) => { const st = SHIP_STATS[k]; return st ? `${classSvg(st.type, 12)}${esc(role ? role.name : st.name)} · Stufe ${st.tier} ${esc(st.type)}` : ''; };
       $('[data-players]').innerHTML = r.players.map((p, i) => {
          const st = SHIP_STATS[p.ship], role = roles[i];
          const ready = p.id === r.hostId ? ['on', 'HOST'] : p.ready ? ['on', 'BEREIT'] : ['', 'WARTET'];
@@ -392,7 +417,7 @@ class MpUI {
          $('[data-scount]').textContent = 'vorgegeben';
          $('[data-ships]').innerHTML = roles.slice(0, r.max).map((role, i) => {
             const st = SHIP_STATS[role.cls], p = r.players[i];
-            return `<div class="mp-ship ${i === meIdx ? 'sel' : ''}" data-role-slot="${i}" title="${esc(st?.typeName || st?.type || '')}"><span class="tr">${esc(st?.tierRoman || '')}</span>${st ? classSvg(st.type, 13) : ''}<span>${esc(role.name)}${i === 0 ? ' · Flaggschiff' : ''}</span><span class="ty">${p ? esc(p.name) : 'frei'}</span></div>`;
+            return `<div class="mp-ship ${i === meIdx ? 'sel' : ''}" data-role-slot="${i}" title="${esc(st?.typeName || st?.type || '')}"><span class="tr">${st?.tier ?? ''}</span>${st ? classSvg(st.type, 13) : ''}<span>${esc(role.name)}${i === 0 ? ' · Flaggschiff' : ''}</span><span class="ty">${p ? esc(p.name) : 'frei'}</span></div>`;
          }).join('') + '<div class="mp-empty">Historische Operation: Der Host führt das Flaggschiff, alle weiteren Kapitäne übernehmen in Beitrittsreihenfolge die vorgegebenen Begleitschiffe. Sinkt das Flaggschiff, ist die Operation gescheitert.</div>';
          this._renderTop();
          return;
@@ -401,7 +426,7 @@ class MpUI {
       $('[data-scount]').textContent = `${own.length} verfügbar`;
       $('[data-ships]').innerHTML = own.length ? own.map(k => {
          const st = SHIP_STATS[k];
-         return `<div class="mp-ship ${k === mine ? 'sel' : ''}" data-ship="${esc(k)}" title="${esc(st.typeName || st.type)}"><span class="tr">${esc(st.tierRoman)}</span>${classSvg(st.type, 13)}<span>${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>`;
+         return `<div class="mp-ship ${k === mine ? 'sel' : ''}" data-ship="${esc(k)}" title="${esc(st.typeName || st.type)}"><span class="tr">${st.tier}</span>${classSvg(st.type, 13)}<span>${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>`;
       }).join('') : '<div class="mp-empty">Für diese Mission hast du kein freigeschaltetes Schiff.</div>';
       if (lobbyState) this.root.querySelectorAll('[data-ship]').forEach(el => el.addEventListener('click', () => { this._click(); lb.setShip(el.dataset.ship); }));
       this._renderTop();

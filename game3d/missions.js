@@ -282,7 +282,7 @@ const DEFS = [
 
    // ------------------------------------------------------------ 2. standard battle
    {
-      id: 'standard', name: 'Standardgefecht', subtitle: 'Nordkap-Schären · 7 gegen 7',
+      id: 'standard', name: 'Begegnungsgefecht', subtitle: 'Nordkap-Schären · 7 gegen 7',
       briefing: 'Ein britischer Kampfverband wurde vor dem Nordkap gemeldet. Unser Verband aus zwei Schlachtschiffen, ' +
          'drei Kreuzern und zwei Zerstörern stellt ihn zwischen den Schären. Vernichten Sie alle feindlichen Schiffe. ' +
          'Nutzen Sie die Inseln als Deckung und bleiben Sie in der Nähe Ihrer Verbündeten.',
@@ -311,7 +311,7 @@ const DEFS = [
 
    // ------------------------------------------------------------ 3. domination
    {
-      id: 'domination', name: 'Herrschaft', subtitle: 'Drei Punkte · Erster auf 1000',
+      id: 'domination', name: 'Seeraumkontrolle', subtitle: 'Drei Punkte · Erster auf 1000',
       briefing: 'Drei strategische Seegebiete – A, B und C – entscheiden über die Kontrolle der Fjordausfahrt. ' +
          'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
          'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
@@ -448,7 +448,7 @@ const DEFS = [
    {
       id: 'laststand', name: 'Letztes Gefecht', subtitle: 'Nordatlantik · 27. Mai 1941',
       briefing: 'Ein Torpedotreffer hat das Ruder der Bismarck bei 12° Backbord verklemmt – Ihr Schiff zieht Kreise. ' +
-         'Im Sturm nähern sich King George V und Rodney, begleitet von Kreuzern und Zerstörern. Lassen Sie Ihre Schadensbekämpfung ' +
+         'Im Sturm nähern sich King George V und Rodney, begleitet von Kreuzern und Zerstörern. Lassen Sie Ihre Leckwehr ' +
          'das Ruder freibekommen und halten Sie zehn Minuten durch, bis der Home Fleet der Treibstoff ausgeht – oder versenken Sie beide Schlachtschiffe.',
       env: { time: 'day', weather: 'storm' }, type: 'survival', playableShips: ['Bismarck'], recommendedShip: 'Bismarck',
       arena: 11000, timeLimit: 10 * 60, stars: 3,
@@ -489,9 +489,9 @@ const DEFS = [
          });
          objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (10:00)');
          objective(w, 'bbs', 'Oder: Versenken Sie King George V und Rodney (0/2)');
-         objective(w, 'rudder', 'Ruder freibekommen (Schadensbekämpfung)', { optional: true });
+         objective(w, 'rudder', 'Ruder freibekommen (Leckwehr)', { optional: true });
          w.score = { kind: 'kills', player: 0, enemy: 0, target: 2 };
-         w.message('Ruder klemmt! Schadensbekämpfung einsetzen!', 'warn');
+         w.message('Ruder klemmt! Leckwehr einsetzen!', 'warn');
       },
       update(w, dt, S) {
          const p = w.player;

@@ -52,22 +52,22 @@ export const MODULE_COST = [40000, 90000, 180000];      // credits for tier 1..3
 
 // ---------------------------------------------------------------- captain skills (points)
 export const SKILLS = [
-   { key: 'prep', name: 'Vorbereitung', cost: 1, desc: 'Verbrauchsgüter −10 % Abklingzeit', fx: { consCd: -0.10 } },
-   { key: 'vigil', name: 'Wachsamkeit', cost: 1, desc: 'Torpedos +15 % früher erkannt', fx: { torpSpot: 0.15 } },
-   { key: 'fireprot', name: 'Brandschutz', cost: 1, desc: 'Brände −10 % Dauer', fx: { fireDur: -0.10 } },
-   { key: 'sniper', name: 'Scharfschütze', cost: 2, desc: 'Hauptbatterie −5 % Streuung', fx: { disp: -0.05 } },
-   { key: 'adren', name: 'Adrenalinrausch', cost: 2, desc: 'Bis −10 % Nachladezeit bei niedrigen HP', fx: { adrenaline: 0.10 } },
-   { key: 'survive', name: 'Überlebensexperte', cost: 2, desc: '+5 % Trefferpunkte', fx: { hp: 0.05 } },
-   { key: 'gunner', name: 'Richtschützenexperte', cost: 2, desc: 'Türme drehen 10 % schneller', fx: { traverse: 0.10 } },
-   { key: 'pyro', name: 'Pyrotechniker', cost: 3, desc: 'Brandchance +10 % (relativ)', fx: { fireChance: 0.10 } },
-   { key: 'torpx', name: 'Torpedoexperte', cost: 3, desc: 'Torpedos −8 % Nachladezeit', fx: { torpReload: -0.08 } },
-   { key: 'conceal', name: 'Tarnexperte', cost: 3, desc: 'Entdeckungsreichweite −8 %', fx: { detect: -0.08 } },
+   { key: 'prep', name: 'Eingespielte Trupps', cost: 1, desc: 'Sonderausrüstung −10 % Bereitschaftszeit', fx: { consCd: -0.10 } },
+   { key: 'vigil', name: 'Ausguck', cost: 1, desc: 'Torpedos +15 % früher erkannt', fx: { torpSpot: 0.15 } },
+   { key: 'fireprot', name: 'Feuerwache', cost: 1, desc: 'Brände −10 % Dauer', fx: { fireDur: -0.10 } },
+   { key: 'sniper', name: 'Zielschießen', cost: 2, desc: 'Hauptbatterie −5 % Streuung', fx: { disp: -0.05 } },
+   { key: 'adren', name: 'Letzte Reserven', cost: 2, desc: 'Bis −10 % Nachladezeit bei schwerem Schaden', fx: { adrenaline: 0.10 } },
+   { key: 'survive', name: 'Verstärkte Schotten', cost: 2, desc: '+5 % Trefferpunkte', fx: { hp: 0.05 } },
+   { key: 'gunner', name: 'Geübte Turmbesatzung', cost: 2, desc: 'Türme drehen 10 % schneller', fx: { traverse: 0.10 } },
+   { key: 'pyro', name: 'Zünderkunde', cost: 3, desc: 'Brandchance +10 % (relativ)', fx: { fireChance: 0.10 } },
+   { key: 'torpx', name: 'Flinke Torpedomixer', cost: 3, desc: 'Torpedos −8 % Nachladezeit', fx: { torpReload: -0.08 } },
+   { key: 'conceal', name: 'Tarnanstrich', cost: 3, desc: 'Entdeckungsreichweite −8 %', fx: { detect: -0.08 } },
    // top tier (WoWs: 4 points): a trade-off, not a flat buff -- the secondaries only engage the
    // Ctrl+click target (none set = silent), but shoot much tighter (MANUAL_SEC_DISP per class)
-   { key: 'manualSec', name: 'Manuelle Steuerung der Sekundärbewaffnung', cost: 4, top: true,
-      desc: 'Sekundärbatterie feuert nur auf das Strg+Klick-Ziel, dafür bis −55 % Streuung', fx: { manualSec: 1 } },
+   { key: 'manualSec', name: 'Einzelzielfeuer der Mittelartillerie', cost: 4, top: true,
+      desc: 'Mittelartillerie feuert nur auf das Strg+Klick-Ziel, dafür bis −55 % Streuung', fx: { manualSec: 1 } },
 ];
-// Secondary dispersion cut of "Manuelle Steuerung der Sekundärbewaffnung" by hull class.
+// Secondary dispersion cut of the top skill "Einzelzielfeuer der Mittelartillerie" (key manualSec) by hull class.
 export const MANUAL_SEC_DISP = { BB: 0.55, CA: 0.35, CL: 0.30, DD: 0.15 };
 // Captain level L needs CAPTAIN_XP[L] lifetime XP and grants L skill points (max 11 of 24 total cost).
 export const CAPTAIN_XP = [0, 1500, 4000, 7500, 12000, 17500, 24000, 32000, 41000, 52000, 65000, 80000];

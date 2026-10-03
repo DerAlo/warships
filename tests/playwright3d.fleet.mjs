@@ -43,7 +43,8 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
          const car = document.querySelector('.m3-car'), cr = car.getBoundingClientRect();
          const cards = [...car.querySelectorAll('.m3-card')];
          return {
-            keys: cards.map(c => c.dataset.ship), fits: car.scrollWidth <= car.clientWidth + 1,
+            // the fleet register is a vertical list: one navy fits without scrolling either way
+            keys: cards.map(c => c.dataset.ship), fits: car.scrollWidth <= car.clientWidth + 1 && car.scrollHeight <= car.clientHeight + 1,
             inside: cards.every(c => { const b = c.getBoundingClientRect(); return b.left >= cr.left - 1 && b.right <= cr.right + 1 && b.bottom <= innerHeight; }),
             clipped: cards.filter(c => { const h = c.querySelector('.hd'); return h.scrollWidth > h.clientWidth + 1; }).map(c => c.dataset.ship),
             page: document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight,
@@ -60,7 +61,7 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
    await page.click('.m3-tabs [data-nat="all"]');
    const all = await page.evaluate(() => {
       const car = document.querySelector('.m3-car');
-      return { n: car.querySelectorAll('.m3-card').length, groups: car.querySelectorAll('.m3-nat').length, scroll: car.scrollWidth > car.clientWidth,
+      return { n: car.querySelectorAll('.m3-card').length, groups: car.querySelectorAll('.m3-nat').length, scroll: car.scrollHeight > car.clientHeight,
          page: document.documentElement.scrollWidth <= innerWidth, locked: car.querySelectorAll('.m3-card.lock').length };
    });
    check(`${tag} "Alle" lists the whole roster in a scrolling strip`, all.n === PLAYABLE.length && all.groups === NATIONS.length && all.scroll && all.page, all);
@@ -74,7 +75,7 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
       dis: document.querySelector('.m3-battle').disabled,
       over: (() => { const e = document.querySelector('.m3-ship'); return e.scrollWidth > e.clientWidth + 1; })(),
    }));
-   check(`${tag} locked ship panel`, /Stufe X/.test(pan.cl) && pan.ds.length > 30 && /EP/.test(pan.btn) && /Kr\./.test(pan.btn) && /Erfordert Kirishima/.test(pan.hint) && pan.dis && !pan.over, pan);
+   check(`${tag} locked ship panel`, /Stufe 10/.test(pan.cl) && pan.ds.length > 30 && /EP/.test(pan.btn) && /Mark/.test(pan.btn) && /Erfordert Kirishima/.test(pan.hint) && pan.dis && !pan.over, pan);
    await page.screenshot({ path: `${OUT}/fleet-port-${tag}-locked.png` });
    await page.click('.m3-tabs [data-nat="all"]');
    await page.screenshot({ path: `${OUT}/fleet-port-${tag}-all.png` });

@@ -1,6 +1,6 @@
 # Bismarck — Offline Naval Combat
 
-A World-of-Warships-style naval combat game with German warships of 1939–45 and
+Kriegsschiffe: a naval combat game with warships of 1939–45 and
 AI-controlled opponents (and allies), offline only. Vanilla JS, no build
 step. Two ways to play, each with its own simulation core (2D: `game/`, 3D: `game3d/`,
 see `game3d/ARCHITECTURE.md`):
@@ -62,10 +62,10 @@ see `game3d/ARCHITECTURE.md`):
   Boss fights need no extra keys: turn bow-on into the red torpedo lanes, change
   course when the barrage rings or the rapid-fire warning appear.
 
-- **3D** (`index-3d.html`) — a singleplayer *World of Warships*: real 3D ships
+- **3D** (`index-3d.html`) — a 3D naval battle game: real 3D ships
   (Three.js, vendored locally under `vendor/three/` — no CDN, still fully offline).
-  - **Missions:** Übungsgefecht (training), Standardgefecht (7 vs 7),
-    Herrschaft (domination, three capture points), Geleitzug (convoy escort),
+  - **Missions:** Übungsgefecht (training), Begegnungsgefecht (7 vs 7),
+    Seeraumkontrolle (three capture points), Geleitzug (convoy escort),
     Letztes Gefecht, Nachtgefecht (destroyer night action), Handelskrieg
     (commerce raid), Sperrriegel (hold a fjord entrance against three waves —
     three ships through and the harbour is lost), Rückzugsgefecht (rearguard:
@@ -87,21 +87,21 @@ see `game3d/ARCHITECTURE.md`):
   - **Playable ships:** Bismarck (battleship), Admiral Hipper (heavy cruiser),
     Nürnberg (light cruiser) and Z 23 (destroyer), each with its own guns,
     torpedoes and consumables.
-  - **Career (Karriere):** every battle/op pays XP (EP) and credits
-    (Kreditpunkte) — base, win bonus, damage, kills, spotting, objectives,
+  - **Career (Karriere):** every battle/op pays experience (EP) and
+    money (Mark) — base, win bonus, damage, kills, spotting, objectives,
     survival, × difficulty — itemised on the results screen. Bismarck and
-    Hipper are free; Nürnberg (7 500 EP) and Z 23 (11 000 EP) are researched
-    with XP (ops keep their fixed ships). Credits buy 3 tiers of five modules
+    Hipper are free; Nürnberg (7 500 EP) and Z 23 (11 000 EP) are put into
+    service with EP (ops keep their fixed ships). Mark buys 3 stages of five refits (Umbauten)
     per ship (Hauptbatterie, Antrieb, Ruderanlage, Rumpf, Feuerleitung; ≤ 10 %
-    each), captain levels from lifetime XP give points for eleven skills
-    (Vorbereitung, Brandschutz, Adrenalinrausch, Tarnexperte …; free respec).
-    The 4-point top skill "Manuelle Steuerung der Sekundärbewaffnung" makes the
+    each), commander levels from lifetime EP give points for eleven courses (Lehrgänge:
+    Eingespielte Trupps, Feuerwache, Letzte Reserven, Tarnanstrich …; free respec).
+    The 4-point top course "Einzelzielfeuer der Mittelartillerie" makes the
     secondaries fire only at the Ctrl+click target (none set = silent) with
     55 % (battleships) / 35 % (heavy cruisers) / 30 % (light cruisers) less
     dispersion.
     Saved locally (`warships3d.profile.v1`), "Profil zurücksetzen" in the
-    Kapitän panel. Code: `game3d/progress3d.js`.
-  - **WoWs scale:** 1 unit = 1 m, maps 16–28 km across, WoWs-like gun ranges,
+    Kommandant panel. Code: `game3d/progress3d.js`.
+  - **Scale:** 1 unit = 1 m, maps 16–28 km across, period-like gun ranges,
     shell flight times, spotting/detectability and time-compressed movement.
     Turret traverse is a real gate on firing — only loaded turrets that have
     slewed onto the aim point fire.
@@ -154,7 +154,7 @@ see `game3d/ARCHITECTURE.md`):
     Bord!", "Wassereinbruch!", "Zitadelle getroffen!", "Gegner versenkt") and
     music that follows the combat (calm, spotted, heavy fire, low health).
     Music and effects volume are set in the pause menu and saved.
-  - **Controls (WoWs-style):** fixed centre crosshair with lead ruler and
+  - **Controls:** fixed centre crosshair with lead ruler and
     turret readiness display.
 
   | Key | Action |

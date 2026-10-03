@@ -256,9 +256,9 @@ function controlPlayer(dt) {
    world._torpPreview = inp.down('T') && !!p.cfg.torp;
 }
 
-const CONS_NAMES = { repair: 'Reparatur', dc: 'Schadensbegrenzung', smoke: 'Nebelwand', boost: 'Maschinen-Boost', dcharge: 'Wasserbomben', flare: 'Leuchtgranate' };
-const CONS_LOG = { repair: '🔧 Reparaturtrupp an Deck', dc: '🧯 Schadensbegrenzung: Brände & Wassereinbruch gestoppt',
-   smoke: '🌫 Nebelwand wird gelegt', boost: '⚡ Maschinen-Boost!', dcharge: '💣 Wasserbomben rollen vom Heck', flare: '✨ Leuchtgranate abgefeuert' };
+const CONS_NAMES = { repair: 'Notreparatur', dc: 'Leckwehr', smoke: 'Nebelanlage', boost: 'Äußerste Kraft', dcharge: 'Wasserbomben', flare: 'Leuchtgranate' };
+const CONS_LOG = { repair: '🔧 Notreparatur läuft', dc: '🧯 Leckwehr: Brände & Wassereinbruch gestoppt',
+   smoke: '🌫 Nebelanlage legt Nebel', boost: '⚡ Äußerste Kraft voraus!', dcharge: '💣 Wasserbomben rollen vom Heck', flare: '✨ Leuchtgranate abgefeuert' };
 
 function useCons(p, key) {
    const st = p.consState(key);

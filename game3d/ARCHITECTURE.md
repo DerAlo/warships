@@ -1,4 +1,4 @@
-# 3D mode ("World of Warships singleplayer") — architecture & module contract
+# 3D mode — architecture & module contract
 
 The 3D mode (`index-3d.html`) runs on its **own fork** of the simulation core in `game3d/`.
 The 2D mode (`index.html`) keeps using `game/`. The two never import from each other, so the
@@ -177,7 +177,7 @@ menu.hideResults()
 menu.loadout(ship)                   // career snapshot { modules, skills } -> new World(diff, { loadout })
 // progress3d.js (pure): calcRewards (World.end), unlock/module/skill rules, profile storage,
 // applyLoadout(cfg, loadout) -> modified cfg copy handed to the player Ship once at spawn (opts.cfg);
-// bots and SHIPS[] stay untouched, nothing runs per frame (Adrenalinrausch is evaluated per salvo).
+// bots and SHIPS[] stay untouched, nothing runs per frame (the "Letzte Reserven" skill is evaluated per salvo).
 // results buttons: "Nochmal" -> onStart(same opts); "Naechste Mission" -> select next + onPort;
 // "Hafen" -> onPort. main3d.onPort drops the finished World (world = null) and shows the port.
 ```

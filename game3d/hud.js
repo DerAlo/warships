@@ -1,14 +1,17 @@
-// game3d/hud.js — DOM part of the WoWs-style 3D HUD: team rosters + score + timer (top),
-// consumables + ship card (bottom-left), ribbons + weapon panel (bottom-centre), telegraph /
-// rudder next to the minimap (bottom-right), kill feed (right), lock panel, messages,
-// scoreboard (Tab) and help (H). The reticle, markers, binocular optics and tactical map are
-// drawn on the #fx canvas by hud3d.js.
+// game3d/hud.js — DOM part of the 3D battle HUD ("Kartenhaus" instrument plates): situation
+// board with score, timer, points and orders (top-left), order of battle + loss reports
+// (top-right), hit tally (left), chart table with minimap, telegraph and rudder (bottom-left),
+// ammunition selector (bottom-centre), equipment gauges + ship card (bottom-right), lock panel,
+// messages, scoreboard (Tab) and help (H). Colours come from the design tokens (theme.js).
+// The reticle, markers, binocular optics and tactical map are drawn on the #fx canvas by
+// hud3d.js.
 //
 // main3d.js builds a plain `ui` snapshot every frame (see buildUi) and calls update(ui, dt).
 // Everything here only reads sim state; DOM writes are throttled or diffed so the HUD costs
 // next to nothing per frame.
 import { clamp01 } from './utils.js';
 import { shipType, TYPE_NAME, isAlly, isVisible, displayKn } from './minimap3d.js';
+import { T as TH, rgba, FONT } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => Math.round(n || 0).toLocaleString('de-DE');
@@ -23,45 +26,67 @@ const setText = (el, s) => { if (el && el._txt !== s) { el._txt = s; el.textCont
 const setStyle = (el, k, v) => { if (el && el['_st' + k] !== v) { el['_st' + k] = v; el.style[k] = v; } };
 const setVar = (el, k, v) => { if (el && el['_st' + k] !== v) { el['_st' + k] = v; el.style.setProperty(k, v); } };
 
-// Class glyphs (same shapes as the minimap icons) as inline SVG.
+// Class glyphs as inline SVG, the same shapes the minimap draws (minimap3d.drawClassIcon):
+// capital ships are discs with one bar per weight class (CL 1, CA 2, BB 3), destroyers an
+// upward triangle, submarines a dome, carriers a flat deck, transports a hollow square.
+// bars and deck stripe are cut out in --cls-bar (dark on the HUD, paper colour in the menus)
+const KO = 'style="stroke:var(--cls-bar,rgba(0,0,0,.62))"';
+const BAR = `<path d="M2.6 #h6.8" ${KO} stroke-width="1.1"/>`;
 export function classSvg(type, size = 12) {
    let body;
-   if (type === 'DD') body = '<path d="M6 .8 11.2 11 6 8.3.8 11Z"/>';
-   else if (type === 'SS') body = '<ellipse cx="6" cy="6" rx="2.7" ry="5.6"/>';
-   else if (type === 'CV') body = '<rect x="1" y="3" width="10" height="6"/>';
-   else if (type === 'TR') body = '<circle cx="6" cy="6" r="4.4"/>';
+   if (type === 'DD') body = '<path d="M6 1 11.2 10.6H.8Z"/>';
+   else if (type === 'SS') body = '<path d="M.8 9.8a5.2 5.2 0 0 1 10.4 0Z"/><path d="M5.3 1.6h1.4v3.4H5.3z"/>';
+   else if (type === 'CV') body = `<rect x=".5" y="3.4" width="11" height="5.2"/><path d="M1.8 6h8.4" ${KO} stroke-width="1" stroke-dasharray="1.6 1"/>`;
+   else if (type === 'TR') body = '<rect x="2" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.8"/>';
    else {
-      body = '<path d="M6 .5 11.5 6 6 11.5.5 6Z"/>';
-      if (type === 'CA') body += '<path d="M3 6h6" stroke="rgba(0,0,0,.55)" stroke-width="1.4"/>';
-      if (type === 'BB') body += '<path d="M3 4.8h6M3 7.2h6" stroke="rgba(0,0,0,.55)" stroke-width="1.2"/>';
+      body = '<circle cx="6" cy="6" r="5.4"/>';
+      const ys = type === 'BB' ? [3.9, 6, 8.1] : type === 'CA' ? [4.9, 7.1] : [6];
+      body += ys.map(y => BAR.replace('#', y)).join('');
    }
    return `<svg class="cls" width="${size}" height="${size}" viewBox="0 0 12 12" fill="currentColor">${body}</svg>`;
 }
 
-// Consumable icons (24x24, stroke = currentColor).
+// Equipment icons, "engraved" line style: 24 grid, 1.6 stroke, round caps, currentColor.
 const CONS_ICON = {
-   damageControl: '<path d="M9 5h6v3H9zM10 8h4l1 12H9z"/><path d="M15 6.5h3l1.5 2"/>',
-   repair: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v10M7 12h10" stroke-width="2.6"/>',
-   smoke: '<path d="M6 16a3.5 3.5 0 0 1 .6-7A5 5 0 0 1 16 8a4 4 0 0 1 2 7.8"/><path d="M5 19h13M8 22h8"/>',
-   boost: '<path d="M13 2 5 13h6l-1 9 8-11h-6z"/>',
-   hydro: '<circle cx="12" cy="12" r="2"/><path d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16"/>',
-   radar: '<path d="M4 18 14 8M6 6a10 10 0 0 0 12 12"/><circle cx="14" cy="8" r="1.8"/><path d="M4 21h16"/>',
-   spotter: '<path d="M2 12h20M12 4v16M8 20h8M8 8l4-4 4 4"/>',
-   fighter: '<path d="M2 12h20M12 4v16M8 20h8M8 8l4-4 4 4"/>',
+   // fire bucket with a drop (Leckwehr)
+   damageControl: '<path d="M6 9h12l-1.6 11H7.6z"/><path d="M8 9a4 4 0 0 1 8 0"/><path d="M12 12.6c-1.3 1.7-1.8 2.6-1.8 3.3a1.8 1.8 0 0 0 3.6 0c0-.7-.5-1.6-1.8-3.3z"/>',
+   // spanner + plus (Notreparatur)
+   repair: '<path d="M14.6 3.8a4.2 4.2 0 0 0-5 5.4L3.8 15l2.6 2.6 5.8-5.8a4.2 4.2 0 0 0 5.4-5l-2.5 2.5-2.3-.6-.6-2.3z"/><path d="M18 15v6M15 18h6"/>',
+   // funnel puffing smoke (Nebelanlage)
+   smoke: '<path d="M6 21l1-7h4l1 7"/><circle cx="9.6" cy="9.4" r="2.6"/><circle cx="14.6" cy="6.6" r="3.1"/><circle cx="18.6" cy="10.6" r="2.3"/>',
+   // telegraph dial at full ahead (Äußerste Kraft)
+   boost: '<path d="M3.5 16.5a8.5 8.5 0 0 1 17 0"/><path d="M12 16.5l5.2-5.2"/><circle cx="12" cy="16.5" r="1.3"/><path d="M3.5 20h17M6.2 10.3l1 1M12 8v1.4"/>',
+   // headphones (Horchgerät)
+   hydro: '<path d="M5 14v-2a7 7 0 0 1 14 0v2"/><rect x="3.5" y="13.5" width="4" height="6.5" rx="1"/><rect x="16.5" y="13.5" width="4" height="6.5" rx="1"/>',
+   // mattress antenna on a mast (Funkmessgerät)
+   radar: '<path d="M5 3.5h14v8H5zM5 7.5h14M9.7 3.5v8M14.3 3.5v8"/><path d="M12 11.5v8.5M8 20h8"/>',
+   // floatplane from above
+   spotter: '<path d="M12 3.5v17M3.5 10.5h17M8.5 19.5h7"/><path d="M6 13.5h2.5M15.5 13.5H18"/>',
+   // swept-wing fighter from above
+   fighter: '<path d="M12 3.5v17M4 12.5l8-3 8 3M9 19.5h6"/>',
 };
-const consSvg = (key) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">${CONS_ICON[key] || '<circle cx="12" cy="12" r="7"/>'}</svg>`;
+const consSvg = (key) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">${CONS_ICON[key] || '<circle cx="12" cy="12" r="7"/>'}</svg>`;
 
+// Ammunition, same line style; colour from the --he / --ap / --torp tokens.
+const ammoSvg = (tok, body) => `<svg viewBox="0 0 24 24" fill="none" stroke="var(--${tok})" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">${body}</svg>`;
 const WEAPON_ICON = {
-   HE: '<svg viewBox="0 0 24 24"><path d="M7 20V10a5 5 0 0 1 10 0v10z" fill="#ff8a3a"/><path d="M7 16h10" stroke="#3a1a00" stroke-width="1.5"/></svg>',
-   AP: '<svg viewBox="0 0 24 24"><path d="M7 20V9l5-6 5 6v11z" fill="#9fd4ff"/><path d="M7 16h10" stroke="#07243a" stroke-width="1.5"/></svg>',
-   TORP: '<svg viewBox="0 0 24 24"><path d="M3 12c0-2 1-3 3-3h11l4 3-4 3H6c-2 0-3-1-3-3z" fill="#b6f0c0"/><path d="M6 9 4 6M6 15l-2 3" stroke="#b6f0c0" stroke-width="1.5"/></svg>',
+   HE: ammoSvg('he', '<path d="M9 21V11.5a3 3 0 0 1 6 0V21z" fill="var(--he)" fill-opacity=".22"/><path d="M9 16.5h6M12 2.5V5M7.6 4.4l1.3 1.9M16.4 4.4l-1.3 1.9"/>'),
+   AP: ammoSvg('ap', '<path d="M9 21v-9l3-8.5 3 8.5v9z" fill="var(--ap)" fill-opacity=".22"/><path d="M9 16.5h6M10.2 9.6h3.6"/>'),
+   TORP: ammoSvg('torp', '<rect x="2.5" y="9.5" width="14.5" height="5" rx="2.5" fill="var(--torp)" fill-opacity=".22"/><path d="M17 12h2.2M19.2 9.4v5.2M21.4 10.4v3.2"/>'),
+};
+
+// ship-card silhouette colours (turret states as on the reticle schematic)
+const SIL = {
+   hull: rgba(TH.hud, 0.55), hullLow: rgba(TH.bad, 0.6), water: rgba(TH.ap, 0.5),
+   turret: { ready: TH.ok, traverse: TH.warn, reload: TH.bad, blocked: TH.bad, dead: TH.dead },
 };
 
 const TELE_ORDER = [4, 3, 2, 1, 0, -1];
 const TELE_LABEL = { 4: 'Voll', 3: '3/4', 2: '1/2', 1: '1/4', 0: 'Stopp', '-1': 'Rück' };
+// colour of each hit slip in the tally (left edge + count)
 const RIBBON_COLOR = {
-   pen: '#e8eef5', citadel: '#ffd24a', overpen: '#b8c7d6', ricochet: '#8fa3b8', shatter: '#8fa3b8', he: '#ff9a4a',
-   sec: '#ffc27a', torp: '#7fe0ff', fire: '#ff6a2d', flood: '#4aa8ff', kill: '#ff4a3d', spotted: '#9dff9a', cap: '#ffffff', defend: '#ffffff',
+   pen: TH.hud, citadel: TH.gold, overpen: TH['hud-dim'], ricochet: '#8f8875', shatter: '#8f8875', he: TH.he,
+   sec: TH.warn, torp: TH.torp, fire: TH.fire, flood: TH.flood, kill: TH.bad, spotted: TH.ally, cap: TH.neutral, defend: TH.neutral,
 };
 
 export class Hud {
@@ -147,7 +172,7 @@ export class Hud {
       if (!r) {
          r = document.createElement('div');
          r.className = 'ribbon';
-         r.style.setProperty('--rc', RIBBON_COLOR[kind] || '#fff');
+         r.style.setProperty('--rc', RIBBON_COLOR[kind] || TH.hud);
          r.innerHTML = `<span class="rname">${esc(name)}</span><span class="rcount"></span>`;
          box.appendChild(r);
          this._ribbonEls.set(kind, r);
@@ -187,7 +212,7 @@ export class Hud {
       const hpF = clamp01(p.hp / (p.maxHP || 1));
       this._hpLag = hpF > this._hpLag ? hpF : this._hpLag + (hpF - this._hpLag) * Math.min(1, dt * 1.6);
       setStyle(e.hpFill, 'width', (hpF * 100).toFixed(1) + '%');
-      setStyle(e.hpFill, 'background', hpF > 0.6 ? '#7cf29a' : hpF > 0.3 ? '#ffc94a' : '#ff5a4d');
+      setStyle(e.hpFill, 'background', hpF > 0.6 ? TH.ok : hpF > 0.3 ? TH.warn : TH.bad);
       setStyle(e.hpLag, 'width', (this._hpLag * 100).toFixed(1) + '%');
       setText(e.hpText, fmtInt(p.hp) + ' / ' + fmtInt(p.maxHP));
       setText(e.speed, Math.round(ui.speedKn) + ' kn');
@@ -304,7 +329,7 @@ export class Hud {
       const x0 = 8, x1 = w - 8, wl = h * 0.7, hull = h * 0.18;
       const X = (f) => x0 + (x1 - x0) * f;
       const hpF = clamp01(p.hp / (p.maxHP || 1));
-      g.fillStyle = hpF > 0.3 ? 'rgba(220,232,245,0.55)' : 'rgba(255,120,100,0.6)';
+      g.fillStyle = hpF > 0.3 ? SIL.hull : SIL.hullLow;
       g.beginPath();
       g.moveTo(X(0.02), wl - hull * 0.9); g.lineTo(X(0.97), wl - hull * 1.3); g.lineTo(X(1), wl - hull * 1.35);
       g.lineTo(X(0.93), wl + hull * 0.5); g.lineTo(X(0.06), wl + hull * 0.5); g.closePath(); g.fill();
@@ -313,33 +338,32 @@ export class Hud {
       g.fillRect(X(0.44), wl - hull * 3.3, X(0.54) - X(0.44), hull * 1.1);
       g.fillRect(X(0.475), wl - hull * 4.1, X(0.505) - X(0.475), hull * 0.9);
       // turrets: fore mounts right of midships, aft mounts left (state colours as on the reticle)
-      const T = ui.turrets || [];
-      const fwd = T.map((t, i) => [t, i]).filter(([t]) => t.offX >= 0), aft = T.map((t, i) => [t, i]).filter(([t]) => t.offX < 0);
-      const col = { ready: '#6dff8e', traverse: '#ffd24a', reload: '#ff6a5a', blocked: '#ff6a5a', dead: '#555' };
+      const TU = ui.turrets || [];
+      const fwd = TU.map((t, i) => [t, i]).filter(([t]) => t.offX >= 0), aft = TU.map((t, i) => [t, i]).filter(([t]) => t.offX < 0);
       const place = (list, a, b) => list.forEach(([t], k) => {
          const f = list.length === 1 ? (a + b) / 2 : a + (b - a) * (k / (list.length - 1));
-         g.fillStyle = col[t.state] || '#ccc';
+         g.fillStyle = SIL.turret[t.state] || TH.neutral;
          g.fillRect(X(f) - 5, wl - hull * 1.9, 10, hull * 0.9);
       });
       place(aft.sort((u, v) => u[0].offX - v[0].offX), 0.14, 0.3);
       place(fwd.sort((u, v) => u[0].offX - v[0].offX), 0.68, 0.84);
       // fire / flood markers at their module positions (mod 0..5 = stern..bow)
       const modX = (m) => X(0.1 + clamp01(m / 5) * 0.8);
-      g.font = '600 12px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = FONT(12, 600); g.textAlign = 'center'; g.textBaseline = 'middle';
       fires.forEach((m, i) => {
          const x = modX(m) + (i % 2) * 6, y = wl - hull * 2.8;
-         g.fillStyle = '#ff6a1a';
+         g.fillStyle = TH.fire;
          g.beginPath(); g.moveTo(x, y - 8); g.quadraticCurveTo(x + 6, y - 1, x + 3, y + 4); g.quadraticCurveTo(x, y + 6, x - 3, y + 4);
          g.quadraticCurveTo(x - 6, y - 1, x, y - 8); g.fill();
-         g.fillStyle = '#ffd24a'; g.beginPath(); g.arc(x, y + 1.5, 2, 0, Math.PI * 2); g.fill();
+         g.fillStyle = TH.warn; g.beginPath(); g.arc(x, y + 1.5, 2, 0, Math.PI * 2); g.fill();
       });
       floods.forEach((m, i) => {
          const x = modX(m) + (i % 2) * 6, y = wl + hull * 1.6;
-         g.fillStyle = '#4aa8ff';
+         g.fillStyle = TH.flood;
          g.beginPath(); g.moveTo(x, y - 6); g.quadraticCurveTo(x + 5, y + 1, x, y + 4); g.quadraticCurveTo(x - 5, y + 1, x, y - 6); g.fill();
       });
       // waterline
-      g.strokeStyle = 'rgba(120,180,230,0.5)'; g.lineWidth = 1;
+      g.strokeStyle = SIL.water; g.lineWidth = 1;
       g.beginPath(); g.moveTo(2, wl + hull * 0.5); g.lineTo(w - 2, wl + hull * 0.5); g.stroke();
    }
 

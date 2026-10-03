@@ -194,8 +194,8 @@ function noteNearMiss(world, s) {
 
 // ---------------- damage model ----------------
 const HIT_TEXT = {
-   citadel: 'Zitadellentreffer!', pen: 'Durchschlag', overpen: 'Überdurchschlag', ricochet: 'Abpraller',
-   shatter: 'Nicht durchschlagen', he: 'Sprenggranate', sec: 'Sekundärtreffer', torp: 'Torpedotreffer',
+   citadel: 'Zitadelltreffer!', pen: 'Panzertreffer', overpen: 'Durchschuss', ricochet: 'Abgeprallt',
+   shatter: 'Wirkungslos', he: 'Sprenggranate', sec: 'Mittelartillerie', torp: 'Torpedotreffer',
 };
 
 export function resolveHit(world, s, ship, zone, lp, p, alt) {
