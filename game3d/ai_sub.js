@@ -9,6 +9,9 @@ import { orderDepth, dropDepthCharges, SONAR_KEEP, PERI_PROX } from './submarine
 
 const HUNT_RANGE = { DD: 5000, CL: 2600 };
 const AVOID_RANGE = 6000;
+// an escort may not lose its charge: a contact this far from the escorted ship is left alone (the
+// escort rejoins; a boat that stays deep and slow is left behind by the convoy)
+const ESCORT_LEASH = 3000;
 const _plan = { want: 0, tel: 3, goal: null };
 const _pos = { x: 0, y: 0 };
 
@@ -33,10 +36,12 @@ function contact(w, e) {
 function hunt(b, w) {
    const R = HUNT_RANGE[b.type] || 2600;
    let best = null, bd = R * R;
+   const esc = b.ai.escortId != null ? w.shipById(b.ai.escortId) : null;
+   const leash = esc && esc.alive ? esc.pos : null;
    for (const e of w.ships) {
       if (!e.alive || !e.sub || e.side === b.side || e.depth === 0) continue;
       const p = contact(w, e);
-      if (!p) continue;
+      if (!p || (leash && dist2(leash, p) > ESCORT_LEASH * ESCORT_LEASH)) continue;
       const d2 = dist2(b.pos, p);
       if (d2 < bd) { bd = d2; best = p; }
    }
@@ -147,9 +152,9 @@ function subCaptain(b, w, d, tgt, threat, searchGoal) {
          const brg = Math.atan2(from.pos.y - b.pos.y, from.pos.x - b.pos.x);
          const df = from === hunter ? dh : dn;
          if (from === hunter && bowReady && df > 700) { _plan.want = brg; _plan.tel = 1; }          // lie in wait, bow on
-         // sidestep only a real run-in (pinged, or the hunter is coming straight at us); an escort
-         // merely passing overhead is crept away from – full speed deep drains the battery
-         else if (df < 800 && (pinged || (from === hunter && runIn(from, b)))) { _plan.want = brg + s * 90 * DEG; _plan.tel = 4; }
+         // sidestep only a real run-in (the hunter coming straight at us); an escort pinging or merely
+         // passing overhead is crept away from – full speed deep drains the battery within minutes
+         else if (df < 800 && from === hunter && runIn(from, b)) { _plan.want = brg + s * 90 * DEG; _plan.tel = 4; }
          else { _plan.want = brg + Math.PI + s * 25 * DEG; _plan.tel = 1; }                           // creep away, quiet
       }
    } else if (tgt) {
