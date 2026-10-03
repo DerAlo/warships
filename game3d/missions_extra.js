@@ -30,7 +30,8 @@ export function extraMissions(H) {
             const S = w._script, hard = w.difficulty.key === 'hard';
             S.harbour = zone(w, 8300, 0, 1500, 'Hafen', 'goal');
             S.runners = []; S.broke = 0; S.kills = 0; S.total = 0;
-            spawnTeam(w, 'player', [['Hipper', 0, 0], ['Scharnhorst', -900, 900], ['Nuernberg', 300, -2200], ['Z23', 900, 1900], ['Z23', 900, -900]], P(4300, 0), Math.PI, shipKey);
+            // hard: a third destroyer joins the line (measured: without it the line fell before wave three)
+            spawnTeam(w, 'player', [['Hipper', 0, 0], ['Scharnhorst', -900, 900], ['Nuernberg', 300, -2200], ['Z23', 900, 1900], ['Z23', 900, -900], ...(hard ? [['Z23', 1700, 500]] : [])], P(4300, 0), Math.PI, shipKey);
             // runners hold their course for the harbour (and shoot on the way); a ship without a route is cover
             const run = (cls, y, lane) => {
                const s = add(w, cls, 'enemy', P(-10200, y), 0, { telegraph: 4, minDist: S.total ? 9000 : 0,
@@ -47,7 +48,6 @@ export function extraMissions(H) {
                w.message('Dritte Welle! Ein Schlachtschiff deckt den Durchbruch.', 'warn');
                add(w, 'KGV', 'enemy', P(-10300, 600), 0, { telegraph: 3, minDist: 11000 }); S.total++;
                run('Fiji', -2500, -1500); run('Jervis', 3600, 1600);
-               if (hard) run('Jervis', -5000, -1800);
                S.wavesDone = true;
             });
             objective(w, 'hold', 'Höchstens 2 Schiffe durchbrechen lassen (0 durchgebrochen)');
@@ -502,6 +502,9 @@ export function extraMissions(H) {
             if (S.phase2) return;
             S.phase2 = true;
             const key = w.difficulty.key, p = w.player;
+            const rDmg = w.difficulty.botDmg * 0.7;
+            // on hard they come in numbers: the leader of each group hunts Hardy, the rest pick on the flotilla
+            const prey = i => { const f = S.flot.filter(s => s.alive); return key === 'hard' && i > 0 && f.length ? f[(i - 1) % f.length].id : p ? p.id : null; };
             setObj(w, 'sink', 'done');
             objective(w, 'out', 'Rückzug: Erreichen Sie den Vestfjord im Westen');
             radio(w, 'Captain Warburton-Lee', 'Auftrag erfüllt. Flottille: kehrt, mit Höchstfahrt nach Westen ablaufen!');
@@ -510,12 +513,12 @@ export function extraMissions(H) {
             later(S, w.time + 12, () => {
                radio(w, 'HMS Hostile', 'Zerstörer aus dem Herjangsfjord – sie kommen von Norden!', 'warn');
                const names = key === 'easy' ? ['Wolfgang Zenker'] : key === 'hard' ? ['Wolfgang Zenker', 'Erich Giese', 'Erich Koellner'] : ['Wolfgang Zenker', 'Erich Giese'];
-               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(5200 - i * 900, -6300), 1.9, { name, telegraph: 4, minDist: 6500, dmgMult: w.difficulty.botDmg * 0.7, ai: { huntId: p ? p.id : null } })));
+               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(5200 - i * 900, -6300), 1.9, { name, telegraph: 4, minDist: 6500, dmgMult: rDmg, ai: { huntId: prey(i) } })));
             });
             later(S, w.time + 55, () => {
-               radio(w, 'HMS Hardy', 'Zwei Zerstörer voraus – Georg Thiele und Bernd von Arnim verlegen uns den Weg!', 'warn');
-               const names = key === 'hard' ? ['Georg Thiele', 'Bernd von Arnim'] : ['Georg Thiele'];
-               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(-3800, 5600 - i * 1100), -0.9, { name, telegraph: 4, minDist: 6500, dmgMult: w.difficulty.botDmg * 0.7, ai: { huntId: p ? p.id : null } })));
+               radio(w, 'HMS Hardy', 'Zerstörer voraus – die Georg Thiele verlegt uns den Weg nach Westen!', 'warn');
+               const names = ['Georg Thiele'];
+               names.forEach((name, i) => S.german.push(add(w, 'Z23', 'enemy', P(-3800, 5600 - i * 1100), -0.9, { name, telegraph: 4, minDist: 6500, dmgMult: rDmg, ai: { huntId: prey(i) } })));
             });
          },
          update(w, dt, S) {
