@@ -5,31 +5,33 @@
 // draw functions with the `ui.sub` snapshot. Nothing here allocates per frame.
 import { DEPTH_NAMES, SONAR_KEEP, hydrophoneContacts } from './submarine.js';
 import { execAction } from './net/command.js';
+import { T, FONT, MONO } from './theme.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 const MAX_LINES = 12, MAX_CONTACTS = 4;
 const TYPE_SOUND = { DD: 'schnelle Schrauben', CL: 'Kreuzer', CA: 'Kreuzer', BB: 'schwere Schrauben', CV: 'schwere Schrauben', TR: 'Frachter', SS: 'U-Boot' };
+// colours and type from the design tokens in index-3d.html (instrument-plate look of the HUD)
 const CSS = `
-#sub-panel, #asw-panel { position: absolute; right: 16px; bottom: 262px; }
-#sub-panel { width: 150px; padding: 8px 10px; font: 12px var(--mono, Consolas, monospace); color: #cfe2f5; }
-#sub-panel .sp-title { font: 700 11px var(--sans, 'Segoe UI', sans-serif); letter-spacing: .08em; color: #8fb0cf; margin-bottom: 5px; }
-#sub-panel .sp-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 3px; color: #7f95aa; }
-#sub-panel .sp-row i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #5f7890; flex: none; }
-#sub-panel .sp-row.on { color: #fff; background: rgba(90,170,255,.22); }
-#sub-panel .sp-row.on i { background: #7fd0ff; border-color: #7fd0ff; }
-#sub-panel .sp-row.tgt i { border-color: #ffd479; }
-#sub-panel .sp-bat { margin-top: 6px; height: 8px; background: rgba(255,255,255,.12); border-radius: 4px; overflow: hidden; }
-#sub-panel .sp-bat i { display: block; height: 100%; width: 100%; background: #7cf29a; }
-#sub-panel .sp-batt { display: flex; justify-content: space-between; margin-top: 3px; color: #a9bfd4; }
-#sub-panel .sp-keys { margin-top: 5px; color: #7f95aa; font-size: 11px; }
-#sub-panel .sp-ping { margin-top: 4px; color: #ff8a70; font-weight: 700; visibility: hidden; }
+#sub-panel, #asw-panel { position: absolute; right: 16px; bottom: 236px; }
+#sub-panel { width: 156px; padding: 8px 10px; font: 12px var(--mono); color: var(--hud); }
+#sub-panel .sp-title { font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim); margin-bottom: 5px; border-bottom: 1px solid var(--panel-edge); padding-bottom: 3px; }
+#sub-panel .sp-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; color: var(--hud-dim); }
+#sub-panel .sp-row i { width: 8px; height: 8px; border: 1.5px solid var(--hud-dim); flex: none; }
+#sub-panel .sp-row.on { color: #fff; background: color-mix(in srgb, var(--gold) 18%, transparent); }
+#sub-panel .sp-row.on i { background: var(--gold); border-color: var(--gold); }
+#sub-panel .sp-row.tgt i { border-color: var(--gold); }
+#sub-panel .sp-bat { margin-top: 6px; height: 8px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.14); overflow: hidden; }
+#sub-panel .sp-bat i { display: block; height: 100%; width: 100%; background: var(--ok); }
+#sub-panel .sp-batt { display: flex; justify-content: space-between; margin-top: 3px; color: var(--hud-dim); }
+#sub-panel .sp-keys { margin-top: 5px; color: var(--hud-dim); font-size: 11px; }
+#sub-panel .sp-ping { margin-top: 4px; color: var(--bad); font-weight: 700; visibility: hidden; }
 #sub-panel .sp-ping.on { visibility: visible; }
-#asw-panel { padding: 6px 10px; font: 12px var(--mono, Consolas, monospace); color: #cfe2f5; min-width: 120px; }
-#asw-panel b { color: #8fb0cf; font: 700 11px var(--sans, 'Segoe UI', sans-serif); letter-spacing: .08em; display: block; }
-#asw-panel .ready { color: #7cf29a; }
-#dc-alert { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); padding: 6px 18px; border-radius: 4px;
-   background: rgba(120,20,12,.82); color: #ffd9d0; font: 700 18px var(--sans, 'Segoe UI', sans-serif); letter-spacing: .12em; }
+#asw-panel { padding: 6px 10px; font: 12px var(--mono); color: var(--hud); min-width: 120px; }
+#asw-panel b { color: var(--hud-dim); font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; display: block; }
+#asw-panel .ready { color: var(--ok); }
+#dc-alert { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); padding: 6px 18px;
+   background: rgba(110,24,16,.86); border: 1px solid var(--bad); color: #ffd9d0; font: 700 17px var(--font); letter-spacing: 4px; }
 `;
 
 function el(tag, id, cls, html) {
@@ -229,7 +231,7 @@ export class SubUi {
       if (p.sub) {
          for (let i = 0; i < 3; i++) { setCls(d.rows[i], 'on', p.depth === i); setCls(d.rows[i], 'tgt', p.depthTarget === i && p.depth !== i); }
          const pct = Math.round(p.battery * 100);
-         if (d.bat._w !== pct) { d.bat._w = pct; d.bat.style.width = pct + '%'; d.bat.style.background = p.batteryLock ? '#ff5a4d' : pct > 35 ? '#7cf29a' : '#ffc94a'; }
+         if (d.bat._w !== pct) { d.bat._w = pct; d.bat.style.width = pct + '%'; d.bat.style.background = p.batteryLock ? T.bad : pct > 35 ? T.ok : T.warn; }
          setText(d.pct, p.batteryLock ? 'leer – lädt' : pct + ' %');
          const pinged = world.time - p.pingT < 3;
          setCls(d.ping, 'on', pinged);
@@ -270,7 +272,7 @@ export function drawSubUnder(g, ui, W, H, t) {
       for (let i = 1; i <= 3; i++) { g.beginPath(); g.ellipse(ox, oy, i * 70, i * 24, 0, 0, TAU); g.stroke(); }
       g.fillStyle = 'rgba(160,230,255,0.9)';
       g.beginPath(); g.arc(ox, oy, 3, 0, TAU); g.fill();
-      g.font = '600 12px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = FONT(12, '600'); g.textAlign = 'center'; g.textBaseline = 'middle';
       for (let i = 0; i < u.nLines; i++) {
          const L = u.lines[i];
          let dx = L.x - ox, dy = L.y - oy;
@@ -286,13 +288,13 @@ export function drawSubUnder(g, ui, W, H, t) {
          g.fillStyle = `rgba(255,190,160,${a})`;
          g.fillText(L.label, ox + dx * 1.08, oy + dy * 1.08 - 8);
       }
-      g.fillStyle = 'rgba(170,220,245,0.85)'; g.font = '600 13px Segoe UI, sans-serif';
+      g.fillStyle = 'rgba(170,220,245,0.85)'; g.font = FONT(13, 600);
       g.fillText('GETAUCHT · Horchgerät: nur Peilungen · G = auf Sehrohrtiefe', W / 2, H * 0.16);
       g.restore();
    }
    if (u.nContacts > 0) {
       g.save();
-      g.font = '600 11px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+      g.font = FONT(11, '600'); g.textAlign = 'center'; g.textBaseline = 'bottom';
       for (let i = 0; i < u.nContacts; i++) {
          const c = u.contacts[i];
          if (!c.visible) continue;
@@ -334,7 +336,7 @@ export function drawPeriscope(g, ui, W, H) {
    const ppd = ui.pxPerRad * DEG;                      // px per degree
    const step = ppd > 60 ? 1 : ppd > 24 ? 2 : ppd > 12 ? 5 : 10;
    const span = R * 0.62 / ppd, yT = cy - R * 0.74;
-   g.font = '11px Consolas, monospace'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+   g.font = MONO(11); g.textAlign = 'center'; g.textBaseline = 'bottom';
    g.fillStyle = 'rgba(200,245,220,0.85)'; g.strokeStyle = 'rgba(200,245,220,0.7)';
    g.beginPath();
    const b0 = Math.ceil((u.relBrg - span) / step) * step;
@@ -357,12 +359,12 @@ export function drawPeriscope(g, ui, W, H) {
    }
    g.stroke();
    // read-outs
-   g.font = 'bold 16px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+   g.font = MONO(16, 'bold'); g.textAlign = 'right'; g.textBaseline = 'alphabetic';
    g.fillStyle = 'rgba(200,245,220,0.9)';
    g.fillText(ui.zoom + '×', cx + R * 0.6, cy + R * 0.62);
    g.textAlign = 'left';
    g.fillText('Peilung ' + String(Math.round(u.relBrg) % 360).padStart(3, '0') + '°', cx - R * 0.6, cy + R * 0.62);
-   g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(200,245,220,0.55)'; g.textAlign = 'center';
+   g.font = MONO(11); g.fillStyle = 'rgba(200,245,220,0.55)'; g.textAlign = 'center';
    g.fillText('SEHROHR · Mausrad: Zoom · Shift: einfahren', cx, cy + R * 0.72);
    g.restore();
 }

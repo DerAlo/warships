@@ -1,18 +1,38 @@
 // game3d/minimap3d.js — map painting for the 3D HUD (minimap + full-screen tactical map) plus
-// shared read-only helpers over sim ships (class, visibility, naming).
+// shared read-only helpers over sim ships (class, visibility, naming). The map is drawn as a
+// sea chart: token colours (theme.js), a kilometre grid and a graduated neatline border.
 //
 // Renderer3D imports HudCanvases3D and calls draw(world) inside render(). main3d.js does NOT
 // hand the renderer any canvas: it owns its own HudCanvases3D and draws after render with the
 // camera/intel extras, so the renderer's instance stays a harmless no-op either way.
 import { WORLD } from './config.js';
 import { drawSubMap } from './subui.js';
+import { T, rgba, FONT, MONO } from './theme.js';
 
 const TAU = Math.PI * 2;
 const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
 export const COL = {
-   ally: '#5dff8c', enemy: '#ff5a4d', self: '#ffffff', neutral: '#d8e6f2',
-   allyDim: 'rgba(93,255,140,0.45)', enemyDim: 'rgba(255,90,77,0.4)',
+   ally: T.ally, enemy: T.enemy, self: T.self, neutral: T.neutral,
+   allyDim: rgba(T.ally, 0.45), enemyDim: rgba(T.enemy, 0.4),
 };
+// chart palette (resolved once; the minimap repaints every frame)
+const MAP = {
+   sea: T['map-sea'], sea2: T['map-sea-2'], land: T['map-land'], coast: T['map-coast'],
+   grid: rgba(T['map-grid'], 0.12), label: rgba(T['map-grid'], 0.6), ink: T['map-ink'], frame: rgba(T['map-grid'], 0.7),
+   shoal: rgba(T['map-coast'], 0.18), smoke: 'rgba(214,210,198,0.38)',
+   capN: rgba(T.neutral, 0.1), capA: rgba(T.ally, 0.14), capE: rgba(T.enemy, 0.15),
+   zoneA: rgba(T.ally, 0.1), zoneE: rgba(T.enemy, 0.11),
+   cone: rgba(T.self, 0.2), cone0: rgba(T.self, 0), detect: rgba(T['ally-soft'], 0.55), guns: rgba(T.self, 0.55),
+   fan: rgba(T.gold, 0.6), torpOwn: rgba(T.torp, 0.9), torpFoe: T.enemy, aim: rgba(T.gold, 0.95), hullEdge: 'rgba(0,0,0,0.7)',
+   knife: 'rgba(0,0,0,0.62)',
+};
+const MAP_FONT = T.font;
+// Grid spacing (world metres) for a map of half-size A: the first of 1/2/5/10 km that gives at
+// most 8 squares across. The tactical-map legend prints it.
+export function gridStep(A) {
+   for (const st of [1000, 2000, 5000, 10000]) if ((2 * A) / st <= 8) return st;
+   return 20000;
+}
 
 // ---------- shared ship helpers (contract fields first, old-sim fallbacks second) ----------
 const OLD_TYPE = { DD: 'DD', LC: 'CL', HC: 'CA', EB: 'BB', Bismarck: 'BB' };
@@ -43,7 +63,9 @@ export function torpSide(t) { return t.side ?? t.owner; }
 export function torpHeading(t) { return t.heading ?? t.dir ?? (t.vel ? Math.atan2(t.vel.y, t.vel.x) : 0); }
 export function arenaOf(world) { return world?.arena || WORLD.ARENA || 3800; }
 
-// Class glyph (WoWs-like): DD chevron, CL/CA diamond (+bar), BB diamond with two bars, CV box.
+// Class glyph, the same shapes as hud.js classSvg: capital ships are discs with one cut-out bar
+// per weight class (CL 1, CA 2, BB 3), DD an upward triangle, SS a dome with a mast, CV a flat
+// deck, TR a hollow square.
 export function drawClassIcon(g, type, x, y, size, color, opts = {}) {
    const s = size;
    g.save();
@@ -52,23 +74,30 @@ export function drawClassIcon(g, type, x, y, size, color, opts = {}) {
    g.lineWidth = opts.lineWidth || Math.max(1, s * 0.16);
    g.strokeStyle = color; g.fillStyle = color;
    g.beginPath();
+   let bars = 0, hollow = !!opts.hollow;
    if (type === 'DD') {
-      g.moveTo(0, -s * 0.55); g.lineTo(s * 0.5, s * 0.45); g.lineTo(0, s * 0.2); g.lineTo(-s * 0.5, s * 0.45); g.closePath();
-   } else if (type === 'SS') {                       // U-Boot: slim lens
-      g.ellipse(0, 0, s * 0.26, s * 0.58, 0, 0, TAU);
+      g.moveTo(0, -s * 0.5); g.lineTo(s * 0.46, s * 0.4); g.lineTo(-s * 0.46, s * 0.4); g.closePath();
+   } else if (type === 'SS') {                       // U-Boot: dome + mast
+      g.moveTo(-s * 0.46, s * 0.3); g.arc(0, s * 0.3, s * 0.46, Math.PI, TAU); g.closePath();
+      g.rect(-s * 0.06, -s * 0.48, s * 0.12, s * 0.3);
    } else if (type === 'CV') {
-      g.rect(-s * 0.5, -s * 0.34, s, s * 0.68);
+      g.rect(-s * 0.5, -s * 0.22, s, s * 0.44);
    } else if (type === 'TR') {
-      g.arc(0, 0, s * 0.4, 0, TAU);
+      g.rect(-s * 0.34, -s * 0.34, s * 0.68, s * 0.68);
+      hollow = true; g.lineWidth = Math.max(1.2, s * 0.15);
    } else {
-      g.moveTo(0, -s * 0.55); g.lineTo(s * 0.55, 0); g.lineTo(0, s * 0.55); g.lineTo(-s * 0.55, 0); g.closePath();
+      g.arc(0, 0, s * 0.46, 0, TAU);
+      bars = type === 'BB' ? 3 : type === 'CA' ? 2 : 1;
    }
-   if (opts.hollow) g.stroke(); else g.fill();
-   if (!opts.hollow && (type === 'CA' || type === 'BB')) {
-      g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = Math.max(1, s * 0.12);
+   if (hollow) g.stroke(); else g.fill();
+   if (!hollow && (bars || type === 'CV')) {
+      g.strokeStyle = MAP.knife; g.lineWidth = Math.max(1, s * 0.1);
       g.beginPath();
-      if (type === 'CA') { g.moveTo(-s * 0.28, 0); g.lineTo(s * 0.28, 0); }
-      else { g.moveTo(-s * 0.3, -s * 0.12); g.lineTo(s * 0.3, -s * 0.12); g.moveTo(-s * 0.3, s * 0.14); g.lineTo(s * 0.3, s * 0.14); }
+      if (type === 'CV') { g.moveTo(-s * 0.38, 0); g.lineTo(s * 0.38, 0); }
+      else for (let i = 0; i < bars; i++) {
+         const yy = (i - (bars - 1) / 2) * s * 0.18;
+         g.moveTo(-s * 0.28, yy); g.lineTo(s * 0.28, yy);
+      }
       g.stroke();
    }
    if (opts.cross) {
@@ -109,35 +138,29 @@ function paintMapInner(g, world, x0, y0, size, opts) {
    const p = world.player;
    const big = !!opts.big;
 
-   // water
+   // sea: chart blue, a touch lighter towards the top
    const grd = g.createLinearGradient(x0, y0, x0, y0 + size);
-   grd.addColorStop(0, '#11324b'); grd.addColorStop(1, '#0b2436');
+   grd.addColorStop(0, MAP.sea); grd.addColorStop(1, MAP.sea2);
    g.fillStyle = grd; g.fillRect(x0, y0, size, size);
 
-   // grid: numbers 1-10 across, letters A-J down (WoWs convention)
-   g.strokeStyle = 'rgba(160,200,235,0.13)'; g.lineWidth = 1;
+   // kilometre grid from the centre of the arena (no lettered squares)
+   const step = gridStep(A), n = Math.floor(A / step);
+   g.strokeStyle = MAP.grid; g.lineWidth = 1;
    g.beginPath();
-   for (let i = 1; i < 10; i++) {
-      const q = Math.round(x0 + (size * i) / 10) + 0.5;
+   for (let i = -n; i <= n; i++) {
+      const q = Math.round(mx(i * step)) + 0.5, r = Math.round(my(i * step)) + 0.5;
       g.moveTo(q, y0); g.lineTo(q, y0 + size);
-      const r = Math.round(y0 + (size * i) / 10) + 0.5;
       g.moveTo(x0, r); g.lineTo(x0 + size, r);
    }
    g.stroke();
-   g.fillStyle = 'rgba(190,215,240,0.5)';
-   g.font = `${big ? 13 : Math.max(8, Math.round(size / 34))}px Consolas, monospace`;
-   g.textAlign = 'center'; g.textBaseline = 'top';
-   for (let i = 0; i < 10; i++) {
-      g.fillText(String(i + 1), x0 + size * (i + 0.5) / 10, y0 + 2);
-      g.textAlign = 'left'; g.textBaseline = 'middle';
-      g.fillText('ABCDEFGHIJ'[i], x0 + 3, y0 + size * (i + 0.5) / 10);
-      g.textAlign = 'center'; g.textBaseline = 'top';
-   }
 
-   // terrain
+   // terrain: land with a light coastline and a faint shoal halo
    for (const o of world.obstacles || []) {
       g.beginPath(); islandPath(g, o, mx, my, sc);
-      if (o.kind === 'island') { g.fillStyle = '#6f7a55'; g.fill(); g.strokeStyle = '#c8b98a'; g.lineWidth = 1; g.stroke(); }
+      if (o.kind === 'island') {
+         g.strokeStyle = MAP.shoal; g.lineWidth = big ? 5 : 3; g.stroke();
+         g.fillStyle = MAP.land; g.fill(); g.strokeStyle = MAP.coast; g.lineWidth = 1; g.stroke();
+      }
       else { g.fillStyle = 'rgba(90,200,180,0.22)'; g.fill(); }
    }
 
@@ -145,7 +168,7 @@ function paintMapInner(g, world, x0, y0, size, opts) {
    for (const c of world.caps || []) {
       const col = c.owner == null ? COL.neutral : (c.owner === p?.side ? COL.ally : COL.enemy);
       const x = mx(c.pos.x), y = my(c.pos.y), r = Math.max(6, c.r * sc);
-      g.fillStyle = col === COL.neutral ? 'rgba(220,230,240,0.10)' : (col === COL.ally ? 'rgba(93,255,140,0.13)' : 'rgba(255,90,77,0.14)');
+      g.fillStyle = col === COL.neutral ? MAP.capN : (col === COL.ally ? MAP.capA : MAP.capE);
       g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
       g.strokeStyle = col; g.lineWidth = c.contested ? 2 : 1.2;
       g.setLineDash(c.contested ? [4, 3] : []); g.stroke(); g.setLineDash([]);
@@ -153,7 +176,7 @@ function paintMapInner(g, world, x0, y0, size, opts) {
          g.strokeStyle = c.capper === p?.side ? COL.ally : COL.enemy; g.lineWidth = 3;
          g.beginPath(); g.arc(x, y, r + 2, -Math.PI / 2, -Math.PI / 2 + TAU * c.progress); g.stroke();
       }
-      g.fillStyle = col; g.font = `bold ${big ? 16 : Math.max(9, Math.round(size / 26))}px Segoe UI, sans-serif`;
+      g.fillStyle = col; g.font = `bold ${big ? 16 : Math.max(9, Math.round(size / 26))}px ${MAP_FONT}`;
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(c.id || '?', x, y + 1);
    }
@@ -163,18 +186,18 @@ function paintMapInner(g, world, x0, y0, size, opts) {
    if (zones) for (let i = 0; i < zones.length; i++) {
       const z = zones[i], x = mx(z.x), y = my(z.y), r = Math.max(6, z.r * sc);
       const col = z.kind === 'goal' ? COL.ally : COL.enemy;
-      g.fillStyle = z.kind === 'goal' ? 'rgba(93,255,140,0.10)' : 'rgba(255,90,77,0.11)';
+      g.fillStyle = z.kind === 'goal' ? MAP.zoneA : MAP.zoneE;
       g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
       g.strokeStyle = col; g.lineWidth = 1.4;
       g.setLineDash(ZONE_DASH); g.stroke(); g.setLineDash(NO_DASH);
-      g.fillStyle = col; g.font = `bold ${big ? 13 : Math.max(8, Math.round(size / 32))}px Segoe UI, sans-serif`;
+      g.fillStyle = col; g.font = `bold ${big ? 13 : Math.max(8, Math.round(size / 32))}px ${MAP_FONT}`;
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(z.label, x, y);
    }
 
    // smoke
    for (const cl of world.smokeClouds || []) {
-      g.fillStyle = 'rgba(200,205,210,0.35)';
+      g.fillStyle = MAP.smoke;
       g.beginPath(); g.arc(mx(cl.c.x), my(cl.c.y), Math.max(2, cl.r * sc), 0, TAU); g.fill();
    }
 
@@ -184,7 +207,7 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       if (opts.camYaw != null && p.alive) {
          const hf = Math.min(1.6, opts.camHfov || 1.2) / 2, len = size * (big ? 0.12 : 0.2);
          const cg = g.createRadialGradient(px, py, 0, px, py, len);
-         cg.addColorStop(0, 'rgba(255,255,255,0.20)'); cg.addColorStop(1, 'rgba(255,255,255,0)');
+         cg.addColorStop(0, MAP.cone); cg.addColorStop(1, MAP.cone0);
          g.fillStyle = cg;
          g.beginPath(); g.moveTo(px, py); g.arc(px, py, len, opts.camYaw - hf, opts.camYaw + hf); g.closePath(); g.fill();
       }
@@ -192,18 +215,18 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       if (p.alive) {
          g.lineWidth = 1;
          if (opts.detectRange) {
-            g.strokeStyle = 'rgba(160,210,255,0.55)'; g.setLineDash([3, 3]);
+            g.strokeStyle = MAP.detect; g.setLineDash([3, 3]);
             g.beginPath(); g.arc(px, py, opts.detectRange * sc, 0, TAU); g.stroke(); g.setLineDash([]);
          }
          if (opts.gunRange) {
-            g.strokeStyle = 'rgba(255,255,255,0.55)';
+            g.strokeStyle = MAP.guns;
             g.beginPath(); g.arc(px, py, opts.gunRange * sc, 0, TAU); g.stroke();
          }
       }
       // torpedo fan preview (tactical map / minimap in torpedo mode)
       if (opts.torpFan && p.alive) {
          const f = opts.torpFan;
-         g.strokeStyle = 'rgba(255,230,140,0.6)'; g.lineWidth = 1;
+         g.strokeStyle = MAP.fan; g.lineWidth = 1;
          g.beginPath();
          for (const b of f.bearings) { g.moveTo(px, py); g.lineTo(mx(p.pos.x + Math.cos(b) * f.range), my(p.pos.y + Math.sin(b) * f.range)); }
          g.stroke();
@@ -215,7 +238,7 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       const mine = p && torpSide(t) === p.side;
       if (!mine && t.spotted === false) continue;
       const h = torpHeading(t), x = mx(t.pos.x), y = my(t.pos.y);
-      g.strokeStyle = mine ? 'rgba(140,220,255,0.9)' : '#ff8a70'; g.lineWidth = big ? 2 : 1.4;
+      g.strokeStyle = mine ? MAP.torpOwn : MAP.torpFoe; g.lineWidth = big ? 2 : 1.4;
       g.beginPath(); g.moveTo(x, y); g.lineTo(x - Math.cos(h) * (big ? 9 : 5), y - Math.sin(h) * (big ? 9 : 5)); g.stroke();
    }
 
@@ -227,9 +250,9 @@ function paintMapInner(g, world, x0, y0, size, opts) {
          const age = world.time - k.t;
          const a = Math.max(0.25, 0.8 - age / 90);
          const x = mx(k.x), y = my(k.y);
-         drawClassIcon(g, k.type, x, y, big ? 14 : Math.max(8, size / 26), `rgba(255,120,100,${a})`, { hollow: true, lineWidth: 1.2 });
+         drawClassIcon(g, k.type, x, y, big ? 14 : Math.max(8, size / 26), rgba(T.enemy, a.toFixed(2)), { hollow: true, lineWidth: 1.2 });
          if (big) {
-            g.fillStyle = `rgba(255,160,140,${a})`; g.font = '11px Segoe UI, sans-serif';
+            g.fillStyle = rgba(T['enemy-soft'], a.toFixed(2)); g.font = FONT(11);
             g.textAlign = 'center'; g.textBaseline = 'top';
             g.fillText(k.name + ' (' + Math.round(age) + 's)', x, y + 9);
          }
@@ -250,12 +273,13 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       const sz = base * (type === 'BB' ? 1.15 : type === 'DD' ? 0.85 : 1) * (self ? 1.25 : 1);
       const col = self ? COL.self : ally ? COL.ally : COL.enemy;
       g.save(); g.translate(x, y); g.rotate(s.heading + Math.PI / 2);
-      g.fillStyle = col; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 1;
-      g.beginPath(); g.moveTo(0, -sz * 0.6); g.lineTo(sz * 0.38, sz * 0.45); g.lineTo(0, sz * 0.25); g.lineTo(-sz * 0.38, sz * 0.45); g.closePath();
+      // hull outline: pointed bow, square stern
+      g.fillStyle = col; g.strokeStyle = MAP.hullEdge; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(0, -sz * 0.62); g.lineTo(sz * 0.27, -sz * 0.12); g.lineTo(sz * 0.27, sz * 0.48); g.lineTo(-sz * 0.27, sz * 0.48); g.lineTo(-sz * 0.27, -sz * 0.12); g.closePath();
       g.fill(); g.stroke();
       g.restore();
       if (big && !self) {
-         g.fillStyle = col; g.font = '12px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'top';
+         g.fillStyle = col; g.font = FONT(12); g.textAlign = 'center'; g.textBaseline = 'top';
          g.fillText(s.name || s.cls || '', x, y + sz * 0.7);
       }
    }
@@ -263,12 +287,38 @@ function paintMapInner(g, world, x0, y0, size, opts) {
    // aim point
    if (opts.aimPoint && p?.alive) {
       const x = mx(opts.aimPoint.x), y = my(opts.aimPoint.y);
-      g.strokeStyle = 'rgba(255,212,121,0.95)'; g.lineWidth = 1.2;
+      g.strokeStyle = MAP.aim; g.lineWidth = 1.2;
       g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x + 4, y); g.moveTo(x, y - 4); g.lineTo(x, y + 4); g.stroke();
    }
 
-   g.strokeStyle = 'rgba(150,190,230,0.45)'; g.lineWidth = 1;
-   g.strokeRect(x0 + 0.5, y0 + 0.5, size - 1, size - 1);
+   // graduated neatline: a band of alternating ink / chart-paper segments (half a grid square
+   // each) inside a thin frame, like the border of a printed sea chart; km figures on the big map
+   const bw = big ? 6 : 4, half = step / 2, m = Math.ceil(A / half);
+   g.fillStyle = MAP.ink;
+   g.fillRect(x0, y0, size, bw); g.fillRect(x0, y0 + size - bw, size, bw);
+   g.fillRect(x0, y0, bw, size); g.fillRect(x0 + size - bw, y0, bw, size);
+   g.fillStyle = MAP.coast;
+   for (let i = -m; i < m; i += 2) {
+      const a0 = Math.max(x0, mx(i * half)), a1 = Math.min(x0 + size, mx((i + 1) * half));
+      if (a1 <= a0) continue;
+      g.fillRect(a0, y0 + 1, a1 - a0, bw - 2); g.fillRect(a0, y0 + size - bw + 1, a1 - a0, bw - 2);
+      const b0 = Math.max(y0, my(i * half)), b1 = Math.min(y0 + size, my((i + 1) * half));
+      g.fillRect(x0 + 1, b0, bw - 2, b1 - b0); g.fillRect(x0 + size - bw + 1, b0, bw - 2, b1 - b0);
+   }
+   g.strokeStyle = MAP.frame; g.lineWidth = 1;
+   g.strokeRect(x0 + bw + 0.5, y0 + bw + 0.5, size - 2 * bw - 1, size - 2 * bw - 1);
+   if (big) {
+      g.fillStyle = MAP.label; g.font = MONO(11); g.textBaseline = 'top'; g.textAlign = 'center';
+      for (let i = -n; i <= n; i++) {
+         if (!i) continue;
+         g.fillText(String(Math.abs(i * step / 1000)), mx(i * step), y0 + bw + 3);
+      }
+      g.textAlign = 'left'; g.textBaseline = 'middle';
+      for (let i = -n; i <= n; i++) {
+         if (!i) continue;
+         g.fillText(String(Math.abs(i * step / 1000)), x0 + bw + 4, my(i * step));
+      }
+   }
 }
 
 // Keeps the renderer's call site (hudCanvases.draw(world)) working; main3d owns its own instance.

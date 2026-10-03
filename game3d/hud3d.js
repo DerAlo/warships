@@ -1,20 +1,33 @@
-// game3d/hud3d.js — everything the HUD draws on the #fx canvas: the WoWs-style reticle (mil
-// ticks, reload ring, range + flight time, turret schematic, out-of-range feedback), floating
+// game3d/hud3d.js — everything the HUD draws on the #fx canvas: the gun sight (hanging mil
+// ticks, reload arcs either side, range + flight time, turret schematic, out-of-range feedback), floating
 // ship markers, the lead ghost, the torpedo fan, torpedo warnings, binocular optics and the
 // full-screen tactical map. Pure drawing from the `ui` snapshot main3d.js builds each frame.
-import { paintMap, drawClassIcon, COL } from './minimap3d.js';
+import { paintMap, drawClassIcon, COL, gridStep, arenaOf } from './minimap3d.js';
 import { drawSubUnder, drawPeriscope } from './subui.js';
+import { T, rgba, FONT, MONO } from './theme.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 const km = (m) => (m / 1000).toFixed(m < 9950 ? 2 : 1).replace('.', ',') + ' km';
-const TURRET_COL = { ready: '#6dff8e', traverse: '#ffd24a', reload: '#ff6a5a', blocked: '#ff6a5a', dead: '#5a5a5a' };
+const TURRET_COL = { ready: T.ok, traverse: T.warn, reload: T.bad, blocked: T.bad, dead: T.dead };
+// sight palette + fonts, resolved once from the design tokens (drawn every frame)
+const SIGHT = {
+   main: T.reticle, dim: rgba(T.reticle, 0.62), faint: rgba(T.reticle, 0.3), out: T.bad, outDim: rgba(T.bad, 0.6),
+   ready: rgba(T.ok, 0.9), partial: rgba(T.warn, 0.9), idle: rgba(T.reticle, 0.7), torpReady: rgba(T.torp, 0.9), snap: rgba(T.enemy, 0.9),
+   track: 'rgba(0,0,0,0.4)', shadow: 'rgba(0,0,0,0.85)',
+};
+const F_SMALL = MONO(10), F_READ = MONO(12), F_READ_B = MONO(15, 'bold'), F_LBL = FONT(13, 'bold'), F_WARN = FONT(12, 'bold'),
+   F_CUE = MONO(13, 'bold'), F_NAME = FONT(11), F_NAME_B = FONT(11, 'bold'), F_DIST = MONO(10);
+const F_TORP = MONO(11, 'bold'), F_MAG = MONO(18, 'bold');
+// binocular optics: warm cream instead of a cold blue so it matches the sight
+const SCOPE = { hair: rgba(T.reticle, 0.35), dot: rgba(T.reticle, 0.55), text: rgba(T.reticle, 0.9), hint: rgba(T.reticle, 0.5) };
+const NAME_ALLY = T['ally-soft'], NAME_ENEMY = T['enemy-soft'], DIST_COL = rgba(T['enemy-soft'], 0.85);
 const NICE_MRAD = [0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50];
 // lead marker palette (constants: the marker is drawn every frame)
-const LEAD_RED = '#ff2a1c', LEAD_TORP = '#3dff8a', LEAD_LOST = '#d8a49c', LEAD_DARK = 'rgba(8,10,14,0.92)',
+const LEAD_RED = T.lead, LEAD_TORP = T['lead-torp'], LEAD_LOST = '#d8a49c', LEAD_DARK = 'rgba(8,10,14,0.92)',
    LEAD_HI = '#ffffff', LEAD_FILL = 'rgba(255,40,24,0.14)';
 const LEAD_DASH = [5, 4], NO_DASH = [];
-const LEAD_FONT = '600 12px Segoe UI, sans-serif', LEAD_FONT_L = '600 15px Segoe UI, sans-serif';
+const LEAD_FONT = FONT(12, 600), LEAD_FONT_L = FONT(15, 600);
 
 export class Overlay3D {
    constructor(canvas) {
@@ -69,27 +82,30 @@ export class Overlay3D {
       g.lineWidth = 2;
       for (let i = 0; i < n; i++) {
          const on = Math.abs(i - lv) < 0.5, w = i > tp ? 10 : 6;
-         g.strokeStyle = on ? '#eef6ff' : i > tp ? 'rgba(210,235,255,0.45)' : 'rgba(210,235,255,0.28)';
+         g.strokeStyle = on ? SIGHT.main : i > tp ? SIGHT.dim : SIGHT.faint;
          g.beginPath(); g.moveTo(x - w, yOf(i)); g.lineTo(x + w, yOf(i)); g.stroke();
       }
       // exact (fractional) position for touchpad glides: a small pointer
       const yl = lv > tp ? yOf(Math.round(lv)) : yB - lv * 9;
-      g.fillStyle = '#eef6ff';
+      g.fillStyle = SIGHT.main;
       g.beginPath(); g.moveTo(x + 14, yl); g.lineTo(x + 20, yl - 4); g.lineTo(x + 20, yl + 4); g.closePath(); g.fill();
-      g.font = 'bold 13px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
+      g.font = F_CUE; g.textAlign = 'right'; g.textBaseline = 'middle';
       g.fillText(lv > tp ? (ui.sub?.peri ? 'Sehrohr ' : 'Fernglas ') + ui.zoom + '×' : 'Kamera', x - 16, yl);
       g.restore();
    }
 
-   // ------------------------------------------------------------ reticle
+   // ------------------------------------------------------------ gun sight
+   // A horizontal mil scale with ticks hanging below it, a small chevron under the centre, and
+   // two reload arcs left and right of the centre that fill from below. Readouts sit below-right
+   // (range, flight time, tick value) and below-left (ammunition, loaded guns).
    _reticle(ui) {
       const g = this.g, cx = this.W / 2, cy = this.H / 2;
       const out = ui.out && ui.mode === 'guns';
-      const main = out ? '#ff6a5a' : '#eef6ff';
-      const dim = out ? 'rgba(255,106,90,0.6)' : 'rgba(238,246,255,0.62)';
+      const main = out ? SIGHT.out : SIGHT.main;
+      const dim = out ? SIGHT.outDim : SIGHT.dim;
       g.save();
       g.lineCap = 'butt';
-      g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
+      g.shadowColor = SIGHT.shadow; g.shadowBlur = 3;
 
       // Mil scale: tick spacing is a "nice" angle chosen so ticks sit 16..40 px apart at the
       // current FOV. The label says how many knots of crossing speed one tick leads at this
@@ -101,54 +117,59 @@ export class Overlay3D {
       const halfW = Math.min(this.W * 0.2, sp * 12);
       g.strokeStyle = main; g.lineWidth = 1.5;
       g.beginPath();
-      g.moveTo(cx - halfW, cy); g.lineTo(cx - 9, cy);
-      g.moveTo(cx + 9, cy); g.lineTo(cx + halfW, cy);
-      // vertical drop line below the centre (range/elevation cue, WoWs look)
-      g.moveTo(cx, cy + 9); g.lineTo(cx, cy + 26);
+      g.moveTo(cx - halfW, cy); g.lineTo(cx - 12, cy);
+      g.moveTo(cx + 12, cy); g.lineTo(cx + halfW, cy);
+      // chevron under the centre
+      g.moveTo(cx - 5, cy + 13); g.lineTo(cx, cy + 8); g.lineTo(cx + 5, cy + 13);
       g.stroke();
       g.lineWidth = 1.2; g.strokeStyle = dim;
       g.beginPath();
       for (let i = 1; sp * i <= halfW + 0.5; i++) {
-         const len = i % 2 === 0 ? 7 : 4;
+         const len = i % 4 === 0 ? 9 : i % 2 === 0 ? 6 : 3;
          for (const s of [-1, 1]) {
             const x = Math.round(cx + s * sp * i) + 0.5;
-            g.moveTo(x, cy - len); g.lineTo(x, cy + (i % 2 === 0 ? 3 : 0));
+            g.moveTo(x, cy); g.lineTo(x, cy + len);
          }
       }
       g.stroke();
       if (ui.pxPerKn > 0) {
-         g.fillStyle = dim; g.font = '10px Consolas, monospace'; g.textAlign = 'left'; g.textBaseline = 'middle';
+         g.fillStyle = dim; g.font = F_SMALL; g.textAlign = 'center'; g.textBaseline = 'bottom';
          for (let i = 4; sp * i <= halfW + 0.5; i += 4) {
-            g.fillText(String(i), cx + sp * i - 3, cy - 14);
-            g.textAlign = 'right'; g.fillText(String(i), cx - sp * i + 3, cy - 14); g.textAlign = 'left';
+            g.fillText(String(i), cx + sp * i, cy - 4);
+            g.fillText(String(i), cx - sp * i, cy - 4);
          }
       }
-      // centre dot
+      // centre point
       g.fillStyle = main;
       g.fillRect(cx - 1, cy - 1, 2, 2);
 
-      // reload ring
+      // reload arcs: left and right of the centre, filling from the bottom up
       const r = ui.reload || {};
-      const R = 30;
+      const R = 30, span = 1.1;                       // half-angle of each arc (rad)
+      const arcs = (frac) => {
+         for (const side of [0, Math.PI]) {
+            // right arc spans side-span..side+span; filled from the bottom end (larger y)
+            const lo = side === 0 ? span : Math.PI - span, dir = side === 0 ? -1 : 1;
+            g.beginPath(); g.arc(cx, cy, R, lo, lo + dir * 2 * span * clamp01(frac), dir < 0); g.stroke();
+         }
+      };
       g.shadowBlur = 0;
-      g.lineWidth = 2;
-      g.strokeStyle = 'rgba(0,0,0,0.35)';
-      g.beginPath(); g.arc(cx, cy, R, 0, TAU); g.stroke();
+      g.lineWidth = 2.5;
+      g.strokeStyle = SIGHT.track;
+      arcs(1);
       if (ui.mode === 'guns') {
-         const frac = r.anyReady ? 1 : r.frac ?? 1;
-         g.strokeStyle = r.anyReady ? 'rgba(109,255,142,0.85)' : r.loaded > 0 ? 'rgba(255,210,74,0.85)' : 'rgba(255,255,255,0.7)';
-         g.beginPath(); g.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + TAU * clamp01(frac)); g.stroke();
+         g.strokeStyle = r.anyReady ? SIGHT.ready : r.loaded > 0 ? SIGHT.partial : SIGHT.idle;
+         arcs(r.anyReady ? 1 : r.frac ?? 1);
       } else if (ui.torpInfo) {
          const ti = ui.torpInfo;
-         g.strokeStyle = ti.readyCount > 0 ? 'rgba(160,255,190,0.85)' : 'rgba(255,255,255,0.6)';
-         const f = ti.readyCount > 0 ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1));
-         g.beginPath(); g.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + TAU * f); g.stroke();
+         g.strokeStyle = ti.readyCount > 0 ? SIGHT.torpReady : SIGHT.idle;
+         arcs(ti.readyCount > 0 ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1)));
       }
 
       // snapped to a ship: corner brackets
       if (ui.snapped && ui.mode === 'guns') {
-         g.strokeStyle = 'rgba(255,120,100,0.9)'; g.lineWidth = 1.5;
-         const b = 14, l = 5;
+         g.strokeStyle = SIGHT.snap; g.lineWidth = 1.5;
+         const b = 15, l = 5;
          g.beginPath();
          for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
             g.moveTo(cx + sx * b, cy + sy * (b - l)); g.lineTo(cx + sx * b, cy + sy * b); g.lineTo(cx + sx * (b - l), cy + sy * b);
@@ -156,14 +177,14 @@ export class Overlay3D {
          g.stroke();
       }
 
-      // readouts (right of the drop line, clear of the centre)
-      g.shadowColor = 'rgba(0,0,0,0.9)'; g.shadowBlur = 4;
+      // readouts (below the scale, clear of the reload arcs)
+      g.shadowColor = SIGHT.shadow; g.shadowBlur = 4;
       g.textBaseline = 'alphabetic';
-      const tx = cx + 40, ty = cy + 26;
+      const tx = cx + 40, ty = cy + 30;
       g.textAlign = 'left';
-      g.fillStyle = main; g.font = 'bold 15px Consolas, monospace';
+      g.fillStyle = main; g.font = F_READ_B;
       g.fillText(km(ui.range), tx, ty);
-      g.font = '12px Consolas, monospace'; g.fillStyle = dim;
+      g.font = F_READ; g.fillStyle = dim;
       if (ui.mode === 'guns') {
          g.fillText((out ? ui.gunRange : ui.range) > 0 ? ui.flight.toFixed(1).replace('.', ',') + ' s' : '', tx, ty + 15);
          if (ui.pxPerKn > 0) g.fillText('Strich ≈ ' + Math.max(0.1, sp / ui.pxPerKn).toFixed(sp / ui.pxPerKn < 3 ? 1 : 0).replace('.', ',') + ' kn', tx, ty + 29);
@@ -173,28 +194,28 @@ export class Overlay3D {
       // left side: ammo + loaded guns
       g.textAlign = 'right';
       if (ui.mode === 'guns') {
-         g.font = 'bold 13px Segoe UI, sans-serif';
-         g.fillStyle = ui.ammo === 'HE' ? '#ffa45a' : '#9fd4ff';
-         g.fillText(ui.ammo === 'HE' ? 'HE' : 'AP', cx - 40, ty);
-         g.font = '12px Consolas, monospace'; g.fillStyle = dim;
+         g.font = F_LBL;
+         g.fillStyle = ui.ammo === 'HE' ? T.he : T.ap;
+         g.fillText(ui.ammo === 'HE' ? 'SPRENG' : 'PANZER', cx - 40, ty);
+         g.font = F_READ; g.fillStyle = dim;
          g.fillText(r.anyReady ? `${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? r.left.toFixed(1).replace('.', ',') + ' s' : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Winkel' : '—', cx - 40, ty + 15);
       } else {
-         g.font = 'bold 13px Segoe UI, sans-serif'; g.fillStyle = '#b6f0c0';
+         g.font = F_LBL; g.fillStyle = T.torp;
          g.fillText('TORPEDO', cx - 40, ty);
          if (ui.torpInfo) {
-            g.font = '12px Consolas, monospace'; g.fillStyle = dim;
+            g.font = F_READ; g.fillStyle = dim;
             g.fillText(ui.torpInfo.readyCount > 0 ? 'bereit' : ui.torpInfo.reload.toFixed(0) + ' s', cx - 40, ty + 15);
          }
       }
       if (out) {
-         g.textAlign = 'center'; g.font = 'bold 12px Segoe UI, sans-serif'; g.fillStyle = '#ff6a5a';
+         g.textAlign = 'center'; g.font = F_WARN; g.fillStyle = SIGHT.out;
          g.fillText('AUSSER REICHWEITE · max ' + km(ui.gunRange), cx, cy - 40);
       }
       g.restore();
 
-      // turret schematic lives bottom-centre, left of the weapon panel, so it never sits on
-      // the own hull (which fills the lower middle of the chase view)
-      if (ui.mode === 'guns') this._turretSchematic(ui, Math.max(cx - 300, 372), this.H - 50);
+      // turret schematic lives bottom-centre, left of the ammunition selector and right of the
+      // chart table, so it never sits on the own hull (which fills the lower middle of the view)
+      if (ui.mode === 'guns') this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
    }
 
    // Small top-down hull under the reticle, rotated relative to the camera (up = where you
@@ -207,14 +228,14 @@ export class Overlay3D {
       const L = 58, B = 12;
       g.save();
       g.translate(cx, cy);
-      g.fillStyle = 'rgba(6,14,24,0.55)'; g.strokeStyle = 'rgba(160,190,220,0.25)'; g.lineWidth = 1;
+      g.fillStyle = 'rgba(17,20,21,0.6)'; g.strokeStyle = rgba(T.gold, 0.35); g.lineWidth = 1;
       g.beginPath(); g.arc(0, 0, 38, 0, TAU); g.fill(); g.stroke();
       // tick at the top = camera direction
       g.beginPath(); g.moveTo(0, -38); g.lineTo(0, -32); g.stroke();
       // local frame: bow along +x; screen up is canvas angle -90deg
       g.rotate(rot - Math.PI / 2);
       g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 3;
-      g.strokeStyle = 'rgba(230,240,250,0.55)'; g.lineWidth = 1.3;
+      g.strokeStyle = rgba(T.hud, 0.6); g.lineWidth = 1.3;
       g.beginPath();
       g.moveTo(L / 2, 0); g.quadraticCurveTo(L * 0.3, -B / 2, 0, -B / 2); g.lineTo(-L / 2 + 4, -B / 2 + 1);
       g.lineTo(-L / 2, 0); g.lineTo(-L / 2 + 4, B / 2 - 1); g.lineTo(0, B / 2); g.quadraticCurveTo(L * 0.3, B / 2, L / 2, 0);
@@ -222,7 +243,7 @@ export class Overlay3D {
       const maxOff = Math.max(1, ...T.map(t => Math.abs(t.offX)));
       for (const t of T) {
          const x = (t.offX / maxOff) * (L / 2 - 9);
-         g.fillStyle = TURRET_COL[t.state] || '#ccc';
+         g.fillStyle = TURRET_COL[t.state] || T.neutral;
          g.strokeStyle = g.fillStyle; g.lineWidth = 1.6;
          g.beginPath(); g.arc(x, 0, 3.2, 0, TAU); g.fill();
          // barrel: t.rel is relative to the bow, positive = starboard (clockwise on screen)
@@ -253,14 +274,14 @@ export class Overlay3D {
          if (Math.abs(x - cxs) < 90 && y > cys - 74 && y < cys + 64) { lifted = true; y = cys - 74; }
          const L = { m, x, y, lifted, nameY: null, showDist: false };
          boxes.push({ x: x - 9, y: y - 9, w: 18, h: 18 });
-         g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
+         g.font = m.locked ? F_NAME_B : F_NAME;
          const nw = g.measureText(m.name || '').width + 6;
          for (let k = 0, ny = y - 10; k < 3; k++, ny -= 12) {
             const b = { x: x - nw / 2, y: ny - 12, w: nw, h: 12 };
             if (m.locked || !hit(b)) { L.nameY = ny; boxes.push(b); break; }
          }
          if (!m.ally) {
-            g.font = '10px Consolas, monospace';
+            g.font = F_DIST;
             const b = { x: x - 22, y: y + 15, w: 44, h: 11 };
             if (m.locked || !hit(b)) { L.showDist = true; boxes.push(b); }
          }
@@ -278,8 +299,8 @@ export class Overlay3D {
          g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
          drawClassIcon(g, m.type, x, y, 13, col, { lineWidth: 1.4 });
          if (nameY != null) {
-            g.font = (m.locked ? 'bold ' : '') + '11px Segoe UI, sans-serif';
-            g.fillStyle = m.ally ? '#c9ffd8' : '#ffd0ca';
+            g.font = m.locked ? F_NAME_B : F_NAME;
+            g.fillStyle = m.ally ? NAME_ALLY : NAME_ENEMY;
             g.textBaseline = 'bottom';
             g.fillText(m.name, x, nameY);
          }
@@ -290,14 +311,14 @@ export class Overlay3D {
          g.fillStyle = col; g.fillRect(x - bw / 2, y + 10, bw * m.hpFrac, bh);
          if (showDist) {
             g.shadowBlur = 3;
-            g.font = '10px Consolas, monospace'; g.textBaseline = 'top'; g.fillStyle = 'rgba(255,220,215,0.85)';
+            g.font = F_DIST; g.textBaseline = 'top'; g.fillStyle = DIST_COL;
             g.fillText(km(m.dist), x, y + 15);
          }
          if (m.fires > 0) {
-            g.fillStyle = '#ff7a2a'; g.beginPath(); g.arc(x + 12, y - 2, 2.5, 0, TAU); g.fill();
+            g.fillStyle = T.fire; g.beginPath(); g.arc(x + 12, y - 2, 2.5, 0, TAU); g.fill();
          }
          if (m.locked) {
-            g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.shadowBlur = 3;
+            g.strokeStyle = T.self; g.lineWidth = 1.5; g.shadowBlur = 3;
             const b = 13, l = 5;
             g.beginPath();
             for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
@@ -421,7 +442,7 @@ export class Overlay3D {
       g.save();
       g.fillStyle = `rgba(255,70,50,${blink})`;
       g.shadowColor = 'rgba(0,0,0,0.8)'; g.shadowBlur = 4;
-      g.font = 'bold 11px Consolas, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = F_TORP; g.textAlign = 'center'; g.textBaseline = 'middle';
       for (const w of W) {
          const r = 64, x = cx + Math.sin(w.ang) * r, y = cy - Math.cos(w.ang) * r;
          g.save(); g.translate(x, y); g.rotate(w.ang);
@@ -435,7 +456,7 @@ export class Overlay3D {
    _frozen(pt) {
       const g = this.g;
       g.save();
-      g.strokeStyle = 'rgba(255,212,121,0.9)'; g.lineWidth = 1.5;
+      g.strokeStyle = rgba(T.gold, 0.9); g.lineWidth = 1.5;
       g.beginPath(); g.arc(pt.x, pt.y, 7, 0, TAU);
       g.moveTo(pt.x - 12, pt.y); g.lineTo(pt.x - 4, pt.y); g.moveTo(pt.x + 4, pt.y); g.lineTo(pt.x + 12, pt.y);
       g.stroke();
@@ -449,7 +470,7 @@ export class Overlay3D {
       const R0 = Math.min(W, H) * 0.47;
       g.save();
       g.globalAlpha = a;
-      // soft optical vignette instead of a hard black tube: like WoWs, the scope view keeps the
+      // soft optical vignette instead of a hard black tube: the scope view keeps the
       // whole screen usable (targets at the edge stay visible for leading and spotting)
       const grd = g.createRadialGradient(cx, cy, R0 * 0.95, cx, cy, Math.hypot(W, H) * 0.56);
       grd.addColorStop(0, 'rgba(0,0,0,0)');
@@ -458,7 +479,7 @@ export class Overlay3D {
       g.fillRect(0, 0, W, H);
       // fine cross hairs out to the reticle radius
       g.lineWidth = 1;
-      g.strokeStyle = 'rgba(210,235,255,0.35)';
+      g.strokeStyle = SCOPE.hair;
       g.beginPath();
       g.moveTo(cx - R0 * 0.9, cy); g.lineTo(cx - Math.min(W * 0.2, R0 * 0.5), cy);
       g.moveTo(cx + Math.min(W * 0.2, R0 * 0.5), cy); g.lineTo(cx + R0 * 0.9, cy);
@@ -470,15 +491,15 @@ export class Overlay3D {
       let mrad = NICE_MRAD[NICE_MRAD.length - 1];
       for (const m of NICE_MRAD) if (m * pxPerMrad >= 22) { mrad = m; break; }
       const sp = mrad * pxPerMrad;
-      g.fillStyle = 'rgba(210,235,255,0.55)';
+      g.fillStyle = SCOPE.dot;
       for (let k = Math.ceil(40 / sp); k * sp < R0 * 0.9; k++) { g.beginPath(); g.arc(cx, cy - k * sp, 1.6, 0, TAU); g.fill(); }
       // magnification
       // magnification + hint on the right arm of the cross (bottom is covered by the HUD panels)
       const rx = cx + Math.min(R0 * 0.88, W / 2 - 20);
-      g.font = 'bold 18px Consolas, monospace'; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
-      g.fillStyle = 'rgba(210,235,255,0.9)';
+      g.font = F_MAG; g.textAlign = 'right'; g.textBaseline = 'alphabetic';
+      g.fillStyle = SCOPE.text;
       g.fillText(ui.zoom + '×', rx, cy - 10);
-      g.font = '11px Consolas, monospace'; g.fillStyle = 'rgba(210,235,255,0.5)';
+      g.font = F_SMALL; g.fillStyle = SCOPE.hint;
       g.fillText('Mausrad: Zoom · Shift: zurück', rx, cy - 34);
       g.restore();
    }
@@ -487,7 +508,7 @@ export class Overlay3D {
    _tacticalMap(ui) {
       const g = this.g, W = this.W, H = this.H;
       g.save();
-      g.fillStyle = 'rgba(3,9,16,0.9)';
+      g.fillStyle = rgba(T['map-ink'], 0.9);
       g.fillRect(0, 0, W, H);
       // keep clear of the top bar (score) and the bottom panels
       const size = Math.max(200, Math.min(W - 80, H - 92 - 150));
@@ -495,10 +516,10 @@ export class Overlay3D {
       paintMap(g, ui.world, x0, y0, size, { ...ui.mapOpts, big: true });
       // title + legend under the map: the HTML score box covers the strip above it
       g.textBaseline = 'top';
-      g.fillStyle = '#e8f2ff'; g.font = 'bold 15px Segoe UI, sans-serif'; g.textAlign = 'left';
-      g.fillText('TAKTISCHE KARTE', x0, y0 + size + 7);
-      g.font = '12px Segoe UI, sans-serif'; g.fillStyle = 'rgba(200,220,240,0.7)'; g.textAlign = 'right';
-      g.fillText('M – schließen  ·  gestrichelt: Entdeckung  ·  Kreis: Hauptbatterie', x0 + size, y0 + size + 9);
+      g.fillStyle = T.hud; g.font = FONT(15, 'bold'); g.textAlign = 'left';
+      g.fillText('LAGEKARTE', x0, y0 + size + 7);
+      g.font = FONT(12); g.fillStyle = T['hud-dim']; g.textAlign = 'right';
+      g.fillText('M – schließen  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
       g.restore();
    }
 }

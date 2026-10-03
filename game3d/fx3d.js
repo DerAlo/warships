@@ -10,6 +10,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { ATM_GLSL, bindAtm, clamp, lerp, mulberry32 } from './gfxcommon3d.js';
 import { WAVES_GLSL } from './water3d.js';
+import { T as THEME, FONT } from './theme.js';
 
 const TAU = Math.PI * 2;
 const rnd = Math.random;   // cosmetic only
@@ -771,13 +772,14 @@ class CapMarkers {
 
    _draw(r, id, owner, contested) {
       const g = r.canvas.getContext('2d');
-      const col = owner === 'player' ? '#5ed0ff' : owner === 'enemy' ? '#ff5a4a' : '#f2f2f2';
+      // same shield shape and token colours as the HUD point badges
+      const col = owner === 'player' ? THEME.ally : owner === 'enemy' ? THEME.enemy : THEME.neutral;
       g.clearRect(0, 0, 128, 128);
-      g.beginPath(); g.arc(64, 64, 52, 0, TAU);
-      g.fillStyle = 'rgba(8,14,22,0.55)'; g.fill();
-      g.lineWidth = 8; g.strokeStyle = contested ? '#ffd24a' : col; g.stroke();
+      g.beginPath(); g.moveTo(18, 14); g.lineTo(110, 14); g.lineTo(110, 82); g.lineTo(64, 116); g.lineTo(18, 82); g.closePath();
+      g.fillStyle = 'rgba(17,20,21,0.6)'; g.fill();
+      g.lineWidth = 8; g.lineJoin = 'round'; g.strokeStyle = contested ? THEME.warn : col; g.stroke();
       g.fillStyle = col;
-      g.font = 'bold 64px system-ui, sans-serif';
+      g.font = FONT(58, 'bold');
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(String(id).slice(0, 2), 64, 68);
       r.tex.needsUpdate = true;
