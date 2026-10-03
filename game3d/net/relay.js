@@ -11,7 +11,7 @@
 //   - every message is published to all connected brokers and deduplicated by sequence number
 //   - reliable, ordered delivery per peer: gaps are held back for a moment (another broker
 //     usually fills them), then requested again from the sender (NACK)
-//   - the channels in LATEST carry complete states (`snap`, `cmd`): only the newest counts, a
+//   - the channels in LATEST carry complete states (`snap`, `cmd`, `mig`): only the newest counts, a
 //     missing one is never waited for or repeated, and they go at full rate to one broker only
 //   - brokers with a rate limit (`gap`) get everything that queued up bundled into one publish
 //   - relayed traffic is AES-GCM encrypted with the room key
@@ -118,7 +118,7 @@ export function makeBusLobby(bus, selfId) {
 }
 
 // ---------------------------------------------------------------- room transport
-const LATEST = new Set(['snap', 'cmd']);
+const LATEST = new Set(['snap', 'cmd', 'mig']);
 const K_REL = 0, K_LATEST = 1, K_HI = 2, K_BYE = 3, K_PING = 4, K_PONG = 5, K_NACK = 6, K_RESET = 7;
 const K_PROBE = 8, K_PROBED = 9, K_NODIRECT = 10;      // direct channel: question, answer; "I stopped using it"
 const TICK_MS = 250;
@@ -189,7 +189,7 @@ async function roomCipher(room, key) {
 //           async (hooks: { onUp(id), onDown(id), onData(bytes, id), onFail(kind, id) }) ->
 //           { send(bytes, id), leave() }. The room works without it.
 // Besides the Transport interface: link(id) -> { via: 'direct'|'relay', rtt }, onRoute(fn(id, via)),
-// stats().
+// stats(), heardAny(exceptId) -> ms since any other peer was last heard (null: nobody else).
 export async function makeRoomTransport(o) {
    const { bus, selfId, room, hostId } = o;
    const cipher = await roomCipher(room, o.key);
@@ -496,8 +496,9 @@ export async function makeRoomTransport(o) {
    sayHi();
 
    const transport = {
-      selfId, hostId,
-      get isHost() { return selfId === hostId; },
+      selfId, hostId,                 // hostId: the lobby moves it after a host migration
+      get isHost() { return selfId === this.hostId; },
+      setAdmit(fn) { o.admit = fn; }, // the new host of a room gates newcomers from now on
       peers: () => [...peers.values()].filter(p => p.joined).map(p => p.id),
       send(channel, data, to) {
          if (left) return;
@@ -513,6 +514,13 @@ export async function makeRoomTransport(o) {
       onPeerLeave(fn) { onLeave = fn; },
       onRoute(fn) { onRoute = fn; },
       link(id) { const p = peers.get(id); return p && p.joined ? { via: via(p), rtt: p.rtt } : null; },
+      // ms since anything came from any peer of the room but `except` on any route (pings
+      // included); null: there is no other peer
+      heardAny(except) {
+         let ms = null;
+         for (const p of peers.values()) if (p.joined && p.id !== except) { const d = now() - Math.max(p.relayAt, p.directAt, p.born); if (ms === null || d < ms) ms = d; }
+         return ms;
+      },
       stats() {
          return { ...st, rx: JSON.parse(JSON.stringify(st.rx)), brokers: bus.stats(),
             peers: [...peers.values()].filter(p => p.joined).map(p => ({ id: p.id, via: via(p), rtt: p.rtt, primary: primary(p) })) };

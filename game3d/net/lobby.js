@@ -28,13 +28,15 @@
 //   (BroadcastChannel, test only) just the knock applies.
 import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots, coopRoles } from './coop.js';
+import { pvpMissions, pvpSlots, TEAM_MAX } from './pvp.js';
 import { MISSIONS, getMission } from '../missions.js';
 import { PLAYABLE, SHIPS, isCarrier } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
 
 export { NET_VERSION };
 export const NAME_KEY = 'warships3d.net.name';
-export const MODES = [['coop', 'Koop gegen Bots', true], ['pvp', 'PvP', false]];
+export const MODES = [['coop', 'Koop gegen Bots', true], ['pvp', 'PvP', true]];
+export const TEAMS = [1, 2];
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 const HEARTBEAT_MS = 4000, STALE_MS = 13000, TICK_MS = 1000;
 const KNOCK_MS = 10000, KNOCK_AGAIN_MS = 2000, CONNECT_MS = 15000, SEAT_MS = 30000;
@@ -56,6 +58,10 @@ async function deriveKey(password, roomId) {
 const proofOf = async (key, roomId, peerId) => hex(await crypto.subtle.digest('SHA-256', enc(`knock:${key}:${roomId}:${peerId}`)));
 
 export const coopMissions = () => MISSIONS.filter(m => coopSlots(m.id) > 0);
+// missions of a mode and how many captains one takes (0 = not in that mode)
+export const modeMissions = (mode) => mode === 'pvp' ? pvpMissions() : coopMissions();
+export const modeSlots = (mode, missionId) => mode === 'pvp' ? pvpSlots(missionId) : coopSlots(missionId);
+const MIN_PLAYERS = { coop: 1, pvp: 2 };
 // carriers stay out of net games until the snapshot carries aircraft
 export const allowedShips = (missionId) => (getMission(missionId)?.playableShips || PLAYABLE).filter(k => !isCarrier(k));
 // the player's own choice for a mission: allowed there and unlocked in the local career profile
@@ -147,16 +153,21 @@ export async function makeBackend(mode) {
 
 // The Transport handed to the game for one match: the room transport restricted to the players
 // of that match, with its own onPeerJoin/onPeerLeave slots (the room keeps the real ones) and
-// without access to the matchmaking channels.
+// without access to the matchmaking channels. After a host migration the game moves the host
+// (_setHost) and adds the players the old host knew under other ids (_add).
 function sessionTransport(base, members, onLeave) {
    const set = new Set(members);
-   let join = null, leave = null, rejoin = null, live = true;
+   let join = null, leave = null, rejoin = null, live = true, hostId = base.hostId;
    const peers = () => base.peers().filter(id => set.has(id));
    return {
-      selfId: base.selfId, hostId: base.hostId, isHost: base.selfId === base.hostId,
+      selfId: base.selfId,
+      get hostId() { return hostId; },
+      get isHost() { return base.selfId === hostId; },
       peers,
       link: (id) => base.link?.(id) ?? null,            // { via: 'direct'|'relay', rtt } with the real transport
       stats: () => base.stats?.() ?? null,
+      // ms since any peer of the room but `except` was last heard (null: nobody else there)
+      heardAny: base.heardAny ? (except) => base.heardAny(except) : undefined,
       send(channel, data, to) {
          if (!live) return;
          const t = to === undefined ? peers() : (Array.isArray(to) ? to : [to]).filter(id => set.has(id));
@@ -173,6 +184,8 @@ function sessionTransport(base, members, onLeave) {
       _join(id) { if (live && set.has(id)) join?.(id); },
       _leave(id) { if (live && set.delete(id)) leave?.(id); },      // at most once per player
       _rejoin(oldId, newId) { if (!live) return; set.delete(oldId); set.add(newId); rejoin?.(oldId, newId); },
+      _add(ids) { if (live) for (const id of ids) if (typeof id === 'string' && id !== base.selfId) set.add(id); },
+      _setHost(id) { hostId = id; },
       _close() { live = false; },
    };
 }
@@ -184,7 +197,7 @@ export class Lobby {
       this.net = backend; this.selfId = backend.selfId; this.getProfile = getProfile; this.cb = cb;
       this.name = loadName();
       this.games = new Map();       // host peer id -> { entry, seen }
-      this.room = null;             // { id, name, mode, mission, difficulty, max, locked, state, hostId, players: [{ id, name, ship, ready }] }
+      this.room = null;             // { id, name, mode, mission, difficulty, max, locked, teamsLocked, state, hostId, players: [{ id, name, ship, ready, team }] }
       this.chat = [];
       this.session = null;
       this.lt = null; this.rt = null;
@@ -193,12 +206,16 @@ export class Lobby {
       // host, running match: seat id -> { orig, id, token, name, ship }; peers re-admitted to a seat
       this._seats = new Map(); this._back = new Map(); this._startMsg = null;
       this._pendingStart = null;    // client: a start that came in before the room was wired
+      // host migration: host -> the successor it named; client: what the host handed over
+      // ({ seats, start, banned }), whether the host is gone while the match runs
+      this._succ = null; this._heir = null; this._orphan = false;
    }
    // client: the running match this tab can go back to ({ room, hostId, mission, name, ... }) or null
    rejoinable() { return loadSeat(); }
    canRejoin(entry) {
       const r = loadSeat();
-      return !!(r && entry && entry.id === r.room && entry.hostId === r.hostId && entry.state === 'running');
+      // by room: after a host migration the game is listed under its new host
+      return !!(r && entry && entry.id === r.room && entry.state === 'running');
    }
    get isHost() { return !!this.room && this.room.hostId === this.selfId; }
    get me() { return this.room?.players.find(p => p.id === this.selfId) || null; }
@@ -255,18 +272,19 @@ export class Lobby {
    // opts: { name, mode, mission, difficulty, max, password }
    async host(opts) {
       if (this.room) throw new NetError('busy', 'Du bist bereits in einem Spiel.');
-      const mission = coopSlots(opts.mission) > 0 ? opts.mission : coopMissions()[0]?.id;
+      const mode = opts.mode === 'pvp' ? 'pvp' : 'coop';
+      const mission = modeSlots(mode, opts.mission) > 0 ? opts.mission : modeMissions(mode)[0]?.id;
       if (!mission) throw new NetError('nomission', 'Keine Mission für den Mehrspielermodus verfügbar.');
       const id = randId(10), password = String(opts.password || '');
       const key = await deriveKey(password, id);
       this._key = key; this._approved.clear(); this._banned.clear();
       const ship = this._ship = pickShip(mission, this.getProfile(), this._ship);
       this.room = {
-         id, name: cleanName(opts.name, 32) || `Spiel von ${this.name}`, mode: 'coop', mission,
+         id, name: cleanName(opts.name, 32) || `Spiel von ${this.name}`, mode, mission,
          difficulty: DIFFICULTIES.includes(opts.difficulty) ? opts.difficulty : 'normal',
-         max: Math.min(coopSlots(mission), Math.max(1, Math.floor(opts.max) || coopSlots(mission))),
-         locked: !!password, state: 'lobby', hostId: this.selfId,
-         players: [{ id: this.selfId, name: this.name, ship, ready: false }],
+         max: Math.min(modeSlots(mode, mission), Math.max(MIN_PLAYERS[mode], Math.floor(opts.max) || modeSlots(mode, mission))),
+         locked: !!password, teamsLocked: false, state: 'lobby', hostId: this.selfId,
+         players: [{ id: this.selfId, name: this.name, ship, ready: false, team: mode === 'pvp' ? 1 : 0 }],
       };
       this.chat = [];
       try {
@@ -301,17 +319,62 @@ export class Lobby {
    configure(o) {
       const r = this.room;
       if (!this.isHost || r.state !== 'lobby') return;
-      if (o.mission && o.mission !== r.mission && coopSlots(o.mission) >= Math.max(1, r.players.length)) {
+      const slots = (id) => modeSlots(r.mode, id);
+      if (o.mission && o.mission !== r.mission && slots(o.mission) >= Math.max(1, r.players.length)) {
          // a prescribed ship is no choice of the player (maybe not even unlocked): everybody picks anew
          const wasFixed = coopRoles(r.mission, r.difficulty).length > 0;
          r.mission = o.mission;
-         r.max = Math.max(r.players.length, Math.min(r.max, coopSlots(r.mission)));
+         r.max = Math.max(r.players.length, Math.min(r.max, slots(r.mission)));
          const allowed = allowedShips(r.mission);
          for (const p of r.players) { p.ready = false; if (wasFixed || !allowed.includes(p.ship)) p.ship = null; }
          this._fixOwnShip();
       }
       if (o.difficulty && DIFFICULTIES.includes(o.difficulty)) r.difficulty = o.difficulty;
-      if (o.max) r.max = Math.max(r.players.length, Math.min(coopSlots(r.mission), Math.floor(o.max) || r.max));
+      if (o.max) r.max = Math.max(r.players.length, MIN_PLAYERS[r.mode] || 1, Math.min(slots(r.mission), Math.floor(o.max) || r.max));
+      this._sync();
+   }
+   // ------------------------------------------------------------ PvP teams
+   teamSize(team) { return this.room ? this.room.players.filter(p => p.team === team).length : 0; }
+   // the team a newcomer joins: the smaller one (team 1 when even)
+   _freeTeam() { return this.teamSize(1) <= this.teamSize(2) ? 1 : 2; }
+   // may player p move to `team`? (the host may also while the teams are locked)
+   _teamOk(p, team, byHost) {
+      const r = this.room;
+      return r.mode === 'pvp' && r.state === 'lobby' && TEAMS.includes(team) && p.team !== team && (byHost || !r.teamsLocked) && this.teamSize(team) < TEAM_MAX;
+   }
+   // the local player asks for a team (host: moves itself)
+   chooseTeam(team) {
+      const r = this.room;
+      if (!r || r.mode !== 'pvp') return;
+      if (this.isHost) this.setTeam(this.selfId, team);
+      else this.rt?.send('room', { t: 'set', team }, r.hostId);
+   }
+   // host: move a player to a team
+   setTeam(id, team) {
+      const p = this.isHost && this.room.players.find(x => x.id === id);
+      if (!p || !this._teamOk(p, team, true)) return;
+      p.team = team; p.ready = p.id === this.selfId ? p.ready : false;
+      this._sync();
+   }
+   // host: even out the teams (the latest to join move), at most one apart
+   balanceTeams() {
+      const r = this.room;
+      if (!this.isHost || r.mode !== 'pvp' || r.state !== 'lobby') return;
+      for (;;) {
+         const a = this.teamSize(1), b = this.teamSize(2);
+         if (Math.abs(a - b) <= 1) break;
+         const from = a > b ? 1 : 2, p = [...r.players].reverse().find(x => x.team === from && x.id !== this.selfId);
+         if (!p) break;
+         p.team = 3 - from; p.ready = false;
+      }
+      this._say(null, 'Teams ausgeglichen.');
+      this._sync();
+   }
+   // host: players may (not) change teams themselves
+   lockTeams(on) {
+      const r = this.room;
+      if (!this.isHost || r.mode !== 'pvp') return;
+      r.teamsLocked = !!on;
       this._sync();
    }
    kick(id) {
@@ -324,27 +387,30 @@ export class Lobby {
       if (p) { r.players = r.players.filter(x => x.id !== id); this._say(null, `${p.name} wurde entfernt.`); }
       this.session?.transport._leave(id);
       this._sync();
+      this._sendSeats();
    }
    canStart() {
       const r = this.room;
       if (!this.isHost || r.state !== 'lobby') return false;
+      if (r.mode === 'pvp' && (!this.teamSize(1) || !this.teamSize(2))) return false;   // somebody to fight
       return r.players.every(p => p.ship && (p.id === this.selfId || p.ready));
    }
    start() {
       if (!this.canStart()) return false;
       const r = this.room;
       const msg = { t: 'start', mode: r.mode, mission: r.mission, difficulty: r.difficulty, seed: crypto.getRandomValues(new Uint32Array(1))[0],
-         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship })) };
+         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ...(r.mode === 'pvp' ? { team: p.team } : null) })) };
       r.state = 'running';
       for (const p of r.players) p.ready = false;
       this.rt.send('room', msg);
       // every captain gets a seat token: proof for a rejoin after a reload or a lost connection
       this._seats.clear(); this._back.clear(); this._startMsg = msg;
+      // the host's own seat is kept here: the way back after it left the match to a successor
       for (const p of msg.players) {
-         if (p.id === this.selfId) continue;
          const seat = { orig: p.id, id: p.id, token: randId(24), name: p.name, ship: p.ship }, sid = randId(10);
          this._seats.set(sid, seat);
-         this.rt.send('room', { t: 'seat', seat: sid, token: seat.token }, p.id);
+         if (p.id === this.selfId) saveSeat({ room: r.id, hostId: this.selfId, seat: sid, token: seat.token, key: this._key, mission: r.mission, name: r.name, at: Date.now() });
+         else this.rt.send('room', { t: 'seat', seat: sid, token: seat.token }, p.id);
       }
       this._sync();
       this._begin(msg);
@@ -354,7 +420,7 @@ export class Lobby {
    _rejoinSeat(from) {
       const r = this.room, sid = this._back.get(from), seat = this._seats.get(sid);
       this._back.delete(from);
-      if (!seat || r.state !== 'running' || !this.session) { this.rt.send('room', { t: 'deny', why: 'norejoin' }, from); return; }
+      if (!seat || r.state !== 'running' || !this.session || !this._startMsg) { this.rt.send('room', { t: 'deny', why: 'norejoin' }, from); return; }
       const old = seat.id;
       seat.id = from;
       r.players = r.players.filter(x => x.id !== old && x.id !== from);
@@ -367,6 +433,42 @@ export class Lobby {
       const m = this._startMsg;
       this.rt.send('room', { ...m, players: m.players.map(q => ({ ...q, id: ids.get(q.id) || q.id })), back: 1 }, from);
       this.rt.send('room', { t: 'seat', seat: sid, token: seat.token }, from);
+      this._sendSeats();
+   }
+   // host: the successor of the running match gets what the lobby needs to carry on (rejoin
+   // seats, the start message, the banned peers)
+   _sendSeats() {
+      if (!this._succ || !this.rt || !this.isHost || !this._startMsg) return;
+      this.rt.send('room', { t: 'seats', seats: [...this._seats].map(([sid, x]) => [sid, x.orig, x.id, x.token, x.name, x.ship]),
+         start: this._startMsg, banned: [...this._banned].slice(0, 64) }, this._succ);
+   }
+   // everybody: `id` runs the match now (game.js, host migration). The room and the listing move
+   // to it; the successor takes over the host's part of the lobby.
+   _newHost(id) {
+      const r = this.room;
+      if (!r || !this.rt || r.hostId === id) return;
+      const old = r.hostId;
+      r.hostId = id; this._orphan = false;
+      this.rt.hostId = id;
+      const s = loadSeat();
+      if (s && s.room === r.id) saveSeat({ ...s, hostId: id });
+      r.players = r.players.filter(p => p.id !== old);
+      if (id !== this.selfId) {
+         // ask the new host for the room state (its first one may have come before the switch)
+         this.rt.send('room', { t: 'hello', name: this.name, ship: this.me?.ship || null }, id);
+         this.cb.onRoom?.();
+         return;
+      }
+      const h = this._heir; this._heir = null;
+      this._seats = new Map((h?.seats || []).map(([sid, orig, pid, token, name, ship]) => [sid, { orig, id: pid, token, name, ship }]));
+      this._startMsg = h?.start || null;
+      for (const b of h?.banned || []) this._banned.add(b);
+      this._back.clear(); this._approved.clear(); this._succ = null;
+      for (const p of r.players) p.at = p.at || Date.now();
+      this.rt.setAdmit?.((peer) => this._approved.has(peer) && !this._banned.has(peer));
+      this._say(null, `Gastgeber gewechselt – ${this.me?.name || this.name} führt das Spiel weiter.`);
+      this._sync();
+      this.open().catch(() => { });
    }
 
    // ------------------------------------------------------------ joining
@@ -434,8 +536,11 @@ export class Lobby {
       if (!rec) throw new NetError('norejoin', DENY.norejoin);
       if (this.room) { this._teardown(true); await new Promise(r => setTimeout(r, 300)); }   // the old room transport is closed first
       await this.open();
-      const known = this.games.get(rec.hostId)?.entry;
-      return this.join({ id: rec.room, hostId: rec.hostId, v: NET_VERSION, locked: false, mission: known?.mission || rec.mission, name: known?.name || rec.name }, '', rec);
+      // the room's listing names its host now (another one after a host migration)
+      const find = () => [...this.games.values()].map(g => g.entry).find(e => e.id === rec.room);
+      for (let i = 0; i < 20 && !find(); i++) await new Promise(r => setTimeout(r, 200));
+      const known = find();
+      return this.join({ id: rec.room, hostId: known?.hostId || rec.hostId, v: NET_VERSION, locked: false, mission: known?.mission || rec.mission, name: known?.name || rec.name }, '', rec);
    }
 
    // ------------------------------------------------------------ room (both sides)
@@ -456,7 +561,11 @@ export class Lobby {
             const p = this.room.players.find(x => x.id === id);
             this._unseat(id, p);
             if (p) { this.room.players = this.room.players.filter(x => x.id !== id); this._say(null, `${p.name} hat das Spiel verlassen.`); this._sync(); }
-         } else if (id === this.room.hostId) this._drop('hostleft', 'Der Host hat das Spiel verlassen.');
+         } else if (id === this.room.hostId) {
+            // a running match may go on under a successor (game.js); otherwise session.onEnd drops
+            if (this.session && this.room.state === 'running') this._orphan = true;
+            else this._drop('hostleft', 'Der Host hat das Spiel verlassen.');
+         }
       });
    }
    // host: player p (may be undefined) is gone, its seat reservation with it. A reservation made
@@ -476,7 +585,8 @@ export class Lobby {
          if (p) { this.rt.send('room', this._state(), from); return; }
          const why = this._banned.has(from) ? 'banned' : !this._approved.has(from) ? 'gone' : r.state !== 'lobby' ? 'running' : r.players.length >= r.max ? 'full' : null;
          if (why) { this.rt.send('room', { t: 'deny', why }, from); return; }
-         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now() };
+         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now(),
+            team: r.mode === 'pvp' ? this._freeTeam() : 0 };
          r.players.push(p);
          this._say(null, `${p.name} ist beigetreten.`);
          this._sync();
@@ -486,6 +596,7 @@ export class Lobby {
          if (typeof m.name === 'string' && cleanName(m.name)) p.name = cleanName(m.name);
          if ('ship' in m) { p.ship = allowedShips(r.mission).includes(m.ship) ? m.ship : null; if (!p.ship) p.ready = false; }
          if ('ready' in m) p.ready = !!m.ready && !!p.ship;
+         if ('team' in m && this._teamOk(p, m.team, false)) p.team = m.team;
          this._sync();
       } else if (m.t === 'bye') {
          this._unseat(from, p);
@@ -502,9 +613,9 @@ export class Lobby {
          const base = cur || pend; if (!base) return;
          this.room = {
             id: base.id, hostId: base.hostId, name: cleanName(m.room.name, 32), mode: String(m.room.mode), mission: String(m.room.mission), difficulty: String(m.room.difficulty),
-            max: Number(m.room.max) || 1, locked: !!m.room.locked, state: m.room.state === 'running' ? 'running' : 'lobby',
+            max: Number(m.room.max) || 1, locked: !!m.room.locked, teamsLocked: !!m.room.teamsLocked, state: m.room.state === 'running' ? 'running' : 'lobby',
             players: m.players.slice(0, 16).map(p => ({ id: String(p.id), name: cleanName(p.name) || '?', ship: SHIPS[p.ship] ? p.ship : null, ready: !!p.ready,
-               via: p.via === 'direct' || p.via === 'relay' ? p.via : '' })),
+               via: p.via === 'direct' || p.via === 'relay' ? p.via : '', team: TEAMS.includes(p.team) ? p.team : 0 })),
          };
          const me = this.me;
          if (me && this._hello) this._hello('ok');
@@ -514,7 +625,15 @@ export class Lobby {
          if (cur) this.cb.onRoom?.();
       } else if (m.t === 'deny') this._hello?.(DENY[m.why] ? m.why : 'gone');
       else if (m.t === 'kick') { this._forgetSeat(); this._drop('kicked', 'Der Host hat dich aus dem Spiel entfernt.'); }
-      else if (m.t === 'closed') { this._forgetSeat(); this._drop('hostleft', 'Der Host hat das Spiel geschlossen.'); }
+      else if (m.t === 'closed') {
+         if (this.session && this.room?.state === 'running') { this._orphan = true; this.session.transport._leave(this.room.hostId); }
+         else { this._forgetSeat(); this._drop('hostleft', 'Der Host hat das Spiel geschlossen.'); }
+      }
+      else if (m.t === 'seats' && Array.isArray(m.seats) && m.start && typeof m.start === 'object') {
+         const str = (x, n) => String(x ?? '').slice(0, n);
+         this._heir = { seats: m.seats.slice(0, 16).filter(Array.isArray).map(x => [str(x[0], 32), str(x[1], 64), str(x[2], 64), str(x[3], 64), cleanName(x[4]), str(x[5], 40)]),
+            start: m.start, banned: Array.isArray(m.banned) ? m.banned.slice(0, 64).map(x => str(x, 64)) : [] };
+      }
       else if (m.t === 'seat' && typeof m.seat === 'string' && typeof m.token === 'string') {
          const base = this.room || this._pendingRoom;
          if (base) saveSeat({ room: base.id, hostId: base.hostId, seat: m.seat.slice(0, 32), token: m.token.slice(0, 64), key: this._key,
@@ -527,8 +646,8 @@ export class Lobby {
    _forgetSeat() { const s = loadSeat(); if (s && this.room && s.room === this.room.id) saveSeat(null); }
    _state() {
       const r = this.room;
-      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, state: r.state },
-         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ready: p.ready, via: this.via(p.id) })) };
+      return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, teamsLocked: !!r.teamsLocked, state: r.state },
+         players: r.players.map(p => ({ id: p.id, name: p.name, ship: p.ship, ready: p.ready, via: this.via(p.id), team: p.team || 0 })) };
    }
    // how a player is connected to the host: 'direct' | 'relay' | '' (the host itself, or unknown).
    // The host and the player concerned know it first-hand, the others from the room state.
@@ -591,7 +710,7 @@ export class Lobby {
    // ------------------------------------------------------------ match hand-over
    _begin(m) {
       if (this.session) return;
-      const players = m.players.map(p => ({ id: String(p.id), name: String(p.name), ship: String(p.ship) }));
+      const players = m.players.map(p => ({ id: String(p.id), name: String(p.name), ship: String(p.ship), ...(TEAMS.includes(p.team) ? { team: p.team } : null) }));
       let done = false;
       const transport = sessionTransport(this.rt, players.map(p => p.id), () => this.leaveRoom());
       const session = {
@@ -600,11 +719,28 @@ export class Lobby {
             if (done) return;
             done = true; transport._close();
             if (this.session === session) this.session = null;
-            if (this.isHost) { this._seats.clear(); this._back.clear(); this._startMsg = null; }
+            this._succ = null; this._heir = null;
+            if (result?.handover && this.isHost) {
+               // the match goes on under the successor: this peer leaves the room (its seat stays)
+               this._teardown(false);
+               this.cb.onEnd?.(result);
+               this.open().catch(() => { });
+               return;
+            }
+            if (this._orphan && !this.isHost) {
+               // the host is gone and nobody took over -- or this peer was the one cut off: the seat
+               // stays (the list offers the way back while the game is listed as running)
+               this._orphan = false;
+               this._drop('hostleft', 'Der Host hat das Spiel verlassen.');
+            }
+            if (this.isHost) { this._forgetSeat(); this._seats.clear(); this._back.clear(); this._startMsg = null; }
             else if (result && !result.aborted) this._forgetSeat();          // over: nothing to go back to
             if (this.room && this.isHost && this.room.state === 'running') { this.room.state = 'lobby'; this._sync(); }
             this.cb.onEnd?.(result || { aborted: true, reason: '', victory: null });
          },
+         // host migration (game.js): the host named its successor / somebody runs the match now
+         onSuccessor: (id) => { if (this.session === session && this.isHost) { this._succ = id; this._sendSeats(); } },
+         onHost: (id) => { if (this.session === session) this._newHost(id); },
       };
       this.session = session;
       if (!this.isHost && this.room) { this.room.state = 'running'; }
@@ -633,7 +769,7 @@ export class Lobby {
       if (host && this.lt) this.lt.send('list', { gone: true });
       const rt = this.rt;
       this.rt = null; this.room = null; this.chat = []; this._approved.clear(); this._key = '';
-      this._seats.clear(); this._back.clear(); this._startMsg = null;
+      this._seats.clear(); this._back.clear(); this._startMsg = null; this._orphan = false; this._succ = null; this._heir = null;
       // let the goodbye leave the send queue before the connection closes
       if (rt) setTimeout(() => rt.leave(), polite ? 150 : 0);
    }

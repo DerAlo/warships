@@ -94,8 +94,10 @@ await wait(A, () => !document.querySelector('[data-act="main"]').disabled);
 await A.click('[data-act="main"]');
 await wait(B, () => window.__phase() === 'playing' && window.__world()?.time > 1);
 await A.close();
-const lost = await wait(B, () => /Host|Verbindung/.test(document.body.innerText) && window.__phase() !== 'playing', null, 20000);
-check('host gone: client is told and the battle stops', lost, await B.evaluate(() => window.__phase()));
+// host migration (CONTRACT.md): the only client is the successor and carries on alone
+const t0 = await B.evaluate(() => window.__world().time);
+const took = await wait(B, () => /Gastgeber gewechselt/.test(document.body.innerText) && window.__net()?.isHost && window.__phase() === 'playing', null, 20000);
+check('host gone: the client is told and takes the battle over', took && await wait(B, (t) => window.__world().time > t + 2, t0, 10000), await B.evaluate(() => [window.__phase(), window.__net()?.isHost]));
 
 await browser.close();
 const bad = results.filter(r => !r.ok).length;

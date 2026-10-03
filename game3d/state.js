@@ -257,9 +257,10 @@ export class World {
    }
    onDamage(target, shooter, amt, type) {
       if (shooter && shooter.stats) shooter.stats.dmg += amt;
-      if (shooter && shooter.side === 'player' && target.side !== 'player') {
-         if (target.spottedByPlayer && shooter !== this.player) this.stats.spottingDmg += amt;
-         if (target.spotMask) for (const h of this.net.humans) if (h && h !== shooter && h.stats && (target.spotMask & (1 << h.slot))) h.stats.spottingDmg += amt;
+      if (shooter && target.side !== shooter.side) {
+         if (shooter.side === 'player' && target.spottedByPlayer && shooter !== this.player) this.stats.spottingDmg += amt;
+         // net game: every human of the shooter's team that sees the target itself (PvP: either team)
+         if (target.spotMask) for (const h of this.net.humans) if (h && h !== shooter && h.stats && h.side === shooter.side && (target.spotMask & (1 << h.slot))) h.stats.spottingDmg += amt;
       }
       if (target.stats) target.stats.tanked += amt;
    }
@@ -291,8 +292,9 @@ export class World {
       if (this._script && this._script.onSink) this._script.onSink(this, ship, killer);
       if (this.net) {
          // net game: the battle goes on while any human captain is still afloat; a historical
-         // operation is lost with its flagship (setup.js), as in singleplayer
-         if (ship === this.net.flag) this.end(false, 'Das Flaggschiff ist gesunken – die Operation ist gescheitert.');
+         // operation is lost with its flagship (setup.js), as in singleplayer; PvP: net.check (setup.js)
+         if (this.net.check) { if (this.net.humans.includes(ship)) this.net.check(); }
+         else if (ship === this.net.flag) this.end(false, 'Das Flaggschiff ist gesunken – die Operation ist gescheitert.');
          else if ((ship.isPlayer || ship.human) &&!this.net.humans.some(h => h && h.alive && (h.isPlayer || h.human))) this.end(false, 'Alle Spielerschiffe wurden versenkt.');
       } else if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
    }
@@ -384,14 +386,15 @@ export class World {
          T.spotted = T.side === 'player' ? true : seen;
          if (seen) {
             T.lastSeen = { x: T.pos.x, y: T.pos.y, heading: T.heading, speed: T.speed, t: this.time };
-            if (!was && T.side === 'enemy') {
+            // PvP: the other team spots the host's ships too (host.js sends each team its own part)
+            if (!was && (T.side === 'enemy' || this.net?.pvp)) {
                this.pushEvent('spotted', { dstId: T.id, text: T.name + ' entdeckt', pos: { x: T.pos.x, y: T.pos.y } });
                if (byPlayer) this.stats.spotted++;
                if (mask) for (const h of this.net.humans) if (h && h.stats && !h.isPlayer && (mask & (1 << h.slot))) h.stats.spotted++;
             }
          }
          if (was !== seen && (T === this.player || T.human)) this.pushEvent(seen ? 'spotted' : 'unspotted', { dstId: T.id, text: seen ? 'Sie wurden entdeckt!' : 'Nicht mehr entdeckt' });
-         else if (was && !seen && T.side === 'enemy') this.pushEvent('unspotted', { dstId: T.id, text: T.name + ' außer Sicht' });
+         else if (was && !seen && (T.side === 'enemy' || this.net?.pvp)) this.pushEvent('unspotted', { dstId: T.id, text: T.name + ' außer Sicht' });
       }
       // torpedoes: seen by the opposing team within their detect range (or hydrophone range)
       for (const t of this.torpedoes) {
@@ -432,10 +435,11 @@ export class World {
             cap.owner = side; cap.progress = 0; cap.capper = null;
             if (side === 'player') {
                this.stats.caps++;
-               if (this.net) for (const h of this.net.humans) if (h && h.stats && !h.isPlayer) h.stats.caps++;
-               this.pushEvent('cap', { text: 'Punkt ' + cap.id + ' eingenommen', capId: cap.id, pos: { ...cap.pos } });
+               if (this.net) for (const h of this.net.humans) if (h && h.stats && !h.isPlayer && h.side === side) h.stats.caps++;
+               this.pushEvent('cap', { text: 'Punkt ' + cap.id + ' eingenommen', capId: cap.id, pos: { ...cap.pos }, prev });
                this.log(null, '🚩 Punkt ' + cap.id + ' eingenommen', 'kill');
             } else {
+               if (this.net?.pvp) for (const h of this.net.humans) if (h && h.stats && h.side === side) h.stats.caps++;
                this.pushEvent('capLost', { text: 'Punkt ' + cap.id + (prev === 'player' ? ' verloren' : ' vom Feind eingenommen'), capId: cap.id, pos: { ...cap.pos } });
                this.log(null, '⚑ Punkt ' + cap.id + (prev === 'player' ? ' verloren' : ' vom Feind eingenommen'), 'warn');
             }

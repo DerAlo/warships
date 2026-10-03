@@ -67,7 +67,7 @@ const cr = await A.evaluate(() => ({
    max: [...document.querySelectorAll('[data-f="max"] option')].map(o => o.textContent),
 }));
 check('create: only co-op missions', cr.missions.length >= 5 && !cr.missions.includes('bismarck'), cr.missions);
-check('create: PvP disabled "bald verfügbar"', cr.pvp.dis && cr.pvp.text.includes('bald verfügbar'), cr.pvp);
+check('create: PvP offered', !cr.pvp.dis && cr.pvp.text === 'PvP', cr.pvp);
 check('create: max players 1..4', cr.max.join() === '1,2,3,4', cr.max);
 check('create dialog fits', await fits(A).then(f => !f.bad.length), await fits(A));
 await A.screenshot({ path: `${OUT}/lobby_create.png` });

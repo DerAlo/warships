@@ -10,6 +10,8 @@
 //     (muzzle flash, reload, shells), consumables, depth orders. The hull itself is NOT
 //     predicted; it follows the host like every other ship.
 // All side-related decoding goes through codec.localSide(). No DOM in here.
+// Host migration (CONTRACT.md): rehost() points the replica at a new host, handover() brings the
+// World up to date for the successor, which then runs it as the authoritative one (game.js).
 import { WORLD, TUNE } from '../config.js';
 import { flightTime, horizDist, apexHeight, fallAngle, arcAlt } from '../combat.js';
 import { execAction } from './command.js';
@@ -38,9 +40,17 @@ function fitN(list, n) {
    while (list.length < n) list.push({ zone: list.length, t: 30, dur: 30, srcId: null, mult: 1 });
 }
 
-// o: { send(channel, data), now() -> seconds, onLost(why) }
+// o: { send(channel, data), now() -> seconds, onLost(why), pvp, flip }
+// pvp: the host leaves out enemies this team has not spotted; a ship missing from a snapshot is
+// then out of sight, not gone. flip: this client's team sails as the host World's side 'enemy'
+// (its World was built with setup.flipSides), so every side on the wire is turned round.
 export function makeReplica(world, o) {
    const me = world.player;
+   const pvp = !!o.pvp;
+   let flip = !!o.flip;
+   const sideOf = (x) => localSide(x, flip);
+   // PvP: an enemy is out of sight until a snapshot brings it
+   if (pvp) for (const s of world.ships) if (s.side !== 'player') { s.detected = s.spotted = false; s._seen = -1; }
    const byId = world._byId;
    const snaps = [];                 // ascending by tick
    const spare = [];
@@ -59,8 +69,12 @@ export function makeReplica(world, o) {
    const shellByHost = new Map(), torpByHost = new Map(), predQ = [];
    let pendingEnd = null, endAt = 0, ended = false, lost = false, lastSt = -1;
    const _p = { x: 0, y: 0 };
+   // host migration: the newest snapshot's bytes (own-ship detail) and the ships that came in later
+   let lastDv = null, lastOwn = 0;
+   const arrived = [];
 
    world._nextId = Math.max(world._nextId, 1 << 24);   // local ids (predicted shells) stay clear of host ids
+   const net0 = world.net;
    world.net = null;                                   // nothing on a replica walks the humans list
 
    // ---------------------------------------------------------------- prediction
@@ -111,6 +125,7 @@ export function makeReplica(world, o) {
       if (!decodeSnap(dv, s)) { spare.push(s); return; }
       snaps.push(s);
       newestTick = tick;
+      lastDv = dv; lastOwn = s.own;
       const now = o.now();
       lastSnapAt = now;
       // clock offset host -> local: follow early arrivals quickly, late ones slowly
@@ -202,13 +217,12 @@ export function makeReplica(world, o) {
       if (fin(m.kc)) world.killCount = m.kc;
       const sc = m.sc;
       if (Array.isArray(sc)) {
-         // (PvP: a client on the other side swaps the two numbers here)
          const w = world.score || (world.score = { kind: sc[3], player: 0, enemy: 0, target: 0 });
-         w.kind = sc[3]; w.player = sc[0]; w.enemy = sc[1]; w.target = sc[2];
+         w.kind = sc[3]; w.player = sc[flip ? 1 : 0]; w.enemy = sc[flip ? 0 : 1]; w.target = sc[2];
       } else world.score = null;
       if (Array.isArray(m.cp)) for (let i = 0; i < m.cp.length && i < world.caps.length; i++) {
          const c = m.cp[i], cap = world.caps[i];
-         cap.owner = localSide(SIDES[c[0]] || null); cap.capper = localSide(SIDES[c[1]] || null);
+         cap.owner = sideOf(SIDES[c[0]] || null); cap.capper = sideOf(SIDES[c[1]] || null);
          cap.progress = c[2]; cap.contested = !!c[3];
       }
       const e = m.env, env = world.env;
@@ -249,6 +263,7 @@ export function makeReplica(world, o) {
          else if (r[3]) s.hp = r[4] * s.maxHP;
       }
       if (world.mission && Array.isArray(m.obj)) world.mission.objectives = m.obj;
+      if (m.pvp && typeof m.pvp === 'object') world.result.pvp = m.pvp;
    }
 
    // ---------------------------------------------------------------- recorded items
@@ -286,7 +301,8 @@ export function makeReplica(world, o) {
       shellByHost.set(s.hid, s);
    }
 
-   // it: ['T', id, ownerId, x, y, heading, tick]
+   // it: ['T', id, ownerId, x, y, heading, tick, run?]  (PvP: a torpedo first seen on its way,
+   // at where it is now; run = the distance it has already run)
    function spawnTorp(it) {
       const owner = byId.get(it[2]);
       const tc = owner && owner.cfg.torp;
@@ -294,7 +310,7 @@ export function makeReplica(world, o) {
       const t = {
          id: it[1], pos: { x: it[3], y: it[4] }, start: { x: it[3], y: it[4] }, heading: it[5], dir: it[5],
          speed: tc.speed, speedKn: tc.speedKn, side: owner.side, owner: owner.side, ownerId: owner.id, dmg: 0, flood: 0,
-         range: tc.range, detect: tc.detect, traveled: 0, age: 0, alive: true, spotted: owner.side === 'player', visibleToOpp: false,
+         range: tc.range - (fin(it[7]) ? it[7] : 0), detect: tc.detect, traveled: 0, age: 0, alive: true, spotted: owner.side === 'player', visibleToOpp: false,
          t0: (it[6] - 1) * SIM_DT, cx: Math.cos(it[5]), cy: Math.sin(it[5]),
       };
       world.torpedoes.push(t);
@@ -309,8 +325,9 @@ export function makeReplica(world, o) {
       world._nextId = it[1];
       try {
          _p.x = it[4]; _p.y = it[5];
-         const s = world.spawn(it[2], localSide(it[3]), _p, it[6], { name: q.name, speedKn: q.speedKn, telegraph: q.telegraph, depth: q.depth, color: q.color, nation: q.nation });
+         const s = world.spawn(it[2], sideOf(it[3]), _p, it[6], { name: q.name, speedKn: q.speedKn, telegraph: q.telegraph, depth: q.depth, color: q.color, nation: q.nation });
          if (fin(q.maxHP)) { s.maxHP = q.maxHP; s.hp = q.maxHP; }
+         arrived.push(it);
       } catch (e) { /* unknown class: the ship stays invisible, the battle goes on */ }
       world._nextId = keep;
    }
@@ -341,7 +358,7 @@ export function makeReplica(world, o) {
             world.addEffect(it[1], _p, it[4], it[5], x);
             break;
          }
-         case 'k': _p.x = it[1]; _p.y = it[2]; world.addSmoke({ c: _p, r: it[3], maxR: it[4] || undefined, life: it[5], side: localSide(it[6]), ownerId: it[7] }); break;
+         case 'k': _p.x = it[1]; _p.y = it[2]; world.addSmoke({ c: _p, r: it[3], maxR: it[4] || undefined, life: it[5], side: sideOf(it[6]), ownerId: it[7] }); break;
          case 'l': world.log(null, String(it[1]), it[2]); break;
          case 'n': spawnShip(it); break;
          case 'r': { const s = byId.get(it[1]); if (s) world.removeShip(s, it[2] || 'escaped'); break; }
@@ -414,7 +431,7 @@ export function makeReplica(world, o) {
          // spotting
          const det = !!(f1 & F_DETECTED);
          s.detected = det;
-         s.spotted = localSide(s.side) === 'player' ? true : det;
+         s.spotted = s.side === 'player' ? true : det;
          s.inSmoke = !!(f1 & F_SMOKE); s.blooming = !!(f1 & F_BLOOM); s.grounded = !!(f1 & F_GROUNDED);
          if (det) {
             const ls = s.lastSeen || (s.lastSeen = { x: 0, y: 0, heading: 0, speed: 0, t: 0 });
@@ -431,12 +448,16 @@ export function makeReplica(world, o) {
             T[j].bearing = a + angD(a, SB.tb[ib * MAX_TURRETS + j]) * kk;
          }
       }
-      // ships the host no longer lists have gone under (or left the battle)
+      // ships the host no longer lists have gone under (or left the battle); PvP: an enemy afloat
+      // the host leaves out is out of this team's sight
       const ships = world.ships;
       let gone = false;
       for (let i = 0; i < ships.length; i++) {
          const s = ships[i];
-         if (s._seen !== undefined && s._seen !== F.tick) { if (s.alive) { s.alive = false; s.hp = 0; } s.sinking = false; gone = true; }
+         if (s._seen === undefined || s._seen === F.tick) continue;
+         if (pvp && s.alive && s.side !== 'player') { s.detected = s.spotted = false; s.inSmoke = s.blooming = false; continue; }
+         if (s.alive) { s.alive = false; s.hp = 0; }
+         s.sinking = false; gone = true;
       }
       if (gone) world.ships = ships.filter(s => s.alive || s.sinking);
    }
@@ -544,10 +565,64 @@ export function makeReplica(world, o) {
    }
    world.update = step;
 
+   // ---------------------------------------------------------------- host migration
+   // Another peer took over as host. f: this client's team sails as that host's side 'enemy'.
+   // Its snapshots and event batches start afresh; the old host's shells are gone, its torpedoes
+   // come again from the new host ('T' with the distance run).
+   function rehost(f) {
+      flip = !!f;
+      batches.clear(); nextBatch = 0; gapSince = 0;
+      while (snaps.length) spare.push(snaps.pop());
+      newestTick = -1; lastSt = -1; synced = false; lastSnapAt = o.now(); lastEcho = -1;
+      lastDv = null;
+      actBase = 0; ack = 0; unacked.length = 0; actsNew = false; dirty = true;
+      for (const s of world.shells) if (!s.pred) s.alive = false;
+      shellByHost.clear();
+      world.torpedoes = []; torpByHost.clear();
+      lost = false;
+   }
+
+   // This client is the successor: everything the old host sent is applied at once (event
+   // batches in order, then the newest snapshot), the replica lets go of the World. Returns
+   // { tick, seen: ids in that snapshot, own(): the own-ship detail of it (after restoreWorld),
+   //   torps: torpedoes with their real run distance, arrived: 'n' items of the ships that came
+   //   in after the start (sides as this World has them) }.
+   function handover() {
+      for (const k of [...batches.keys()].sort((a, b) => a - b)) {
+         const b = batches.get(k);
+         for (const it of b[2]) if (Array.isArray(it)) applyItem(it);
+      }
+      batches.clear();
+      const N = snaps.length ? snaps[snaps.length - 1] : null;
+      const tick = N ? N.tick : world.tick;
+      rt = tick * SIM_DT;
+      if (N) applyShips(N, N, 0, N, 0);
+      const seen = new Set();
+      if (N) for (let i = 0; i < N.n; i++) seen.add(N.id[i]);
+      for (const t of world.torpedoes) {
+         const owner = byId.get(t.ownerId), tc = owner && owner.cfg.torp;
+         t.traveled = t.speed * Math.max(0, rt - t.t0);
+         t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled;
+         if (tc) { t.traveled += tc.range - t.range; t.range = tc.range; }
+      }
+      for (const k of ['update', 'addShell', 'addTorpedo']) delete world[k];
+      world.net = net0;
+      world.tick = tick; world.time = rt;
+      lost = true;                    // the replica is done; nothing reaches it any more
+      const dv = lastDv, off = lastOwn;
+      return {
+         tick, seen, torps: world.torpedoes.slice(),
+         arrived: arrived.map(it => { const c = it.slice(); c[3] = sideOf(it[3]); return c; }),
+         own() { if (dv && me) decodeOwn(dv, off, me, world, 0); },
+      };
+   }
+
    return {
-      act, control, onSnap, onEvt, onSync, hostLost,
+      act, control, onSnap, onEvt, onSync, hostLost, rehost, handover,
       // called every frame even when the sim loop does not run (results screen, menus)
       pump() { if (!ended && !pendingEnd && !lost && o.now() - lastSnapAt > (synced ? SILENCE : SILENCE * 2)) hostLost('timeout'); },
+      // s since the host's last snapshot
+      silent() { return o.now() - lastSnapAt; },
       get ended() { return ended; },
       get lost() { return lost; },
       info() { return { rt, delay, jitter: jit, rtt, snaps: snaps.length, newestTick, synced, unacked: unacked.length, batches: batches.size }; },

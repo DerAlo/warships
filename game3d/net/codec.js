@@ -1,7 +1,8 @@
 // game3d/net/codec.js — the binary ship snapshot (channel `snap`, host -> client).
 //
-// One message = the state of every ship afloat or sinking (the same bytes for all clients)
-// followed by the receiving client's own-ship detail (reloads, consumables, fires ...).
+// One message = the state of every ship afloat or sinking (the same bytes for all clients of a
+// team; PvP: only what that team can see, see encodeShips) followed by the receiving client's
+// own-ship detail (reloads, consumables, fires ...).
 // Everything little endian:
 //   u8 kind (1) · u32 tick (sequence number) · u32 ack (own actions executed) · u16 echo (last
 //   command sequence number received, for the round-trip estimate) · u8 nShips
@@ -10,7 +11,7 @@
 //             · u8 nT · nT x u8 turret bearing
 //   own detail: see encodeOwn()
 // Decoding of everything side-related goes through localSide(), the single place a PvP client
-// will swap 'player' and 'enemy' later.
+// of the other team swaps 'player' and 'enemy'.
 import { DEEP_M, periDepthM } from '../submarine.js';
 
 export const SIM_DT = 1 / 60;
@@ -18,8 +19,11 @@ export const MAX_SHIPS = 64, MAX_TURRETS = 8;
 export const SNAP_KIND = 1, SNAP_HEAD = 12;
 const TAU = Math.PI * 2;
 
-// Host sides -> sides as the local player sees them. Co-op: every human is on the host's side.
-export function localSide(side) { return side; }
+// Host sides -> sides as the local player sees them. Co-op: every human is on the host's side;
+// PvP: flip = the client sails for the other team (its World was flipped, setup.flipSides).
+export function localSide(side, flip = false) {
+   return !flip ? side : side === 'player' ? 'enemy' : side === 'enemy' ? 'player' : side;
+}
 
 export const F_ALIVE = 1, F_SINKING = 2, F_DETECTED = 4, F_SPOTTED = 8, F_SMOKE = 16, F_BLOOM = 32, F_GROUNDED = 64;
 
@@ -27,17 +31,24 @@ const u8c = (v, k, max = 255) => { v = Math.round(v * k); return v < 0 ? 0 : v >
 const i8c = (v, k) => { v = Math.round(v * k); return v < -127 ? -127 : v > 127 ? 127 : v; };
 const u16c = (v, k) => { v = Math.round(v * k); return v < 0 ? 0 : v > 65535 ? 65535 : v; };
 
+// Can the team sailing as `side` see ship s? Its own ships, every enemy it has spotted, and
+// every wreck (a sinking ship is no secret).
+export const visibleTo = (s, side) => s.side === side || s.detected || !s.alive;
+
 // ---- host: common part. Returns the offset behind the last ship.
-export function encodeShips(dv, world) {
-   const ships = world.ships, n = Math.min(ships.length, MAX_SHIPS);
+// side (PvP): only the ships that team can see (visibleTo); an enemy it has not spotted is not
+// in the message at all, so a client never learns where it is.
+export function encodeShips(dv, world, side = null) {
+   const ships = world.ships;
    dv.setUint8(0, SNAP_KIND);
    dv.setUint32(1, world.tick >>> 0, true);
    dv.setUint32(5, 0, true);
    dv.setUint16(9, 0, true);
-   dv.setUint8(11, n);
-   let o = SNAP_HEAD;
-   for (let i = 0; i < n; i++) {
+   let o = SNAP_HEAD, n = 0;
+   for (let i = 0; i < ships.length && n < MAX_SHIPS; i++) {
       const s = ships[i];
+      if (side && !visibleTo(s, side)) continue;
+      n++;
       dv.setUint32(o, s.id, true);
       o += 2;                       // the offsets below were laid out for a 2-byte id
       dv.setUint8(o + 2,(s.alive ? F_ALIVE : 0) | (s.sinking ? F_SINKING : 0) | (s.detected ? F_DETECTED : 0) | (s.spotted ? F_SPOTTED : 0)
@@ -59,6 +70,7 @@ export function encodeShips(dv, world) {
       o += 24;
       for (let k = 0; k < nT; k++) dv.setUint8(o++, Math.round((((T[k].bearing % TAU) + TAU) % TAU) / TAU * 256) & 255);
    }
+   dv.setUint8(11, n);
    return o;
 }
 
