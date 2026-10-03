@@ -1,7 +1,7 @@
 // tests/playwright3d.secondary.mjs -- browser smoke test for the WoWs-style secondary battery
 // priority target: Ctrl+left click on an enemy sets ship.secTarget (orange HUD brackets + notice)
 // without firing the main battery, Ctrl+click again clears it, a plain click still fires.
-// Also exercises the career skill "Manuelle Steuerung der Sekundärbewaffnung" in the port.
+// Also exercises the career skill "Einzelzielfeuer der Mittelartillerie" in the port.
 // Exit code 1 on a failed check or any console error. Screenshots go to tests/shots/.
 //
 // Run:  node server.js 8762   then   URL3D=http://localhost:8762/index-3d.html node tests/playwright3d.secondary.mjs
@@ -59,7 +59,7 @@ await wait(1200);
    const capBtn = await page.$('[data-act="captain"]');
    if (capBtn) { await capBtn.click(); await wait(300); }
    const btn = await page.$('[data-skill="manualSec"]');
-   check('port: skill "Manuelle Steuerung der Sekundärbewaffnung" listed', !!btn && (await btn.textContent()).includes('Manuelle Steuerung der Sekundärbewaffnung'));
+   check('port: skill "Einzelzielfeuer der Mittelartillerie" listed', !!btn && (await btn.textContent()).includes('Einzelzielfeuer der Mittelartillerie'));
    if (btn) {
       await page.screenshot({ path: `${OUT}/3d-secondary-skills.png` });
       await btn.click(); await wait(200);

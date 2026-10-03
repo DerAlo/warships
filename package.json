@@ -1,7 +1,7 @@
 {
   "name": "warships-bismarck",
   "version": "1.0.0",
-  "description": "A World of Warships-style offline naval combat game. You command the battleship Bismarck against AI bots. HTML/JS/Canvas, no build step.",
+  "description": "Kriegsschiffe: an offline naval combat game of 1939-45. You command warships against AI bots. HTML/JS/Canvas, no build step.",
   "type": "module",
   "scripts": {
     "start": "node server.js",

@@ -80,7 +80,7 @@ export class Ship {
       this.lockTarget = null;         // ship id the player/bot has locked (secondaries prefer it)
       this.secTarget = null;          // ship id: secondary priority target (player: Ctrl+click, bots: gun target)
       this.secLostT = 0;              // s the secTarget has been out of sight (dropped after SEC_LOST_T)
-      this.manualSec = !!cfg.manualSec; // skill "Manuelle Steuerung der Sekundärbewaffnung": secTarget only
+      this.manualSec = !!cfg.manualSec; // skill "Einzelzielfeuer der Mittelartillerie": secTarget only
       this.turrets = m.turrets.map((t, i) => ({
          idx: i, off: { x: t.off.x, y: t.off.y }, guns: t.guns, caliber: m.caliber,
          arcC: t.arcC, arcW: t.arcW, bearing: t.arcC, elev: 0, err: 0,
@@ -153,7 +153,7 @@ export class Ship {
             world.addShell(makeShell(world, this, muzzle, this.aimPoint, m, 'main', this.ammo));
             n++;
          }
-         // Adrenalinrausch: evaluated once per salvo, not per frame
+         // skill "Letzte Reserven" (adren): evaluated once per salvo, not per frame
          t.reload = this.adrenaline ? t.reloadMax * (1 - this.adrenaline * (1 - this.hp / this.maxHP)) : t.reloadMax;
          world.addEffect('muzzle', { x: wp.x + cb * barrel, y: wp.y + sb * barrel }, 0.35, 10 + m.caliber * 0.07,
             { bearing: b, shipId: this.id, turret: t.idx, caliber: m.caliber, guns: t.guns, big: m.caliber >= 280, elev: t.elev });

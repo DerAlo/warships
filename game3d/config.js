@@ -34,12 +34,12 @@ export const WORLD = {
 
 // Consumable catalogue: display name/icon; per-ship charges/durations live in SHIPS[].consumables.
 export const CONSUMABLES = {
-   damageControl: { name: 'Schadensbekämpfung', short: 'DC', icon: '🧯' },
-   repair: { name: 'Reparaturtrupp', short: 'Rep', icon: '🔧' },
-   smoke: { name: 'Nebelwand', short: 'Nebel', icon: '🌫️' },
-   boost: { name: 'Maschinenüberlast', short: 'Boost', icon: '⚡' },
-   hydro: { name: 'Hydrophon', short: 'Hydro', icon: '👂' },
-   radar: { name: 'Funkmessortung', short: 'Radar', icon: '📡' },
+   damageControl: { name: 'Leckwehr', short: 'Leck', icon: '🧯' },
+   repair: { name: 'Notreparatur', short: 'Rep', icon: '🔧' },
+   smoke: { name: 'Nebelanlage', short: 'Nebel', icon: '🌫️' },
+   boost: { name: 'Äußerste Kraft', short: 'AK', icon: '⚡' },
+   hydro: { name: 'Horchgerät', short: 'Horch', icon: '👂' },
+   radar: { name: 'Funkmessgerät', short: 'FuMG', icon: '📡' },
 };
 
 export const CLASS_NAMES = { BB: 'Schlachtschiff', CA: 'Schwerer Kreuzer', CL: 'Leichter Kreuzer', DD: 'Zerstörer', SS: 'U-Boot', TR: 'Transporter', CV: 'Flugzeugträger' };
@@ -644,7 +644,7 @@ Object.assign(SHIPS, {
    }),
    Algerie: ship({
       key: 'Algerie', name: 'Algérie', className: 'Algérie-Klasse', playable: true, tier: 7,
-      desc: 'Der wohl beste Vertragskreuzer: weit reichende 20,3-cm-Geschütze, solide Panzerung und Maschinenüberlast.',
+      desc: 'Der wohl beste Vertragskreuzer: weit reichende 20,3-cm-Geschütze, solide Panzerung und Äußerste Kraft als Sonderausrüstung.',
       sisters: ['Algérie'],
       hull: { type: 'CA', L: 186.2, beam: 20, draft: 6.2, deckH: 9.5, nation: 'fr',
          sup: { x: 8, len: 44, w: 13, h: 22 }, funnels: [{ x: 0, r: 4, h: 13, rake: 0.06 }] },

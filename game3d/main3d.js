@@ -47,8 +47,8 @@ const RUDDER_NAMES = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'h
 const OLD_THROTTLE = { '-1': -0.5, 0: -0.001, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 };
 const HOLD_DELAY = 0.35, HOLD_REPEAT = 0.28;
 const CONS_NAMES = {
-   damageControl: 'Schadensbekämpfung', repair: 'Reparaturtrupp', smoke: 'Nebelgenerator',
-   boost: 'Maschinen-Boost', hydro: 'Hydroakustik', radar: 'Radar', spotter: 'Aufklärer', fighter: 'Jäger',
+   damageControl: 'Leckwehr', repair: 'Notreparatur', smoke: 'Nebelanlage',
+   boost: 'Äußerste Kraft', hydro: 'Horchgerät', radar: 'Funkmessgerät', spotter: 'Aufklärer', fighter: 'Jäger',
 };
 const OLD_BEAM = { DD: 13, LC: 18, HC: 22, EB: 36, Bismarck: 36 };
 
@@ -697,7 +697,7 @@ function watchSecTarget() {
    const p = P, id = p?.secTarget ?? null;
    if (secSeen.world !== world) {
       secSeen.world = world; secSeen.id = id;
-      if (p?.manualSec && p.cfg?.sec) hud.msg('Manuelle Sekundärsteuerung: Ziel mit Strg+Linksklick wählen', 'info', 5);
+      if (p?.manualSec && p.cfg?.sec) hud.msg('Einzelzielfeuer: Ziel der Mittelartillerie mit Strg+Linksklick wählen', 'info', 5);
       return;
    }
    if (id === secSeen.id) return;
@@ -920,9 +920,9 @@ function autoSecondaries() {
 
 // ------------------------------------------------------------------ events, ribbons, audio
 const RIBBON_NAMES = {
-   pen: 'Durchschlag', citadel: 'Zitadelle', overpen: 'Überdurchschlag', ricochet: 'Abpraller', shatter: 'Zerschellt',
-   he: 'Treffer', sec: 'Sekundär', torp: 'Torpedotreffer', fire: 'Brand', flood: 'Flutung', kill: 'Versenkt',
-   spotted: 'Aufgeklärt', cap: 'Eroberung', defend: 'Verteidigt',
+   pen: 'Panzertreffer', citadel: 'Zitadelltreffer', overpen: 'Durchschuss', ricochet: 'Abgeprallt', shatter: 'Wirkungslos',
+   he: 'Sprengtreffer', sec: 'Mittelartillerie', torp: 'Torpedotreffer', fire: 'Brand gelegt', flood: 'Wassereinbruch', kill: 'Versenkt',
+   spotted: 'Gesichtet', cap: 'Punkt genommen', defend: 'Punkt gehalten',
 };
 function addRibbon(kind, n = 1) {
    if (!RIBBON_NAMES[kind] || n <= 0) return;

@@ -85,7 +85,7 @@ test('progress: modules + skills flow through the ship stat pipeline (player onl
    // the shared class config and the bots stay untouched
    assert.strictEqual(c.main.reload, 10.5);
    for (const s of w.ships) if (!s.isPlayer) assert.strictEqual(s.cfg, SHIPS[s.cls]);
-   // Brandschutz: shorter fires
+   // Feuerwache (fireprot): shorter fires
    b.ignite('mid', null); assert.ok(b.fires[0].dur < 35 && b.fires[0].dur > 30);
    // every single effect is modest
    for (const d of PG.MODULES) for (const tr of d.tiers) for (const v of Object.values(tr)) assert.ok(Math.abs(v) <= 0.1);
@@ -117,9 +117,9 @@ test('progress: profile load survives broken, old and blocked storage', () => {
    assert.deepStrictEqual(PG.loadProfile(st), p);
 });
 
-test('progress: top skill "Manuelle Steuerung der Sekundärbewaffnung" loads, learns and bakes in', () => {
+test('progress: top skill "Einzelzielfeuer der Mittelartillerie" loads, learns and bakes in', () => {
    const sk = PG.SKILLS.find(s => s.key === 'manualSec');
-   assert.ok(sk && sk.name === 'Manuelle Steuerung der Sekundärbewaffnung' && sk.desc && sk.top);
+   assert.ok(sk && sk.name === 'Einzelzielfeuer der Mittelartillerie' && sk.desc && sk.top);
    assert.strictEqual(sk.cost, 4, 'top tier costs 4 points');
    assert.ok(sk.cost === Math.max(...PG.SKILLS.map(s => s.cost)), 'the most expensive skill');
    const total = PG.SKILLS.reduce((a, s) => a + s.cost, 0);
