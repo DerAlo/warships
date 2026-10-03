@@ -8,7 +8,7 @@ import { resolveShells, resolveTorpedoes } from './combat.js';
 import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
 import { updateSubs, hullContact, PERI_PROX, HYDRO_SUB } from './submarine.js';
-import { updateAir, airSpots } from './air.js';
+import { updateAir, airSpots, airSpotMask } from './air.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -62,7 +62,6 @@ export class World {
       this.planes = [];         // legacy (unused)
       this.squadrons = [];      // airborne squadrons (air.js)
       this.bombs = [];          // falling bombs, pooled (alive flag), see air.js
-      this.coop = !!opts.coop;  // co-op world: missions keep carriers out (singleplayer only for now)
       this.events = [];
       this._eventSeq = 0;
       this.obstacles = [];
@@ -378,7 +377,7 @@ export class World {
             if (sees) { seen = true; if (O.isPlayer) byPlayer = true; else if (O.human) mask |= 1 << O.slot; }
          }
          // aircraft overhead (air.js): 2 = a squadron of the player's own carrier
-         if (!byPlayer && this.squadrons.length) { const a = airSpots(this, T); if (a) { seen = true; if (a === 2) byPlayer = true; } }
+         if ((!byPlayer || this.net) && this.squadrons.length) { const a = airSpots(this, T); if (a) { seen = true; if (a === 2) byPlayer = true; mask |= airSpotMask; } }
          const was = T.detected;
          T.detected = seen;
          T.spottedByPlayer = byPlayer;

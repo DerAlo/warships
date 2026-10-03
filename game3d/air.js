@@ -23,9 +23,11 @@
 //
 // Spotting: squadrons spot surface ships for their team (airSpots, called by World._updateSpotting).
 // Squadrons themselves are visible to the other team near its ships and planes (sq.visible is
-// the player team's view).
+// the player team's view; sq.visE the enemy team's, computed only in a PvP net game).
 //
-// Not networked yet: the snapshot codec carries no squadrons, so updateAir is a no-op in a net game.
+// Net games (net/CONTRACT.md): the host runs all of this; clients get one snapshot entry per
+// squadron (codec.js) and the bombs as event items (world.onBomb, set by host.js). A captain's
+// orders to his squadrons are command actions (net/command.js), the same in singleplayer.
 import { aaProfile } from './config.js';
 import { DEG, clamp, clamp01, angleDelta, dist2, toLocal, insideHull, gaussR } from './utils.js';
 import { resolveHit } from './combat.js';
@@ -78,6 +80,11 @@ const AA_DT = 0.1;          // AA is integrated at 10 Hz (cheap, and the bursts 
 
 let _sqId = 1;
 const _lp = { x: 0, y: 0 };
+// squadron ids fit 16 bits on the wire (codec.js); wrapping is harmless, squadrons live minutes
+const nextSqId = () => { const id = _sqId; _sqId = _sqId >= 65535 ? 1 : _sqId + 1; return id; };
+// host migration: the successor goes on numbering above the squadrons it took over
+export function sqIdFloor(n) { if (n >= _sqId && n < 65535) _sqId = n + 1; }
+export const RELEASE_AHEAD = 6000;   // m: a bomber flight let go without a target looks this far ahead
 
 // Fields every ship carries (cheap, so nothing else has to test for undefined).
 export function initAirState(ship) {
@@ -135,7 +142,7 @@ export function launchSquadron(world, ship, type, order = null, human = false) {
    const lt = AIR.launchBase + AIR.launchPer * n;
    ship.air.deckT = lt;
    const sq = {
-      id: _sqId++, side: ship.side, ownerId: ship.id, type, cfg: pc, n, n0: n,
+      id: nextSqId(), side: ship.side, ownerId: ship.id, type, cfg: pc, n, n0: n,
       armed: type === 'ft' ? 0 : n, hp: pc.hp,
       pos: { x: ship.pos.x + c * L * 0.35, y: ship.pos.y + s * L * 0.35 }, alt: 20, altT: type === 'db' ? AIR.dbAlt : AIR.cruiseAlt,
       prev: { x: 0, y: 0, alt: 0, h: 0 },
@@ -148,6 +155,7 @@ export function launchSquadron(world, ship, type, order = null, human = false) {
    };
    sq.prev.x = sq.pos.x; sq.prev.y = sq.pos.y; sq.prev.alt = sq.alt; sq.prev.h = sq.heading;
    if (type === 'ft' && order && order.kind === 'patrol') sq.center = { x: order.pos.x, y: order.pos.y };
+   if (world.net?.pvp) sq.visE = ship.side === 'enemy';
    world.squadrons.push(sq);
    world.hasAir = true;
    world.pushEvent('airLaunch', { srcId: ship.id, sqId: sq.id, kind: type, n, pos: { x: sq.pos.x, y: sq.pos.y },
@@ -172,6 +180,26 @@ export function orderPatrol(world, sq, pos) {
    sq.patrolT = AIR.patrolT;
    sq.human = false;
    world.pushEvent('airInfo', { srcId: sq.ownerId, sqId: sq.id, text: 'Jäger: Patrouille eingerichtet' });
+   return true;
+}
+
+// The captain takes the controls of a squadron of his carrier (its AI stops thinking).
+export function takeSquadron(world, sq) {
+   if (!sq || sq.n <= 0 || sq.state === 'return' || sq.state === 'land') return false;
+   sq.human = true;
+   return true;
+}
+
+// The captain lets go: bombers without an order keep their course and look for a target before
+// they turn home, fighters patrol where they are.
+export function releaseSquadron(world, sq) {
+   if (!sq || !sq.human) return false;
+   sq.human = false; sq.aiming = false; sq.throttle = 0;
+   if (sq.type === 'ft' && sq.state !== 'return') orderPatrol(world, sq, sq.pos);
+   else if (sq.type !== 'ft' && !sq.order) {
+      sq.order = { kind: 'strike', targetId: null,
+         pos: { x: sq.pos.x + Math.cos(sq.heading) * RELEASE_AHEAD, y: sq.pos.y + Math.sin(sq.heading) * RELEASE_AHEAD } };
+   }
    return true;
 }
 
@@ -226,7 +254,7 @@ export function dropWeapons(world, sq) {
 
 function splitSquad(world, sq, n) {
    const f = {
-      ...sq, id: _sqId++, n, armed: 0, hp: sq.cfg.hp, human: false, order: null, aiming: false, aimT: 0,
+      ...sq, id: nextSqId(), n, armed: 0, hp: sq.cfg.hp, human: false, order: null, aiming: false, aimT: 0,
       pos: { x: sq.pos.x, y: sq.pos.y }, prev: { ...sq.prev }, aimPt: { x: 0, y: 0 }, center: null,
       ai: { t: 0, phase: 0, errL: 0, errP: { x: 0, y: 0 } },
       heading: sq.heading + 0.4, want: sq.heading + 0.4,
@@ -247,6 +275,7 @@ function addBomb(world, sq, x, y, w, mult, delay) {
    b.alive = true; b.x = x; b.y = y; b.sx = sq.pos.x; b.sy = sq.pos.y; b.salt = Math.max(sq.alt, 250);
    b.t = -delay; b.fall = AIR.bombFall; b.side = sq.side; b.ownerId = sq.ownerId;
    b.dmg = w.dmg * mult; b.pen = w.pen; b.fire = w.fire; b.ap = !!w.ap; b.heading = sq.heading;
+   if (world.onBomb) world.onBomb(b, sq, delay);     // net host: the clients draw it falling too
 }
 
 // pseudo shell for combat.resolveHit (one reused object; resolveHit keeps no reference)
@@ -278,7 +307,6 @@ function bombImpact(world, b) {
 
 // ---------------------------------------------------------------- per step
 export function updateAir(world, dt) {
-   if (world.net) return;        // not networked yet (see header)
    const ships = world.ships;
    // carriers: deck, service, restock
    for (const s of ships) {
@@ -354,6 +382,7 @@ function stepSquad(world, sq, dt) {
          if (dx * dx + dy * dy < AIR.landR * AIR.landR) { land(world, sq, home); return; }
       }
    } else if (!sq.human) squadThink(world, sq, dt);
+   else if (sq.type === 'ft') fighterFoe(world, sq);
 
    // flight model
    let turn = AIR.turn[sq.type] * (sq.aiming ? AIR.aimTurn : 1);
@@ -412,7 +441,7 @@ function planeDown(world, sq, by) {
    sq.n--;
    if (sq.armed > sq.n) sq.armed = sq.n;
    sq.hp += sq.cfg.hp;
-   world.addEffect('planeDown', sq.pos, 4.5, 8, { alt: sq.alt, heading: sq.heading, speed: sq.speed * 0.8, side: sq.side });
+   world.addEffect('planeDown', sq.pos, 4.5, 8, { alt: sq.alt, heading: sq.heading, speed: sq.speed * 0.8, side: sq.side, sqId: sq.id });
    const carrier = world.shipById(sq.ownerId);
    if (carrier?.stats) carrier.stats.planesLost++;
    if (by?.stats) by.stats.planesDown++;
@@ -488,22 +517,48 @@ export function squadById(world, id) {
    return null;
 }
 
-// The player team's view of enemy squadrons.
-function squadVisibility(world) {
-   const sb = AIR.seeByShip * AIR.seeByShip, sp = AIR.seeByPlane * AIR.seeByPlane;
+// A captain's fighters engage the enemy planes they are pointed at.
+function fighterFoe(world, sq) {
+   let best = null, bd = 1100 * 1100;
+   const c = Math.cos(sq.heading), s = Math.sin(sq.heading);
    for (const q of world.squadrons) {
-      if (q.side === 'player') { q.visible = true; continue; }
-      let vis = false;
-      for (const s of world.ships) if (s.alive && s.side === 'player' && s.depth === 0 && dist2(s.pos, q.pos) < sb) { vis = true; break; }
-      if (!vis) for (const o of world.squadrons) if (o.side === 'player' && o.n > 0 && dist2(o.pos, q.pos) < sp) { vis = true; break; }
-      q.visible = vis;
-      if (vis) q.seenT = world.time;
+      if (q.side === sq.side || q.n <= 0 || q.state === 'land' || q.state === 'launch') continue;
+      const dx = q.pos.x - sq.pos.x, dy = q.pos.y - sq.pos.y;
+      if (dx * c + dy * s < -200) continue;            // behind
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bd) { bd = d2; best = q; }
    }
+   sq.foeId = best ? best.id : null;
+   if (best && sq.state === 'fly') sq.state = 'attack';
+   else if (!best && sq.state === 'attack') sq.state = 'fly';
 }
 
+// Does the team sailing as `side` see squadron q (near one of its ships or squadrons)?
+function seenBy(world, q, side) {
+   if (q.side === side) return true;
+   const sb = AIR.seeByShip * AIR.seeByShip, sp = AIR.seeByPlane * AIR.seeByPlane;
+   for (const s of world.ships) if (s.alive && s.side === side && s.depth === 0 && dist2(s.pos, q.pos) < sb) return true;
+   for (const o of world.squadrons) if (o.side === side && o.n > 0 && dist2(o.pos, q.pos) < sp) return true;
+   return false;
+}
+// sq.visible: the player team's view; sq.visE (PvP net game): the enemy team's.
+function squadVisibility(world) {
+   const pvp = !!world.net?.pvp;
+   for (const q of world.squadrons) {
+      q.visible = seenBy(world, q, 'player');
+      if (q.visible && q.side !== 'player') q.seenT = world.time;
+      if (pvp) q.visE = seenBy(world, q, 'enemy');
+   }
+}
+// What the team sailing as `side` sees (net/codec.js, net/host.js).
+export const squadVisibleTo = (q, side) => side === 'enemy' ? !!q.visE : !!q.visible;
+
 // Spotting from the air (World._updateSpotting): 0 not seen, 1 seen by an enemy squadron,
-// 2 seen by a squadron of the player's own carrier.
+// 2 seen by a squadron of the player's own carrier. airSpotMask (net game): a bit per remote
+// captain (ship.slot) whose own squadrons see T, for the spotting statistics as with ships.
+export let airSpotMask = 0;
 export function airSpots(world, T) {
+   airSpotMask = 0;
    if (T.depth === 2 || T.inSmoke) return 0;
    const r = T.depth === 1 ? AIR.periSpot : Math.min(T.detectRange * AIR.spotK, AIR.spotMax);
    const r2 = r * r, pid = world.player ? world.player.id : -1;
@@ -511,18 +566,28 @@ export function airSpots(world, T) {
    for (const q of world.squadrons) {
       if (q.side === T.side || q.n <= 0 || q.state === 'land' || q.state === 'launch') continue;
       if (dist2(q.pos, T.pos) < r2) {
-         if (q.ownerId === pid) return 2;
-         seen = 1;
+         if (q.ownerId === pid) seen = 2; else if (!seen) seen = 1;
+         if (!world.net) { if (seen === 2) return 2; continue; }
+         const o = world.shipById(q.ownerId);
+         if (o && o.human && o.slot) airSpotMask |= 1 << o.slot;
       }
    }
    return seen;
 }
 
-// AA focus (player key): cycles off -> port -> starboard -> off. Returns the new focus.
+// AA focus: -1 port, +1 starboard, 0 even. Returns the new focus (null: the ship has no AA).
+export function setAaFocus(world, ship, f) {
+   if (!ship.aa.range) return null;
+   f = f < 0 ? -1 : f > 0 ? 1 : 0;
+   if (ship.aaFocus === f) return f;
+   ship.aaFocus = f;
+   world.pushEvent('aaFocus', { srcId: ship.id, focus: f,
+      text: 'Flak-Schwerpunkt: ' + (f < 0 ? 'Backbord' : f > 0 ? 'Steuerbord' : 'aus') });
+   return f;
+}
+// the player key cycles off -> port -> starboard -> off
+export const nextAaFocus = (f) => f === 0 ? -1 : f === -1 ? 1 : 0;
 export function cycleAaFocus(world, ship) {
    if (!ship.aa.range) return 0;
-   ship.aaFocus = ship.aaFocus === 0 ? -1 : ship.aaFocus === -1 ? 1 : 0;
-   world.pushEvent('aaFocus', { srcId: ship.id, focus: ship.aaFocus,
-      text: 'Flak-Schwerpunkt: ' + (ship.aaFocus < 0 ? 'Backbord' : ship.aaFocus > 0 ? 'Steuerbord' : 'aus') });
-   return ship.aaFocus;
+   return setAaFocus(world, ship, nextAaFocus(ship.aaFocus));
 }

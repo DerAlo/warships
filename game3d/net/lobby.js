@@ -30,7 +30,7 @@ import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots, coopRoles } from './coop.js';
 import { pvpMissions, pvpSlots, TEAM_MAX } from './pvp.js';
 import { MISSIONS, getMission } from '../missions.js';
-import { PLAYABLE, SHIPS, isCarrier } from '../config.js';
+import { PLAYABLE, SHIPS } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
 
 export { NET_VERSION };
@@ -62,8 +62,8 @@ export const coopMissions = () => MISSIONS.filter(m => coopSlots(m.id) > 0);
 export const modeMissions = (mode) => mode === 'pvp' ? pvpMissions() : coopMissions();
 export const modeSlots = (mode, missionId) => mode === 'pvp' ? pvpSlots(missionId) : coopSlots(missionId);
 const MIN_PLAYERS = { coop: 1, pvp: 2 };
-// carriers stay out of net games until the snapshot carries aircraft
-export const allowedShips = (missionId) => (getMission(missionId)?.playableShips || PLAYABLE).filter(k => !isCarrier(k));
+// every playable ship, carriers included (their squadrons are part of the snapshot, CONTRACT.md)
+export const allowedShips = (missionId) => getMission(missionId)?.playableShips || PLAYABLE;
 // the player's own choice for a mission: allowed there and unlocked in the local career profile
 export const ownShips = (missionId, profile) => allowedShips(missionId).filter(k => SHIPS[k] && isUnlocked(profile, k));
 export function pickShip(missionId, profile, preferred) {
