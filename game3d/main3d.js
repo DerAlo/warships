@@ -26,6 +26,8 @@ import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
 import { AirUi } from './airui.js';
+import { activeSquad } from './air.js';
+import { TouchUi } from './touch3d.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
 import { createNetGame } from './net/game.js';
 
@@ -131,6 +133,27 @@ const airui = new AirUi({ hud, audio, onView: (on) => {
    if (on) { shellcam.reset(); endKillCam(); renderer.focus = airui.focus; }
    else { renderer.focus = null; input.mouse.dx = 0; input.mouse.dy = 0; input.mouse.wheel = 0; }
 } });
+// touch overlay (touch3d.js): only on a coarse pointer / after the first touch; it drives `input`
+// like the keys do, plus the absolute telegraph lever and rudder track
+const touch = new TouchUi({ input, canvas: scene3d, api: {
+   state: () => touchState(),
+   setTelegraph: (n) => setTelegraph(n),
+   setRudder: (n) => setRudder(n),
+} });
+window.__touch = () => ({ on: touch.on, shown: touch.shown });
+function touchState() {
+   const p = P;
+   if (!p) return null;
+   const sq = airui.squad(world);
+   return {
+      alive: !!p.alive, kn: Math.round(displayKn(p) || 0), tele: ctl.telegraph, rudder: ctl.rudder,
+      map: ctl.mapOpen, help: ctl.help, bino: !!cam3.bino, free: !!cam3.freeLook, lock: ctl.lockId != null,
+      cv: !!p.air, sub: !!p.sub, deep: !!p.sub && p.depth === 2, depthTarget: p.depthTarget ?? 0,
+      sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw, aa: !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net,
+      squad: !!airui.flying, sqType: sq?.type || null, sqHome: !!sq && (sq.state === 'return' || sq.state === 'land'),
+      airSel: p.air?.sel || null, sqActive: !!(p.air && world && activeSquad(world, p, p.air.sel)),
+   };
+}
 let turretCache = [];
 let lastMarkers = [];
 let fired = { shots: 0, salvos: 0, torps: 0 };
@@ -1585,6 +1608,7 @@ function frame() {
          document.body.appendChild(el);
       }
    }
+   touch.frame(dt, phase === 'playing' && !!world);
    input.endFrame();
 }
 
