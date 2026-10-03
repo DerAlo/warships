@@ -9,6 +9,11 @@
 // The host waits a few seconds for every player of the session; whoever does not answer is left
 // out (an allied bot keeps that place). Then both sides build the same World and the host starts
 // sending snapshots.
+//
+// Rejoin: the lobby re-admits a former captain of the running match (CONTRACT.md) and calls the
+// transport's onRejoin(oldId, newId). The returning client says hello like at the start and gets
+//   host -> client   { ...start, self, rejoin: 1 }, then { k:'more' }* and { k:'resync' }
+// and its ship back from the AI.
 import { NET_VERSION } from './transport.js';
 import { buildNetWorld, validClass, cleanLoadout, MAX_HUMANS } from './setup.js';
 import { makeHost } from './host.js';
@@ -46,6 +51,8 @@ export function createNetGame(session, hooks) {
    const t0 = now();
    const stat = { out: 0, in: 0, snapIn: 0, snapOut: 0, since: t0 };
    let world = null, host = null, replica = null, done = false, lostText = null, lastHello = -1;
+   let startMsg = null, waitResync = 0;
+   const slots = new Map();          // host: peer id -> slot index in the start message
    const hello = new Map();          // host: peer id -> loadout
    const gone = new Set();           // host: players that left before the start
    const early = [];                 // client: event batches that overtook the start message
@@ -78,7 +85,8 @@ export function createNetGame(session, hooks) {
       try { world = buildNetWorld(start); } catch (e) { console.error('[net] world build failed', e); send('sync', { k: 'abort' }); lose(TEXT.build); return; }
       const humans = world.net.humans;
       host = makeHost(world, { send, clients: list.slice(1).map((p, i) => ({ id: p.id, name: p.name, ship: humans[i + 1] })) });
-      for (let i = 1; i < list.length; i++) send('sync', { ...start, self: i }, list[i].id);
+      startMsg = start;
+      for (let i = 1; i < list.length; i++) { slots.set(list[i].id, i); send('sync', { ...start, self: i }, list[i].id); }
       for (const p of players) if (p.id !== selfId && !list.includes(p)) send('sync', { k: 'refuse' }, p.id);
       hooks.onReady?.(world);
    }
@@ -86,7 +94,16 @@ export function createNetGame(session, hooks) {
    function hostSync(m, from) {
       if (!m || typeof m !== 'object' || !players.some(p => p.id === from) || from === selfId) return;
       if (m.k === 'hello') {
-         if (world) { if (!host.client(from)) send('sync', { k: 'refuse' }, from); return; }
+         if (world) {
+            const c = host && host.client(from);
+            if (!c) send('sync', { k: 'refuse' }, from);
+            else if (c.back) {
+               if (m.v !== NET_VERSION) { send('sync', { k: 'refuse', why: 'version' }, from); return; }
+               send('sync', { ...startMsg, self: slots.get(from), rejoin: 1 }, from);
+               host.resume(from);
+            }
+            return;
+         }
          if (m.v !== NET_VERSION) { send('sync', { k: 'refuse', why: 'version' }, from); return; }
          if (!hello.has(from)) hello.set(from, cleanLoadout(m.loadout));
       } else if (m.k === 'bye') { hello.delete(from); gone.add(from); if (host) host.drop(from); }
@@ -101,10 +118,13 @@ export function createNetGame(session, hooks) {
       replica = makeReplica(world, {
          send: (channel, data) => send(channel, data, hostId), now,
          onLost: (why) => lose(why === 'timeout' ? TEXT.hostLost : TEXT.hostLeft),
+         // back in a running match: show it once the world has caught up (own telegraph included)
+         onResync: () => { if (waitResync) { waitResync = 0; hooks.onReady?.(world); } },
       });
       for (const b of early) replica.onEvt(b);
       early.length = 0;
-      hooks.onReady?.(world);
+      if (m.rejoin) waitResync = now();
+      else hooks.onReady?.(world);
    }
 
    function clientSync(m, from) {
@@ -122,6 +142,16 @@ export function createNetGame(session, hooks) {
       tp.on('cmd', (d, from) => { if (host) { if (hooks.measure) stat.in += size(d); host.onCmd(d, from); } });
       tp.on('snap', () => {}); tp.on('evt', () => {});
       tp.onPeerLeave((id) => { hello.delete(id); gone.add(id); if (host) host.drop(id); });
+      // a former captain is back under a new peer id (lobby check passed): the slot moves along
+      tp.onRejoin?.((oldId, newId) => {
+         const p = players.find(x => x.id === oldId);
+         if (!p || !host) return;
+         if (oldId !== newId && players.some(x => x.id === newId)) return;
+         if (!host.rejoin(oldId, newId)) return;
+         players[players.indexOf(p)] = { ...p, id: newId };
+         gone.delete(newId);
+         if (slots.has(oldId)) { const i = slots.get(oldId); slots.delete(oldId); slots.set(newId, i); }
+      });
    } else {
       tp.on('sync', clientSync);
       tp.on('snap', (d, from) => {
@@ -153,7 +183,10 @@ export function createNetGame(session, hooks) {
             if (t - lastHello >= HELLO_EVERY) { lastHello = t; send('sync', { k: 'hello', v: NET_VERSION, loadout: cleanLoadout(hooks.loadout?.(players.find(p => p.id === selfId).ship)) }, hostId); }
             if (t - t0 > START_WAIT) lose(TEXT.noStart);
          }
-      } else if (replica) replica.pump();
+      } else if (replica) {
+         if (waitResync && t - waitResync > START_WAIT) lose(TEXT.noStart);
+         replica.pump();
+      }
    }
 
    // The local player leaves the match (results screen closed, pause menu, host lost): tell the
@@ -176,7 +209,7 @@ export function createNetGame(session, hooks) {
    return {
       isHost, pump, quit,
       get world() { return world; },
-      get ready() { return !!world; },
+      get ready() { return !!world && !waitResync; },
       get done() { return done; },
       get lost() { return lostText; },
       get host() { return host; },

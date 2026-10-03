@@ -150,6 +150,42 @@ export function makeReplica(world, o) {
       else if (m.k === 'own') world.log(null, String(m.text || ''), m.type || 'info');
       else if (m.k === 'end') { if (!pendingEnd && !ended) { pendingEnd = m; endAt = o.now() + 1; } }
       else if (m.k === 'abort') hostLost('abort');
+      else if (m.k === 'more') { if (Array.isArray(m.n)) for (const it of m.n) if (Array.isArray(it) && it[0] === 'n') spawnShip(it); }
+      else if (m.k === 'resync') applyResync(m);
+   }
+
+   // Back in a running match: the world was built from `start`; this is what happened since.
+   // Event batches before `b` went to the others only; from `b` on this client gets them too.
+   function applyResync(m) {
+      if (!fin(m.b)) return;
+      for (const k of batches.keys()) if (k < m.b) batches.delete(k);
+      nextBatch = m.b; gapSince = 0;
+      for (const s of world.ships) s._seen = -1;      // a ship missing from the next snapshot is gone
+      if (fin(m.kc)) world.killCount = m.kc;
+      if (Array.isArray(m.ro)) for (const r of m.ro) {
+         const s = byId.get(r[0]);
+         if (!s || !Array.isArray(r)) continue;
+         s.dmgDealt = r[1]; s.kills = r[2];
+         if (r[3]) s.hp = r[4] * s.maxHP;
+         else if (s.alive) { if (r[5]) world.removeShip(s, r[5]); else { s.alive = false; s.hp = 0; } }
+      }
+      if (world.mission) {
+         if (Array.isArray(m.obj)) world.mission.objectives = m.obj;
+         if (Array.isArray(m.zn)) world.mission.zones = m.zn;
+      }
+      if (Array.isArray(m.tp)) for (const t of m.tp) {
+         if (!Array.isArray(t) || !Array.isArray(t[0])) continue;
+         spawnTorp(t[0]);
+         applyItem(['v', t[0][1], t[1]]);
+      }
+      if (Array.isArray(m.sm)) for (const k of m.sm) if (Array.isArray(k)) applyItem(['k', ...k]);
+      if (m.me && typeof m.me === 'object') Object.assign(world.stats, m.me);
+      if (me && Array.isArray(m.tg)) {
+         if (fin(m.tg[0])) me.telegraph = ctl.telegraph = m.tg[0];
+         if (fin(m.tg[1])) me.rudderCmd = ctl.rudder = m.tg[1];
+         dirty = true;
+      }
+      if (o.onResync) o.onResync();
    }
 
    function hostLost(why) {

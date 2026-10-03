@@ -100,7 +100,21 @@ const DENY = {
    banned: 'Der Host hat dich aus diesem Spiel entfernt.',
    version: 'Das Spiel verwendet eine andere Version.',
    gone: 'Das Spiel existiert nicht mehr.',
+   norejoin: 'Dieses Gefecht ist vorbei oder du hast nicht daran teilgenommen.',
 };
+
+// The seat in a running match, kept per tab (survives a reload, not a closed tab): with it a
+// dropped captain may knock again while the match runs (see CONTRACT.md, "Rejoin").
+const REJOIN_KEY = 'warships3d.net.rejoin';
+const REJOIN_MAX_MS = 3 * 3600e3;
+function loadSeat() {
+   try {
+      const r = JSON.parse(sessionStorage.getItem(REJOIN_KEY) || 'null');
+      if (r && typeof r.room === 'string' && typeof r.token === 'string' && Date.now() - (r.at || 0) < REJOIN_MAX_MS) return r;
+   } catch (e) { /* no storage */ }
+   return null;
+}
+function saveSeat(r) { try { if (r) sessionStorage.setItem(REJOIN_KEY, JSON.stringify(r)); else sessionStorage.removeItem(REJOIN_KEY); } catch (e) { /* no storage */ } }
 
 // ---------------------------------------------------------------- backends
 // A backend opens the lobby channel ({ send, on, leave }) and game room Transports.
@@ -135,7 +149,7 @@ export async function makeBackend(mode) {
 // without access to the matchmaking channels.
 function sessionTransport(base, members, onLeave) {
    const set = new Set(members);
-   let join = null, leave = null, live = true;
+   let join = null, leave = null, rejoin = null, live = true;
    const peers = () => base.peers().filter(id => set.has(id));
    return {
       selfId: base.selfId, hostId: base.hostId, isHost: base.selfId === base.hostId,
@@ -153,9 +167,11 @@ function sessionTransport(base, members, onLeave) {
       },
       onPeerJoin(fn) { join = fn; },
       onPeerLeave(fn) { leave = fn; },
+      onRejoin(fn) { rejoin = fn; },                    // host: fn(oldId, newId), a captain is back
       leave() { if (live) onLeave(); },
       _join(id) { if (live && set.has(id)) join?.(id); },
       _leave(id) { if (live && set.delete(id)) leave?.(id); },      // at most once per player
+      _rejoin(oldId, newId) { if (!live) return; set.delete(oldId); set.add(newId); rejoin?.(oldId, newId); },
       _close() { live = false; },
    };
 }
@@ -173,6 +189,15 @@ export class Lobby {
       this.lt = null; this.rt = null;
       this._approved = new Map(); this._banned = new Set(); this._key = ''; this._knock = null; this._hello = null; this._ship = null;
       this._timer = null; this._beat = 0; this._closed = false;
+      // host, running match: seat id -> { orig, id, token, name, ship }; peers re-admitted to a seat
+      this._seats = new Map(); this._back = new Map(); this._startMsg = null;
+      this._pendingStart = null;    // client: a start that came in before the room was wired
+   }
+   // client: the running match this tab can go back to ({ room, hostId, mission, name, ... }) or null
+   rejoinable() { return loadSeat(); }
+   canRejoin(entry) {
+      const r = loadSeat();
+      return !!(r && entry && entry.id === r.room && entry.hostId === r.hostId && entry.state === 'running');
    }
    get isHost() { return !!this.room && this.room.hostId === this.selfId; }
    get me() { return this.room?.players.find(p => p.id === this.selfId) || null; }
@@ -255,14 +280,20 @@ export class Lobby {
       const r = this.room, now = Date.now();
       // the knocking peer itself takes no seat: it may still be listed from a visit whose goodbye got lost
       const seats = r.players.filter(p => p.id !== from).length + [...this._approved].filter(([id, until]) => id !== from && until > now && !r.players.some(p => p.id === id)).length;
-      let why = null;
+      let why = null, seat = null;
       if (d.v !== NET_VERSION) why = 'version';
       else if (this._banned.has(from)) why = 'banned';
+      else if (typeof d.seat === 'string') {
+         // back to the running match: the proof is made with the seat's token instead of the password
+         seat = r.state === 'running' && this.session ? this._seats.get(d.seat) : null;
+         if (!seat || d.proof !== await proofOf(seat.token, r.id, from)) why = 'norejoin';
+      }
       else if (r.locked && d.proof !== await proofOf(this._key, r.id, from)) why = 'password';
       else if (r.state !== 'lobby') why = 'running';
       else if (seats >= r.max) why = 'full';
       if (!this.isHost || this.room !== r) return;
       if (!why) this._approved.set(from, now + SEAT_MS);
+      if (seat && !why) this._back.set(from, d.seat);
       this.lt?.send('knockr', why ? { ok: false, why } : { ok: true }, from);
    }
    // host only: change mission / difficulty / player limit while in the lobby
@@ -284,7 +315,8 @@ export class Lobby {
       const r = this.room;
       if (!this.isHost || id === this.selfId) return;
       const p = r.players.find(x => x.id === id);
-      this._banned.add(id); this._approved.delete(id);
+      this._banned.add(id); this._approved.delete(id); this._back.delete(id);
+      for (const [sid, s] of this._seats) if (s.id === id) this._seats.delete(sid);
       this.rt.send('room', { t: 'kick' }, id);
       if (p) { r.players = r.players.filter(x => x.id !== id); this._say(null, `${p.name} wurde entfernt.`); }
       this.session?.transport._leave(id);
@@ -303,25 +335,52 @@ export class Lobby {
       r.state = 'running';
       for (const p of r.players) p.ready = false;
       this.rt.send('room', msg);
+      // every captain gets a seat token: proof for a rejoin after a reload or a lost connection
+      this._seats.clear(); this._back.clear(); this._startMsg = msg;
+      for (const p of msg.players) {
+         if (p.id === this.selfId) continue;
+         const seat = { orig: p.id, id: p.id, token: randId(24), name: p.name, ship: p.ship }, sid = randId(10);
+         this._seats.set(sid, seat);
+         this.rt.send('room', { t: 'seat', seat: sid, token: seat.token }, p.id);
+      }
       this._sync();
       this._begin(msg);
       return true;
    }
+   // host: an approved peer with a seat said hello in the room: it takes over its old place
+   _rejoinSeat(from) {
+      const r = this.room, sid = this._back.get(from), seat = this._seats.get(sid);
+      this._back.delete(from);
+      if (!seat || r.state !== 'running' || !this.session) { this.rt.send('room', { t: 'deny', why: 'norejoin' }, from); return; }
+      const old = seat.id;
+      seat.id = from;
+      r.players = r.players.filter(x => x.id !== old && x.id !== from);
+      const p = { id: from, name: seat.name, ship: seat.ship, ready: false, at: Date.now() };
+      r.players.push(p);
+      this._say(null, `${p.name} ist zurück im Gefecht.`);
+      this.session.transport._rejoin(old, from);
+      this._sync();
+      const ids = new Map([...this._seats.values()].map(s => [s.orig, s.id]));
+      const m = this._startMsg;
+      this.rt.send('room', { ...m, players: m.players.map(q => ({ ...q, id: ids.get(q.id) || q.id })), back: 1 }, from);
+      this.rt.send('room', { t: 'seat', seat: sid, token: seat.token }, from);
+   }
 
    // ------------------------------------------------------------ joining
-   async join(entry, password = '') {
+   // back: the seat record of rejoinable() to go back into the running match of that room
+   async join(entry, password = '', back = null) {
       if (this.room || this._joining) throw new NetError('busy', 'Du bist bereits in einem Spiel.');
       if (entry.v !== NET_VERSION) throw new NetError('version', DENY.version);
       if (!this.lt) throw new NetError('gone', DENY.gone);
       this._joining = true;
       let rt = null, again = null;
       try {
-         const key = entry.locked ? await deriveKey(String(password), entry.id) : '';
-         const proof = entry.locked ? await proofOf(key, entry.id, this.selfId) : '';
+         const key = back ? String(back.key || '') : entry.locked ? await deriveKey(String(password), entry.id) : '';
+         const proof = back ? await proofOf(back.token, entry.id, this.selfId) : entry.locked ? await proofOf(key, entry.id, this.selfId) : '';
          const answer = await new Promise((resolve) => {
             this._knock = { hostId: entry.hostId, resolve };
             // the lobby channel may lose a message: knock until the host answers
-            const knock = () => this.lt?.send('knock', { room: entry.id, proof, v: NET_VERSION }, entry.hostId);
+            const knock = () => this.lt?.send('knock', back ? { room: entry.id, proof, v: NET_VERSION, seat: back.seat } : { room: entry.id, proof, v: NET_VERSION }, entry.hostId);
             knock();
             again = setInterval(knock, KNOCK_AGAIN_MS);
             setTimeout(() => resolve(null), KNOCK_MS);
@@ -329,7 +388,11 @@ export class Lobby {
          clearInterval(again);
          this._knock = null;
          if (!answer) throw new NetError('timeout', 'Der Host antwortet nicht.');
-         if (!answer.ok) throw new NetError(answer.why, DENY[answer.why] || 'Der Host hat den Beitritt abgelehnt.');
+         if (!answer.ok) {
+            if (back && answer.why === 'norejoin') saveSeat(null);
+            throw new NetError(answer.why, DENY[answer.why] || 'Der Host hat den Beitritt abgelehnt.');
+         }
+         this._key = key;
          // open the game room and wait for the host to show up there (over the relay within a
          // moment; whether a direct channel follows does not matter here)
          rt = await this.net.openRoom(entry.id, entry.hostId, key, null);
@@ -353,11 +416,23 @@ export class Lobby {
          this._wireRoom();
          this._closeLobby();
          this.cb.onRoom?.();
+         const m = this._pendingStart;
+         this._pendingStart = null;
+         if (m) this._begin(m);
       } finally {
          clearInterval(again);
-         this._joining = false; this._knock = null; this._hello = null; this._pendingRoom = null;
-         if (rt) { rt.leave(); this.room = null; }
+         this._joining = false; this._knock = null; this._hello = null; this._pendingRoom = null; this._pendingStart = null;
+         if (rt) { rt.leave(); this.room = null; this._key = ''; }
       }
+   }
+   // back into the running match this tab took part in (rejoinable()); leaves a room first
+   async rejoin() {
+      const rec = loadSeat();
+      if (!rec) throw new NetError('norejoin', DENY.norejoin);
+      if (this.room) { this._teardown(true); await new Promise(r => setTimeout(r, 300)); }   // the old room transport is closed first
+      await this.open();
+      const known = this.games.get(rec.hostId)?.entry;
+      return this.join({ id: rec.room, hostId: rec.hostId, v: NET_VERSION, locked: false, mission: known?.mission || rec.mission, name: known?.name || rec.name }, '', rec);
    }
 
    // ------------------------------------------------------------ room (both sides)
@@ -394,6 +469,7 @@ export class Lobby {
       if (!m || !r) return;
       let p = r.players.find(x => x.id === from);
       if (m.t === 'hello') {
+         if (this._back.has(from) && this._approved.has(from) && !this._banned.has(from)) { this._rejoinSeat(from); return; }
          if (p) { this.rt.send('room', this._state(), from); return; }
          const why = this._banned.has(from) ? 'banned' : !this._approved.has(from) ? 'gone' : r.state !== 'lobby' ? 'running' : r.players.length >= r.max ? 'full' : null;
          if (why) { this.rt.send('room', { t: 'deny', why }, from); return; }
@@ -430,12 +506,22 @@ export class Lobby {
          const me = this.me;
          if (me && this._hello) this._hello('ok');
          if (me && !me.ship && this.room.state === 'lobby') this._fixOwnShip();
+         // the match of this room is over: no way back into it any more
+         if (this.room.state === 'lobby') { const s = loadSeat(); if (s && s.room === base.id && s.hostId === base.hostId) saveSeat(null); }
          if (cur) this.cb.onRoom?.();
       } else if (m.t === 'deny') this._hello?.(DENY[m.why] ? m.why : 'gone');
-      else if (m.t === 'kick') this._drop('kicked', 'Der Host hat dich aus dem Spiel entfernt.');
-      else if (m.t === 'closed') this._drop('hostleft', 'Der Host hat das Spiel geschlossen.');
-      else if (m.t === 'start' && this.room && Array.isArray(m.players) && m.players.some(p => p.id === this.selfId)) this._begin(m);
+      else if (m.t === 'kick') { this._forgetSeat(); this._drop('kicked', 'Der Host hat dich aus dem Spiel entfernt.'); }
+      else if (m.t === 'closed') { this._forgetSeat(); this._drop('hostleft', 'Der Host hat das Spiel geschlossen.'); }
+      else if (m.t === 'seat' && typeof m.seat === 'string' && typeof m.token === 'string') {
+         const base = this.room || this._pendingRoom;
+         if (base) saveSeat({ room: base.id, hostId: base.hostId, seat: m.seat.slice(0, 32), token: m.token.slice(0, 64), key: this._key,
+            mission: this.room?.mission || '', name: this.room?.name || '', at: Date.now() });
+      }
+      else if (m.t === 'start' && this.room && Array.isArray(m.players) && m.players.some(p => p.id === this.selfId)) {
+         if (this.rt) this._begin(m); else this._pendingStart = m;      // still joining: after the wiring
+      }
    }
+   _forgetSeat() { const s = loadSeat(); if (s && this.room && s.room === this.room.id) saveSeat(null); }
    _state() {
       const r = this.room;
       return { t: 'state', room: { name: r.name, mode: r.mode, mission: r.mission, difficulty: r.difficulty, max: r.max, locked: r.locked, state: r.state },
@@ -503,6 +589,8 @@ export class Lobby {
             if (done) return;
             done = true; transport._close();
             if (this.session === session) this.session = null;
+            if (this.isHost) { this._seats.clear(); this._back.clear(); this._startMsg = null; }
+            else if (result && !result.aborted) this._forgetSeat();          // over: nothing to go back to
             if (this.room && this.isHost && this.room.state === 'running') { this.room.state = 'lobby'; this._sync(); }
             this.cb.onEnd?.(result || { aborted: true, reason: '', victory: null });
          },
@@ -534,6 +622,7 @@ export class Lobby {
       if (host && this.lt) this.lt.send('list', { gone: true });
       const rt = this.rt;
       this.rt = null; this.room = null; this.chat = []; this._approved.clear(); this._key = '';
+      this._seats.clear(); this._back.clear(); this._startMsg = null;
       // let the goodbye leave the send queue before the connection closes
       if (rt) setTimeout(() => rt.leave(), polite ? 150 : 0);
    }

@@ -210,6 +210,8 @@ class MpUI {
       else if (r && lb.isHost) {
          main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : 'GEFECHT!'; main.disabled = !lb.canStart(); main.dataset.kind = 'start';
          main.title = main.disabled && r.state === 'lobby' ? 'Alle Mitspieler müssen bereit sein' : '';
+      } else if (r && r.state === 'running' && !lb.session && lb.canRejoin({ id: r.id, hostId: r.hostId, state: r.state })) {
+         main.textContent = 'ZURÜCK INS GEFECHT'; main.disabled = false; main.dataset.kind = 'rejoin';
       } else if (r) {
          const me = lb.me;
          main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : me?.ready ? 'NICHT BEREIT' : 'BEREIT'; main.disabled = r.state !== 'lobby' || !me?.ship; main.dataset.kind = 'ready';
@@ -235,6 +237,7 @@ class MpUI {
       if (kind === 'create') this._askCreate();
       else if (kind === 'start') lb.start();
       else if (kind === 'ready') lb.setReady(!lb.me?.ready);
+      else if (kind === 'rejoin') this._rejoin();
    }
 
    // ------------------------------------------------------------ list view
@@ -275,12 +278,15 @@ class MpUI {
       box.innerHTML = shown.map(g => {
          const bad = g.v !== NET_VERSION, full = g.players >= g.max, run = g.state === 'running';
          const st = bad ? ['bad', 'INKOMPATIBEL'] : run ? ['running', 'LÄUFT'] : full ? ['running', 'VOLL'] : ['lobby', 'OFFEN'];
+         // the running match this tab took part in: the way back into it
+         const back = !bad && lb.canRejoin(g) ? `<button class="mp-btn pri" data-back="${esc(g.hostId)}" title="Zurück ins laufende Gefecht: Du übernimmst wieder dein Schiff.">ZURÜCKKEHREN</button>` : '';
          return `<div class="mp-game ${bad ? 'off' : ''}" data-id="${esc(g.id)}" data-host="${esc(g.hostId)}" ${bad ? 'title="Dieses Spiel wurde mit einer anderen Spielversion erstellt."' : ''}>
             <span class="n">${g.locked ? LOCK : ''}${esc(g.name)}</span><span>${esc(g.host)}</span><span class="c-mode">${esc(MODE_LABEL[g.mode] || g.mode)}</span>
             <span>${esc(misName(g.mission))}</span><span class="c-diff">${esc(DIFF_LABEL[g.difficulty] || g.difficulty)}</span><span>${g.players}/${g.max}</span>
             <span class="st ${st[0]}">${st[1]}</span>
-            <button class="mp-btn" data-join="${esc(g.hostId)}" ${bad || full || run ? 'disabled' : ''}>BEITRETEN</button></div>`;
+            ${back || `<button class="mp-btn" data-join="${esc(g.hostId)}" ${bad || full || run ? 'disabled' : ''}>BEITRETEN</button>`}</div>`;
       }).join('');
+      box.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => { this._click(); this._rejoin(); }));
       box.querySelectorAll('[data-join]').forEach(b => b.addEventListener('click', () => {
          const g = this.lobby?.list().find(x => x.hostId === b.dataset.join);
          if (!g) return;
@@ -298,6 +304,21 @@ class MpUI {
          const text = e?.code ? e.message : 'Beitritt fehlgeschlagen.';
          if (!e?.code) console.warn('multiplayer: join failed', e);
          if (onError && e?.code === 'password') onError(text); else this._message('Beitritt nicht möglich', text);
+      }
+   }
+   async _rejoin() {
+      const rec = this.lobby?.rejoinable();
+      if (!rec) return;
+      this._busy(`Zurück ins Gefecht „${rec.name || 'Spiel'}“ …`);
+      try {
+         await this.lobby.rejoin();
+         this._closeModal();
+         this._show('room');
+      } catch (e) {
+         const text = e?.code ? e.message : 'Rückkehr fehlgeschlagen.';
+         if (!e?.code) console.warn('multiplayer: rejoin failed', e);
+         this._message('Rückkehr nicht möglich', text);
+         if (this.view === 'list') this._renderGames();
       }
    }
 
@@ -394,8 +415,12 @@ class MpUI {
       this.menu?.hide();
       this.root.classList.remove('hidden');
       this._show(lb?.room ? 'room' : 'list');
-      if (lb?.room) this._chatLine({ id: '', text: result?.aborted ? `Gefecht abgebrochen${result.reason ? ': ' + result.reason : '.'}` : result?.victory ? 'Gefecht beendet: Sieg!' : 'Gefecht beendet: Niederlage.' });
-      else if (this.notice) this._message('Spiel beendet', this.notice);
+      // dropped out of a match that goes on: say how to get back
+      const back = result?.aborted && lb?.rejoinable();
+      if (lb?.room) {
+         this._chatLine({ id: '', text: result?.aborted ? `Gefecht abgebrochen${result.reason ? ': ' + result.reason : '.'}` : result?.victory ? 'Gefecht beendet: Sieg!' : 'Gefecht beendet: Niederlage.' });
+         if (back && !lb.isHost && lb.room.state === 'running') this._chatLine({ id: '', text: 'Das Gefecht läuft weiter: Mit „ZURÜCK INS GEFECHT“ übernimmst du wieder dein Schiff.' });
+      } else if (this.notice) this._message('Spiel beendet', this.notice + (back ? ' Läuft das Gefecht noch, steht es in der Spielliste mit „ZURÜCKKEHREN“.' : ''));
    }
 
    // ------------------------------------------------------------ dialogs

@@ -251,6 +251,16 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
 - **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
   (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **Rejoin.** A captain who dropped out (tab reloaded, network gone, left by mistake) goes back
+  in while the match runs: a seat token from the start (sessionStorage) lets the lobby re-admit
+  that tab only, the host moves the slot to the new peer id and sends the missed state as state
+  (`more` + `resync`: later ships, roster, objectives, torpedoes, smoke, own statistics and
+  telegraph), not as the missed events. `tests/playwright3d.mp.rejoin.mjs` (real brokers,
+  2026-10, measured): back in the battle ~1 s after the click, old ship, objectives and
+  statistics equal to the host's, 20 snapshots/s again; in hybrid mode the direct channel came
+  back after a reload and after a cut connection (the probe before using a channel, see
+  "Transport", covers the old "up, then down at once" report). Trystero's console error for a
+  channel the other side closed abruptly is turned into a warning in `transport_rtc.js`.
 - **Transport.** Two browsers behind home routers often get no WebRTC path (no TURN server), so
   the room never depends on one: `makeRoomTransport` reaches every peer over public MQTT brokers
   from the first moment and moves a peer to the data channel once a probe sent over it came back
@@ -280,4 +290,6 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   `tests/playwright3d.mp.relay.mjs` (needs internet: two separate Chromium instances over the
   real brokers, `MODE=blocked|direct|relayonly`, prints the measured link quality),
   `tests/playwright3d.mp.multi.mjs` (the same with `PLAYERS=3|4`, `MODE=hybrid|relayonly|blocked`,
-  `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps).
+  `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps),
+  `tests/playwright3d.mp.rejoin.mjs` (reload and network cut mid-battle, back through the list,
+  an outsider refused; `MODE=hybrid|relayonly`).
