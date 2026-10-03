@@ -51,7 +51,7 @@ body.touch canvas#scene3d { touch-action: none; }
 #tu-tele { position: absolute; left: calc(14px + var(--sl)); bottom: calc(16px + var(--sb)); width: 64px; padding: 4px 0; display: flex; flex-direction: column;
    border: 1px solid var(--panel-edge); background: rgba(17, 20, 21, .5); border-radius: 3px; }
 #tu-tele .tu-kn { font: 700 13px var(--mono); text-align: center; color: #fff; padding: 2px 0 4px; border-bottom: 1px solid var(--panel-edge); }
-#tu-tele .tu-st { height: 34px; display: flex; align-items: center; justify-content: center; font: 600 11px var(--mono); color: #8d8676; border-top: 1px solid rgba(255,255,255,.05); }
+#tu-tele .tu-st { height: 40px; display: flex; align-items: center; justify-content: center; font: 600 11px var(--mono); color: #8d8676; border-top: 1px solid rgba(255,255,255,.05); }
 #tu-tele .tu-st.on { color: var(--ink); background: var(--gold); font-weight: 700; }
 #tu-tele.squad .tu-st { display: none; }
 #tu-tele .tu-sq { display: none; height: 92px; align-items: center; justify-content: center; font: 700 11px var(--font); letter-spacing: 1px; text-transform: uppercase; color: var(--hud); }
@@ -88,6 +88,16 @@ body.touch #help-panel .tu-help { display: block; }
 body.touch #torp-alert { top: calc(50% - 96px); }
 @media (max-height: 560px) {
    body.touch #side-r { display: none; }
+   /* port on a phone held sideways: narrower side columns, the order bar in two rows */
+   body.touch .m3-top { height: 48px; }
+   body.touch .m3-main { grid-template-columns: 220px minmax(0,1fr) 270px; gap: 12px; padding: 10px 12px; }
+   body.touch .m3-brief { max-height: 36%; padding: 10px 16px; }
+   body.touch .m3-ship { padding: 10px 14px; }
+   body.touch .m3-orders { flex-wrap: wrap; gap: 6px; min-height: 0; }
+   body.touch .m3-diff { flex: 1 1 100%; min-height: 44px; }
+   body.touch .m3-diff > span { display: none; }
+   body.touch .m3-diff button { flex: 1; }
+   body.touch .m3-battle { flex: 1 1 100%; min-height: 48px; font-size: 20px; }
    body.touch #lock-panel { top: 60px; transform: translateX(-50%) scale(.85); }
 }
 @media (min-height: 700px) {
