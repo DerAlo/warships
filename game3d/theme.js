@@ -39,3 +39,12 @@ export const T = read();
 // canvas font strings (Bahnschrift on Windows, system fallbacks elsewhere)
 export const FONT = (px, weight = '') => `${weight ? weight + ' ' : ''}${px}px ${T.font}`;
 export const MONO = (px, weight = '') => `${weight ? weight + ' ' : ''}${px}px ${T.mono}`;
+
+// The Kriegsschiffe mark: the signal flags K and S on a halyard plus the wordmark. Same markup as
+// the loading screen in index-3d.html; styled by the .ks-logo rules there (colours via tokens).
+export function logoSvg(sub = 'Seekrieg 1939 – 1945') {
+   return '<div class="ks-logo"><svg viewBox="0 0 34 44" aria-hidden="true"><path class="hl" d="M3 1v42"/><path class="hl" d="M3 3h3M3 22h3"/>'
+      + '<rect class="fy" x="6" y="3" width="13" height="16"/><rect class="fb" x="19" y="3" width="13" height="16"/>'
+      + '<rect class="fw" x="6" y="22" width="26" height="16"/><rect class="fb" x="14" y="27" width="10" height="6"/></svg>'
+      + `<span class="wm"><b>Kriegsschiffe</b><i>${sub}</i></span></div>`;
+}
