@@ -536,19 +536,50 @@ function superstructure(b, d, S, tl, col, ship) {
    };
 
    if (type === 'CV') {
-      const yF = S.deckAt(0) + lv * 2.4;
-      b.box(L * 0.96, 1.0, B * 1.25, -L * 0.01, yF, 0, shade(col.deck, 0.9));
+      // flight deck on a hangar block; island from cfg.hull.sup (Akagi / Hiryu: port side, with
+      // the funnel trunked down over the starboard side); deck stripes and a deck park aft
+      const yF = S.deckAt(0) + lv * 2.4, yT = yF + 0.6;
+      const hs = hull.sup || { x: L * 0.05, len: L * 0.12, w: 7, h: 20 };
+      const portIsland = !!hull.islandPort, jp = hull.nation === 'jp';
+      const fl = L * (hull.deckLen || 0.96), fx = -L * 0.01 - (L * 0.96 - fl) * 0.5;
+      b.box(fl, 1.0, B * 1.25, fx, yF, 0, shade(col.deck, 0.9));
       b.band = 2;
-      b.box(L * 0.95, 0.1, B * 1.2, -L * 0.01, yF + 0.55, 0, col.deck);
+      b.box(fl - 0.6, 0.1, B * 1.2, fx, yF + 0.55, 0, col.deck);
       b.band = 0;
       for (let x = -L * 0.4; x < L * 0.4; x += L / 10) b.box(L / 22, lv * 2.4, B * 0.5, x, S.deckAt(x), 0, sup);
-      const xi = L * 0.05, zi = B * 0.52;
-      b.box(L * 0.18, lv * 3, B * 0.12, xi, yF + 0.5, zi, sup);
-      b.box(L * 0.08, lv * 1.3, B * 0.1, xi + L * 0.03, yF + 0.5 + lv * 3, zi, sup);
-      const g = new THREE.CylinderGeometry(1, 1, lv * 2.6, 12); g.translate(0, lv * 1.3, 0); g.scale(L * 0.025, 1, B * 0.05);
-      b.put(g, xi - L * 0.04, yF + 0.5 + lv * 3, zi, dark);
-      smoke.push(new THREE.Vector3(xi - L * 0.04, yF + 0.5 + lv * 5.6, zi));
-      pole(xi + L * 0.02, yF + 0.5 + lv * 4.3, lv * 3, 0.3);
+      const white = col.lamp, stripe = jp ? lin(0xb8b4a6) : white;
+      for (let x = fx - fl * 0.44; x < fx + fl * 0.44; x += fl / 18) b.box(fl / 40, 0.05, 0.7, x, yT, 0, stripe);   // centreline
+      for (const s of [1, -1]) b.box(fl * 0.9, 0.05, 0.45, fx, yT, s * B * 0.56, white);                         // deck edges
+      if (jp) b.box(B * 0.2, 0.05, B * 1.18, fx - fl * 0.47, yT, 0, lin(0xa8402e));                               // red/white round-down
+      else for (const s of [1, -1]) b.box(B * 0.5, 0.05, 0.6, fx - fl * 0.46, yT, s * B * 0.3, white);
+      const side = portIsland ? -1 : 1;
+      const xi = hs.x, zi = side * B * 0.52, li = Math.min(hs.len, L * 0.16), hi = clamp(hs.h * 0.45, lv * 2.2, lv * 4);
+      b.box(li, hi, Math.max(3, hs.w * 0.7), xi, yF + 0.5, zi, sup);
+      b.box(li * 0.45, lv * 1.3, Math.max(2.5, hs.w * 0.55), xi + li * 0.2, yF + 0.5 + hi, zi, sup);
+      b.box(li * 0.4, 0.8, Math.max(2.6, hs.w * 0.58), xi + li * 0.24, yF + 0.5 + hi + lv * 0.75, zi, win);     // bridge windows
+      pole(xi + li * 0.25, yF + 0.5 + hi + lv * 1.3, lv * 3.2, 0.3, zi);
+      b.box(0.3, 0.3, B * 0.25, xi + li * 0.25, yF + 0.5 + hi + lv * 3.5, zi, mast);                                 // yard
+      if (jp && portIsland) {
+         // Akagi / Hiryu: funnels trunked out and down over the starboard side, below the deck
+         const fx0 = (funnels[0]?.x ?? 4);
+         const g = new THREE.CylinderGeometry(2.6, 3.1, B * 0.45, 10).rotateX(Math.PI / 2 + 0.55);
+         b.put(g, fx0, yF - lv * 0.9, B * 0.58, dark);
+         smoke.push(new THREE.Vector3(fx0, yF - lv * 1.9, B * 0.82));
+      } else {
+         const fr = funnels[0] ? funnels[0] : { x: xi - li * 0.3, r: 5, h: 12 };
+         const g = new THREE.CylinderGeometry(1, 1, lv * 2.6, 12); g.translate(0, lv * 1.3, 0); g.scale(Math.min(fr.r * 1.1, L * 0.03), 1, B * 0.05);
+         const xf = clamp(fr.x, xi - li * 0.5, xi + li * 0.5);
+         b.put(g, xf - li * 0.25, yF + 0.5 + hi, zi, dark);
+         smoke.push(new THREE.Vector3(xf - li * 0.25, yF + 0.5 + hi + lv * 2.6, zi));
+      }
+      // deck park: two rows of planes aft (fuselage + wing, tails toward the stern)
+      const pc = col.plane;
+      for (let r = 0; r < 3; r++) for (let k = -1; k <= 1; k++) {
+         const px = fx - fl * 0.4 + r * 16, pz = k * B * 0.3;
+         b.box(10, 1.2, 1.2, px, yT + 0.6, pz, pc);
+         b.box(2, 0.25, k === 0 ? 12 : 6.5, px + 1.2, yT + 0.45, pz, pc);
+         b.box(1.2, 1.5, 0.2, px - 4.4, yT + 1.3, pz, pc);
+      }
    } else if (type === 'TR') {
       // freighter: cream midships/aft house with bridge, cargo hatches, masts with derricks
       const hwT = Math.max(2, Math.min(W / 2, hw((x0 + x1) / 2) * 0.92)), len = x1 - x0;

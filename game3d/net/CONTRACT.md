@@ -103,6 +103,11 @@ Kept out: `training` (exercise for one captain, no allied ship), `laststand` (th
 alone). Today's limits (measured with `coopSlots`): rheinuebung 2 (Bismarck, Prinz Eugen),
 wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 
+Carriers stay out of net games until the snapshot carries aircraft: `validClass` and
+`allowedShips` drop carrier classes, `replaceableBots` skips CV bots, and every net World is built
+with `coop: true`, which keeps bot carriers off the roster (`updateAir` returns early with
+`world.net` set).
+
 ## Game side behaviour (`game3d/net/game.js`)
 
 - `startNetGame(session)` returns at once; the match starts after the handshake below.

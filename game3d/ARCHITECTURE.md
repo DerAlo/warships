@@ -49,6 +49,37 @@ hooks); the shared files only call into them.
 - Saved profiles: the boats are appended to the tech tree; `progress3d.js` fills missing ship
   entries on load, so older `warships3d.profile.v1` data keeps working.
 
+## Carriers and aircraft (`air.js`, `ai_air.js`, `airui.js`, `air3d.js`)
+
+Class `CV` ("Flugzeugträger"): a ship whose config has an `air` block (`AIR()` in `config.js`:
+per type `tb` / `db` / `ft` the plane name, `hangar`, `squad`, `flight`, `hp`, `speed`, `restock`,
+`weapon`; shared `service` and `fuel`). Every ship also gets `aa` (`aaProfile`: range, dps, three
+bands) and `aaFocus` (-1 port, +1 starboard, 0 even).
+
+- State: `world.squadrons` (array of squads, see the header of `air.js` for the fields),
+  `world.bombs` (fixed pool, `alive` flag), `ship.air` (`deckT`, per type `hangar`, `max` =
+  restock target that missions may lower, `service` queue, `sel` = the player's selected type). Aerial torpedoes are ordinary `world.torpedoes`
+  with `air: true` and `arm` (metres before they can hit).
+- Step: `updateAir(world, dt)` runs after `updateSubs` in `World.update`: deck/service/restock,
+  `squadThink` (bots and released player squads; skipped while `sq.human`), flight, fighters,
+  AA (10 Hz, `AA_DT`), bombs. `sq.prev` holds the pose at the start of the step for render
+  interpolation. `airSpots` feeds the spotting pass.
+- Orders: `launchSquadron(world, ship, type, order, human)`, `recallSquadron`, `orderPatrol`,
+  `dropWeapons` (needs `aimT` ≥ `tbAimMin` / `dbAimMin`; one flight per call), `cycleAaFocus`.
+- Events: `airLaunch`, `airInfo`, `airDrop`, `airLand`, `planeDown` (`srcId` shooter ship,
+  `dstId` owning carrier), `aaFocus`. Effects: `flak`, `planeDown`, `splash`.
+- Bots: `carrierPlan` (stand-off, strike timing, `launchT` per mission, fighter cover and
+  scouting; fighters go for enemy fighters on friendly planes first, then bombers),
+  `airEvade` for every bot ship (comb torpedo runs, turn under dive bombers, close up
+  on the nearest friend while planes are around).
+- Client: `AirUi` owns keys 1–3 / E / F / 4 on a carrier, the squadron chase camera
+  (`cam3.override` pose), the air and AA panels, the aim fan/ellipse and plane markers
+  (`drawAir` from `hud3d.js`, `drawAirMap` from `minimap3d.js`). `AirModels` (`air3d.js`) draws
+  every plane, wreck and falling bomb with three `InstancedMesh`es (3 draw calls in all).
+- **Singleplayer only.** `updateAir` returns early when `world.net` is set, random battles add
+  carriers only when `!world.coop`, and Midway lists `playableShips: ['Enterprise']`. The net
+  snapshot codec does not carry squadrons, bombs or aerial torpedo flags yet.
+
 ## Coordinates & scale
 
 * Sim plane: `{x, y}`; X+ = east, Y+ = south; angle 0 = +x (east), CCW positive in sim math,

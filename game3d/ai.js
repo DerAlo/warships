@@ -16,6 +16,7 @@ import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
 import { subPlan, subFireRange } from './ai_sub.js';
+import { carrierPlan, airEvade } from './ai_air.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
 const TARGET_DT = 2;               // s between target re-evaluations
@@ -189,6 +190,9 @@ function decide(b, w, d) {
       tel = 4;
    } else if (ai.breakOff) {
       want = threat.away; tel = 4;
+   } else if (b.air && ai.role === 'cv') {
+      // carriers: stand off behind the fleet and fly strikes (ai_air.js)
+      ({ want, tel, goal } = carrierPlan(b, w, d, threat));
    } else if ((sp = subPlan(b, w, d, tgt, threat, searchGoal))) {
       // submarines, sub hunters and ships dodging a known boat (ai_sub.js)
       want = sp.want; tel = sp.tel; goal = sp.goal;
@@ -224,6 +228,7 @@ function decide(b, w, d) {
       }
    }
 
+   if (w.squadrons.length) want = airEvade(b, w, want, d);
    want = separation(b, w, want);
    want = navDetour(b, w, want, goal);
    want = avoidTerrain(b, w, want);

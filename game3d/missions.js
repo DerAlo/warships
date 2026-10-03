@@ -1,9 +1,10 @@
 // game3d/missions.js — singleplayer missions: maps (islands), environment, teams, objectives,
 // scripted reinforcements and win/lose logic. MISSIONS is pure data for the menu; setupMission /
 // updateMission are called by World. Mission text is German (UI), code English.
-import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, NATION_BLOC } from './config.js';
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
+import { canLaunch, launchSquadron } from './air.js';
 
 // ---------------------------------------------------------------- names
 const POOLS = {
@@ -143,6 +144,9 @@ const UK_TEAM = [['KGV', 0, -700], ['Rodney', -300, 700], ['Norfolk', 500, -2500
 // rng stream stays untouched). A player sailing for the other bloc (Allied ship in the Axis
 // line-up) swaps the two fleets: the player's team is always called first.
 const SUB_CHANCE = 0.4;
+// Carriers (missions flagged `carriers`): CV_CHANCE of the battles put one carrier on each side in
+// place of the light cruiser, set well back. Never in co-op worlds (the net codec carries no planes).
+const CV_CHANCE = 0.3;
 function rollFleet(w, slots, playerCls) {
    const S = w._script;
    if (playerCls) S.swap = (NATION_BLOC[SHIPS[playerCls].hull.nation] || 'axis') !== (BOT_POOLS.axis[slots[0][0]] ? 'axis' : 'allies');
@@ -176,6 +180,20 @@ function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({}
          const pool = BOT_SUBS[axis !== !!S.swap ? 'axis' : 'allies'];
          slots[dd] = [pool[(h >>> 8) % pool.length], slots[dd][1], slots[dd][2]];
       }
+   }
+   const pCV = !!playerCls && SHIPS[playerCls].hull.type === 'CV';
+   if (S.cvs === undefined) {
+      let hc = (Math.imul((w.seed >>> 0) ^ 0x2c1b3c6d, 2654435761) >>> 0);
+      hc ^= hc >>> 15; hc = Math.imul(hc, 2246822519) >>> 0; hc ^= hc >>> 13;
+      S.cvHash = hc >>> 0;
+      S.cvs = !w.coop && !!S.def?.carriers && (pCV || S.cvHash % 100 < CV_CHANCE * 100);
+   }
+   let cl = -1;
+   slots.forEach((s, i) => { if (SHIPS[s[0]].hull.type === 'CL') cl = i; });
+   if (S.cvs && cl >= 0) {
+      const pool = BOT_CVS[axis !== !!S.swap ? 'axis' : 'allies'];
+      slots[cl] = [pCV ? playerCls : pool[(S.cvHash >>> 8) % pool.length], -2600, slots[cl][2] * 0.3];
+      if (pCV) pIdx = cl;
    }
    if (playerCls && pIdx < 0) {
       pIdx = slots.findIndex(s => s[0] === playerCls);
@@ -286,7 +304,7 @@ const DEFS = [
       briefing: 'Ein britischer Kampfverband wurde vor dem Nordkap gemeldet. Unser Verband aus zwei Schlachtschiffen, ' +
          'drei Kreuzern und zwei Zerstörern stellt ihn zwischen den Schären. Vernichten Sie alle feindlichen Schiffe. ' +
          'Nutzen Sie die Inseln als Deckung und bleiben Sie in der Nähe Ihrer Verbündeten.',
-      env: { time: 'day', weather: 'overcast', front: { at: 150, dur: 50, to: 'storm' } }, type: 'annihilation', playableShips: null, recommendedShip: 'Bismarck',
+      env: { time: 'day', weather: 'overcast', front: { at: 150, dur: 50, to: 'storm' } }, type: 'annihilation', carriers: true, playableShips: null, recommendedShip: 'Bismarck',
       arena: 12000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
@@ -315,7 +333,7 @@ const DEFS = [
       briefing: 'Drei strategische Seegebiete – A, B und C – entscheiden über die Kontrolle der Fjordausfahrt. ' +
          'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
          'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
-      env: { time: 'day', weather: 'clear', front: { at: 240, dur: 60, to: 'rain', text: 'Regenböen ziehen auf' } }, type: 'domination', playableShips: null, recommendedShip: 'Hipper',
+      env: { time: 'day', weather: 'clear', front: { at: 240, dur: 60, to: 'rain', text: 'Regenböen ziehen auf' } }, type: 'domination', carriers: true, playableShips: null, recommendedShip: 'Hipper',
       arena: 11000, timeLimit: 20 * 60, stars: 2,
       setup(w, shipKey) {
          islands(w, [
@@ -883,6 +901,134 @@ const DEFS = [
       timeout(w) {
          setObj(w, 'sink', 'failed');
          w.end(false, 'Die Scharnhorst ist im Schneesturm entkommen.');
+      },
+   },
+
+   // ------------------------------------------------------------ op 4: Midway (carriers; singleplayer only)
+   {
+      id: 'midway', group: 'ops', name: 'Schlacht um Midway', subtitle: 'Zentralpazifik · 4. Juni 1942',
+      fleet: { own: 'Enterprise · Hornet, Yorktown, Atlanta, Vincennes, 4 Zerstörer', foe: 'Akagi, Kaga, Sōryū, Hiryū · Kirishima, Tone, Chikuma, 3 Zerstörer' },
+      briefing: 'Nordöstlich von Midway: Die US-Funkaufklärung hat den japanischen Angriff vorhergesagt. Task Force 16 und 17 stehen mit drei Trägern auf der Flanke der Kido Butai, ' +
+         'deren vier Träger gerade die Insel angreifen. Finden Sie den Verband mit Ihren Flugzeugen und schlagen Sie zu, solange seine Staffeln an Deck aufmunitioniert werden. ' +
+         'Jäger schützen Ihre Träger; Sturzkampfbomber treffen die Flugdecks, Torpedobomber die Wasserlinie. Halten Sie die Enterprise außerhalb der Reichweite der japanischen Geschütze.',
+      debrief: 'Am Vormittag des 4. Juni stürzten sich die Dauntless-Bomber der Enterprise und der Yorktown fast gleichzeitig auf Akagi, Kaga und Sōryū – binnen sechs Minuten brannten alle drei. ' +
+         'Die Hiryū schlug zurück und traf die Yorktown schwer, wurde aber am Nachmittag selbst versenkt. Vier Flottenträger und über 200 Flugzeuge gingen verloren; ' +
+         'die japanische Marine hat die Initiative im Pazifik nie zurückgewonnen.',
+      env: { time: 'day', weather: 'clear' }, type: 'historic', playableShips: ['Enterprise'], recommendedShip: 'Enterprise',
+      arena: 16000, timeLimit: 24 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-12400, -11800), r: 900, height: 22, seed: 951, lobes: 5, elong: 1.6, rot: 0.7, rough: 0.5, name: 'Midway' },
+            { c: P(2600, 11200), r: 260, height: 30, seed: 953, lobes: 3, rough: 0.8 },
+         ]);
+         const S = w._script, hard = w.difficulty.key === 'hard';
+         // Kido Butai: four carriers in a box, the battleship and the heavy cruisers on the flanks
+         const ax = 7600, ay = -2200, hj = Math.PI * 0.9;
+         S.cvs = [['Akagi', 'Akagi', 0, -1400], ['Akagi', 'Kaga', -1600, -1500], ['Hiryu', 'Sōryū', 0, 1400], ['Hiryu', 'Hiryū', -1600, 1500]]
+            .map(([cls, name, fx, fy]) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, telegraph: 3, hpMult: w.difficulty.botHP * 0.25 }));
+         // fuelled and armed planes on the hangar decks: the carriers burn easily (hpMult above);
+         // the morning raid on Midway cost planes, and the decks are busy rearming: thinner hangars
+         // and no launch for the first minutes (the American first strike meets little air cover)
+         // the combat air patrol is worn out from chasing the torpedo bombers all morning; lost planes
+         // are not replaced (max = what is left)
+         const kStrike = hard ? 0.75 : 0.6, kFt = hard ? 0.6 : 0.4;
+         S.ftAmmo = hard ? 0.7 : 0.5;
+         for (const c of S.cvs) {
+            for (const t of ['tb', 'db', 'ft']) c.air[t].max = c.air[t].hangar = Math.ceil(c.air[t].hangar * (t === 'ft' ? kFt : kStrike));
+            c.ai.launchT = hard ? 100 : 150;
+         }
+         S.escorts = [['Kirishima', 'Kirishima', 1600, 0], ['Takao', 'Tone', 600, -3200], ['Takao', 'Chikuma', 600, 3200],
+            ['Fubuki', 'Nowaki', 2600, -1800], ['Fubuki', 'Arashi', 2600, 1800], ['Fubuki', 'Hagikaze', -3200, 0]]
+            .slice(0, hard ? 6 : 5)
+            .map(([cls, name, fx, fy], i) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, ai: { escortId: S.cvs[i % 4].id } }));
+         // 1942 Japanese flak: few directors, slow 25 mm mounts that could not track fast dive bombers
+         const aaK = hard ? 0.75 : 0.6;
+         for (const s of [...S.cvs, ...S.escorts]) for (const b of s.aa.bands) b.dps *= aaK;
+         // Task Forces 16/17
+         const me = add(w, pickShip(this, shipKey), 'player', P(-6800, 4000), -0.25, { isPlayer: true });
+         S.own = [add(w, 'Enterprise', 'player', P(-8000, 5600), -0.25, { name: 'USS Hornet' }),
+            add(w, 'Enterprise', 'player', P(-9000, 1800), -0.25, { name: 'USS Yorktown' })];
+         S.screen = [['Cleveland', 'USS Atlanta', -5000, 3400], ['Cleveland', 'USS Vincennes', -7200, 1800],
+            ['Benham', 'USS Benham', -5200, 5000], ['Benham', 'USS Balch', -5800, 2200], ['Benham', 'USS Ellet', -7800, 6800], ['Benham', 'USS Maury', -8400, 400]]
+            .map(([cls, name, x, y], i) => add(w, cls, 'player', P(x, y), -0.25, { name, ai: { escortId: i < 2 || i > 3 ? me.id : S.own[i & 1].id } }));
+         later(S, 3, () => radio(w, 'Adm. Spruance', 'Catalina meldet zwei Träger, Peilung 320, Entfernung 180 Meilen. Alle Staffeln starten!'));
+         later(S, 40, () => radio(w, 'USS Yorktown', 'Unsere Wildcats übernehmen den Jagdschutz über dem Verband.'));
+         objective(w, 'find', 'Finden Sie die japanischen Träger (Flugzeuge klären auf)');
+         objective(w, 'sink', 'Versenken Sie mindestens zwei japanische Träger (0/4)');
+         objective(w, 'yorktown', 'Die Yorktown darf nicht verloren gehen', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 4 };
+      },
+      update(w, dt, S) {
+         // Catalina flying boats shadow the Kido Butai: a rough fix on the carriers every 150 s
+         if (w.time >= (S.pby ?? 2)) {
+            S.pby = w.time + 150;
+            for (const s of S.cvs) if (s.alive && !s.detected) s.lastSeen = { x: s.pos.x + (w.rng() - 0.5) * 2400, y: s.pos.y + (w.rng() - 0.5) * 2400, heading: s.heading, speed: s.speed, t: w.time };
+         }
+         if (!S.found && S.cvs.some(s => s.alive && s.detected)) {
+            S.found = true;
+            setObj(w, 'find', 'done', 'Japanischer Trägerverband gefunden');
+            radio(w, 'Lt. Cdr. McClusky', 'Feindliche Träger in Sicht! Wir greifen an.');
+         }
+         // Hornet and Yorktown send Wildcats ahead of their strikes to tie down the Zeros over the
+         // Kido Butai (the player escorts his own strikes: fighters patrol where they are released)
+         // the Zeros of the combat air patrol go up with what ammunition the morning left them
+         for (const q of w.squadrons) if (q.side === 'enemy' && q.type === 'ft' && q.state === 'launch' && !q.mwAmmo) { q.mwAmmo = true; q.ammo *= S.ftAmmo; }
+         if (S.found && w.time >= (S.sweepT ?? 0)) {
+            S.sweepT = w.time + 5;
+            let jx = 0, jy = 0, n = 0;
+            for (const s of S.cvs) if (s.alive) { jx += s.pos.x; jy += s.pos.y; n++; }
+            jx /= n || 1; jy /= n || 1;
+            // the inbound strike closest to the Kido Butai: the escort's post moves with it
+            let inbound = null, bd = 14000 * 14000;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type === 'ft' || q.armed <= 0 || (q.state !== 'fly' && q.state !== 'attack')) continue;
+               const d2 = (q.pos.x - jx) ** 2 + (q.pos.y - jy) ** 2;
+               if (d2 < bd) { bd = d2; inbound = q; }
+            }
+            let covered = false;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type !== 'ft' || !q.order?.sweep || q.state === 'return' || q.state === 'land') continue;
+               covered = true;
+               if (inbound) { q.center.x = inbound.pos.x; q.center.y = inbound.pos.y; q.patrolT = Math.max(q.patrolT, 20); }
+            }
+            if (n && inbound && !covered) {
+               for (const c of S.own) {
+                  if (!c.alive || !canLaunch(w, c, 'ft') || c.air.ft.hangar < 2) continue;
+                  launchSquadron(w, c, 'ft', { kind: 'patrol', pos: { x: inbound.pos.x, y: inbound.pos.y }, sweep: true });
+                  break;
+               }
+            }
+         }
+         if (!S.raid && w.squadrons.some(q => q.side === 'enemy' && q.order?.kind === 'strike' && q.state === 'fly')) {
+            S.raid = true;
+            radio(w, 'Radar Yorktown', 'Feindliche Flugzeuge im Anflug! Jäger auf Abfangkurs!', 'warn');
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (S.cvs.includes(ship)) {
+            w.score.player = S.cvs.filter(s => !s.alive).length;
+            objText(w, 'sink', `Versenken Sie mindestens zwei japanische Träger (${w.score.player}/4)`);
+            if (w.score.player === 2) radio(w, 'Adm. Spruance', 'Zwei Träger erledigt – weiter so, die Hiryū darf nicht entkommen!');
+            radio(w, 'Adm. Spruance', `${ship.name} sinkt!`);
+            if (w.score.player >= 4) {
+               setObj(w, 'find', 'done');
+               setObj(w, 'sink', 'done');
+               if (S.own[1].alive) setObj(w, 'yorktown', 'done');
+               w.end(true, 'Alle vier japanischen Träger sind versenkt – Midway ist gerettet.');
+            }
+         } else if (ship === S.own[1]) setObj(w, 'yorktown', 'failed');
+         if (ship.side === 'player' && ship.type === 'CV' && S.own.every(s => !s.alive) && w.player && !w.player.alive) w.end(false, 'Die amerikanischen Träger sind verloren.');
+      },
+      timeout(w, S) {
+         const sunk = S.cvs.filter(s => !s.alive).length;
+         if (sunk >= 2) {
+            setObj(w, 'sink', 'done', `Japanische Träger versenkt (${sunk}/4)`);
+            if (S.own[1].alive) setObj(w, 'yorktown', 'done');
+            w.end(true, 'Die Kido Butai ist zerschlagen – der Rest dreht nach Westen ab.');
+         } else {
+            setObj(w, 'sink', 'failed');
+            w.end(false, 'Die japanischen Träger sind entkommen – Midway bleibt bedroht.');
+         }
       },
    },
 ];

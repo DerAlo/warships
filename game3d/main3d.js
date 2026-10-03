@@ -25,6 +25,7 @@ import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
+import { AirUi } from './airui.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
 import { createNetGame } from './net/game.js';
 
@@ -125,6 +126,11 @@ function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringif
 const shellcam = new ShellCam({ cam3, input, hud, overlay, settings, saveSettings, simDt: SIM_DT, hintEl: $('shellcam-hint'),
    world: () => world, phase: () => phase, torpWarn: () => fx.torpWarn.length > 0, killCamOn: () => kc.on,
    lockedShip: () => lockedShip(), mapOpen: () => ctl.mapOpen });
+// carriers / squadrons / AA focus (airui.js): the squadron view owns cam3.override while it is open
+const airui = new AirUi({ hud, audio, onView: (on) => {
+   if (on) { shellcam.reset(); endKillCam(); renderer.focus = airui.focus; }
+   else { renderer.focus = null; input.mouse.dx = 0; input.mouse.dy = 0; input.mouse.wheel = 0; }
+} });
 let turretCache = [];
 let lastMarkers = [];
 let fired = { shots: 0, salvos: 0, torps: 0 };
@@ -163,6 +169,9 @@ window.__setRender = (on) => { renderOn = !!on; };
 window.__killCam = (id) => { const v = id != null ? shipById(id) : world?.ships.find(s => s.side !== P?.side); if (v) startKillCam(v); return kc.on; };
 window.__killCamOn = () => kc.on;
 window.__shellCam = () => shellcam.debug();
+// carrier hooks: squadron view state, planes drawn last frame
+window.__air = () => ({ flying: airui.flying, sqId: airui.sqId, drawn: renderer.air?.drawn ?? 0, override: !!cam3.override,
+   sel: P?.air?.sel ?? null, squads: world ? world.squadrons.length : 0 });
 window.__photo = () => ({ on: phase === 'photo', yaw: photo.yaw, pitch: photo.pitch, dist: photo.dist });
 window.__music = () => fx.music;
 // Aim relative to the ship's heading (radians, + = starboard) and optionally at a range (m).
@@ -478,7 +487,7 @@ function beginMatch() {
    // the last match may have ended in the scope: snap the lens back instead of blending out
    if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
-   cam3.peri = null; subui.reset(world);
+   cam3.peri = null; subui.reset(world); airui.reset(world, cam3);
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
 
@@ -527,7 +536,7 @@ input.wheelGate = () => (phase === 'photo' || (phase === 'playing' && !ctl.mapOp
 function toMenu() {
    const n = net;
    net = null;
-   subui.stop();
+   subui.stop(); airui.stop();
    shellcam.reset(); endKillCam(); cam3.override = null; input.noLock = false; $('photo-hint')?.classList.add('hidden');
    phase = 'menu';
    input.gameActive = false;
@@ -550,6 +559,8 @@ function frameInput(dt) {
    if (inp.tapped('H')) { ctl.help = !ctl.help; hud.toggleHelp(ctl.help); }
 
    subui.frame(p, world, cam3, dt);
+   // carrier keys (1-3 plane type, E launch / take over, 4 AA focus); true = squadron view
+   if (airui.input(inp, p, world, dt, { mapOpen: ctl.mapOpen, sens: settings.sens, net: !!net })) { cam3.bino = false; return; }
    if (!p || !p.alive) { cam3.bino = false; return; }
 
    // --- engine telegraph / rudder: persistent steps, hold repeats
@@ -561,9 +572,9 @@ function frameInput(dt) {
 
    // --- weapons
    const ti = torpInfo(p);
-   if (inp.tapped('1')) selectAmmo('HE');
-   if (inp.tapped('2')) selectAmmo('AP');
-   if (inp.tapped('3')) {
+   if (!p.air && inp.tapped('1')) selectAmmo('HE');      // carriers: 1-3 pick the plane type (airui)
+   if (!p.air && inp.tapped('2')) selectAmmo('AP');
+   if (!p.air && inp.tapped('3')) {
       if (!ti) { audio.denied(); hud.msg('Keine Torpedos an Bord', 'warn'); }
       else if (ctl.mode === 'torp') {
          ctl.spread = ctl.spread === 'narrow' ? 'wide' : 'narrow';
@@ -799,6 +810,7 @@ function applyControls(dt) {
    if (net) net.control(cmd);
    turretCache = computeTurrets(p);
 
+   if (airui.flying) return;            // squadron view: the ship holds fire
    if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
    // Ctrl held = secondary target picking, never a salvo
@@ -1001,7 +1013,7 @@ function processEvents(dt) {
             if (e.state === 'done' || e.state === 'failed') audio.objective(e.state); else audio.radio();
             break;
          }
-         default: subui.event(e, p, world, mine, onMe); break;
+         default: subui.event(e, p, world, mine, onMe); airui.event(e, p, world); break;
       }
    }
    // old sim: {kind:'sink', ship} records + synthesized hit ribbons
@@ -1317,7 +1329,7 @@ function buildUi(dt) {
 
    // lock panel + lead marker (guns and torpedoes; see buildLead)
    ui.lockShip = lockedShip();
-   buildLead(ui, markers);
+   if (airui.flying) lead.shown = false; else buildLead(ui, markers);
    ui.leadMark = lead;
 
    // torpedo fan (screen polylines)
@@ -1357,8 +1369,9 @@ function buildUi(dt) {
    ui.torpWarnCount = fx.torpWarn.length;
    ui.camYaw = pose?.yaw ?? cam3.yaw;
    subui.fill(ui, p, world, cam3, project, subui.peri.y, dt);
+   airui.fill(ui, p, world, project, dt);
    ui.mapOpts = {
-      sub: ui.sub.map, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
+      sub: ui.sub.map, airCtl: airui.sqId, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
       aimPoint: aim.point, torpFan: ctl.mode === 'torp' && ui.torpInfo ? { bearings: torpBearings(ui.torpInfo, aim.yaw), range: ui.torpInfo.range } : null,
    };
    return ui;
@@ -1399,7 +1412,7 @@ function updateMusic(dt) {
 const kc = { on: false, t: 0, dur: 2.2, ship: null, a0: 0, hp0: 0, d: 400, pose: { px: 0, py: 0, pz: 0, tx: 0, ty: 0, tz: 0, fov: 40 } };
 function startKillCam(v) {
    const p = P;
-   if (!settings.killCam || kc.on || phase !== 'playing' || !p?.alive || ctl.mapOpen) return;
+   if (!settings.killCam || kc.on || phase !== 'playing' || !p?.alive || ctl.mapOpen || airui.flying) return;
    if (fx.torpWarn.length || p.hp < p.maxHP * 0.25) return;   // never in obvious danger
    kc.on = true; kc.t = 0; kc.w0 = performance.now(); kc.ship = v; kc.hp0 = p.hp;
    kc.d = clamp(shipLen(v) * 2.4, 260, 700);
@@ -1540,6 +1553,7 @@ function frame() {
       const alpha = phase === 'playing' || (net && (phase === 'paused' || phase === 'photo')) ? clamp01(acc / SIM_DT) : 1;
       if (world) {
          applyInterp(alpha);
+         airui.frame(world, alpha, dt);   // squadron render positions + squadron camera
          try {
             shellcam.update(dt, alpha);
             cam3.spectate = !!(P && !P.alive && P.sinking);

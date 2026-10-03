@@ -6,6 +6,7 @@ import { WORLD, SHIPS, CONSUMABLES } from './config.js';
 import { TAU, DEG, clamp, clamp01, angleDelta, approach, toWorld, toLocal, obstacleT, obstacleRadiusAt, dist2 } from './utils.js';
 import { makeShell, launchAngle, flightTime } from './combat.js';
 import { initSubState, subSpeedFactor, subDetectRange, SUB_TUBE_ARC } from './submarine.js';
+import { initAirState } from './air.js';
 
 const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, SS: 18, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
 const FLOOD_DUR = 40;
@@ -109,6 +110,7 @@ export class Ship {
       // captain skills baked into the config at creation (1 = stock)
       this.torpSpot = cfg.torpSpot || 1; this.fireDur = cfg.fireDur || 1; this.adrenaline = cfg.adrenaline || 0;
       initSubState(this);             // depth, battery, sonar contact, depth-charge racks (submarine.js)
+      initAirState(this);             // hangars (carriers), AA profile and focus (air.js)
       if (opts.depth && this.sub) { this.depthTarget = this.depthF = this.depth = clamp(opts.depth, 0, 2); }
    }
 

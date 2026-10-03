@@ -20,12 +20,12 @@ const WEATHER_LABEL = { clear: 'Klar', overcast: 'Bewölkt', rain: 'Regen', stor
 const DIFFS = [['easy', 'Einfach'], ['normal', 'Normal'], ['hard', 'Schwer']];
 const RATING_LABEL = [
    ['firepower', 'Feuerkraft'], ['survivability', 'Überlebensfähigkeit'], ['mobility', 'Manövrierbarkeit'],
-   ['concealment', 'Tarnung'], ['torpedoes', 'Torpedos'],
+   ['concealment', 'Tarnung'], ['torpedoes', 'Torpedos'], ['antiAir', 'Flugabwehr'],
 ];
 const RIBBON_ORDER = ['kill', 'citadel', 'pen', 'overpen', 'he', 'sec', 'torp', 'fire', 'flood', 'ricochet', 'shatter', 'spotted', 'cap'];
 const ESCAPE_LABEL = { arrived: 'angekommen', retreated: 'abgelaufen', escaped: 'entkommen' };
 const STORE_KEY ='warships3d.progress.v1';
-const CLASS_ORDER = { BB: 0, CA: 1, CL: 2, DD: 3, SS: 4 };
+const CLASS_ORDER = { CV: 0, BB: 1, CA: 2, CL: 3, DD: 4, SS: 5 };
 const natOf = (k) => SHIPS[k]?.hull?.nation || 'de';
 // register tabs: two-letter codes (the full navy name is the tooltip)
 const NAT_CODE = { de: 'DE', uk: 'GB', us: 'US', jp: 'JP', fr: 'FR', it: 'IT', su: 'SU' };
@@ -590,6 +590,8 @@ export class Menu3D {
             <span>Panzergranate</span><span>${fmtInt(S.apDmg)}</span>
             ${S.torp ? `<span>Torpedos</span><span>${S.torp.launchers}× ${Math.round(S.torp.tubes / S.torp.launchers)} · ${String(S.torp.rangeKm).replace('.', ',')} km · ${S.torp.speedKn} kn</span>` : ''}
             ${S.secRangeKm ? `<span>Mittelartillerie</span><span>${String(S.secRangeKm).replace('.', ',')} km</span>` : ''}
+            ${S.air ? ['tb', 'db', 'ft'].map(t => `<span>${esc(S.air[t].name)}</span><span>${S.air[t].hangar} im Hangar · Staffel ${S.air[t].squad}</span>`).join('') : ''}
+            ${S.aaKm ? `<span>Flugabwehr</span><span>${String(S.aaKm).replace('.', ',')} km · ${S.aaDps} Schaden/s</span>` : ''}
             <span>Geschwindigkeit</span><span>${String(S.speedKn).replace('.', ',')} kn</span>
             <span>Tarnwert</span><span>${String(S.detectKm).replace('.', ',')} km</span>
             <span>Gürtelpanzer</span><span>${S.belt} mm</span>

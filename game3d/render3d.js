@@ -13,6 +13,7 @@ import { Terrain } from './terrain3d.js';
 import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
+import { AirModels } from './air3d.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
 
@@ -45,6 +46,8 @@ export class Renderer3D {
       this.cam.terrain = this.terrain;   // camera collision samples the real relief
       this.fx =new FX(this.scene, this.ocean, this.terrain);
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
+      this.air = new AirModels(this.scene, this.fx);
+      this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
       this.post = new Post(r, { samples: 4, bloomLevels: 5 });
 
       this.hudCanvases = new HudCanvases3D();
@@ -121,6 +124,7 @@ export class Renderer3D {
       this.ocean.setDepthMap(res.depthTex, res.rect);
       this.ships.clear();
       this.fx.clear();
+      this.air.clear();
       this.arena = arena;
    }
    buildObstacles(world) { this.buildWorld(world); }
@@ -149,6 +153,7 @@ export class Renderer3D {
       this.ocean.setHulls(this.ships.hulls);
       this._updateShadow(world);
       this.fx.update(world, dt, this.time, this.camera, this.ships);
+      this.air.update(world, dt, this.time);
 
       const env = this.env;
       this.post.render(this.scene, this.camera, {
@@ -176,7 +181,8 @@ export class Renderer3D {
       const p = world.player;
       const cp = this.camera.position;
       let cx, cz;
-      if (p && p.pos && p.alive !== false) { cx = p.pos.x; cz = p.pos.y; }
+      if (this.focus) { cx = this.focus.x; cz = this.focus.y; }
+      else if (p && p.pos && p.alive !== false) { cx = p.pos.x; cz = p.pos.y; }
       else { this.camera.getWorldDirection(_f); const t = clamp(cp.y / Math.max(0.05, -_f.y), 0, 3000); cx = cp.x + _f.x * t; cz = cp.z + _f.z * t; }
       const camD = Math.hypot(cp.x - cx, cp.y, cp.z - cz);
       let half = clamp(camD * 1.15 + 220, 380, 1800);

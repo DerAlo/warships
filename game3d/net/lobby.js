@@ -29,7 +29,7 @@
 import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots, coopRoles } from './coop.js';
 import { MISSIONS, getMission } from '../missions.js';
-import { PLAYABLE, SHIPS } from '../config.js';
+import { PLAYABLE, SHIPS, isCarrier } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
 
 export { NET_VERSION };
@@ -56,7 +56,8 @@ async function deriveKey(password, roomId) {
 const proofOf = async (key, roomId, peerId) => hex(await crypto.subtle.digest('SHA-256', enc(`knock:${key}:${roomId}:${peerId}`)));
 
 export const coopMissions = () => MISSIONS.filter(m => coopSlots(m.id) > 0);
-export const allowedShips = (missionId) => getMission(missionId)?.playableShips || PLAYABLE;
+// carriers stay out of net games until the snapshot carries aircraft
+export const allowedShips = (missionId) => (getMission(missionId)?.playableShips || PLAYABLE).filter(k => !isCarrier(k));
 // the player's own choice for a mission: allowed there and unlocked in the local career profile
 export const ownShips = (missionId, profile) => allowedShips(missionId).filter(k => SHIPS[k] && isUnlocked(profile, k));
 export function pickShip(missionId, profile, preferred) {

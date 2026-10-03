@@ -3,7 +3,7 @@
 // roster and ship ids come out identical on every peer.
 import { World, makeStats } from '../state.js';
 import { Ship } from '../ship.js';
-import { SHIPS, PLAYABLE } from '../config.js';
+import { SHIPS, PLAYABLE, isCarrier } from '../config.js';
 import { getMission } from '../missions.js';
 import { applyLoadout } from '../progress3d.js';
 
@@ -18,14 +18,16 @@ export function replaceableBots(world) {
       if (v instanceof Ship) held.add(v);
       else if (Array.isArray(v)) for (const x of v) if (x instanceof Ship) held.add(x);
    }
-   return world.bots.filter(b => b.side === 'player' && b.alive && b.type !== 'TR' && !(b.ai && (b.ai.passive || b.ai.route)) && !held.has(b));
+   return world.bots.filter(b => b.side === 'player' && b.alive && b.type !== 'TR' && b.type !== 'CV' && !(b.ai && (b.ai.passive || b.ai.route)) && !held.has(b));
 }
 
 // The host cannot trust the ship a client claims: unknown or not allowed -> the mission's choice.
 export function validClass(missionId, cls) {
    const def = getMission(missionId) || getMission('standard');
-   const allowed = def.playableShips || PLAYABLE;
-   return typeof cls === 'string' && SHIPS[cls] && allowed.includes(cls) ? cls : (def.recommendedShip || allowed[0]);
+   // carriers stay out of net games until the snapshot carries aircraft (CONTRACT.md)
+   const allowed = (def.playableShips || PLAYABLE).filter(k => !isCarrier(k));
+   if (typeof cls === 'string' && SHIPS[cls] && allowed.includes(cls)) return cls;
+   return def.recommendedShip && !isCarrier(def.recommendedShip) ? def.recommendedShip : allowed[0];
 }
 
 // Career loadouts arrive over the network too: keep only the shape applyLoadout() reads.
@@ -58,7 +60,7 @@ export function historicShips(world) {
 // `self` is the local slot: world.player becomes that ship, so renderer, HUD, camera and audio
 // read the world exactly as in a singleplayer match.
 export function buildNetWorld(o) {
-   const w = new World(o.difficulty, { mission: o.mission, ship: o.classes[0], seed: o.seed >>> 0, loadout: o.loadouts[0] || null });
+   const w = new World(o.difficulty, { mission: o.mission, ship: o.classes[0], seed: o.seed >>> 0, loadout: o.loadouts[0] || null, coop: true });
    const fixed = !!getMission(o.mission)?.fixedShips;
    const host = w.player;
    const label = (ship, i) => { const n = o.names && o.names[i]; if (n) { ship.captain = n; ship.name = ship.name + ' (' + n + ')'; } };
@@ -108,7 +110,7 @@ export function missionSlots(missionId) {
       n = MAX_HUMANS;
       try {
          for (const seed of [11, 4242, 987654321]) {
-            const w = new World('normal', { mission: def.id, ship: validClass(def.id, null), seed });
+            const w = new World('normal', { mission: def.id, ship: validClass(def.id, null), seed, coop: true });
             n = Math.min(n, 1 + (def.fixedShips ? historicShips(w) : replaceableBots(w)).length);
          }
       } catch (e) { n = 0; }
@@ -128,7 +130,7 @@ export function missionRoles(missionId, difficulty = 'normal') {
    let roles = roleCache.get(key);
    if (!roles) {
       try {
-         const w = new World(difficulty, { mission: def.id, ship: validClass(def.id, null), seed: 11 });
+         const w = new World(difficulty, { mission: def.id, ship: validClass(def.id, null), seed: 11, coop: true });
          roles = [w.player, ...historicShips(w)].slice(0, n).map(s => ({ cls: s.cls, name: s.name }));
       } catch (e) { roles = []; }
       roleCache.set(key, roles);
