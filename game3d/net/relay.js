@@ -189,7 +189,7 @@ async function roomCipher(room, key) {
 //           async (hooks: { onUp(id), onDown(id), onData(bytes, id), onFail(kind, id) }) ->
 //           { send(bytes, id), leave() }. The room works without it.
 // Besides the Transport interface: link(id) -> { via: 'direct'|'relay', rtt }, onRoute(fn(id, via)),
-// stats().
+// stats(), heardAny(exceptId) -> ms since any other peer was last heard (null: nobody else).
 export async function makeRoomTransport(o) {
    const { bus, selfId, room, hostId } = o;
    const cipher = await roomCipher(room, o.key);
@@ -514,6 +514,13 @@ export async function makeRoomTransport(o) {
       onPeerLeave(fn) { onLeave = fn; },
       onRoute(fn) { onRoute = fn; },
       link(id) { const p = peers.get(id); return p && p.joined ? { via: via(p), rtt: p.rtt } : null; },
+      // ms since anything came from any peer of the room but `except` on any route (pings
+      // included); null: there is no other peer
+      heardAny(except) {
+         let ms = null;
+         for (const p of peers.values()) if (p.joined && p.id !== except) { const d = now() - Math.max(p.relayAt, p.directAt, p.born); if (ms === null || d < ms) ms = d; }
+         return ms;
+      },
       stats() {
          return { ...st, rx: JSON.parse(JSON.stringify(st.rx)), brokers: bus.stats(),
             peers: [...peers.values()].filter(p => p.joined).map(p => ({ id: p.id, via: via(p), rtt: p.rtt, primary: primary(p) })) };

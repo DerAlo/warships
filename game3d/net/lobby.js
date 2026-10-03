@@ -165,6 +165,8 @@ function sessionTransport(base, members, onLeave) {
       peers,
       link: (id) => base.link?.(id) ?? null,            // { via: 'direct'|'relay', rtt } with the real transport
       stats: () => base.stats?.() ?? null,
+      // ms since any peer of the room but `except` was last heard (null: nobody else there)
+      heardAny: base.heardAny ? (except) => base.heardAny(except) : undefined,
       send(channel, data, to) {
          if (!live) return;
          const t = to === undefined ? peers() : (Array.isArray(to) ? to : [to]).filter(id => set.has(id));
@@ -725,9 +727,9 @@ export class Lobby {
                return;
             }
             if (this._orphan && !this.isHost) {
-               // the host is gone and nobody took over
+               // the host is gone and nobody took over -- or this peer was the one cut off: the seat
+               // stays (the list offers the way back while the game is listed as running)
                this._orphan = false;
-               this._forgetSeat();
                this._drop('hostleft', 'Der Host hat das Spiel verlassen.');
             }
             if (this.isHost) { this._forgetSeat(); this._seats.clear(); this._back.clear(); this._startMsg = null; }

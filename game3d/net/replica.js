@@ -621,6 +621,8 @@ export function makeReplica(world, o) {
       act, control, onSnap, onEvt, onSync, hostLost, rehost, handover,
       // called every frame even when the sim loop does not run (results screen, menus)
       pump() { if (!ended && !pendingEnd && !lost && o.now() - lastSnapAt > (synced ? SILENCE : SILENCE * 2)) hostLost('timeout'); },
+      // s since the host's last snapshot
+      silent() { return o.now() - lastSnapAt; },
       get ended() { return ended; },
       get lost() { return lost; },
       info() { return { rt, delay, jitter: jit, rtt, snaps: snaps.length, newestTick, synced, unacked: unacked.length, batches: batches.size }; },

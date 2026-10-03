@@ -93,6 +93,9 @@ Host migration adds (all optional for the game, absent on old lobbies):
   migration, and `_add(ids)` on the new host for the players the old host knew under other ids
   (rejoined captains). The room transport (`relay.js`) has an assignable `hostId` and
   `setAdmit(fn)` for the lobby of a new host.
+- The transport may have `heardAny(exceptId)`: ms since anything (pings included) came from any
+  peer of the room but `exceptId`, `null` when nobody else is there. `relay.js` has it, the
+  session transport passes it through; the game uses it to tell a lost host from a lost self.
 - `onEnd(result)` of the old host after a hand-over carries `handover: true` (and
   `aborted: true`): the lobby leaves the room but keeps the seat for a rejoin.
 
@@ -175,13 +178,16 @@ ship with its internals (health, reloads, fires, floods, modules, consumables, t
 launchers, statistics, the bot AI's state), `st` every captain's statistics, `scr` the mission
 script's state, `tn` its timers, `fr` the weather front, `tp` live torpedoes, `pl` the captains
 `[peerId, slot, gone]`. Measured (node test, 7v7, 120 s): 13.4 kB per message, 13.4 kB/s to the
-successor, nothing more for the others.
+successor, nothing more for the others. Browser (standard battle, 3 captains): 11.5 kB per
+message, about 10 kB/s.
 
 The host is gone when it says `left` (it quit on purpose), when the transport reports it gone, or
 after 5 s without a snapshot. Then:
 
-1. The successor waits 0.25 s (a last full state of a leaving host may still be on the way),
-   turns its replica World into the authoritative one (newest snapshot and events, completed by
+1. The successor waits 0.25 s (a last full state of a leaving host may still be on the way).
+   If the host fell silent (not `left`) and the successor heard nobody else of the room for 4 s
+   either (`heardAny`), it is the one cut off: it does not take over and ends like the others in
+   step 3 (its seat stays, see "Rejoin"). Otherwise it turns its replica World into the authoritative one (newest snapshot and events, completed by
    the newest full state; ships out of the snapshot run on by dead reckoning) and runs the host
    from there. Its own ship stays its own; the old host's ship goes to the AI. It announces
    `{ k: 'host', id, t, team }` on `sync` to everybody and the lobby moves the room and the listing
@@ -190,12 +196,20 @@ after 5 s without a snapshot. Then:
    …", then "Gastgeber gewechselt – <Name> führt das Gefecht weiter." and points its replica at
    the new host (PvP: a client of the new host's team now reads the sides as they are, the other
    team turned round). Messages of the successor that overtook the announcement are replayed.
+   A `host` announcement that comes while the old host still sends snapshots (silent for less
+   than 2 s) is held back, and believed once the old host is gone within 8 s; an announcement
+   alone never takes a client away from a host it still hears.
 3. Without an announcement within 8 s the match ends with "Verbindung zum Host verloren". A
    successor without any full state ends the match too, so does `abort` (a host without
    successor quitting).
 4. A host that hears `host` from another peer (it was only cut off for a while) gives up with
    "Ein anderer Spieler hat das Gefecht übernommen." There is no vote; the newest announcement
    wins.
+
+The host's page says goodbye when it is closed or reloaded (`pagehide` -> `quit()`: last full
+state and `left`), so the successor runs the match after about 0.3 s (measured, browser, local
+and relay); without the goodbye (crash, network) it takes the 5 s snapshot timeout plus 0.25 s
+(measured 5.3 s).
 
 The old host may come back as a captain: the lobby gave it a seat at the start like everybody
 (see "Rejoin"); the new host's lobby holds the seats (room message `seats`).
@@ -300,6 +314,8 @@ late carries the distance already run in `it[7]`.
   banned peers, says "Gastgeber gewechselt – <Name> führt das Spiel weiter." in the room chat and
   publishes the listing (same room id, itself as host). While the match runs, the host leaving or
   `closed` does not drop a client from the room at once: the game decides (successor or over).
+  A client whose match ended because the host was lost keeps its seat: it may have been the one
+  cut off, and the list offers the way back while the game is listed as running.
 - `?net=local` in the URL switches lobby and transport to BroadcastChannel (no network) so the
   whole flow is testable with two pages of one browser context. `?net=relay` uses the brokers
   only and never tries WebRTC.

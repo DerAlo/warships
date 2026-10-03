@@ -517,6 +517,31 @@ test('host migration: a host cut off for a while gives way; without a successor 
    assert.match(TEXT.hostLeft, /Host hat das Spiel verlassen/);
 });
 
+test('host migration: a successor cut off from everybody does not take over', () => {
+   const room = makeRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games;
+   room.run(3);
+   assert.equal(gh.host.successor, 'anna');
+   // anna's network is gone: nothing in, nothing out, and its transport hears none of the others
+   const ta = room.tps[1];
+   let cut = true;
+   const deliver = ta._deliver.bind(ta), send = ta.send.bind(ta);
+   ta._deliver = (...a) => { if (!cut) deliver(...a); };
+   ta.send = (...a) => { if (!cut) send(...a); };
+   ta.heardAny = () => (cut ? 9e9 : 0);
+   room.run(15);
+   assert.equal(ga.isHost, false, 'anna did not start a match of its own');
+   assert.deepEqual(room.lost[1], [TEXT.hostLost]);
+   assert.deepEqual(room.lost[0], []);
+   assert.deepEqual(room.lost[2], []);
+   assert.equal(gb.info().hostId, 'host');
+   assert.ok(gb.replica.info().synced);
+   cut = false;
+   room.run(1);
+   assert.deepEqual(room.lost[0], [], 'the host carries on');
+});
+
 test('only the host is believed; only session players may command', () => {
    const room = makeRoom({ names: ['host', 'anna', 'bert', 'eve'], players: [{ id: 'host', name: 'H', ship: 'Bismarck' }, { id: 'anna', name: 'A', ship: 'Hipper' }, { id: 'bert', name: 'B', ship: 'Z23' }] });
    assert.ok(room.run(12, () => room.games.slice(0, 3).every(g => g.ready)));

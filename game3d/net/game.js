@@ -35,6 +35,8 @@ const HELLO_WAIT = 8;               // s the host waits for the players
 const START_WAIT = 15;              // s a client waits for the start
 const MIGRATE_WAIT = 8;             // s a client waits for the successor once the host is gone
 const PROMOTE_GRACE = 0.25;         // s the successor waits for a last full state of a leaving host
+const ANNOUNCE_QUIET = 2;           // s without a snapshot after which a client believes a new host
+const CUT_OFF_MS = 4000;            // ms the successor heard none of the others: it is the one cut off
 
 export const TEXT = {
    hostLeft: 'Der Host hat das Spiel verlassen – das Gefecht wurde beendet.',
@@ -84,6 +86,8 @@ export function createNetGame(session, hooks) {
    let orphan = 0;                   // when the host was lost (waiting for the successor)
    let startIn = null, myTeam = 0, mySlot = 0, flipNow = false;
    const pend = [];                  // messages of the successor that overtook its announcement
+   let heir = null;                  // an announcement that came while the host still sent: { id, m, at }
+   let orphanWhy = '';               // how the host was lost ('left' | 'timeout')
    const nameOf = (id) => players.find(p => p.id === id)?.name || '';
 
    const send = (channel, data, to) => {
@@ -173,7 +177,8 @@ export function createNetGame(session, hooks) {
       if (!m || typeof m !== 'object') return;
       if (from !== hostId) {
          if (!replica || !players.some(p => p.id === from)) return;
-         if (m.k === 'host') adopt(from, m);
+         // a new host: believed once the old one is gone or silent, kept for that moment otherwise
+         if (m.k === 'host') { if (orphan || replica.silent() >= ANNOUNCE_QUIET) adopt(from, m); else heir = { id: from, m, at: now() }; }
          else if (pend.length < 400) pend.push(['sync', m, from]);
          return;
       }
@@ -197,8 +202,19 @@ export function createNetGame(session, hooks) {
       if (done || lostText || !replica || orphan) return;
       const text = why === 'timeout' ? TEXT.hostLost : TEXT.hostLeft;
       if (why === 'abort' || replica.ended || (succ === selfId && !mig)) { lose(text); return; }
-      orphan = now();
+      orphan = now(); orphanWhy = why;
+      if (heir && orphan - heir.at < MIGRATE_WAIT) { const h = heir; heir = null; adopt(h.id, h.m); return; }
       if (succ !== selfId) hooks.onNotice?.(TEXT.waitHost);
+   }
+
+   // The host fell silent and the successor heard nobody else of the room for a while either: it is
+   // the one cut off, not the host. It does not take over (it would run a match of its own) and
+   // gives up like the others. A host that said goodbye proves the connection. Only the real
+   // transport tells (heardAny); with nobody else in the room it cannot tell.
+   function cutOff() {
+      if (orphanWhy === 'left' || !tp.heardAny) return false;
+      const ms = tp.heardAny(hostId);
+      return ms !== null && !(ms < CUT_OFF_MS);
    }
 
    // This client carries on as the host: the replica World becomes the authoritative one.
@@ -247,7 +263,7 @@ export function createNetGame(session, hooks) {
    // Another client took over: the replica listens to it from now on.
    function adopt(id, m) {
       if (done || lostText || !replica || replica.ended) return;
-      hostId = id; orphan = 0; succ = null;
+      hostId = id; orphan = 0; succ = null; heir = null;
       tp._setHost?.(id);
       flipNow = pvp && !!m.team && myTeam !== m.team;
       replica.rehost(flipNow);
@@ -312,7 +328,11 @@ export function createNetGame(session, hooks) {
          if (waitResync && t - waitResync > START_WAIT) lose(TEXT.noStart);
          if (!orphan) replica.pump();
          else if (lostText) { /* over */ }
-         else if (succ === selfId) { if (t - orphan >= PROMOTE_GRACE) promote(); }
+         else if (succ === selfId) {
+            if (t - orphan < PROMOTE_GRACE) { /* a last full state may be on the way */ }
+            else if (cutOff()) { succ = null; hooks.onNotice?.(TEXT.waitHost); }
+            else promote();
+         }
          else if (t - orphan > MIGRATE_WAIT) lose(TEXT.hostLost);
       }
    }
