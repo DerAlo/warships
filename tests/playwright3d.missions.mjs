@@ -39,8 +39,10 @@ await page.waitForTimeout(800);
    if (!/Nordkap/.test(intro)) fail('no briefing screen');
    await page.keyboard.press('Escape');
    if (await page.evaluate(() => !!document.querySelector('.m3-op'))) fail('Esc did not close the briefing');
-   await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
-   await page.waitForTimeout(300);
+   // give the briefing a moment between the two keys, then wait for the sim (as newmissions does):
+   // back-to-back keys raced the pointer lock, which paused the op as it started
+   await page.keyboard.press('Enter'); await page.waitForTimeout(250); await page.keyboard.press('Enter');
+   await page.waitForFunction(() => window.__phase() === 'playing', null, { timeout: 10000 }).catch(() => {});
    const st = await page.evaluate(() => ({ phase: window.__phase(), id: window.__world()?.mission?.id, ship: window.__world()?.player?.cls }));
    if (st.phase !== 'playing' || st.id !== 'nordkap' || st.ship !== 'DukeOfYork') fail('op did not start: ' + JSON.stringify(st));
    console.log('ops menu', JSON.stringify({ sec: sec.trim(), card, intro, st }));
