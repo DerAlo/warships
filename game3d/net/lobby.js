@@ -27,7 +27,7 @@
 //   everybody by definition (its relay key is derived from the public room id). With ?net=local
 //   (BroadcastChannel, test only) just the knock applies.
 import { NET_VERSION, makeLocalTransport } from './transport.js';
-import { coopSlots } from './coop.js';
+import { coopSlots, coopRoles } from './coop.js';
 import { MISSIONS, getMission } from '../missions.js';
 import { PLAYABLE, SHIPS } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
@@ -300,11 +300,13 @@ export class Lobby {
    configure(o) {
       const r = this.room;
       if (!this.isHost || r.state !== 'lobby') return;
-      if (o.mission && o.mission !== r.mission && coopSlots(o.mission) > 0) {
+      if (o.mission && o.mission !== r.mission && coopSlots(o.mission) >= Math.max(1, r.players.length)) {
+         // a prescribed ship is no choice of the player (maybe not even unlocked): everybody picks anew
+         const wasFixed = coopRoles(r.mission, r.difficulty).length > 0;
          r.mission = o.mission;
          r.max = Math.max(r.players.length, Math.min(r.max, coopSlots(r.mission)));
          const allowed = allowedShips(r.mission);
-         for (const p of r.players) { p.ready = false; if (!allowed.includes(p.ship)) p.ship = null; }
+         for (const p of r.players) { p.ready = false; if (wasFixed || !allowed.includes(p.ship)) p.ship = null; }
          this._fixOwnShip();
       }
       if (o.difficulty && DIFFICULTIES.includes(o.difficulty)) r.difficulty = o.difficulty;
@@ -538,19 +540,27 @@ export class Lobby {
    }
    // host: push the room state to everybody and refresh the listing
    _sync() {
+      this._assignRoles();
       this.rt?.send('room', this._state());
       this._announce();
       this.cb.onRoom?.();
    }
+   // host, historical operation: the ships are prescribed by slot (player order), not chosen.
+   // A running match keeps its assignment (a returning captain gets the seat's ship back).
+   _assignRoles() {
+      const r = this.room, roles = r && r.state === 'lobby' ? coopRoles(r.mission, r.difficulty) : [];
+      if (roles.length) r.players.forEach((p, i) => { p.ship = roles[i]?.cls || null; if (!p.ship) p.ready = false; });
+   }
    // my ship is no longer valid for the mission: fall back to an own ship that is
    _fixOwnShip() {
+      if (coopRoles(this.room.mission, this.room.difficulty).length) return;   // prescribed: the host assigns
       const me = this.me, ship = pickShip(this.room.mission, this.getProfile(), this._ship);
       if (!me || !ship || me.ship === ship) return;
       if (this.isHost) me.ship = ship; else this.rt?.send('room', { t: 'set', ship }, this.room.hostId);
    }
    setShip(ship) {
       const r = this.room;
-      if (!r || r.state !== 'lobby' || !ownShips(r.mission, this.getProfile()).includes(ship)) return;
+      if (!r || r.state !== 'lobby' || coopRoles(r.mission, r.difficulty).length || !ownShips(r.mission, this.getProfile()).includes(ship)) return;
       this._ship = ship;
       if (this.isHost) { this.me.ship = ship; this._sync(); } else this.rt.send('room', { t: 'set', ship }, r.hostId);
    }

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeMemoryHub } from '../game3d/net/transport.js';
 import { createNetGame, TEXT } from '../game3d/net/game.js';
-import { coopSlots } from '../game3d/net/coop.js';
+import { coopSlots, coopRoles, coopExcluded } from '../game3d/net/coop.js';
 import { SNAP_EVERY } from '../game3d/net/host.js';
 
 const DT = 1 / 60;
@@ -74,9 +74,64 @@ function makeRoom(o = {}) {
 function ready(room) { return room.run(12, () => room.games.every(g => g.ready)); }
 const shipOf = (world, id) => world._byId.get(id);
 
-test('coopSlots: the standard battle takes several captains, fixed-ship missions none', () => {
+test('coopSlots: the standard battle takes several captains, historical operations their allied ships', () => {
    assert.ok(coopSlots('standard') >= 3, 'standard: ' + coopSlots('standard'));
    assert.equal(coopSlots('no-such-mission'), 0);
+   assert.equal(coopSlots('rheinuebung'), 2);
+   assert.equal(coopSlots('cerberus'), 4);
+   assert.equal(coopSlots('laststand'), 0, 'the Bismarck fights alone');
+   assert.equal(coopSlots('training'), 0);
+   for (const id of Object.keys(coopExcluded())) assert.equal(coopSlots(id), 0, id);
+   assert.deepEqual(coopRoles('rheinuebung').map(r => r.name), ['Bismarck', 'Prinz Eugen']);
+   assert.deepEqual(coopRoles('cerberus').map(r => r.cls), ['Scharnhorst', 'Scharnhorst', 'Hipper', 'Z23']);
+   assert.deepEqual(coopRoles('standard'), [], 'free ship choice');
+});
+
+test('historical operation: the host keeps the flagship, the others take the mission\'s own allied ships', () => {
+   const room = makeRoom({ mission: 'cerberus', names: ['host', 'anna', 'bert', 'carl'], ships: ['Scharnhorst', 'Bismarck', 'Hipper', 'Z23'] });
+   assert.ok(ready(room), 'all peers ready');
+   const [gh, ga, gb, gc] = room.games;
+   const hw = gh.world, H = hw.net.humans, S = hw._script;
+   assert.equal(H.length, 4);
+   assert.equal(hw.net.flag, H[0]);
+   assert.equal(H[0].cls, 'Scharnhorst');
+   // the very ships the mission script watches ("Gneisenau und Prinz Eugen dürfen nicht sinken")
+   assert.equal(H[1], S.gn); assert.equal(H[2], S.eugen);
+   assert.match(H[1].name, /^Gneisenau \(Kapitän anna\)$/);
+   assert.equal(H[3].cls, 'Z23');
+   for (const h of H.slice(1)) { assert.ok(h.human); assert.equal(h.dmgMult, 1); assert.ok(h.stats); }
+   for (const [g, i] of [[ga, 1], [gb, 2], [gc, 3]]) {
+      assert.equal(g.world.player.id, H[i].id);
+      assert.equal(g.world.player.cls, H[i].cls);
+      assert.equal(g.world.player.name, H[i].name);
+   }
+   // Gneisenau answers her captain, not the escort AI
+   const cmd = { telegraph: 1, rudder: -2, aim: { x: 0, y: 0 }, lock: null };
+   room.run(8, () => { ga.control(cmd); });
+   assert.equal(H[1].telegraph, 1); assert.equal(H[1].rudderCmd, -2);
+   // losing an escort costs the optional objective, the battle goes on
+   H[2].takeDamage(1e9, null, 'pen');
+   room.run(3);
+   assert.equal(hw.phase, 'playing');
+   assert.equal(hw.mission.objectives.find(o => o.id === 'ships').state, 'failed');
+   assert.equal(gb.world.mission.objectives.find(o => o.id === 'ships').state, 'failed', 'objectives reach the clients');
+   // the flagship lost: the operation has failed for everybody
+   H[0].takeDamage(1e9, null, 'pen');
+   assert.ok(room.run(10, () => room.games.every(g => g.world.phase !== 'playing')), 'every world ended');
+   for (const g of room.games) { assert.equal(g.world.phase, 'lost'); assert.match(g.world.result.reason, /Flaggschiff/); }
+});
+
+test('historical operation: torpedo hits of every human destroyer count for Vian\'s attack', () => {
+   const room = makeRoom({ mission: 'vian', names: ['host', 'anna'], ships: ['Jervis', 'Jervis'] });
+   assert.ok(ready(room));
+   const hw = room.games[0].world, H = hw.net.humans;
+   assert.equal(H[1].name, 'HMS Maori (Kapitän anna)');
+   H[1].stats.torpHits = 2;
+   room.run(1);
+   assert.equal(hw.score.player, 2, 'a client\'s hits count');
+   H[0].stats.torpHits = 1;
+   room.run(1);
+   assert.equal(hw.score.player, 3);
 });
 
 test('start: every peer builds the same world, each with its own ship', () => {

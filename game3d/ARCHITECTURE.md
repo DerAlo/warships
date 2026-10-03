@@ -251,6 +251,16 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
 - **Leaving.** Host quits or goes silent for 5 s: the client ends with a German notice
   (`TEXT` in `net/game.js`). A client that leaves (`bye` or transport leave) hands its ship back
   to the AI. A sunk human keeps watching; the match is lost when no human ship is afloat.
+- **Historical operations in co-op.** Missions with prescribed ships are offered too (picker group
+  "Historische Operationen", with the player limit): the host commands the flagship, the others
+  the mission's own allied ships, biggest first (`historicShips` in `net/setup.js`; e.g.
+  Cerberus: Scharnhorst, Gneisenau, Prinz Eugen, Z 29). They keep the ship object the mission
+  script knows, so its objectives ("Gneisenau und Prinz Eugen dürfen nicht sinken") and its AI
+  orders for a dropped captain keep working; the bots' damage cut is lifted for a human. Losing
+  the flagship ends the operation (`world.net.flag`, `state.js`), as in singleplayer; Vian's
+  torpedo count adds every human's hits. Out: the exercise and "Letztes Gefecht" (Bismarck
+  alone). The room shows who commands which ship. Not balanced for 2-4 humans yet: an operation
+  with several full-strength captains is easier than alone.
 - **Rejoin.** A captain who dropped out (tab reloaded, network gone, left by mistake) goes back
   in while the match runs: a seat token from the start (sessionStorage) lets the lobby re-admit
   that tab only, the host moves the slot to the new peer id and sends the missed state as state
@@ -292,4 +302,5 @@ main3d.js        startNetGame(session)           = window.__startNetGame; window
   `tests/playwright3d.mp.multi.mjs` (the same with `PLAYERS=3|4`, `MODE=hybrid|relayonly|blocked`,
   `ONLY=<broker>`; prints host upload, publishes per broker and per client snapshot rate and gaps),
   `tests/playwright3d.mp.rejoin.mjs` (reload and network cut mid-battle, back through the list,
-  an outsider refused; `MODE=hybrid|relayonly`).
+  an outsider refused; `MODE=hybrid|relayonly`), `tests/playwright3d.mp.ops.mjs` (Cerberus with
+  three captains: picker, ship assignment in the room, the match, flagship lost).

@@ -303,6 +303,26 @@ test('lobby: leaving and joining again at once works although the goodbye is sti
    await sleep(400);
 });
 
+test('lobby: a historical operation gives every slot its prescribed ship', async () => {
+   const net = makeNet([{ delay: 5 }, { delay: 20 }]);
+   const { host, client } = await lobbyPair(net);
+   const { ownShips } = await import('../game3d/net/lobby.js');
+   host.configure({ mission: 'rheinuebung' });
+   await until(() => client.room.mission === 'rheinuebung' && client.me?.ship === 'Hipper', 3000, 'Prinz Eugen for the second captain');
+   assert.deepEqual(host.room.players.map(p => p.ship), ['Bismarck', 'Hipper'], 'host = flagship, although nobody unlocked them');
+   client.setShip('Bismarck');                                      // no choice here
+   client.setReady(true);
+   await until(() => host.room.players[1].ready, 3000, 'ready');
+   assert.equal(host.room.players[1].ship, 'Hipper');
+   assert.ok(host.canStart());
+   // back to free choice: the prescribed ship is dropped, each player picks an own one again
+   host.configure({ mission: 'standard' });
+   await until(() => client.room.mission === 'standard' && client.me?.ship, 3000, 'own ship again');
+   assert.ok(ownShips('standard', { unlocked: {} }).includes(client.me.ship), client.me.ship);
+   client.close(); host.close();
+   await sleep(400);
+});
+
 test('lobby: joining again works when the goodbye never arrived (full room, same player)', async () => {
    const net = makeNet([{ delay: 10 }, { delay: 20 }]);
    const { host, client, entry } = await lobbyPair(net);

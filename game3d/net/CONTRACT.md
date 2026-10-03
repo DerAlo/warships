@@ -84,12 +84,24 @@ and `oldId` is not. The game moves that player's slot to `newId`.
 ## Co-op rules (`game3d/net/coop.js`, owned by the netcode side)
 
 ```js
-coopSlots(missionId)   // max human players incl. host (0 = mission not playable in co-op)
+coopSlots(missionId)               // max human players incl. host (0 = mission not playable in co-op)
+coopRoles(missionId, difficulty)   // historical operations: [{ cls, name }] per slot, [] otherwise
+coopExcluded()                     // { missionId: German reason } of the missions kept out on purpose
 ```
 
-Matchmaking uses it for the mission picker and the player limit. Every player picks a ship from
-their own unlocked ships (local career profile); duplicates are allowed. Missions that prescribe
-ships (`fixedShips`) are not offered in co-op for now.
+Matchmaking uses them for the mission picker, the player limit and the room. In a mission with
+free ship choice every player picks a ship from their own unlocked ships (local career profile);
+duplicates are allowed. A historical operation (`fixedShips`) prescribes the ships: slot 0 (the
+host) commands the mission's own ship, the flagship; slot i takes the i-th allied ship the
+mission brings, biggest type first (BB, CA, CL, DD, SS), equal types in spawn order; transports
+and scripted ships (convoy, route) stay bots. The host lobby sets every player's `ship` to the
+slot's class (the player cannot choose, and needs no unlock for it); the game takes the mission's
+ship object itself (name, script role, AI orders for when the captain drops) and sets its damage
+cut back to full strength. The operation is lost when the flagship sinks.
+
+Kept out: `training` (exercise for one captain, no allied ship), `laststand` (the Bismarck fights
+alone). Today's limits (measured with `coopSlots`): rheinuebung 2 (Bismarck, Prinz Eugen),
+wolfpack 3, guadalcanal / nordkap / cerberus / vian / barents / narvik 4.
 
 ## Game side behaviour (`game3d/net/game.js`)
 

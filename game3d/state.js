@@ -285,8 +285,10 @@ export class World {
       if (ship === this.player) this.shakeAdd(2);
       if (this._script && this._script.onSink) this._script.onSink(this, ship, killer);
       if (this.net) {
-         // net game: the battle goes on while any human captain is still afloat
-         if ((ship.isPlayer || ship.human) && !this.net.humans.some(h => h && h.alive && (h.isPlayer || h.human))) this.end(false, 'Alle Spielerschiffe wurden versenkt.');
+         // net game: the battle goes on while any human captain is still afloat; a historical
+         // operation is lost with its flagship (setup.js), as in singleplayer
+         if (ship === this.net.flag) this.end(false, 'Das Flaggschiff ist gesunken – die Operation ist gescheitert.');
+         else if ((ship.isPlayer || ship.human) &&!this.net.humans.some(h => h && h.alive && (h.isPlayer || h.human))) this.end(false, 'Alle Spielerschiffe wurden versenkt.');
       } else if (ship === this.player) this.end(false, 'Ihr Schiff wurde versenkt.');
    }
 

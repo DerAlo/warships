@@ -341,7 +341,8 @@ export function extraMissions(H) {
                setObj(w, 'contact', 'done', 'Fühlung mit der Bismarck hergestellt');
                radio(w, 'HMS Cossack', 'Feind in Sicht – Meldung an die Home Fleet abgesetzt.');
             }
-            const n = w.stats.torpHits;
+            // co-op: the hits of every human destroyer count (w.stats is only the host's)
+            const n = w.net ? w.net.humans.reduce((a, h) => a + (h?.stats?.torpHits || 0), 0) : w.stats.torpHits;
             if (n !== S.hits) {
                S.hits = n;
                w.score.player = n;
