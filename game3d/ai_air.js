@@ -109,7 +109,10 @@ function fighterThink(w, sq, dt) {
       let bd = AIR.ftEngage * AIR.ftEngage;
       for (const q of w.squadrons) {
          if (q.side === sq.side || q.n <= 0 || q.state === 'launch' || q.state === 'land') continue;
-         const d2 = dist2(q.pos, c) * (q.armed > 0 ? 0.6 : 1);
+         // escort: enemy fighters on our bombers first, then bombers, then anything else
+         let k = q.armed > 0 ? 0.6 : 1;
+         if (q.type === 'ft' && q.foeId != null) { const v = squadById(w, q.foeId); if (v && v.side === sq.side) k = 0.3; }
+         const d2 = dist2(q.pos, c) * k;
          if (d2 < bd) { bd = d2; foe = q; }
       }
    }

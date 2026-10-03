@@ -57,8 +57,8 @@ per type `tb` / `db` / `ft` the plane name, `hangar`, `squad`, `flight`, `hp`, `
 bands) and `aaFocus` (-1 port, +1 starboard, 0 even).
 
 - State: `world.squadrons` (array of squads, see the header of `air.js` for the fields),
-  `world.bombs` (fixed pool, `alive` flag), `ship.air` (`deckT`, per type `hangar`, `service`
-  queue, `sel` = the player's selected type). Aerial torpedoes are ordinary `world.torpedoes`
+  `world.bombs` (fixed pool, `alive` flag), `ship.air` (`deckT`, per type `hangar`, `max` =
+  restock target that missions may lower, `service` queue, `sel` = the player's selected type). Aerial torpedoes are ordinary `world.torpedoes`
   with `air: true` and `arm` (metres before they can hit).
 - Step: `updateAir(world, dt)` runs after `updateSubs` in `World.update`: deck/service/restock,
   `squadThink` (bots and released player squads; skipped while `sq.human`), flight, fighters,
@@ -69,7 +69,8 @@ bands) and `aaFocus` (-1 port, +1 starboard, 0 even).
 - Events: `airLaunch`, `airInfo`, `airDrop`, `airLand`, `planeDown` (`srcId` shooter ship,
   `dstId` owning carrier), `aaFocus`. Effects: `flak`, `planeDown`, `splash`.
 - Bots: `carrierPlan` (stand-off, strike timing, `launchT` per mission, fighter cover and
-  scouting), `airEvade` for every bot ship (comb torpedo runs, turn under dive bombers, close up
+  scouting; fighters go for enemy fighters on friendly planes first, then bombers),
+  `airEvade` for every bot ship (comb torpedo runs, turn under dive bombers, close up
   on the nearest friend while planes are around).
 - Client: `AirUi` owns keys 1–3 / E / F / 4 on a carrier, the squadron chase camera
   (`cam3.override` pose), the air and AA panels, the aim fan/ellipse and plane markers

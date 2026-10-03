@@ -4,6 +4,7 @@
 import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
+import { canLaunch, launchSquadron } from './air.js';
 
 // ---------------------------------------------------------------- names
 const POOLS = {
@@ -924,18 +925,25 @@ const DEFS = [
          // Kido Butai: four carriers in a box, the battleship and the heavy cruisers on the flanks
          const ax = 7600, ay = -2200, hj = Math.PI * 0.9;
          S.cvs = [['Akagi', 'Akagi', 0, -1400], ['Akagi', 'Kaga', -1600, -1500], ['Hiryu', 'Sōryū', 0, 1400], ['Hiryu', 'Hiryū', -1600, 1500]]
-            .map(([cls, name, fx, fy]) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, telegraph: 3, hpMult: w.difficulty.botHP * 0.6 }));
+            .map(([cls, name, fx, fy]) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, telegraph: 3, hpMult: w.difficulty.botHP * 0.25 }));
          // fuelled and armed planes on the hangar decks: the carriers burn easily (hpMult above);
          // the morning raid on Midway cost planes, and the decks are busy rearming: thinner hangars
          // and no launch for the first minutes (the American first strike meets little air cover)
+         // the combat air patrol is worn out from chasing the torpedo bombers all morning; lost planes
+         // are not replaced (max = what is left)
+         const kStrike = hard ? 0.75 : 0.6, kFt = hard ? 0.6 : 0.4;
+         S.ftAmmo = hard ? 0.7 : 0.5;
          for (const c of S.cvs) {
-            for (const t of ['tb', 'db']) c.air[t].hangar = Math.ceil(c.air[t].hangar * (hard ? 0.75 : 0.6));
+            for (const t of ['tb', 'db', 'ft']) c.air[t].max = c.air[t].hangar = Math.ceil(c.air[t].hangar * (t === 'ft' ? kFt : kStrike));
             c.ai.launchT = hard ? 100 : 150;
          }
          S.escorts = [['Kirishima', 'Kirishima', 1600, 0], ['Takao', 'Tone', 600, -3200], ['Takao', 'Chikuma', 600, 3200],
             ['Fubuki', 'Nowaki', 2600, -1800], ['Fubuki', 'Arashi', 2600, 1800], ['Fubuki', 'Hagikaze', -3200, 0]]
             .slice(0, hard ? 6 : 5)
             .map(([cls, name, fx, fy], i) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, ai: { escortId: S.cvs[i % 4].id } }));
+         // 1942 Japanese flak: few directors, slow 25 mm mounts that could not track fast dive bombers
+         const aaK = hard ? 0.75 : 0.6;
+         for (const s of [...S.cvs, ...S.escorts]) for (const b of s.aa.bands) b.dps *= aaK;
          // Task Forces 16/17
          const me = add(w, pickShip(this, shipKey), 'player', P(-6800, 4000), -0.25, { isPlayer: true });
          S.own = [add(w, 'Enterprise', 'player', P(-8000, 5600), -0.25, { name: 'USS Hornet' }),
@@ -960,6 +968,36 @@ const DEFS = [
             S.found = true;
             setObj(w, 'find', 'done', 'Japanischer Trägerverband gefunden');
             radio(w, 'Lt. Cdr. McClusky', 'Feindliche Träger in Sicht! Wir greifen an.');
+         }
+         // Hornet and Yorktown send Wildcats ahead of their strikes to tie down the Zeros over the
+         // Kido Butai (the player escorts his own strikes: fighters patrol where they are released)
+         // the Zeros of the combat air patrol go up with what ammunition the morning left them
+         for (const q of w.squadrons) if (q.side === 'enemy' && q.type === 'ft' && q.state === 'launch' && !q.mwAmmo) { q.mwAmmo = true; q.ammo *= S.ftAmmo; }
+         if (S.found && w.time >= (S.sweepT ?? 0)) {
+            S.sweepT = w.time + 5;
+            let jx = 0, jy = 0, n = 0;
+            for (const s of S.cvs) if (s.alive) { jx += s.pos.x; jy += s.pos.y; n++; }
+            jx /= n || 1; jy /= n || 1;
+            // the inbound strike closest to the Kido Butai: the escort's post moves with it
+            let inbound = null, bd = 14000 * 14000;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type === 'ft' || q.armed <= 0 || (q.state !== 'fly' && q.state !== 'attack')) continue;
+               const d2 = (q.pos.x - jx) ** 2 + (q.pos.y - jy) ** 2;
+               if (d2 < bd) { bd = d2; inbound = q; }
+            }
+            let covered = false;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type !== 'ft' || !q.order?.sweep || q.state === 'return' || q.state === 'land') continue;
+               covered = true;
+               if (inbound) { q.center.x = inbound.pos.x; q.center.y = inbound.pos.y; q.patrolT = Math.max(q.patrolT, 20); }
+            }
+            if (n && inbound && !covered) {
+               for (const c of S.own) {
+                  if (!c.alive || !canLaunch(w, c, 'ft') || c.air.ft.hangar < 2) continue;
+                  launchSquadron(w, c, 'ft', { kind: 'patrol', pos: { x: inbound.pos.x, y: inbound.pos.y }, sweep: true });
+                  break;
+               }
+            }
          }
          if (!S.raid && w.squadrons.some(q => q.side === 'enemy' && q.order?.kind === 'strike' && q.state === 'fly')) {
             S.raid = true;

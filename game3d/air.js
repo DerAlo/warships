@@ -83,9 +83,10 @@ const _lp = { x: 0, y: 0 };
 export function initAirState(ship) {
    const a = ship.cfg.air;
    ship.air = a ? {
-      tb: { hangar: a.tb.hangar, service: [], restockT: a.tb.restock },
-      db: { hangar: a.db.hangar, service: [], restockT: a.db.restock },
-      ft: { hangar: a.ft.hangar, service: [], restockT: a.ft.restock },
+      // max: restock target (missions may lower it: planes lost before the battle stay lost)
+      tb: { hangar: a.tb.hangar, max: a.tb.hangar, service: [], restockT: a.tb.restock },
+      db: { hangar: a.db.hangar, max: a.db.hangar, service: [], restockT: a.db.restock },
+      ft: { hangar: a.ft.hangar, max: a.ft.hangar, service: [], restockT: a.ft.restock },
       deckT: 0,                // s until the deck is free for the next launch
       sel: 'tb',               // selected type (player HUD)
       strikeT: 4,              // bot: s until the next strike decision
@@ -102,7 +103,7 @@ export function planeCount(world, ship, type) {
    let svc = 0, air = 0;
    for (const s of h.service) svc += s.n;
    for (const q of world.squadrons) if (q.ownerId === ship.id && q.type === type) air += q.n;
-   return { ready: h.hangar, service: svc, air, total: h.hangar + svc + air, max: ship.cfg.air[type].hangar };
+   return { ready: h.hangar, service: svc, air, total: h.hangar + svc + air, max: h.max };
 }
 function totalPlanes(world, ship, type) {
    const h = ship.air[type];
@@ -290,7 +291,7 @@ export function updateAir(world, dt) {
             const e = h.service[i];
             if ((e.t -= dt) <= 0) { h.hangar += e.n; h.service.splice(i, 1); }
          }
-         if (totalPlanes(world, s, type) < s.cfg.air[type].hangar) {
+         if (totalPlanes(world, s, type) < h.max) {
             if ((h.restockT -= dt) <= 0) { h.hangar++; h.restockT = s.cfg.air[type].restock; }
          } else h.restockT = s.cfg.air[type].restock;
       }
