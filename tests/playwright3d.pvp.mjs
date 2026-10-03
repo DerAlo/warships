@@ -71,7 +71,7 @@ await A.selectOption('[data-f="max"]', '4');
 await A.click('.mp-modal [data-ok]');
 check('host is in its PvP room', await wait(A, () => !!document.querySelector('.mp-body.room') && window.__mp.lobby.room?.mode === 'pvp', null, 20000),
    await A.evaluate(() => document.querySelector('.mp-sub')?.innerText || ''));
-check('room shows the teams', await A.evaluate(() => document.querySelectorAll('[data-team-head]').length === 2 && /PvP/.test(document.querySelector('.mp-sub').innerText)));
+check('room shows the teams', await A.evaluate(() => document.querySelectorAll('[data-team-head]').length === 2 && /PvP/i.test(document.querySelector('.mp-sub').innerText)));
 
 // ---- 2. the list shows the mode, the filter finds it
 const B = await mkPage('B', 'Bert');
