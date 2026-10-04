@@ -736,7 +736,7 @@ function watchSecTarget() {
    const p = P, id = p?.secTarget ?? null;
    if (secSeen.world !== world) {
       secSeen.world = world; secSeen.id = id;
-      if (p?.manualSec && p.cfg?.sec) hud.msg('Einzelzielfeuer: Ziel der Mittelartillerie mit Strg+Linksklick wählen', 'info', 5);
+      if (p?.manualSec && p.cfg?.sec) hud.msg('Einzelzielfeuer: Ziel der Mittelartillerie mit ' + (input.touchMode ? '„Sek. Ziel“' : 'Strg+Linksklick') + ' wählen', 'info', 5);
       return;
    }
    if (id === secSeen.id) return;

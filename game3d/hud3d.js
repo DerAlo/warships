@@ -9,6 +9,7 @@ import { drawAir } from './airui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+const isTouch = () => typeof document !== 'undefined' && !!document.body?.classList.contains('touch');   // touch3d.js overlay on
 const km = (m) => (m / 1000).toFixed(m < 9950 ? 2 : 1).replace('.', ',') + ' km';
 const TURRET_COL = { ready: T.ok, traverse: T.warn, reload: T.bad, blocked: T.bad, dead: T.dead };
 // sight palette + fonts, resolved once from the design tokens (drawn every frame)
@@ -503,7 +504,7 @@ export class Overlay3D {
       g.fillStyle = SCOPE.text;
       g.fillText(ui.zoom + '×', rx, cy - 10);
       g.font = F_SMALL; g.fillStyle = SCOPE.hint;
-      g.fillText('Mausrad: Zoom · Shift: zurück', rx, cy - 34);
+      g.fillText(isTouch() ? 'Zwei Finger: Zoom · Glas: zurück' : 'Mausrad: Zoom · Shift: zurück', rx, cy - 34);
       g.restore();
    }
 
@@ -522,7 +523,7 @@ export class Overlay3D {
       g.fillStyle = T.hud; g.font = FONT(15, 'bold'); g.textAlign = 'left';
       g.fillText('LAGEKARTE', x0, y0 + size + 7);
       g.font = FONT(12); g.fillStyle = T['hud-dim']; g.textAlign = 'right';
-      g.fillText('M – schließen  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
+      g.fillText((isTouch() ? 'Karte – schließen' : 'M – schließen') + '  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
       g.restore();
    }
 }

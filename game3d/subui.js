@@ -11,10 +11,11 @@ import { T, FONT, MONO } from './theme.js';
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
 const MAX_LINES = 12, MAX_CONTACTS = 4;
+const touch = () => typeof document !== 'undefined' && !!document.body?.classList.contains('touch');   // touch3d.js overlay on
 const TYPE_SOUND = { DD: 'schnelle Schrauben', CL: 'Kreuzer', CA: 'Kreuzer', BB: 'schwere Schrauben', CV: 'schwere Schrauben', TR: 'Frachter', SS: 'U-Boot' };
 // colours and type from the design tokens in index-3d.html (instrument-plate look of the HUD)
 const CSS = `
-#sub-panel, #asw-panel { position: absolute; right: 16px; bottom: 236px; }
+#sub-panel, #asw-panel { position: absolute; right: 16px; bottom: 246px; }
 #sub-panel { width: 156px; padding: 8px 10px; font: 12px var(--mono); color: var(--hud); }
 #sub-panel .sp-title { font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim); margin-bottom: 5px; border-bottom: 1px solid var(--panel-edge); padding-bottom: 3px; }
 #sub-panel .sp-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; color: var(--hud-dim); }
@@ -76,10 +77,10 @@ export class SubUi {
          + DEPTH_NAMES.map((n, i) => `<div class="sp-row" data-d="${i}"><i></i><span>${n}</span></div>`).join('')
          + '<div class="sp-bat"><i></i></div><div class="sp-batt"><span>Batterie</span><span class="sp-pct">100 %</span></div>'
          + '<div class="sp-keys"><b>F</b> tiefer · <b>G</b> auf</div><div class="sp-ping">SONAR-ORTUNG</div>');
-      const asw = el('div', 'asw-panel', 'panel hidden', '<b>WASSERBOMBEN · G</b><span class="asw-stat">bereit</span>');
+      const asw = el('div', 'asw-panel', 'panel hidden', '<b>WASSERBOMBEN<i class="kb"> · G</i></b><span class="asw-stat">bereit</span>');
       const alert = el('div', 'dc-alert', 'hidden'); alert.textContent = 'WASSERBOMBEN!';
       const br = document.getElementById('bottom-right'), hudRoot = document.getElementById('hud');
-      // above the minimap, clear of the weapon bar
+      // above the chart table (bottom-right), clear of the weapon bar
       const host = hudRoot || br;
       if (host) { host.appendChild(sub); host.appendChild(asw); host.appendChild(alert); }
       this.dom = { sub, asw, alert, rows: [...sub.querySelectorAll('.sp-row')], bat: sub.querySelector('.sp-bat i'),
@@ -309,7 +310,7 @@ export function drawSubUnder(g, ui, W, H, t) {
          g.fillText(L.label, ox + dx * 1.08, oy + dy * 1.08 - 8);
       }
       g.fillStyle = 'rgba(170,220,245,0.85)'; g.font = FONT(13, 600);
-      g.fillText('GETAUCHT · Horchgerät: nur Peilungen · G = auf Sehrohrtiefe', W / 2, H * 0.16);
+      g.fillText('GETAUCHT · Horchgerät: nur Peilungen · ' + (touch() ? '▲ Auf' : 'G') + ' = auf Sehrohrtiefe', W / 2, H * 0.16);
       g.restore();
    }
    if (u.nContacts > 0) {
@@ -385,7 +386,7 @@ export function drawPeriscope(g, ui, W, H) {
    g.textAlign = 'left';
    g.fillText('Peilung ' + String(Math.round(u.relBrg) % 360).padStart(3, '0') + '°', cx - R * 0.6, cy + R * 0.62);
    g.font = MONO(11); g.fillStyle = 'rgba(200,245,220,0.55)'; g.textAlign = 'center';
-   g.fillText('SEHROHR · Mausrad: Zoom · Shift: einfahren', cx, cy + R * 0.72);
+   g.fillText(touch() ? 'SEHROHR · Zwei Finger: Zoom · Glas: einfahren' : 'SEHROHR · Mausrad: Zoom · Shift: einfahren', cx, cy + R * 0.72);
    g.restore();
 }
 

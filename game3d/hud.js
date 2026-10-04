@@ -1,8 +1,9 @@
-// game3d/hud.js — DOM part of the 3D battle HUD ("Kartenhaus" instrument plates): situation
-// board with score, timer, points and orders (top-left), order of battle + loss reports
-// (top-right), hit tally (left), chart table with minimap, telegraph and rudder (bottom-left),
-// ammunition selector (bottom-centre), equipment gauges + ship card (bottom-right), lock panel,
-// messages, scoreboard (Tab) and help (H). Colours come from the design tokens (theme.js).
+// game3d/hud.js — DOM part of the 3D battle HUD ("Kartenhaus" instrument plates): orders
+// (top-left), situation board with score, timer and points flanked by the own and the enemy order
+// of battle (top-centre), key hint + loss reports (top-right), equipment gauges + ship card
+// (bottom-left), hit tally above the ammunition selector (bottom-centre), chart table with
+// telegraph, rudder and minimap (bottom-right), lock panel, messages, scoreboard (Tab) and help
+// (H). On touch screens touch3d.js rearranges the same plates around its controls. Colours come from the design tokens (theme.js).
 // The reticle, markers, binocular optics and tactical map are drawn on the #fx canvas by
 // hud3d.js.
 //
