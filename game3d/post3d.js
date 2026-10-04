@@ -8,15 +8,27 @@ const FS_VERT = /* glsl */`
 varying vec2 vUv;
 void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
+// Mobile GPUs pass NaN / Inf through where desktop drivers clamp; one such pixel in the bloom
+// pyramid smears over the whole frame (white or black screen). Every read of HDR data goes
+// through safe3: NaN -> 0, Inf -> the half-float ceiling.
+const SAFE_GLSL = /* glsl */`
+vec3 safe3(vec3 c) {
+#if __VERSION__ >= 300
+   c = vec3(isnan(c.r) ? 0.0 : c.r, isnan(c.g) ? 0.0 : c.g, isnan(c.b) ? 0.0 : c.b);
+#endif
+   return clamp(c, vec3(0.0), vec3(6.0e4));
+}`;
+
 const BRIGHT_FRAG = /* glsl */`
 uniform sampler2D tSrc;
 uniform vec2 uTexel;
 uniform float uThreshold;
 varying vec2 vUv;
+${SAFE_GLSL}
 void main() {
    // 4-tap box downsample + soft-knee threshold
-   vec3 c = texture2D(tSrc, vUv + uTexel * vec2(-0.5, -0.5)).rgb + texture2D(tSrc, vUv + uTexel * vec2(0.5, -0.5)).rgb
-          + texture2D(tSrc, vUv + uTexel * vec2(-0.5, 0.5)).rgb + texture2D(tSrc, vUv + uTexel * vec2(0.5, 0.5)).rgb;
+   vec3 c = safe3(texture2D(tSrc, vUv + uTexel * vec2(-0.5, -0.5)).rgb) + safe3(texture2D(tSrc, vUv + uTexel * vec2(0.5, -0.5)).rgb)
+          + safe3(texture2D(tSrc, vUv + uTexel * vec2(-0.5, 0.5)).rgb) + safe3(texture2D(tSrc, vUv + uTexel * vec2(0.5, 0.5)).rgb);
    c *= 0.25;
    c = min(c, vec3(60.0));
    float l = max(c.r, max(c.g, c.b));
@@ -68,12 +80,13 @@ uniform vec3 uTint;
 uniform float uTime;
 varying vec2 vUv;
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+${SAFE_GLSL}
 void main() {
-   vec3 c = texture2D(tScene, vUv).rgb;
-   c += texture2D(tBloom, vUv).rgb * uBloom;
+   vec3 c = safe3(texture2D(tScene, vUv).rgb);
+   if (uBloom > 0.0) c += safe3(texture2D(tBloom, vUv).rgb) * uBloom;
    c *= uTint;
    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-   c = max(mix(vec3(l), c, uSat), 0.0);
+   c = clamp(mix(vec3(l), c, uSat), 0.0, 6.0e4);
    // gentle contrast around mid-grey in log space
    c = pow(c / 0.18, vec3(uContrast)) * 0.18;
    gl_FragColor = vec4(c, 1.0);
@@ -91,6 +104,7 @@ export class Post {
       this.renderer = renderer;
       this.samples = samples;
       this.levels = bloomLevels;
+      this.bloomOn = true;
       this.sceneRT = new THREE.WebGLRenderTarget(4, 4, {
          type: THREE.HalfFloatType, samples, depthBuffer: true, stencilBuffer: false,
          minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
@@ -145,6 +159,20 @@ export class Post {
       r.clear(true, true, false);
       r.render(scene, camera);
 
+      const U = this.compMat.uniforms;
+      U.uSat.value = p.saturation ?? 1.1;
+      U.uContrast.value = p.contrast ?? 1.06;
+      U.uVignette.value = p.vignette ?? 0.28;
+      U.uTime.value = p.time || 0;
+      if (p.tint) U.uTint.value.setRGB(p.tint[0], p.tint[1], p.tint[2]); else U.uTint.value.setRGB(1, 1, 1);
+      r.toneMappingExposure = p.exposure ?? 1;
+      if (!this.bloomOn) {   // low quality: no bloom chain, composite straight from the scene
+         U.tBloom.value = this.sceneRT.texture;
+         U.uBloom.value = 0;
+         this._pass(this.compMat, null);
+         return;
+      }
+
       // bloom chain
       const rts = this.bloomRTs;
       this.brightMat.uniforms.tSrc.value = this.sceneRT.texture;
@@ -166,16 +194,18 @@ export class Post {
       }
       r.autoClear = ac;
 
-      const U = this.compMat.uniforms;
       U.tBloom.value = rts[0].texture;
       U.uBloom.value = p.bloom ?? 0.12;
-      U.uSat.value = p.saturation ?? 1.1;
-      U.uContrast.value = p.contrast ?? 1.06;
-      U.uVignette.value = p.vignette ?? 0.28;
-      U.uTime.value = p.time || 0;
-      if (p.tint) U.uTint.value.setRGB(p.tint[0], p.tint[1], p.tint[2]); else U.uTint.value.setRGB(1, 1, 1);
-      r.toneMappingExposure = p.exposure ?? 1;
       this._pass(this.compMat, null);
+   }
+
+   // quality switch at runtime: MSAA sample count of the scene target and bloom on/off
+   setQuality({ samples, bloom }) {
+      if (bloom != null) this.bloomOn = !!bloom;
+      if (samples != null && samples !== this.sceneRT.samples) {
+         this.sceneRT.samples = samples;
+         this.sceneRT.dispose();   // three re-creates the buffers with the new count on next use
+      }
    }
 
    dispose() {

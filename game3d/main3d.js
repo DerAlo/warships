@@ -30,6 +30,7 @@ import { activeSquad } from './air.js';
 import { TouchUi } from './touch3d.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
 import { createNetGame } from './net/game.js';
+import { gfxPref, setGfxPref, startTier, mountDiag } from './gfxquality.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -181,6 +182,9 @@ window.__turrets = () => turretCache.map(t => ({ state: t.state, reload: t.reloa
 window.__cons = () => consumables().map(c => ({ slot: c.slot, key: c.key, charges: c.charges, cd: c.cd, active: c.active }));
 window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
+window.__gfx = () => renderer.gfxState();
+window.__setGfx = (t) => renderer.setTier(t);
+mountDiag(() => renderer.gfxState());
 window.__zoom3d = () => ({
    level: zoom.level, tp: zoom.tp, bino: zoom.bino, zoom: zoom.zoom, dist: zoom.dist, distTarget: zoom.distTarget,
    acc: zoom.acc, scopeT: renderer.cam?.scopeT ?? 0, fov: renderer.camera.fov,
@@ -1668,6 +1672,11 @@ click('btn-quit', toMenu);
       kcBox.addEventListener('change', () => { settings.killCam = kcBox.checked; saveSettings(); });
    }
    shellcam.bindSelect($('opt-shellcam'));
+   const gfxSel = $('opt-gfx');
+   if (gfxSel) {
+      gfxSel.value = gfxPref();
+      gfxSel.addEventListener('change', () => { setGfxPref(gfxSel.value); renderer.setTier(startTier(gfxSel.value)); });
+   }
 }
 // Audio may only start after a user gesture.
 const gesture = () => { audio.init(); audio.resume(); };

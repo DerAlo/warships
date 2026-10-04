@@ -22,7 +22,8 @@ vec3 waveDisp(vec2 p, float dist, float damp) {
       vec4 a = uWaveA[i]; vec4 b = uWaveB[i];
       float lam = 6.2831853 / a.z;
       float fade = (1.0 - smoothstep(lam * 9.0, lam * 16.0, dist)) * damp;
-      float th = a.z * dot(a.xy, p) - a.w * uWTime + b.z;
+      // both phase terms wrapped first: mobile sin/cos lose all accuracy on arguments in the thousands
+      float th = mod(a.z * dot(a.xy, p), 6.2831853) - mod(a.w * uWTime, 6.2831853) + b.z;
       float A = b.x * fade;
       float c = cos(th);
       o.xz += b.y * A * a.xy * c;
@@ -226,7 +227,8 @@ vec3 waveNormal(vec2 p, float fp, out float jac) {
       vec4 a = uWaveA[i]; vec4 b = uWaveB[i];
       float lam = 6.2831853 / a.z;
       float fade = 1.0 - smoothstep(0.12 * lam, 0.45 * lam, fp);
-      float th = a.z * dot(a.xy, p) - a.w * uWTime + b.z;
+      // both phase terms wrapped first: mobile sin/cos lose all accuracy on arguments in the thousands
+      float th = mod(a.z * dot(a.xy, p), 6.2831853) - mod(a.w * uWTime, 6.2831853) + b.z;
       float wa = a.z * b.x * fade;
       float c = cos(th), s = sin(th);
       n.x -= a.x * wa * c;
@@ -298,7 +300,7 @@ void main() {
    float ft = foamTex * 0.65 + foamTex2 * 0.35;
    float crestFoam = smoothstep(0.55, 0.05, jac) * smoothstep(0.35, 0.8, ft) * smoothstep(0.1, 0.6, uSea);
    crestFoam += smoothstep(0.62, 0.95, crest) * smoothstep(0.5, 0.75, ft) * uSea * 0.8;
-   float band = sin(depth * 1.6 - uWTime * 1.7 + ft * 4.0) * 0.5 + 0.5;
+   float band = sin(depth * 1.6 - mod(uWTime * 1.7, 6.2831853) + ft * 4.0) * 0.5 + 0.5;
    // surf bands only close to the waterline, lace thins out over wide flats (reefs stay turquoise)
    float shoreFoam = smoothstep(2.2, 0.2, depth) * smoothstep(0.55, 0.95, band * ft + 0.2) * 0.8 + smoothstep(0.5, 0.02, depth) * (0.35 + 0.5 * ft);
    float foam = clamp((crestFoam + shoreFoam) * (1.0 - smoothstep(1500.0, 6000.0, dist) * 0.8), 0.0, 1.0);

@@ -14,6 +14,7 @@ import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
+import { TIERS, startTier, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
 
@@ -21,7 +22,9 @@ export class Renderer3D {
    constructor(canvas) {
       this.canvas = canvas;
       const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
-      this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      this.tier = startTier();
+      const tq = TIERS[this.tier];
+      this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
       r.setPixelRatio(this.pixelRatio);
       r.toneMapping = THREE.ACESFilmicToneMapping;
       r.outputColorSpace = THREE.SRGBColorSpace;
@@ -39,7 +42,7 @@ export class Renderer3D {
 
       this.sky = new Sky(r);
       this.scene.add(this.sky.mesh);
-      this.ocean = new Ocean({ segs: 256 });
+      this.ocean = new Ocean({ segs: tq.oceanSegs });
       this.scene.add(this.ocean.mesh);
       this.terrain = new Terrain();
       this.scene.add(this.terrain.group);
@@ -48,7 +51,9 @@ export class Renderer3D {
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.air = new AirModels(this.scene, this.fx);
       this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
-      this.post = new Post(r, { samples: 4, bloomLevels: 5 });
+      this.post = new Post(r, { samples: tq.samples, bloomLevels: 5 });
+      this.post.setQuality({ bloom: tq.bloom });
+      this._wd = { frames: 0, checks: 0, strikes: 0, blank: false, px: new Uint8Array(4) };
 
       this.hudCanvases = new HudCanvases3D();
       this.time = 0;
@@ -76,7 +81,7 @@ export class Renderer3D {
       const sun = new THREE.DirectionalLight(0xffffff, 3);
       sun.castShadow = true;
       const maxTex = this.renderer.capabilities.maxTextureSize || 4096;
-      const sm = maxTex >= 8192 ? 4096 : 2048;
+      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, TIERS[this.tier].shadow);
       sun.shadow.mapSize.set(sm, sm);
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.6;
@@ -165,7 +170,60 @@ export class Renderer3D {
          vignette: 0.3,
          time: this.time,
       });
+      if (this._wd.checks < 12 && ++this._wd.frames % 40 === 0) this._probeFrame();
       this.hudCanvases.draw(world);
+   }
+
+   // ================= QUALITY =================
+   // switch tier live: pixel ratio, MSAA, bloom, shadow-map size (ocean mesh density waits for a reload)
+   setTier(name) {
+      const tq = TIERS[name];
+      if (!tq) return;
+      this.tier = name;
+      this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
+      this.renderer.setPixelRatio(this.pixelRatio);
+      this.resize(this._cssW, this._cssH);
+      this.post.setQuality({ samples: tq.samples, bloom: tq.bloom });
+      const maxTex = this.renderer.capabilities.maxTextureSize || 4096;
+      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, tq.shadow);
+      const sh = this.sun.shadow;
+      if (sh.mapSize.x !== sm) {
+         sh.mapSize.set(sm, sm);
+         if (sh.map) { sh.map.dispose(); sh.map = null; }
+      }
+      this._wd.frames = 0; this._wd.checks = 0; this._wd.strikes = 0;
+   }
+
+   // blank-frame watchdog: read a few pixels of the finished frame (same task, so the drawing
+   // buffer is still valid); two white readings in a row step the tier down
+   _probeFrame() {
+      const wd = this._wd, gl = this.renderer.getContext();
+      const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      if (W < 8 || H < 8) return;
+      wd.checks++;
+      const px = new Uint8Array(PROBES.length * 4);
+      for (let i = 0; i < PROBES.length; i++) {
+         gl.readPixels(Math.floor(PROBES[i][0] * W), Math.floor(PROBES[i][1] * H), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, wd.px);
+         px.set(wd.px, i * 4);
+      }
+      wd.last = Array.from(px);
+      if (!frameLooksBlank(px)) { wd.strikes = 0; return; }
+      if (++wd.strikes < 2) return;
+      if (this.tier !== 'low') {
+         const next = lowerTier(this.tier);
+         console.warn(`[gfx] white frame on tier ${this.tier}, falling back to ${next}`);
+         rememberFallback(next);
+         this.setTier(next);
+      } else if (!wd.blank) {
+         wd.blank = true;
+         console.warn('[gfx] frame still white on the lowest tier');
+      }
+   }
+
+   gfxState() {
+      return { tier: this.tier, pixelRatio: this.pixelRatio, samples: this.post.sceneRT.samples, bloom: this.post.bloomOn,
+         shadow: this.sun.shadow.mapSize.x, ...gpuInfo(this.renderer.getContext()),
+         probes: this._wd.checks, blankStrikes: this._wd.strikes, stillBlank: this._wd.blank, lastProbe: this._wd.last };
    }
 
    _applyDebugView() {
