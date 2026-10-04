@@ -219,7 +219,22 @@ export class Overlay3D {
 
       // turret schematic lives bottom-centre, left of the ammunition selector and right of the
       // chart table, so it never sits on the own hull (which fills the lower middle of the view)
-      if (ui.mode === 'guns') this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
+      // (on touch screens touch3d.js keeps a slot for it in the bottom stack, read twice a second)
+      if (ui.mode === 'guns') {
+         const slot = this._tschSlot();
+         if (slot) this._turretSchematic(ui, slot.x, slot.y);
+         else if (!isTouch()) this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
+      }
+   }
+
+   _tschSlot() {
+      const now = performance.now();
+      if (!this._tsch || now - this._tsch.t > 500) {
+         const e = isTouch() ? document.getElementById('tu-tsch') : null;
+         const r = e?.getBoundingClientRect();
+         this._tsch = { t: now, slot: r && r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null };
+      }
+      return this._tsch.slot;
    }
 
    // Small top-down hull under the reticle, rotated relative to the camera (up = where you
