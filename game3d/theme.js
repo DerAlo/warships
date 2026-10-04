@@ -40,11 +40,16 @@ export const T = read();
 export const FONT = (px, weight = '') => `${weight ? weight + ' ' : ''}${px}px ${T.font}`;
 export const MONO = (px, weight = '') => `${weight ? weight + ' ' : ''}${px}px ${T.mono}`;
 
-// The Kriegsschiffe mark: the signal flags K and S on a halyard plus the wordmark. Same markup as
-// the loading screen in index-3d.html; styled by the .ks-logo rules there (colours via tokens).
+// The Kriegsschiffe mark: a brass-rimmed shield with a twin-gun turret, its barrels crossed, over
+// three waves. Same markup as the loading screen in index-3d.html; styled by the .ks-mark rules
+// there (colours via tokens).
+export const CREST_SVG = '<svg class="ks-crest" viewBox="0 0 40 46" aria-hidden="true">'
+   + '<path class="sh" d="M20 1.5 37.5 7v15c0 11-7.5 18.5-17.5 22.5C10 40.5 2.5 33 2.5 22V7Z"/>'
+   + '<path class="rim" d="M20 5 34.2 9.5V22c0 9-6 15.2-14.2 18.7C11.8 37.2 5.8 31 5.8 22V9.5Z"/>'
+   + '<g class="br"><rect x="18.6" y="6.5" width="2.8" height="18" rx=".8" transform="rotate(-36 20 24)"/><rect x="18.6" y="6.5" width="2.8" height="18" rx=".8" transform="rotate(36 20 24)"/></g>'
+   + '<path class="tu" d="M12 30.5h16l-2.2-7.2H14.2Z"/><rect class="tu" x="10" y="30.5" width="20" height="2.6" rx=".8"/>'
+   + '<path class="wv" d="M10 36.6q2.5-1.8 5 0t5 0 5 0 5 0"/></svg>';
+
 export function logoSvg(sub = 'Seekrieg 1939 – 1945') {
-   return '<div class="ks-logo"><svg viewBox="0 0 34 44" aria-hidden="true"><path class="hl" d="M3 1v42"/><path class="hl" d="M3 3h3M3 22h3"/>'
-      + '<rect class="fy" x="6" y="3" width="13" height="16"/><rect class="fb" x="19" y="3" width="13" height="16"/>'
-      + '<rect class="fw" x="6" y="22" width="26" height="16"/><rect class="fb" x="14" y="27" width="10" height="6"/></svg>'
-      + `<span class="wm"><b>Kriegsschiffe</b><i>${sub}</i></span></div>`;
+   return `<div class="ks-mark">${CREST_SVG}<span class="wm"><b>Kriegsschiffe</b>${sub ? `<i>${sub}</i>` : ''}</span></div>`;
 }

@@ -1,8 +1,10 @@
 // tests/playwright3d.responsive.mjs -- layout check on small and touch screens: phones held sideways (also with
 // the browser bars eating height) and upright, tablets both ways, small laptops. For every size it shots the
-// port, the ship list and a running battle (then a carrier and a submarine battle for their own panels), and fails
-// when visible menu tiles or HUD blocks overlap each other, stick out of the window, or when the 3D view comes out
-// blank (nearly all white or all black). A phone held upright must show the "turn the device" veil instead.
+// port, the commander sheet, the multiplayer lobby (list, create dialog, room; local test transport), a running
+// battle (then a carrier and a submarine battle for their own panels) and the battle report, and fails when visible
+// menu tiles or HUD blocks overlap each other, stick out of the window, when a control on a touch screen is smaller
+// than a finger (44 px), or when the 3D view comes out blank (nearly all white or all black). A phone held upright
+// must show the "turn the device" veil instead of the battle HUD.
 // Exit code 1 on a failed check or a console error.
 //
 // Run:  node server.js 8820   then   URL3D=http://localhost:8820/index-3d.html node tests/playwright3d.responsive.mjs
@@ -11,6 +13,8 @@ import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const URL = process.env.URL3D || 'http://localhost:8820/index-3d.html';
+// the lobby runs on the BroadcastChannel test transport: no internet, nothing else changes for the single player game
+const PAGE = URL + (URL.includes('?') ? '&' : '?') + 'net=local';
 const OUT = process.env.OUT || 'tests/shots/responsive';
 const SHOTS = process.env.SHOTS !== '0';
 mkdirSync(OUT, { recursive: true });
@@ -80,6 +84,12 @@ const OVERLAP_FN = (sels) => {
    return { n: els.length, overlaps: out, offscreen: off };
 };
 
+// visible buttons smaller than a finger (touch screens only)
+const SMALL_FN = (sel) => [...document.querySelectorAll(sel)].filter(e => e.offsetParent && getComputedStyle(e).visibility !== 'hidden')
+   .map(e => ({ e, r: e.getBoundingClientRect() })).filter(x => x.r.width < 43.5 || x.r.height < 43.5)
+   .map(x => (x.e.className || x.e.tagName.toLowerCase()) + ' "' + x.e.textContent.trim().slice(0, 14) + '" ' + Math.round(x.r.width) + 'x' + Math.round(x.r.height));
+const MP_SELS = ['.mp button', '.mp input', '.mp select', '.mp .mp-box', '.mp .mp-game', '.mp .mp-player', '.mp .mp-ship'];
+const END_SELS = ['#end button', '#end .m3r-title', '#end .m3r-mis', '#end .m3r-earn > div', '#end .m3r-st', '#end .m3r-teams table', '#end .m3r-rw'];
 const MENU_SELS = ['#menu button', '#menu .m3-card', '#menu [class*="card"]', '#menu [class*="tile"]', '#menu h1', '#menu h2', '#menu .tabs > *'];
 const HUD_SELS = [
    '#scorebox', '#objectives', '#nav', '#minimap-wrap', '#weapons > *', '#cons > *', '#ship-card', '#roster-ally', '#roster-enemy',
@@ -104,7 +114,7 @@ for (const sz of SIZES) {
       s.textContent = ':root{--font:Arial,sans-serif!important;--font-cond:Arial,sans-serif!important;--mono:Arial,monospace!important}';
       document.addEventListener('DOMContentLoaded', () => document.head.appendChild(s));
    });
-   await page.goto(URL, { waitUntil: 'load' });
+   await page.goto(PAGE, { waitUntil: 'load' });
    await page.waitForTimeout(1500);
    if (SHOTS) await page.screenshot({ path: `${OUT}/${sz.name}-1-port.png` });
    let r = await page.evaluate(OVERLAP_FN, MENU_SELS);
@@ -112,6 +122,47 @@ for (const sz of SIZES) {
    check(tag + 'port: nothing outside the window', r.offscreen.length === 0, r.offscreen.slice(0, 6));
    const docW = await page.evaluate(() => document.documentElement.scrollWidth);
    check(tag + 'port: no sideways scrolling', docW <= sz.w + 1, docW);
+   const small = async (what, sel) => { if (!sz.touch) return; const s = await page.evaluate(SMALL_FN, sel); check(tag + what + ': touch targets >= 44 px', !s.length, s.slice(0, 6)); };
+   const fits = async (what, sels) => {
+      const q = await page.evaluate(OVERLAP_FN, sels);
+      check(tag + what + ': no overlaps, inside the window (' + q.n + ')', !q.overlaps.length && !q.offscreen.length, [...q.overlaps, ...q.offscreen].slice(0, 6));
+   };
+   await small('port', '#menu button');
+
+   // the commander sheet (Lehrgänge) over the port
+   await page.click('#menu [data-act="captain"]');
+   await page.waitForSelector('#menu .m3-cap');
+   if (SHOTS) await page.screenshot({ path: OUT + '/' + sz.name + '-1b-captain.png' });
+   await fits('kommandant', ['#menu .m3-op button', '#menu .m3-op .t']);
+   await small('kommandant', '#menu .m3-op button');
+   await page.click('#menu [data-cap="close"]');
+
+   // multiplayer lobby: name prompt, list of games, create dialog, own room; then back to the port
+   await page.click('#menu [data-act="mp"]');
+   await page.waitForSelector('.mp:not(.hidden) [data-f="pname"]', { timeout: 8000 });
+   await page.fill('[data-f="pname"]', 'Testkapitän');
+   await page.click('.mp-modal [data-ok]');
+   await page.waitForFunction(() => !document.querySelector('.mp-modal') && document.querySelector('.mp-body.list'), null, { timeout: 8000 });
+   await page.waitForTimeout(300);
+   if (SHOTS) await page.screenshot({ path: OUT + '/' + sz.name + '-1c-lobby.png' });
+   await fits('lobby list', MP_SELS);
+   await small('lobby list', '.mp button');
+   await page.click('.mp [data-act="main"]');
+   await page.waitForSelector('.mp-modal [data-f="name"]');
+   await fits('lobby create dialog', ['.mp-modal button', '.mp-modal input', '.mp-modal select']);
+   await small('lobby create dialog', '.mp-modal button');
+   await page.click('.mp-modal [data-ok]');
+   await page.waitForSelector('.mp-body.room .mp-player', { timeout: 8000 });
+   await page.waitForTimeout(300);
+   if (SHOTS) await page.screenshot({ path: OUT + '/' + sz.name + '-1d-room.png' });
+   await fits('lobby room', MP_SELS);
+   await small('lobby room', '.mp button');
+   const docW2 = await page.evaluate(() => document.documentElement.scrollWidth);
+   check(tag + 'lobby: no sideways scrolling', docW2 <= sz.w + 1, docW2);
+   await page.click('.mp [data-act="back"]');
+   await page.waitForSelector('.mp-body.list', { timeout: 8000 });
+   await page.click('.mp [data-act="back"]');
+   await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 8000 });
 
    const battle = async (ship) => {
       await page.evaluate((ship) => window.__start({ difficulty: 'easy', mission: 'standard', ship }), ship);
@@ -162,6 +213,15 @@ for (const sz of SIZES) {
       check(tag + `battle ${ship}: ${panel} shown, no overlapping HUD blocks (${r.n})`, shown && r.overlaps.length === 0, shown ? r.overlaps.slice(0, 8) : panel + ' not shown');
       check(tag + `battle ${ship}: HUD inside the window`, r.offscreen.length === 0, r.offscreen.slice(0, 6));
    }
+
+   // the battle report
+   await page.evaluate(() => window.__world().end(true, 'Alle Gegner versenkt.'));
+   const shown = await page.waitForFunction(() => !document.getElementById('end').classList.contains('hidden'), null, { timeout: 10000 }).then(() => true, () => false);
+   check(tag + 'report: shown after the end', shown);
+   await page.waitForTimeout(1500);
+   if (SHOTS) await page.screenshot({ path: OUT + '/' + sz.name + '-4-report.png' });
+   await fits('report', END_SELS);
+   await small('report', '#end button');
    await ctx.close();
 }
 await browser.close();

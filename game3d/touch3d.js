@@ -114,18 +114,6 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    background: rgba(10, 12, 13, .9); font: 600 19px var(--font); letter-spacing: 1px; color: var(--hud); text-align: center; }
 #tu-rotate svg { width: 72px; height: 72px; color: var(--gold); }
 #tu-rotate span { font-size: 13px; color: var(--hud-dim); letter-spacing: .5px; }
-@media (max-height: 560px) {
-   /* port on a phone held sideways: narrower side columns, the order bar in two rows */
-   body.touch .m3-top { height: 48px; }
-   body.touch .m3-main { grid-template-columns: 220px minmax(0,1fr) 270px; gap: 12px; padding: 10px 12px; }
-   body.touch .m3-brief { max-height: 36%; padding: 10px 16px; }
-   body.touch .m3-ship { padding: 10px 14px; }
-   body.touch .m3-orders { flex-wrap: wrap; gap: 6px; min-height: 0; }
-   body.touch .m3-diff { flex: 1 1 100%; min-height: 44px; }
-   body.touch .m3-diff > span { display: none; }
-   body.touch .m3-diff button { flex: 1; }
-   body.touch .m3-battle { flex: 1 1 100%; min-height: 48px; font-size: 20px; }
-}
 @media (min-height: 700px) {
    #touch-ui { --tu-s: 1.15; }
    body.touch { --tu-map: .8; --tu-hud: .9; }

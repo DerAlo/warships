@@ -36,15 +36,16 @@ const LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor
 
 const CSS = `
 /* Lobby in the port's "Kartenhaus" style (tokens: index-3d.html :root). The masthead and the main
-   button reuse the port's .m3-top/.m3-capt/.m3-battle rules; the body is a set of paper sheets on
+   button reuse the port's .m3-capt/.m3-battle rules; the body is a set of paper sheets on
    the dimmed sea: the filter sheet, the list of open games as ledger rows, the room's three sheets. */
 .mp { position:absolute; inset:0; z-index:22; display:flex; flex-direction:column; color:var(--ink); font-family:var(--font); pointer-events:auto; --cls-bar:var(--paper);
    background:linear-gradient(90deg, rgba(9,15,19,.92), rgba(9,15,19,.66) 30%, rgba(9,15,19,.66) 70%, rgba(9,15,19,.92)); }
 .mp * { box-sizing:border-box; }
-.mp-top { flex:none; height:64px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; padding:0 20px; user-select:none; color:var(--paper);
+.mp { --tap:34px; } body.touch .mp { --tap:44px; }
+.mp-top { flex:none; min-height:64px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:16px; padding:0 20px; user-select:none; color:var(--paper);
    background:var(--navy); border-bottom:3px double var(--brass); box-shadow:0 8px 24px rgba(0,0,0,.35); }
-.mp-top .m3-logo .ks-logo svg { height:38px; } .mp-top .m3-logo .ks-logo .wm b { font-size:23px; }
-.mp-top .m3-battle { flex:none; height:44px; min-width:270px; font-size:17px; }
+.mp-top .m3-logo .ks-crest { height:38px; } .mp-top .m3-logo .wm b { font-size:23px; }
+.mp-top .m3-battle { flex:none; height:44px; min-height:44px; min-width:270px; font-size:17px; letter-spacing:5px; text-indent:5px; }
 .mp-left { display:flex; align-items:center; gap:18px; min-width:0; } .mp-right { display:flex; justify-content:flex-end; align-items:center; gap:14px; }
 .mp-btn { cursor:pointer; border:1px solid var(--ink-2); padding:6px 12px; background:var(--paper); color:var(--ink); font:600 12px var(--font); letter-spacing:1.5px; white-space:nowrap; }
 .mp-btn:hover:not(:disabled) { background:var(--navy); border-color:var(--navy); color:var(--paper); } .mp-btn:disabled { opacity:.4; cursor:not-allowed; }
@@ -124,7 +125,39 @@ const CSS = `
 .mp-modal .err { color:var(--signal); font-size:12.5px; margin-top:8px; min-height:16px; }
 .mp-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 @media (max-width: 1150px) { .mp-body.room { grid-template-columns:270px minmax(0,1fr) 240px; } .mp-grow, .mp-game { grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1.2fr) 64px 92px 118px; } .mp-grow .c-mode, .mp-game .c-mode, .mp-grow .c-diff, .mp-game .c-diff { display:none; }
-   .mp-top .m3-logo .ks-logo .wm i { display:none; } .mp-top .m3-battle { min-width:200px; } }
+   .mp-top .m3-logo .wm i { display:none; } .mp-top .m3-battle { min-width:200px; } }
+/* touch: every control at least 44 px */
+body.touch .mp .mp-btn, body.touch .mp .mp-seg button, body.touch .mp input[type=text], body.touch .mp input[type=password], body.touch .mp select, body.touch .mp .mp-ship { min-height:44px; }
+body.touch .mp .mp-player .k { width:44px; height:44px; } body.touch .mp label.chk { min-height:44px; margin:0; } body.touch .mp label.chk input { width:20px; height:20px; }
+/* tablets upright, phones: the games list as wrapped cards, the room as stacked sheets; the body scrolls */
+@media (max-width: 980px), (max-height: 560px) {
+   .mp-top { display:flex; gap:10px; padding:6px 12px; } .mp-top .m3-logo .wm { display:none; }
+   .mp-left, .mp-right { flex:1 1 0; min-width:max-content; } .mp-top .m3-battle { flex:0 1 auto; } .mp-top .m3-battle { min-width:170px; font-size:16px; letter-spacing:3px; text-indent:3px; }
+   .mp-left { gap:10px; } .mp-net { font-size:10.5px; }
+   .mp-body { gap:12px; padding:10px 12px; overflow-y:auto; overflow-x:hidden; }
+   .mp-body.list { grid-template-columns:minmax(220px,260px) minmax(0,1fr); }
+   .mp-body .mp-note.mp-scroll { display:none; }
+   .mp-grow { display:none; }
+   .mp-game { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:8px 10px; font-size:12.5px; }
+   .mp-game > span.n { flex:1 1 100%; } .mp-game .c-mode, .mp-game .c-diff { display:inline; } .mp-game .mp-btn { margin-left:auto; }
+   .mp-body .mp-col { min-height:auto; }
+   .mp-body.list { grid-template-rows:max-content; }
+   .mp-body.room { grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:max-content max-content; align-content:start; }
+   .mp-body.room > .mp-col:nth-child(2) { grid-column:1 / -1; grid-row:1; }
+   .mp-body.room .mp-chat { flex:none; } .mp-body.room .mp-chat-log { height:110px; flex:none; }
+   .mp-body.room [data-players], .mp-body.room [data-ships] { max-height:300px; }
+}
+@media (max-height: 560px) { .mp-body.list .mp-games { max-height:none; overflow:visible; } .mp-top .m3-logo { display:none; } }
+@media (max-width: 640px) {
+   .mp-top { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"l r" "m m"; }
+   .mp-left { grid-area:l; min-width:0; } .mp-right { grid-area:r; min-width:0; } .mp-top .m3-battle { grid-area:m; width:100%; min-width:0; }
+   .mp-top .m3-logo { display:none; } .mp-net { display:none; }
+   .mp-body.list, .mp-body.room { display:flex; flex-direction:column; }
+   .mp-body.room > .mp-col:nth-child(2) { order:-1; } .mp-body .mp-col { flex:none; min-height:auto; }
+   .mp-body.list .mp-games { overflow:visible; }
+   .mp-row2 { grid-template-columns:1fr; } .mp-modal .box { padding:16px 16px; } .mp-modal .bt { flex-wrap:wrap; }
+   .mp-set { grid-template-columns:minmax(0,1fr); gap:4px; } .mp-set > span { min-width:0; } .mp-title { font-size:20px; }
+}
 `;
 
 let ui = null;
@@ -245,7 +278,7 @@ class MpUI {
       const lb = this.lobby, r = lb?.room;
       if (this.view === 'list') { main.textContent = 'SPIEL ERSTELLEN'; main.disabled = !lb; main.dataset.kind = 'create'; }
       else if (r && lb.isHost) {
-         main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : 'GEFECHT!'; main.disabled = !lb.canStart(); main.dataset.kind = 'start';
+         main.textContent = r.state === 'running' ? 'GEFECHT LÄUFT' : 'AUSLAUFEN'; main.disabled = !lb.canStart(); main.dataset.kind = 'start';
          main.title = !main.disabled || r.state !== 'lobby' ? ''
             : r.mode === 'pvp' && (!lb.teamSize(1) || !lb.teamSize(2)) ? 'Beide Teams brauchen mindestens einen Kapitän' : 'Alle Mitspieler müssen bereit sein';
       } else if (r && r.state === 'running' && !lb.session && lb.canRejoin({ id: r.id, hostId: r.hostId, state: r.state })) {
