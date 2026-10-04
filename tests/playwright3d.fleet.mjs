@@ -43,7 +43,7 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
          const car = document.querySelector('.m3-car'), cr = car.getBoundingClientRect();
          const cards = [...car.querySelectorAll('.m3-card')];
          return {
-            // the fleet register is a vertical list: one navy fits without scrolling either way
+            // the ship line-up: one navy fits without scrolling either way
             keys: cards.map(c => c.dataset.ship), fits: car.scrollWidth <= car.clientWidth + 1 && car.scrollHeight <= car.clientHeight + 1,
             inside: cards.every(c => { const b = c.getBoundingClientRect(); return b.left >= cr.left - 1 && b.right <= cr.right + 1 && b.bottom <= innerHeight; }),
             clipped: cards.filter(c => { const h = c.querySelector('.hd'); return h.scrollWidth > h.clientWidth + 1; }).map(c => c.dataset.ship),
@@ -61,7 +61,7 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
    await page.click('.m3-tabs [data-nat="all"]');
    const all = await page.evaluate(() => {
       const car = document.querySelector('.m3-car');
-      return { n: car.querySelectorAll('.m3-card').length, groups: car.querySelectorAll('.m3-nat').length, scroll: car.scrollHeight > car.clientHeight,
+      return { n: car.querySelectorAll('.m3-card').length, groups: car.querySelectorAll('.m3-nat').length, scroll: car.scrollWidth > car.clientWidth || car.scrollHeight > car.clientHeight,
          page: document.documentElement.scrollWidth <= innerWidth, locked: car.querySelectorAll('.m3-card.lock').length };
    });
    check(`${tag} "Alle" lists the whole roster in a scrolling strip`, all.n === PLAYABLE.length && all.groups === NATIONS.length && all.scroll && all.page, all);

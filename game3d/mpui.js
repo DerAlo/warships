@@ -156,7 +156,7 @@ body.touch .mp .mp-player .k { width:44px; height:44px; } body.touch .mp label.c
    .mp-body.room > .mp-col:nth-child(2) { order:-1; } .mp-body .mp-col { flex:none; min-height:auto; }
    .mp-body.list .mp-games { overflow:visible; }
    .mp-row2 { grid-template-columns:1fr; } .mp-modal .box { padding:16px 16px; } .mp-modal .bt { flex-wrap:wrap; }
-   .mp-set { grid-template-columns:1fr; gap:4px; } .mp-title { font-size:20px; }
+   .mp-set { grid-template-columns:minmax(0,1fr); gap:4px; } .mp-set > span { min-width:0; } .mp-title { font-size:20px; }
 }
 `;
 
