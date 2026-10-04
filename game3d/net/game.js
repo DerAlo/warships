@@ -365,6 +365,7 @@ export function createNetGame(session, hooks) {
 
    return {
       get isHost() { return isHost; },
+      get pvp() { return pvp || !!startIn?.teams; },
       pump, quit,
       get world() { return world; },
       get ready() { return !!world && !waitResync; },

@@ -117,12 +117,14 @@ const fx = {
 };
 // Player settings (per browser). sens scales both mouse axes.
 const SETTINGS_KEY = 'warships3d.settings.v1';
-const settings = { sens: 1, music: 0.5, sfx: 1, killCam: true };
+const settings = { sens: 1, music: 0.5, sfx: 1, killCam: true, aimAssist: true, touchHint: true };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* private mode */ }
 settings.sens = clamp(Number(settings.sens) || 1, 0.3, 2.5);
 settings.music = clamp(Number.isFinite(Number(settings.music)) ? Number(settings.music) : 0.5, 0, 1);
 settings.sfx = clamp(Number.isFinite(Number(settings.sfx)) ? Number(settings.sfx) : 1, 0, 1);
 settings.killCam = settings.killCam !== false;
+settings.aimAssist = settings.aimAssist !== false;
+settings.touchHint = settings.touchHint !== false;
 audio.setVolumes(settings.music, settings.sfx);
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* ignore */ } }
 // shell camera (shellcam.js): settings.shellCam, B key, cam3.override like the kill cam
@@ -140,6 +142,8 @@ const touch = new TouchUi({ input, canvas: scene3d, api: {
    state: () => touchState(),
    setTelegraph: (n) => setTelegraph(n),
    setRudder: (n) => setRudder(n),
+   hint: () => settings.touchHint && !/[?&]nohint\b/.test(location.search),
+   hintDone: (forever) => { if (forever) { settings.touchHint = false; saveSettings(); } },
 } });
 window.__touch = () => ({ on: touch.on, shown: touch.shown });
 function touchState() {
@@ -639,6 +643,14 @@ function frameInput(dt) {
    if (!wantFree && cam3.freeLook) { view.yaw = unwrapNear(frozen.yaw, view.yaw); view.logR = Math.log(frozen.range); }
    cam3.freeLook = wantFree;
 
+   // --- touch aim assist (Zielhilfe): the aim rides on the lead point of the locked target, a swipe
+   // shifts it (the shift is kept), a long swipe away pauses the assist until the next lock
+   const ab = assistBase(p);
+   if (ab) {
+      view.yaw = unwrapNear(ab.yaw + assist.yaw, view.yaw);
+      view.logR = clamp(ab.logR + assist.logR, Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+   }
+
    // --- mouse -> bearing / range. Sensitivity follows the FOV so 16x is as controllable as 1x.
    if (!ctl.mapOpen) {
       const fov = renderer.camera.fov || BASE_FOV;
@@ -657,6 +669,10 @@ function frameInput(dt) {
          }
       }
    }
+   if (ab) {
+      assist.yaw = angleDelta(ab.yaw, view.yaw); assist.logR = clamp(view.logR - ab.logR, -0.4, 0.4);
+      if (Math.abs(assist.yaw) > ASSIST_BREAK) { assist.paused = true; hud.msg('Zielhilfe pausiert · Ziel neu erfassen', 'info'); }
+   }
    const s = 1 - Math.exp(-dt / AIM_TAU);
    cam3.yaw += (view.yaw - cam3.yaw) * s;
    cam3.range = Math.exp(lerp(Math.log(cam3.range), view.logR, s));
@@ -665,6 +681,24 @@ function frameInput(dt) {
 }
 
 function unwrapNear(a, ref) { return ref + angleDelta(ref, a); }
+
+// Touch aim assist: only on a touch screen, only for the X lock, never in PvP and never for the
+// squadron view, free look or the map. Firing, ammunition and dispersion stay with the player.
+// Returns the bearing / log range of the lead point (from the last buildLead) or null.
+const ASSIST_BREAK = 0.35;                                  // rad swiped off the lead: assist pauses
+const assist = { id: null, paused: false, yaw: 0, logR: 0 };
+const assistOut = { yaw: 0, logR: 0 };
+function assistWanted() { return touch.on && settings.aimAssist && !net?.pvp && ctl.lockId != null; }
+function assistBase(p) {
+   if (assist.id !== ctl.lockId) { assist.id = ctl.lockId; assist.paused = false; assist.yaw = 0; assist.logR = 0; }
+   if (!assistWanted() || assist.paused || cam3.freeLook || ctl.mapOpen || airui.flying || !p.alive) return null;
+   if (!lead.fix || lead.id !== ctl.lockId) return null;
+   const dx = lead.wx - p.pos.x, dy = lead.wy - p.pos.y, d = Math.hypot(dx, dy);
+   if (!(d > 1)) return null;
+   assistOut.yaw = Math.atan2(dy, dx); assistOut.logR = clamp(Math.log(d), Math.log(cam3.rangeMin), Math.log(cam3.rangeMax));
+   return assistOut;
+}
+window.__assist = () => ({ wanted: assistWanted(), paused: assist.paused, yaw: assist.yaw, logR: assist.logR, fix: lead.fix });
 
 function stepHold(key, dt, fn) {
    const n = input.tapped(key);
@@ -705,7 +739,10 @@ function toggleLock() {
       const d = Math.hypot(m.x - W / 2, m.y - H / 2);
       if (d < bestD) { bestD = d; best = m; }
    }
-   if (best && bestD < Math.max(W, H) * 0.35 && best.id !== ctl.lockId) { ctl.lockId = best.id; audio.lock(); }
+   if (best && bestD < Math.max(W, H) * 0.35 && best.id !== ctl.lockId) {
+      ctl.lockId = best.id; audio.lock();
+      if (assistWanted() && !assist.told) { assist.told = true; hud.msg('Zielhilfe: das Fadenkreuz folgt dem Vorhalt · Wischen korrigiert', 'info'); }
+   }
    else if (ctl.lockId != null) { ctl.lockId = null; audio.uiClick(); }
    else audio.denied();
 }
@@ -1236,7 +1273,7 @@ function project(x, h, y, out) {
 const LOCK_GRACE = 10, AUTO_GRACE = 6;                     // s a locked / auto target may stay unseen
 const LEAD_FRAME = { l: 36, t: 100, r: 36, b: 250 };       // px kept clear: score box, bottom panels + minimap
 const lead = { shown: false, x: 0, y: 0, off: false, ang: 0, state: 'ok', torp: false, id: null,
-   hull: false, bx: 0, by: 0, sx: 0, sy: 0, dist: 0 };
+   hull: false, bx: 0, by: 0, sx: 0, sy: 0, dist: 0, fix: false, wx: 0, wy: 0 };   // fix / wx, wy: world lead point (aim assist)
 const leadPt = { x: 0, y: 0, t: 0 }, leadPr = { x: 0, y: 0, visible: false }, leadPr2 = { x: 0, y: 0, visible: false };
 const leadCands = [];
 let leadSpeed = 0;   // torpedo speed (m/s) in torpedo mode, 0 = guns
@@ -1247,9 +1284,9 @@ function leadSolve(p, tx, ty, vx, vy, out) {
 }
 function buildLead(ui, markers) {
    const p = P, L = lead, cx = W / 2, cy = H / 2;
-   L.shown = false;
+   L.shown = false; L.fix = false;
    const torp = ctl.mode === 'torp';
-   if (!ctl.lead || !p?.alive || (torp && !ui.torpInfo)) { L.id = null; return; }
+   if (!(ctl.lead || assistWanted()) || !p?.alive || (torp && !ui.torpInfo)) { L.id = null; return; }
    leadSpeed = torp ? ui.torpInfo.speed : 0;
    // --- target: the lock (also while it is briefly unseen), else the best candidate
    let tgt = ui.lockShip, lost = false;
@@ -1291,6 +1328,8 @@ function buildLead(ui, markers) {
       vx = k.vx || 0; vy = k.vy || 0; tx = k.x + vx * dtk; ty = k.y + vy * dtk; hdg = k.hdg ?? 0;
    } else { const v = velOf(tgt); tx = tgt.pos.x; ty = tgt.pos.y; vx = v.x; vy = v.y; hdg = tgt.heading; }
    if (!leadSolve(p, tx, ty, vx, vy, leadPt)) return;   // a torpedo cannot catch this target
+   L.fix = true; L.wx = leadPt.x; L.wy = leadPt.y;
+   if (!ctl.lead) return;                                // marker off: the aim assist alone needs the point
    const dist = Math.hypot(leadPt.x - p.pos.x, leadPt.y - p.pos.y);
    L.dist = dist; L.torp = torp;
    L.state = leadState(!lost, dist, torp ? ui.torpInfo.range : aim.gunRange);
@@ -1670,6 +1709,11 @@ click('btn-quit', toMenu);
    if (kcBox) {
       kcBox.checked = settings.killCam;
       kcBox.addEventListener('change', () => { settings.killCam = kcBox.checked; saveSettings(); });
+   }
+   const asBox = $('opt-assist');
+   if (asBox) {
+      asBox.checked = settings.aimAssist;
+      asBox.addEventListener('change', () => { settings.aimAssist = asBox.checked; saveSettings(); });
    }
    shellcam.bindSelect($('opt-shellcam'));
    const gfxSel = $('opt-gfx');

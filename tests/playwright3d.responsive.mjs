@@ -116,6 +116,15 @@ for (const sz of SIZES) {
    });
    await page.goto(PAGE, { waitUntil: 'load' });
    await page.waitForTimeout(1500);
+   // the one-time touch note comes first: it must fit, then it is dismissed
+   if (sz.touch) {
+      if (SHOTS) await page.screenshot({ path: `${OUT}/${sz.name}-0-hint.png` });
+      const h = await page.evaluate(OVERLAP_FN, ['.tu-hint-card']);
+      check(tag + 'touch note inside the window', h.n === 1 && !h.offscreen.length, h);
+      const s = await page.evaluate(SMALL_FN, '#tu-hint-ok, #tu-hint label');
+      check(tag + 'touch note: targets >= 44 px', !s.length, s.slice(0, 6));
+      await page.click('#tu-hint-ok');
+   }
    if (SHOTS) await page.screenshot({ path: `${OUT}/${sz.name}-1-port.png` });
    let r = await page.evaluate(OVERLAP_FN, MENU_SELS);
    check(tag + `port: no overlapping tiles (${r.n})`, r.overlaps.length === 0, r.overlaps.slice(0, 6));

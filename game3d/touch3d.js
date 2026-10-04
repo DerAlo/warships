@@ -24,7 +24,9 @@ const W_KEY = { HE: '1', AP: '2', TORP: '3' };
 const MQ_COMPACT = '(max-height: 480px)';                        // phone held sideways
 const MQ_NARROW = '(max-height: 480px) and (max-width: 899px)';  // ... and a short one: consumables go left
 const MQ_UPRIGHT = '(orientation: portrait) and (max-width: 600px)';
-const LATE_PLATES = ['sub-panel', 'asw-panel', 'air-panel', 'aa-panel'];   // built by subui / airui on demand
+const MORE_OPEN = 5;             // s the phone's "more" fold stays open
+const OBJ_SHOW = 8;              // s the phone shows the objectives after a change
+const LATE_PLATES =['sub-panel', 'asw-panel', 'air-panel', 'aa-panel'];   // built by subui / airui on demand
 
 const CSS = `
 body.touch { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
@@ -86,6 +88,13 @@ body.touch #roster-ally::before { text-align: left; }
 body.touch #roster-enemy, body.touch #roster-enemy::before { justify-content: flex-end; text-align: right; }
 body.touch #killfeed { width: auto; max-width: 330px; }
 body.touch #tu-hud-r > #minimap-wrap { zoom: var(--tu-map); pointer-events: auto; cursor: pointer; }
+/* phone: the target card sits under the system buttons (TouchUi._arrange) */
+#tu-hud-t { position: absolute; top: calc(60px + env(safe-area-inset-top, 0px)); right: calc(116px + env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+body.touch #tu-hud-t > * { position: static; transform: none; margin: 0; zoom: var(--tu-hud); }
+/* while a finger aims on the sea the info plates step back */
+#tu-hud-l, #tu-hud-r, #tu-hud-t { transition: opacity .25s; }
+body.touch.tu-aim #tu-hud-l, body.touch.tu-aim #tu-hud-r, body.touch.tu-aim #tu-hud-t { opacity: .3; }
+#tu-more { display: none; }
 /* ship card: a compact hull-points strip */
 body.touch #ship-card { width: 250px; padding: 5px 10px 6px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "head head" "bar text"; align-items: center; column-gap: 8px; row-gap: 3px; }
 body.touch #ship-card .sc-head { grid-area: head; }
@@ -109,6 +118,18 @@ body.touch #air-panel .ap-keys, body.touch #sub-panel .sp-keys { display: none; 
 body.touch #help-panel { pointer-events: auto; touch-action: pan-y; max-height: calc(100% - 70px); overflow: auto; top: calc(50% + 24px); }
 body.touch #help-panel .tu-help { display: block; }
 body.touch #torp-alert { top: calc(50% - 96px); }
+/* first-start note (_hint) */
+#tu-hint { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto;
+   background: rgba(8, 10, 11, .78); font-family: var(--font); color: var(--hud); }
+.tu-hint-card { max-width: 460px; width: 100%; margin: auto; padding: 18px 20px 16px; background: rgba(17, 20, 21, .96); border: 1px solid var(--panel-edge); border-top: 3px solid var(--gold); border-radius: 3px; }
+.tu-hint-k { font: 700 11px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--gold); }
+.tu-hint-card h2 { margin: 4px 0 10px; font: 700 22px var(--font-cond); letter-spacing: 1px; text-transform: uppercase; color: #fff; }
+.tu-hint-card p { margin: 0 0 10px; font-size: 14px; line-height: 1.45; color: var(--hud); }
+.tu-hint-card b { color: var(--gold); }
+.tu-hint-card label { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 0 8px; font-size: 14px; color: var(--hud-dim); }
+.tu-hint-card input { width: 20px; height: 20px; accent-color: var(--gold); }
+.tu-hint-card button { width: 100%; min-height: 48px; border: 0; border-radius: 3px; background: var(--gold); color: var(--ink); font: 700 15px var(--font); letter-spacing: 1.5px; text-transform: uppercase; }
+@media (max-height: 480px) { .tu-hint-card { max-width: 620px; padding: 12px 16px; } .tu-hint-card h2 { font-size: 18px; margin-bottom: 6px; } .tu-hint-card p { font-size: 13px; margin-bottom: 6px; } .tu-hint-card label { margin: 0 0 4px; } }
 /* phone held upright: no room for a battle */
 #tu-rotate { display: none; position: fixed; inset: 0; z-index: 30; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px;
    background: rgba(10, 12, 13, .9); font: 600 19px var(--font); letter-spacing: 1px; color: var(--hud); text-align: center; }
@@ -144,6 +165,12 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    #tu-hud-r { top: calc(6px + env(safe-area-inset-top, 0px)); bottom: calc(182px + env(safe-area-inset-bottom, 0px)); }
    body.touch #tu-hud-l > #cons { margin-top: auto; zoom: 1; flex-wrap: wrap; gap: 6px; max-width: 210px; }
    body.touch #mission-name { display: none; }
+   /* fewer buttons: map (the minimap opens it too), overview, help, AA and secondaries fold out of "..." */
+   #tu-more { display: flex; }
+   body.touch:not(.tu-more) #tu-map, body.touch:not(.tu-more) #tu-board, body.touch:not(.tu-more) #tu-help,
+   body.touch:not(.tu-more) #tu-sec, body.touch:not(.tu-more) #tu-aa { display: none; }
+   body.touch #objectives { transition: opacity .6s; }
+   body.touch #objectives:not(.tu-fresh) { opacity: 0; }
    body.touch #scorebox { width: 250px; padding: 4px 10px 5px; grid-template-columns: auto 1fr; grid-template-areas: "timer score" "caps caps"; }
    body.touch .score-row { margin-top: 0; }
    body.touch #caps-row { margin-top: 4px; }
@@ -183,6 +210,7 @@ const ICON = {
    map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>',
    board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
    help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9a3 3 0 1 1 4 2.8c-.7.3-1 1-1 1.7V15"/><circle cx="12" cy="18.5" r=".6" fill="currentColor"/></svg>',
+   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg>',
    scope: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="14" r="4"/><circle cx="17" cy="14" r="4"/><path d="M10 12h4M5 10l2-5h3M19 10l-2-5h-3"/></svg>',
    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg>',
    free: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -216,6 +244,10 @@ export class TouchUi {
       this.pinch = 0;               // last finger distance of a two-finger pinch (0 = none)
       this.held = new Set();        // virtual keys held by a button
       this.board = false;
+      this.more = false;            // phone: the "more" fold is open
+      this.moreT = 0;               // s until it closes by itself
+      this.objTxt = null;           // last objectives text, and s since it changed
+      this.objT = 0;
       if (typeof window === 'undefined') return;
       if (isCoarse()) this.enable();
       // a laptop with a touch screen: the first real touch switches the overlay on
@@ -229,6 +261,7 @@ export class TouchUi {
       this.input.touchMode = true;
       this._build();
       document.body.classList.add('touch');
+      this._hint();
       // iOS Safari ignores user-scalable=no: no page pinch-zoom while the battle runs
       document.addEventListener('gesturestart', (e) => { if (this.shown) e.preventDefault(); }, { passive: false });
    }
@@ -244,6 +277,7 @@ export class TouchUi {
       const bMap = btn('tu-map', '', ICON.map, sys);
       const bBoard = btn('tu-board', '', ICON.board, sys);
       const bHelp = btn('tu-help', '', ICON.help, sys);
+      const bMore = btn('tu-more', '', ICON.more, sys);   // phone: folds out map / overview / help / AA / secondaries
 
       const tele = el('div', 'tu-tele', null, '<div class="tu-kn">0 kn</div>'
          + TELE_STEPS.map(n => `<div class="tu-st" data-n="${n}">${TELE_TXT[n]}</div>`).join('')
@@ -275,7 +309,7 @@ export class TouchUi {
       root.appendChild(el('div', 'tu-rotate', null, ICON.rotate + 'Bitte Gerät quer halten<span>Das Gefecht braucht die Breite des Bildschirms.</span>'));
       const host = document.getElementById('app') || document.body;
       host.appendChild(root);
-      this.dom = { root, bPause, bMap, bBoard, bHelp, tele, kn: tele.querySelector('.tu-kn'), steps: [...tele.querySelectorAll('.tu-st')],
+      this.dom = { root, bPause, bMap, bBoard, bHelp, bMore, tele, kn: tele.querySelector('.tu-kn'), steps: [...tele.querySelectorAll('.tu-st')],
          rud, thumb: rud.querySelector('.tu-th'), rudL: rud.querySelector('.tu-rl'), fire, scope, lock, free, ctx, air };
 
       // help: a touch section in front of the key list
@@ -289,6 +323,10 @@ export class TouchUi {
       // ---- wiring
       const tap = (b, k) => this._press(b, () => this.input.virtualTap(k));
       tap(bPause, 'P'); tap(bMap, 'M'); tap(bHelp, 'H');
+      this._press(bMore, () => this._more(!this.more));
+      // the fold closes by itself: soon after map / overview / help, a while after AA / secondaries (tapped repeatedly)
+      for (const b of [bMap, bBoard, bHelp]) b.addEventListener('pointerup', () => { if (this.more) this.moreT = Math.min(this.moreT, 0.6); });
+      for (const b of [ctx.sec, ctx.aa]) b.addEventListener('pointerup', () => { if (this.more) this.moreT = MORE_OPEN; });
       this._press(bBoard, () => { this.board = !this.board; this.input.virtualKey('TAB', this.board); setCls(bBoard, 'on', this.board); });
       tap(scope, 'SHIFT'); tap(lock, 'X');
       this._press(free, () => { const on = !this.held.has('C'); this._hold('C', on); setCls(free, 'on', on); });
@@ -354,6 +392,7 @@ export class TouchUi {
          try { cv.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
          this.look.set(e.pointerId, { x: e.clientX, y: e.clientY });
          this.pinch = this.look.size === 2 ? this._spread() : 0;
+         setCls(document.body, 'tu-aim', true);   // the info plates fade while a finger aims
          this.input.virtualTap('_TOUCH');   // "any key": skips the kill / shell camera, nothing else reads it
       });
       cv.addEventListener('pointermove', (e) => {
@@ -373,10 +412,27 @@ export class TouchUi {
       const lift = (e) => {
          if (!this.look.delete(e.pointerId)) return;
          this.pinch = this.look.size === 2 ? this._spread() : 0;
+         if (!this.look.size) setCls(document.body, 'tu-aim', false);
       };
       cv.addEventListener('pointerup', lift);
       cv.addEventListener('pointercancel', lift);
       this._arrange();
+   }
+
+   // One-time note on the first touch start: the game is made for mouse and keyboard. Shown again on
+   // the next visit unless "nicht mehr anzeigen" is ticked (api.hint() / api.hintDone(forever)).
+   _hint() {
+      if (!this.api.hint?.() || document.getElementById('tu-hint')) return;
+      const box = el('div', 'tu-hint', null, `<div class="tu-hint-card" role="dialog" aria-labelledby="tu-hint-t">
+         <div class="tu-hint-k">Touch-Steuerung</div>
+         <h2 id="tu-hint-t">Gebaut für Maus und Tastatur</h2>
+         <p>Am Touchscreen ist alles spielbar, aber Zielen geht langsamer und ungenauer. Gegen menschliche Gegner ist das ein deutlicher Nachteil.</p>
+         <p><b>Zielhilfe:</b> Tippe <b>Ziel</b>, um einen Gegner zu erfassen. Das Fadenkreuz folgt dann dem Vorhalt, Wischen korrigiert. Feuern, Munition und Streuung bleiben bei dir. Im PvP ist sie aus, im Pausenmenü abschaltbar.</p>
+         <label><input type="checkbox" id="tu-hint-never"> Nicht mehr anzeigen</label>
+         <button type="button" id="tu-hint-ok">Verstanden</button></div>`);
+      document.body.appendChild(box);
+      const ok = box.querySelector('#tu-hint-ok');
+      ok.addEventListener('click', () => { this.api.hintDone?.(box.querySelector('#tu-hint-never').checked); box.remove(); });
    }
 
    // Regroup the HUD plates for touch (see the CSS note above). Runs on build, when the phone turns or
@@ -387,7 +443,7 @@ export class TouchUi {
       if (!hud) return;
       if (!this.cols) {
          const box = (id) => { const e = el('div', id); hud.appendChild(e); return e; };
-         this.cols = { l: box('tu-hud-l'), r: box('tu-hud-r'), b: box('tu-hud-b') };
+         this.cols = { l: box('tu-hud-l'), r: box('tu-hud-r'), b: box('tu-hud-b'), t: box('tu-hud-t') };
          this.cols.b.appendChild(el('div', 'tu-tsch'));     // room for hud3d's turret schematic
          this.mq = { compact: matchMedia(MQ_COMPACT), narrow: matchMedia(MQ_NARROW), upright: matchMedia(MQ_UPRIGHT) };
          this.mq.compact.addEventListener?.('change', () => this._arrange());
@@ -401,11 +457,12 @@ export class TouchUi {
             this.input.virtualTap('M');
          });
       }
-      const { l, r, b } = this.cols;
+      const { l, r, b, t } = this.cols;
       const compact = this.mq.compact.matches, narrow = this.mq.narrow.matches;
       const put = (col, ids) => { for (const id of ids) { const e = id && $(id); if (e) col.appendChild(e); } };
       put(l, ['scorebox', 'ship-card', ...LATE_PLATES, 'objectives', 'roster-ally', narrow && 'cons']);
-      put(r, ['minimap-wrap', 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
+      put(r, ['minimap-wrap', !compact && 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
+      put(t, [compact && 'lock-panel']);      // phone: the target card under the system buttons, clear of the fire cluster
       put(b, [!compact && 'tally', 'tu-tsch', !narrow && 'cons', 'weapons']);
       this.late = LATE_PLATES.filter(id => !$(id));
    }
@@ -450,6 +507,11 @@ export class TouchUi {
       node.addEventListener('pointerup', end);
       node.addEventListener('pointercancel', end);
    }
+   _more(on) {
+      this.more = !!on; this.moreT = MORE_OPEN;
+      setCls(document.body, 'tu-more', this.more);
+      setCls(this.dom?.bMore, 'on', this.more);
+   }
    _hold(k, on) {
       if (on === this.held.has(k)) return;
       if (on) this.held.add(k); else this.held.delete(k);
@@ -460,6 +522,8 @@ export class TouchUi {
       if (this.board) { this.board = false; this.input.virtualKey('TAB', false); setCls(this.dom?.bBoard, 'on', false); }
       setCls(this.dom?.free, 'on', false);
       this.look.clear(); this.pinch = 0;
+      setCls(document.body, 'tu-aim', false);
+      this._more(false);
       this.input.mouse.down = false;
       if (this.dom) for (const b of this.dom.root.querySelectorAll('.press')) b.classList.remove('press');
    }
@@ -471,7 +535,7 @@ export class TouchUi {
          this.shown = playing;
          setCls(this.dom.root, 'hidden', !playing);
          if (!playing) this._releaseAll();
-         this.t = REFRESH;
+         this.t = REFRESH; this.objT = 0;
       }
       if (!playing) return;
       this.t += dt;
@@ -492,6 +556,12 @@ export class TouchUi {
       if (!s) return;
       if (this.late?.length && this.late.some(id => document.getElementById(id))) this._arrange();
       const body = document.body;
+      // (held open while the map, the overview or the help is up: its button closes it again)
+      if (this.more && !(s.map || s.help || this.board) && (this.moreT -= REFRESH) <= 0) this._more(false);
+      // phone: the objectives show for a while after each change, then fade (CSS, compact only)
+      const obj = document.getElementById('objectives'), ot = obj ? obj.textContent : '';
+      if (ot !== this.objTxt) { this.objTxt = ot; this.objT = 0; } else this.objT += REFRESH;
+      setCls(obj, 'tu-fresh', this.objT < OBJ_SHOW);
       setCls(body, 'tu-cv', s.cv && !s.squad);
       setCls(body, 'tu-squad', s.squad);
       setCls(d.tele, 'squad', s.squad);
@@ -544,10 +614,11 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Zwei Finger</span><span class="d">Auseinander/zusammen: Zoom bis ins Fernglas</span></div>
    <div><span class="k">Feuer</span><span class="d">Salve · Staffel: halten = Anflug, loslassen = Abwurf</span></div>
    <div><span class="k">Glas · Ziel · Frei</span><span class="d">Fernglas an/aus · Ziel erfassen · freie Kamera</span></div>
+   <div><span class="k">Zielhilfe</span><span class="d">Erfasstes Ziel: das Fadenkreuz folgt dem Vorhalt, Wischen korrigiert (nicht im PvP, im Pausenmenü abschaltbar)</span></div>
    <div><span class="k">Waffenleiste</span><span class="d">HE / AP / Torpedos antippen (Torpedos nochmals: Fächer)</span></div>
    <div><span class="k">Runde Felder</span><span class="d">Verbrauchsgüter (Leckwehr, Reparatur …)</span></div>
    <div><span class="k">Träger</span><span class="d">Flugzeugtyp, Start/Übernehmen · Staffel: Leiste links = Kurs, Hebel = Tempo, Schiff, Rückruf</span></div>
    <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · Zerstörer: Wasserbomben</span></div>
-   <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe</span></div>
+   <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Flak und Sek.-Ziel aus</span></div>
    <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
 </div>`;

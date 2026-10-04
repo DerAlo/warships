@@ -19,14 +19,14 @@ const check = (name, ok, info = '') => {
 
 const browser = await chromium.launch({ args: process.env.NO_GPU ? [] : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
 
-async function open(viewport, touch) {
+async function open(viewport, touch, query = touch ? '?nohint' : '') {
    const ctx = await browser.newContext(touch ? { viewport, hasTouch: true, isMobile: true, deviceScaleFactor: 1 } : { viewport });
    const page = await ctx.newPage();
    const tag = `[${viewport.width}x${viewport.height}${touch ? '' : ' desktop'}] `;
    page.on('console', m => { if (m.type() === 'error') errors.push(tag + m.text()); });
    page.on('pageerror', e => errors.push(tag + 'PAGEERROR: ' + e.message));
    await page.addInitScript(() => { HTMLCanvasElement.prototype.requestPointerLock = function () { return Promise.reject(new Error('blocked by test')); }; });
-   await page.goto(URL, { waitUntil: 'load' });
+   await page.goto(URL + query, { waitUntil: 'load' });
    await page.waitForTimeout(1000);
    const cdp = touch ? await ctx.newCDPSession(page) : null;
    const ev = (fn, arg) => page.evaluate(fn, arg);
@@ -58,6 +58,8 @@ async function open(viewport, touch) {
    const st = await t.ev(() => window.__touch());
    check(t.tag + 'no touch overlay on a desktop', !st.on && !st.shown && !(await t.visible('#touch-ui')), st);
    check(t.tag + 'no touch class on the body', !(await t.ev(() => document.body.classList.contains('touch'))));
+   check(t.tag + 'no touch note on a desktop', !(await t.ev(() => !!document.getElementById('tu-hint'))));
+   check(t.tag + 'aim assist option hidden on a desktop', !(await t.visible('#opt-assist')));
    await t.ctx.close();
 }
 
@@ -159,16 +161,129 @@ for (const [vp, ship] of [[{ width: 915, height: 412 }, 'Bismarck'], [{ width: 1
    }
    check(tag + 'consumable plate starts a consumable', used, c0.map(c => c.slot));
 
-   // map and pause
+   // map and pause (phone: map / overview / help fold out of "...")
+   const phone = await visible('#tu-more');
+   check(tag + (phone ? 'phone: map, overview, help, AA folded away' : 'tablet: no fold button'),
+      phone === (vp.height <= 480) && (!phone || !(await visible('#tu-map')) && !(await visible('#tu-board')) && !(await visible('#tu-help')) && !(await visible('#tu-aa'))));
+   if (phone) {
+      await tap('#tu-more');
+      check(tag + 'phone: the fold shows map, overview, help', await visible('#tu-map') && await visible('#tu-board') && await visible('#tu-help'));
+   }
    await tap('#tu-map');
    check(tag + 'map button opens the map', await waitFor(() => window.__ctl().mapOpen, 1000));
    await tap('#tu-map');
    check(tag + 'map button closes the map', await waitFor(() => !window.__ctl().mapOpen, 1000));
+   if (phone) check(tag + 'phone: the fold closes again after the map', await waitFor(() => !document.body.classList.contains('tu-more'), 2000));
    await tap('#tu-pause');
    check(tag + 'pause button pauses', await waitFor(() => window.__phase() === 'paused', 1000));
    check(tag + 'overlay hidden while paused', await waitFor(() => !window.__touch().shown, 1000));
    await tap('#btn-resume');
    check(tag + 'resume by touch', await waitFor(() => window.__phase() === 'playing' && window.__touch().shown, 1500));
+   await t.ctx.close();
+}
+
+// ---------------- first-start note (phone) ----------------
+{
+   const t = await open({ width: 740, height: 360 }, true, '');
+   const { ev, tap, visible, page, tag } = t;
+   check(tag + 'note: shown on the first touch start', await visible('#tu-hint') && await visible('#tu-hint-ok'));
+   const fit = await ev(() => { const r = document.querySelector('.tu-hint-card').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.width > 200; });
+   check(tag + 'note: card inside the window', fit);
+   await page.screenshot({ path: `${OUT}/3d-touch-hint.png` });
+   await tap('#tu-hint-ok');
+   check(tag + 'note: "Verstanden" closes it', !(await visible('#tu-hint')));
+   await page.reload({ waitUntil: 'load' }); await t.wait(800);
+   check(tag + 'note: comes back without "nicht mehr anzeigen"', await visible('#tu-hint'));
+   await tap('#tu-hint-never'); await tap('#tu-hint-ok');
+   await page.reload({ waitUntil: 'load' }); await t.wait(800);
+   check(tag + 'note: "nicht mehr anzeigen" is kept', !(await visible('#tu-hint')) && !(await ev(() => !!document.getElementById('tu-hint'))));
+   await t.ctx.close();
+}
+
+// ---------------- aim assist, target card and the fading plates (phone) ----------------
+{
+   const t = await open({ width: 844, height: 390 }, true);
+   const { ev, wait, waitFor, tap, touchEv, start, visible, page, tag } = t;
+   await start('Bismarck');
+   // one destroyer crossing ahead, spotting forced (as in playwright3d.lead.mjs), the others parked far astern
+   const scene = () => ev(() => {
+      const w = window.__world(), P = w.player;
+      const foes = w.ships.filter(s => s.side !== P.side && s.alive);
+      const E = foes.find(s => s.id === window.__E) || foes.find(s => s.type === 'DD') || foes[0];
+      if (window.__E !== E.id) {
+         window.__E = E.id;
+         Object.defineProperty(E, 'spotted', { get: () => true, set: () => { }, configurable: true });
+         Object.defineProperty(E, 'detected', { get: () => true, set: () => { }, configurable: true });
+      }
+      P.speed = 0; P.telegraph = 0;
+      const b = P.heading + 0.12;
+      E.pos.x = P.pos.x + Math.cos(b) * 9000; E.pos.y = P.pos.y + Math.sin(b) * 9000;
+      E.heading = b + Math.PI / 2; E.speed = 15; if (E.vel) { E.vel.x = Math.cos(E.heading) * 15; E.vel.y = Math.sin(E.heading) * 15; }
+      let k = 0;
+      for (const s of foes) if (s !== E) { k++; s.pos.x = P.pos.x - Math.cos(P.heading) * (40000 + k * 500); s.pos.y = P.pos.y - Math.sin(P.heading) * (40000 + k * 500); }
+      window.__setAim(0.12, 9000);
+   });
+   // bearing / range from the player to the lead point of E
+   const leadAim = () => ev(() => {
+      const w = window.__world(), P = w.player, E = w.ships.find(s => s.id === window.__E);
+      const v = E.vel || { x: Math.cos(E.heading) * E.speed, y: Math.sin(E.heading) * E.speed };
+      let x = E.pos.x, y = E.pos.y;
+      for (let i = 0; i < 4; i++) { const tt = P.flightTime(Math.hypot(x - P.pos.x, y - P.pos.y)); x = E.pos.x + v.x * tt; y = E.pos.y + v.y * tt; }
+      const a = window.__aim();
+      let d = Math.atan2(y - P.pos.y, x - P.pos.x) - a.targetYaw;
+      while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      return { dYaw: d, range: Math.hypot(x - P.pos.x, y - P.pos.y), aimRange: a.targetRange };
+   });
+   await scene(); await wait(600);
+   check(tag + 'assist: off without a lock', !(await ev(() => window.__assist().wanted)));
+   const before = await leadAim();
+   await tap('#tu-lock');
+   check(tag + 'assist: target locked', await waitFor(() => window.__ctl().lockId != null, 1500));
+   await scene(); await wait(500);
+   let la = await leadAim();
+   check(tag + 'assist: the aim follows the lead point', Math.abs(la.dYaw) < 0.004 && Math.abs(la.aimRange / la.range - 1) < 0.03 && Math.abs(before.dYaw) > 0.004, { before, la });
+   // the card sits under the system buttons, clear of every button
+   const card = await ev(() => {
+      const c = document.getElementById('lock-panel'), r = c.getBoundingClientRect();
+      const hit = [...document.querySelectorAll('#touch-ui .tu-btn, #tu-tele, #tu-rud, #weapons, #cons')].filter(b => b.offsetParent)
+         .map(b => [b.id || b.className, b.getBoundingClientRect()]).filter(([, q]) => q.left < r.right && q.right > r.left && q.top < r.bottom && q.bottom > r.top).map(([n]) => n);
+      return { parent: c.parentElement.id, shown: r.width > 0 && getComputedStyle(c).display !== 'none', hit, top: r.top };
+   });
+   check(tag + 'target card under the system buttons, overlaps nothing', card.parent === 'tu-hud-t' && card.shown && !card.hit.length, card);
+   await page.screenshot({ path: `${OUT}/3d-touch-assist.png` });
+   // a swipe shifts the aim; the shift stays while the assist keeps following
+   const sx = 844 * 0.55, sy = 390 * 0.3;
+   await touchEv('touchStart', [[sx, sy]]);
+   check(tag + 'plates fade while a finger aims', await waitFor(() => document.body.classList.contains('tu-aim'), 500));
+   for (let i = 1; i <= 3; i++) { await touchEv('touchMove', [[sx + i * 4, sy]]); await wait(16); }
+   await touchEv('touchEnd', []);
+   check(tag + '... and come back after', await waitFor(() => !document.body.classList.contains('tu-aim'), 500));
+   await scene(); await wait(500);
+   la = await leadAim();
+   const off = await ev(() => window.__assist());
+   check(tag + 'assist: a swipe correction is kept', Math.abs(off.yaw) > 0.002 && !off.paused && Math.abs(la.dYaw + off.yaw) < 0.004, { off, la });
+   // a long swipe away pauses it
+   await touchEv('touchStart', [[sx, sy]]);
+   for (let i = 1; i <= 10; i++) { await touchEv('touchMove', [[sx - i * 40, sy]]); await wait(16); }
+   await touchEv('touchEnd', []);
+   check(tag + 'assist: a long swipe away pauses it', await waitFor(() => window.__assist().paused, 1000));
+   // switched off in the pause menu
+   await scene(); await wait(200);
+   await tap('#tu-lock'); await tap('#tu-lock');   // unlock, lock again: assist resumes
+   check(tag + 'assist: a new lock resumes it', await waitFor(() => window.__ctl().lockId != null && !window.__assist().paused, 1500));
+   await tap('#tu-pause');
+   await waitFor(() => window.__phase() === 'paused', 1000);
+   check(tag + 'assist: option in the pause menu', await visible('#opt-assist'));
+   await tap('#opt-assist');
+   check(tag + 'assist: switched off', await ev(() => !window.__assist().wanted && JSON.parse(localStorage.getItem('warships3d.settings.v1')).aimAssist === false));
+   await tap('#btn-resume');
+   await waitFor(() => window.__phase() === 'playing', 1500);
+   await scene(); await wait(200);
+   const a0 = await ev(() => window.__aim().targetYaw);
+   await wait(800);
+   check(tag + 'assist off: the aim stays where the player put it', Math.abs((await ev(() => window.__aim().targetYaw)) - a0) < 1e-6);
+   // the objectives fade after a while (8 s)
+   check(tag + 'phone: objectives fade after a while', await waitFor(() => getComputedStyle(document.getElementById('objectives')).opacity === '0', 9000));
    await t.ctx.close();
 }
 

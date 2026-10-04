@@ -63,7 +63,7 @@ async function open(query = '', ctxOpts = {}) {
    await ctx.close();
 }
 {
-   const { ctx, gfx } = await open('', { viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2.625 });
+   const { ctx, gfx } = await open('?nohint', { viewport: { width: 915, height: 412 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2.625 });
    const g = await gfx();
    check('touch device starts on medium', g.tier === 'medium' && g.samples === 2 && g.pixelRatio === 1.5, { tier: g.tier, pr: g.pixelRatio });
    await ctx.close();

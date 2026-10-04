@@ -261,6 +261,7 @@
    .sens-row span { float: right; color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
    .sens-row input { display: block; width: 100%; margin-top: 8px; accent-color: var(--signal); }
    .sens-row.check-row input { display: inline-block; width: auto; margin: 0 8px 0 0; vertical-align: -2px; }
+   body:not(.touch) .touch-only { display: none !important; }
    .sens-row select { float: right; pointer-events: auto; font: 600 12px var(--font); color: var(--ink); background: var(--paper-2);
       border: 1px solid var(--paper-edge); padding: 2px 6px; margin-top: -3px; }
    #shellcam-hint { bottom: 64px; }
@@ -510,6 +511,7 @@
             <input type="range" id="vol-sfx" min="0" max="100" step="5" value="100">
          </label>
          <label class="sens-row check-row"><input type="checkbox" id="opt-killcam" checked> Versenkungs-Kamera</label>
+         <label class="sens-row check-row touch-only"><input type="checkbox" id="opt-assist" checked> Zielhilfe (Touch, nicht im PvP)</label>
          <label class="sens-row">Geschoss-Kamera
             <select id="opt-shellcam"><option value="off">Aus</option><option value="key" selected>Mit Taste (B)</option><option value="auto">Jede Salve</option></select>
          </label>
