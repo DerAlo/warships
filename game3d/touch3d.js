@@ -560,5 +560,6 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Runde Felder</span><span class="d">Verbrauchsgüter (Leckwehr, Reparatur …)</span></div>
    <div><span class="k">Träger</span><span class="d">Flugzeugtyp, Start/Übernehmen · Staffel: Leiste links = Kurs, Hebel = Tempo, Schiff, Rückruf</span></div>
    <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · Zerstörer: Wasserbomben</span></div>
-   <div><span class="k">Oben Mitte</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe</span></div>
+   <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe</span></div>
+   <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
 </div>`;
