@@ -153,17 +153,20 @@ const ce = await client.evaluate(() => window.__ended), he = await host.evaluate
 check('session.onEnd once on each side', ce.length === 1 && he.length === 1 && ce[0].aborted === false && ce[0].victory === true && he[0].victory === true, { client: ce, host: he });
 check('back in the menu', (await client.evaluate(() => window.__phase())) === 'menu' && (await host.evaluate(() => window.__phase())) === 'menu');
 
-// ---- 7. second match on the same transports... the host leaves in the middle
+// ---- 7. second match on the same transports... the host leaves in the middle: since host migration
+// (CONTRACT.md) the client takes the match over instead of being sent back to the menu
 await Promise.all([begin(host, 'host', 'pw2'), begin(client, 'gast', 'pw2')]);
 check('second match starts', await waitFor(host, () => window.__phase() === 'playing', 15000) && await waitFor(client, () => window.__phase() === 'playing', 15000));
 await waitFor(client, () => window.__net()?.synced, 5000);
 await wait(1500);
 await host.evaluate(() => document.getElementById('btn-quit').click());
-check('client is sent back to the menu', await waitFor(client, () => window.__phase() === 'menu', 5000));
+check('client takes the match over as host', await waitFor(client, () => window.__phase() === 'playing' && window.__net()?.isHost === true, 10000));
 const note = await client.evaluate(() => document.querySelector('.net-notice')?.textContent || '');
-check('client is told in German', /Host hat das Spiel verlassen/.test(note), note);
+check('client is told in German', /Gastgeber gewechselt/.test(note), note);
 const ce2 = await client.evaluate(() => window.__ended), he2 = await host.evaluate(() => window.__ended);
-check('both sessions ended as aborted', ce2.length === 1 && ce2[0].aborted === true && he2.length === 1 && he2[0].aborted === true, { client: ce2, host: he2 });
+check('host session ended as a handover, client plays on', ce2.length === 0 && he2.length === 1 && he2[0].aborted === true && he2[0].handover === true, { client: ce2, host: he2 });
+await client.evaluate(() => document.getElementById('btn-quit').click());
+check('client leaves to the menu', await waitFor(client, () => window.__phase() === 'menu', 5000));
 
 // ---- 8. singleplayer still starts after a net game
 await host.evaluate(() => window.__start({ difficulty: 'normal', mission: 'training', ship: 'Hipper' }));
