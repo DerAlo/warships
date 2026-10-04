@@ -294,7 +294,7 @@
       #loading .ld-stage { inset: auto; left: 50%; top: 14%; width: 175vw; aspect-ratio: 16 / 9; transform: translateX(-50%);
          -webkit-mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent); mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent); }
       #loading .ld-title { bottom: 9vh; }
-      #loading .ld-title b { font-size: min(12vw, 84px); }
+      #loading .ld-title b { font-size: min(9vw, 84px); }   /* room for the wider fallback font phones use */
    }
    @media (prefers-reduced-motion: reduce) { #loading .ld-fa, #loading .ld-fb, #loading .ld-fire, #loading .ld::after { animation: none; } #loading .ld-fb { opacity: 0; } }
 </style>
