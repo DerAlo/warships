@@ -1,7 +1,8 @@
 // tests/playwright3d.responsive.mjs -- layout check on small and touch screens: phones held sideways (also with
 // the browser bars eating height) and upright, tablets both ways, small laptops. For every size it shots the
-// port, the ship list and a running battle, and fails when visible menu tiles or HUD blocks overlap each other,
-// stick out of the window, or when the 3D view comes out blank (nearly all white or all black).
+// port, the ship list and a running battle (then a carrier and a submarine battle for their own panels), and fails
+// when visible menu tiles or HUD blocks overlap each other, stick out of the window, or when the 3D view comes out
+// blank (nearly all white or all black). A phone held upright must show the "turn the device" veil instead.
 // Exit code 1 on a failed check or a console error.
 //
 // Run:  node server.js 8820   then   URL3D=http://localhost:8820/index-3d.html node tests/playwright3d.responsive.mjs
@@ -83,6 +84,7 @@ const MENU_SELS = ['#menu button', '#menu .m3-card', '#menu [class*="card"]', '#
 const HUD_SELS = [
    '#scorebox', '#objectives', '#nav', '#minimap-wrap', '#weapons > *', '#cons > *', '#ship-card', '#roster-ally', '#roster-enemy',
    '#tally', '#lock-panel', '#hint-line', '#touch-ui .tu-btn', '#tu-tele', '#tu-rud', '#air-panel', '#sub-panel', '#aa-panel',
+   '#asw-panel', '#killfeed', '#tu-tsch',
 ];
 
 const browser = await chromium.launch({ args: process.env.NO_GPU ? [] : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
@@ -111,14 +113,27 @@ for (const sz of SIZES) {
    const docW = await page.evaluate(() => document.documentElement.scrollWidth);
    check(tag + 'port: no sideways scrolling', docW <= sz.w + 1, docW);
 
-   await page.evaluate(() => window.__start({ difficulty: 'easy', mission: 'standard', ship: 'Bismarck' }));
-   const t0 = Date.now();
-   while (Date.now() - t0 < 8000 && await page.evaluate(() => window.__phase()) !== 'playing') await page.waitForTimeout(100);
-   await page.waitForTimeout(2500);
+   const battle = async (ship) => {
+      await page.evaluate((ship) => window.__start({ difficulty: 'easy', mission: 'standard', ship }), ship);
+      const t0 = Date.now();
+      while (Date.now() - t0 < 8000 && await page.evaluate(() => window.__phase()) !== 'playing') await page.waitForTimeout(100);
+      await page.waitForTimeout(2500);
+   };
+   await battle('Bismarck');
    if (SHOTS) await page.screenshot({ path: `${OUT}/${sz.name}-2-battle.png` });
    r = await page.evaluate(OVERLAP_FN, HUD_SELS);
    check(tag + `battle: no overlapping HUD blocks (${r.n})`, r.overlaps.length === 0, r.overlaps.slice(0, 8));
    check(tag + 'battle: HUD inside the window', r.offscreen.length === 0, r.offscreen.slice(0, 6));
+   // a phone held upright gets the "turn the device" veil instead of a cramped battle
+   const upright = sz.touch && sz.h > sz.w && sz.w <= 600;
+   if (upright) {
+      const veil = await page.evaluate(() => {
+         const v = document.getElementById('tu-rotate'), r = v?.getBoundingClientRect();
+         return { shown: !!r && r.width >= innerWidth - 1 && r.height >= innerHeight - 1 && getComputedStyle(v).display !== 'none',
+            text: v?.textContent || '', hud: getComputedStyle(document.getElementById('hud')).visibility };
+      });
+      check(tag + 'battle: upright phone shows the "quer halten" veil', veil.shown && /Gerät quer halten/.test(veil.text) && veil.hud === 'hidden', veil);
+   }
    // blank-scene guard: sample the rendered frame (screenshot pixels, HUD hidden)
    await page.evaluate(() => { document.getElementById('hud').style.visibility = 'hidden'; const t = document.getElementById('touch-ui'); if (t) t.style.visibility = 'hidden'; });
    await page.waitForTimeout(200);
@@ -138,6 +153,15 @@ for (const sz of SIZES) {
       return { white: white / n, black: black / n, mean: Math.round(mean), sd: Math.round(Math.sqrt(sum2 / n - mean * mean)) };
    }, png.toString('base64'));
    check(tag + 'battle: 3D view is not blank', stats.white < 0.6 && stats.black < 0.8 && stats.sd > 6, stats);
+   // carrier (air group panel, plane-type bar) and submarine (depth panel, dive buttons) bring panels of their own
+   if (!upright) for (const [ship, panel] of [['Enterprise', '#air-panel'], ['U96', '#sub-panel']]) {
+      await battle(ship);
+      if (SHOTS) await page.screenshot({ path: `${OUT}/${sz.name}-3-${ship.toLowerCase()}.png` });
+      r = await page.evaluate(OVERLAP_FN, HUD_SELS);
+      const shown = await page.evaluate((sel) => { const e = document.querySelector(sel); return !!e && e.getBoundingClientRect().height > 2; }, panel);
+      check(tag + `battle ${ship}: ${panel} shown, no overlapping HUD blocks (${r.n})`, shown && r.overlaps.length === 0, shown ? r.overlaps.slice(0, 8) : panel + ' not shown');
+      check(tag + `battle ${ship}: HUD inside the window`, r.offscreen.length === 0, r.offscreen.slice(0, 6));
+   }
    await ctx.close();
 }
 await browser.close();

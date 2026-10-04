@@ -9,6 +9,7 @@ import { drawAir } from './airui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+const isTouch = () => typeof document !== 'undefined' && !!document.body?.classList.contains('touch');   // touch3d.js overlay on
 const km = (m) => (m / 1000).toFixed(m < 9950 ? 2 : 1).replace('.', ',') + ' km';
 const TURRET_COL = { ready: T.ok, traverse: T.warn, reload: T.bad, blocked: T.bad, dead: T.dead };
 // sight palette + fonts, resolved once from the design tokens (drawn every frame)
@@ -218,7 +219,22 @@ export class Overlay3D {
 
       // turret schematic lives bottom-centre, left of the ammunition selector and right of the
       // chart table, so it never sits on the own hull (which fills the lower middle of the view)
-      if (ui.mode === 'guns') this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
+      // (on touch screens touch3d.js keeps a slot for it in the bottom stack, read twice a second)
+      if (ui.mode === 'guns') {
+         const slot = this._tschSlot();
+         if (slot) this._turretSchematic(ui, slot.x, slot.y);
+         else if (!isTouch()) this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
+      }
+   }
+
+   _tschSlot() {
+      const now = performance.now();
+      if (!this._tsch || now - this._tsch.t > 500) {
+         const e = isTouch() ? document.getElementById('tu-tsch') : null;
+         const r = e?.getBoundingClientRect();
+         this._tsch = { t: now, slot: r && r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null };
+      }
+      return this._tsch.slot;
    }
 
    // Small top-down hull under the reticle, rotated relative to the camera (up = where you
@@ -503,7 +519,7 @@ export class Overlay3D {
       g.fillStyle = SCOPE.text;
       g.fillText(ui.zoom + '×', rx, cy - 10);
       g.font = F_SMALL; g.fillStyle = SCOPE.hint;
-      g.fillText('Mausrad: Zoom · Shift: zurück', rx, cy - 34);
+      g.fillText(isTouch() ? 'Zwei Finger: Zoom · Glas: zurück' : 'Mausrad: Zoom · Shift: zurück', rx, cy - 34);
       g.restore();
    }
 
@@ -522,7 +538,7 @@ export class Overlay3D {
       g.fillStyle = T.hud; g.font = FONT(15, 'bold'); g.textAlign = 'left';
       g.fillText('LAGEKARTE', x0, y0 + size + 7);
       g.font = FONT(12); g.fillStyle = T['hud-dim']; g.textAlign = 'right';
-      g.fillText('M – schließen  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
+      g.fillText((isTouch() ? 'Karte – schließen' : 'M – schließen') + '  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
       g.restore();
    }
 }

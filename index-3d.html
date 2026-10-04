@@ -68,11 +68,19 @@
          radial-gradient(circle at calc(100% - 5px) calc(100% - 5px), var(--rivet) 1.2px, transparent 1.7px),
          var(--panel); }
    .cls { vertical-align: -1px; flex: none; }
+   #hud i.kb { font-style: normal; }   /* key hints inside plates (touch3d.js hides them on touch screens) */
    .plate-lbl { font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim); }
 
-   /* --- top-left: situation board (score, timer, points) + orders --- */
-   #sitrep { position: absolute; top: 12px; left: 16px; width: 272px; display: flex; flex-direction: column; gap: 8px; }
-   #scorebox { padding: 8px 14px 9px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "name timer" "score score" "caps caps"; align-items: center; column-gap: 10px; }
+   /* --- top-left: orders of the mission --- */
+   #objectives { position: absolute; top: 12px; left: 16px; width: 250px; font-size: 12px; display: flex; flex-direction: column; gap: 3px; padding-left: 2px; }
+   .obj { padding-left: 17px; position: relative; color: var(--hud); }
+   .obj::before { content: ''; position: absolute; left: 1px; top: 3px; width: 8px; height: 8px; border: 1.5px solid var(--gold); }
+   .obj.done { color: var(--ok); } .obj.done::before { background: var(--ok); border-color: var(--ok); }
+   .obj.failed { color: var(--enemy-soft); text-decoration: line-through; } .obj.failed::before { border-color: var(--bad); background: linear-gradient(45deg, transparent 42%, var(--bad) 42% 58%, transparent 58%); }
+
+   /* --- top-centre: own order of battle | situation board (score, timer, points) | enemy --- */
+   #topbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: flex-start; }
+   #scorebox { width: 300px; flex: none; padding: 7px 14px 8px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "name timer" "score score" "caps caps"; align-items: center; column-gap: 10px; }
    #mission-name { grid-area: name; font: 600 10.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
    #timer { grid-area: timer; font: 700 19px var(--mono); letter-spacing: 1px; color: var(--hud); }
    .score-row { grid-area: score; display: flex; align-items: center; gap: 8px; margin-top: 5px; }
@@ -82,26 +90,18 @@
    #score-bar i { position: absolute; top: 0; bottom: 0; transition: width .3s; }
    #score-fill-ally { left: 0; background: var(--ally); } #score-fill-enemy { right: 0; background: var(--enemy); }
    #score-bar::after { content: ''; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--panel-solid); }
-   #caps-row { grid-area: caps; display: flex; gap: 6px; margin-top: 7px; }
+   #caps-row { grid-area: caps; display: flex; justify-content: center; gap: 6px; margin-top: 7px; }
    #caps-row:empty { display: none; }
    .cap { width: 26px; height: 22px; font: 700 12px var(--font); display: flex; align-items: center; justify-content: center;
       border: 1.5px solid var(--neutral); color: var(--neutral); background: rgba(0,0,0,.35); clip-path: polygon(0 0, 100% 0, 100% 72%, 50% 100%, 0 72%); }
    .cap.own-a { border-color: var(--ally); color: var(--ally); } .cap.own-e { border-color: var(--enemy); color: var(--enemy); }
    .cap.cap-a { background: linear-gradient(to top, color-mix(in srgb, var(--ally) 55%, transparent) var(--prog), rgba(0,0,0,.35) 0); }
    .cap.cap-e { background: linear-gradient(to top, color-mix(in srgb, var(--enemy) 55%, transparent) var(--prog), rgba(0,0,0,.35) 0); }
-   #objectives { font-size: 12px; display: flex; flex-direction: column; gap: 3px; padding-left: 2px; }
-   .obj { padding-left: 17px; position: relative; color: var(--hud); }
-   .obj::before { content: ''; position: absolute; left: 1px; top: 3px; width: 8px; height: 8px; border: 1.5px solid var(--gold); }
-   .obj.done { color: var(--ok); } .obj.done::before { background: var(--ok); border-color: var(--ok); }
-   .obj.failed { color: var(--enemy-soft); text-decoration: line-through; } .obj.failed::before { border-color: var(--bad); background: linear-gradient(45deg, transparent 42%, var(--bad) 42% 58%, transparent 58%); }
-   #hint-line { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--hud-dim); white-space: nowrap; }
-   #hint-line b { color: var(--gold); font-family: var(--mono); }
-
-   /* --- top-right: order of battle (own / enemy) + loss reports --- */
-   #side-r { position: absolute; top: 12px; right: 16px; width: 330px; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
-   .roster { width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 10px; font-size: 11.5px; }
-   .roster::before { content: attr(data-label); width: 100%; text-align: right; font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim);
+   .roster { width: 200px; flex: none; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 2px 10px; font-size: 11.5px; }
+   #roster-ally { justify-content: flex-end; } #roster-enemy { justify-content: flex-start; }
+   .roster::before { content: attr(data-label); width: 100%; font: 600 9.5px var(--font); letter-spacing: 2px; text-transform: uppercase; color: var(--hud-dim);
       border-bottom: 1px solid var(--panel-edge); padding-bottom: 2px; margin-bottom: 1px; }
+   #roster-ally::before { text-align: right; }
    .roster .r { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
    .roster .r.ally { color: var(--ally-soft); } .roster .r.ally .cls { color: var(--ally); }
    .roster .r.enemy { color: var(--enemy-soft); } .roster .r.enemy .cls { color: var(--enemy); }
@@ -109,7 +109,11 @@
    .roster .r.hid { opacity: .5; }
    .roster .r.dead { opacity: .45; } .roster .r.dead span { text-decoration: line-through; text-decoration-thickness: 1.5px; }
    .roster .r.dead .cls { color: var(--dead) !important; }
-   #killfeed { width: 100%; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 12px; margin-top: 4px; }
+
+   /* --- top-right: key hint, loss reports below it --- */
+   #hint-line { position: absolute; top: 12px; right: 16px; font-size: 11px; color: var(--hud-dim); white-space: nowrap; }
+   #hint-line b { color: var(--gold); font-family: var(--mono); }
+   #killfeed { position: absolute; top: 36px; right: 16px; width: 330px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 12px; }
    #killfeed:empty { display: none; }
    .kf { display: flex; gap: 6px; align-items: center; background: rgba(17,20,21,.55); padding: 2px 8px; border-right: 2px solid var(--panel-edge); transition: opacity 1s; }
    .kf.old { opacity: .35; }
@@ -118,7 +122,7 @@
    .kf .kx { color: var(--hud-dim); font-size: 11px; }
 
    /* --- centre: lock panel, messages, alerts --- */
-   #lock-panel { position: absolute; top: 96px; left: 50%; transform: translateX(-50%); width: 250px; padding: 6px 12px; border-color: color-mix(in srgb, var(--enemy) 50%, transparent); }
+   #lock-panel { position: absolute; top: 104px; left: 50%; transform: translateX(-50%); width: 250px; padding: 6px 12px; border-color: color-mix(in srgb, var(--enemy) 50%, transparent); }
    .lk-head { display: flex; align-items: center; gap: 6px; color: var(--enemy); }
    .lk-name { font-weight: 700; color: #fff; font-size: 13px; }
    .lk-type { margin-left: auto; font-size: 11px; color: var(--hud-dim); }
@@ -135,23 +139,23 @@
    @keyframes blink { from { opacity: 1; } to { opacity: .35; } }
    #free-look { position: absolute; top: 150px; left: 50%; transform: translateX(-50%); font-size: 12px; letter-spacing: 2px; color: var(--gold); }
 
-   /* --- left, mid-height: hit tally (damage + hit slips) --- */
-   /* anchored above the chart table and growing upwards, so new slips never cover the minimap */
-   #tally { position: absolute; left: 16px; bottom: 254px; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px; max-height: max(120px, calc(100% - 520px)); overflow: hidden; }
-   #dmg-counter { font: 700 16px var(--mono); color: #fff; } #dmg-counter:empty { display: none; }
-   #dmg-counter span { display: block; font: 600 9.5px var(--font); letter-spacing: 2px; color: var(--hud-dim); text-transform: uppercase; }
-   #ribbons { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+   /* --- bottom-centre: hit tally (hit slips, damage) above the ammunition selector --- */
+   #tally { display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: 560px; }
+   #dmg-counter { font: 700 15px var(--mono); color: #fff; } #dmg-counter:empty { display: none; }
+   #dmg-counter span { font: 600 9.5px var(--font); letter-spacing: 2px; color: var(--hud-dim); text-transform: uppercase; margin-right: 5px; }
+   #ribbons { display: flex; flex-wrap: wrap-reverse; justify-content: center; gap: 4px; }
+   #ribbons:empty { display: none; }
    .ribbon { display: flex; gap: 6px; align-items: center; padding: 2px 10px 2px 8px; font-size: 11.5px; font-weight: 600; color: var(--hud);
       background: linear-gradient(90deg, rgba(17,20,21,.78), rgba(17,20,21,.35)); border-left: 4px solid var(--rc); clip-path: polygon(0 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
    .ribbon .rcount { font-family: var(--mono); color: var(--rc); }
    .ribbon.pop { animation: pop .35s ease-out; }
-   @keyframes pop { 0% { transform: translateX(-8px); filter: brightness(1.8); } 100% { transform: none; filter: none; } }
+   @keyframes pop { 0% { transform: translateY(6px); filter: brightness(1.8); } 100% { transform: none; filter: none; } }
 
-   /* --- bottom-left: chart table (minimap + engine telegraph / rudder) --- */
-   #bottom-left { position: absolute; left: 16px; bottom: 16px; display: flex; align-items: flex-end; gap: 8px; }
+   /* --- bottom-right: chart table (engine telegraph / rudder beside the minimap) --- */
+   #bottom-right { position: absolute; right: 16px; bottom: 16px; display: flex; align-items: flex-end; gap: 8px; }
    #minimap-wrap { width: 220px; height: 220px; padding: 0; overflow: hidden; border: 2px solid var(--gold); border-radius: 0; background: var(--map-sea-2); box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
    #minimap-canvas { width: 216px; height: 216px; display: block; }
-   #nav { width: 100px; padding: 8px 8px 7px; display: flex; flex-direction: column; gap: 4px; }
+   #nav { width: 104px; padding: 8px 8px 7px; display: flex; flex-direction: column; gap: 4px; }
    #speed-kn { font: 700 19px var(--mono); text-align: center; color: #fff; }
    .nav-lbl { font-size: 9.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--hud-dim); text-align: center; }
    #telegraph { display: flex; flex-direction: column; gap: 1px; border: 1px solid rgba(255,255,255,.08); padding: 2px 0; }
@@ -166,8 +170,8 @@
    #rudder-cmd { position: absolute; top: -2px; width: 0; height: 0; margin-left: -5px; border: 5px solid transparent; border-top: 7px solid var(--gold); transition: left .15s; }
    #rudder-act { position: absolute; top: 4px; width: 3px; height: 8px; margin-left: -1.5px; background: #fff; }
 
-   /* --- bottom-right: ship status (equipment gauges above the ship card) --- */
-   #bottom-right { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+   /* --- bottom-left: ship status (equipment gauges above the ship card) --- */
+   #bottom-left { position: absolute; left: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
    #cons { display: flex; gap: 7px; }
    .cslot { width: 48px; height: 48px; position: relative; border-radius: 50%; background: var(--panel); border: 2px solid var(--panel-edge); overflow: hidden; color: var(--hud); }
    .cicon { position: absolute; inset: 11px; } .cicon svg { width: 100%; height: 100%; }
@@ -194,7 +198,7 @@
    #hp-text { font: 700 13px var(--mono); margin-top: 3px; display: flex; justify-content: space-between; }
 
    /* --- bottom-centre: ammunition selector --- */
-   #bottom-center { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+   #bottom-center { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; }
    #weapons { display: flex; gap: 0; border: 1px solid var(--panel-edge); background: var(--panel); }
    .wslot { width: 128px; height: 48px; position: relative; padding: 6px 8px 0 36px; opacity: .7; border-right: 1px solid rgba(255,255,255,.07); }
    .wslot:last-child { border-right: 0; }
@@ -277,51 +281,28 @@
    <canvas id="fx"></canvas>
 
    <div id="hud" class="hidden">
-      <div id="hint-line"><b>H</b> Steuerung · <b>M</b> Karte · <b>Tab</b> Übersicht</div>
+      <div id="objectives"></div>
 
-      <div id="sitrep">
+      <div id="topbar">
+         <div id="roster-ally" class="roster" data-label="Eigene Verbände"></div>
          <div id="scorebox" class="panel">
             <div id="mission-name">Gefecht</div>
             <div id="timer">0:00</div>
             <div class="score-row"><b id="score-ally">0</b><div id="score-bar"><i id="score-fill-ally"></i><i id="score-fill-enemy"></i></div><b id="score-enemy">0</b></div>
             <div id="caps-row"></div>
          </div>
-         <div id="objectives"></div>
+         <div id="roster-enemy" class="roster" data-label="Feind"></div>
       </div>
 
-      <div id="side-r">
-         <div id="roster-ally" class="roster" data-label="Eigene Verbände"></div>
-         <div id="roster-enemy" class="roster" data-label="Feind"></div>
-         <div id="killfeed"></div>
-      </div>
+      <div id="hint-line"><b>H</b> Steuerung · <b>M</b> Karte · <b>Tab</b> Übersicht</div>
+      <div id="killfeed"></div>
 
       <div id="lock-panel" class="panel hidden"></div>
       <div id="msgs"></div>
       <div id="torp-alert" class="hidden">TORPEDOS!</div>
       <div id="free-look" class="hidden">FREIE KAMERA · GESCHÜTZE HALTEN DAS ZIEL</div>
 
-      <div id="tally">
-         <div id="dmg-counter"></div>
-         <div id="ribbons"></div>
-      </div>
-
       <div id="bottom-left">
-         <div id="minimap-wrap"><canvas id="minimap-canvas" width="216" height="216"></canvas></div>
-         <div id="nav" class="panel">
-            <div id="speed-kn">0 kn</div>
-            <div class="nav-lbl">Maschine</div>
-            <div id="telegraph"></div>
-            <div class="nav-lbl" style="margin-top:4px">Ruder</div>
-            <div id="rudder-bar"><i class="notch" style="left:0"></i><i class="notch" style="left:25%"></i><i class="notch" style="left:50%"></i><i class="notch" style="left:75%"></i><i class="notch" style="left:100%"></i><i id="rudder-cmd" style="left:50%"></i><i id="rudder-act" style="left:50%"></i></div>
-            <div id="rudder-name">mittschiffs</div>
-         </div>
-      </div>
-
-      <div id="bottom-center">
-         <div id="weapons"></div>
-      </div>
-
-      <div id="bottom-right">
          <div id="cons"></div>
          <div id="ship-card" class="panel">
             <div class="sc-head"><span id="ship-name">SCHIFF</span><span id="ship-type"></span>
@@ -331,6 +312,26 @@
             <div class="hp-bar"><i id="hp-lag"></i><i id="hp-fill"></i></div>
             <div id="hp-text">0 / 0</div>
          </div>
+      </div>
+
+      <div id="bottom-center">
+         <div id="tally">
+            <div id="ribbons"></div>
+            <div id="dmg-counter"></div>
+         </div>
+         <div id="weapons"></div>
+      </div>
+
+      <div id="bottom-right">
+         <div id="nav" class="panel">
+            <div id="speed-kn">0 kn</div>
+            <div class="nav-lbl">Maschine</div>
+            <div id="telegraph"></div>
+            <div class="nav-lbl" style="margin-top:4px">Ruder</div>
+            <div id="rudder-bar"><i class="notch" style="left:0"></i><i class="notch" style="left:25%"></i><i class="notch" style="left:50%"></i><i class="notch" style="left:75%"></i><i class="notch" style="left:100%"></i><i id="rudder-cmd" style="left:50%"></i><i id="rudder-act" style="left:50%"></i></div>
+            <div id="rudder-name">mittschiffs</div>
+         </div>
+         <div id="minimap-wrap"><canvas id="minimap-canvas" width="216" height="216"></canvas></div>
       </div>
 
       <div id="scoreboard" class="hidden"></div>
@@ -384,9 +385,9 @@
             <p><b>Vorhalt.</b> Die Striche auf dem Fadenkreuz sind ein Vorhaltelineal: „Strich ≈ 4 kn" heißt, ein Strich Vorhalt pro 4 Knoten Quergeschwindigkeit des Ziels. Die rote Vorhalteraute (L) zeigt, wo das Ziel beim Einschlag sein wird – Fadenkreuz darauf, dann feuern. Sie gehört zum erfassten Ziel (X), sonst zum Gegner nächst dem Fadenkreuz. Liegt der Vorhaltepunkt außerhalb des Bildes, sitzt sie mit Pfeil am Bildrand. Gestrichelt mit „zu weit": außerhalb der Reichweite. Blass mit „außer Sicht": Ziel kurz verloren, Position geschätzt. Im Torpedomodus ist die Raute grün.</p>
             <p><b>Türme.</b> Unter dem Fadenkreuz siehst du dein Schiff mit allen Türmen: <span class="tc" style="background:var(--seal)">grün</span> = bereit und ausgerichtet, <span class="tc" style="background:var(--brass-lo)">gelb</span> = schwenkt, <span class="tc" style="background:var(--signal)">rot</span> = lädt oder kann nicht wirken. Ein Klick feuert nur die grünen.</p>
             <p><b>Zoom und Fernglas.</b> Mausrad nach vorn zoomt heran: erst rückt die Kamera ans Schiff, der nächste Klick schaltet ins Fernglas (2×, dann 4×, 8×, 16×). Zurückdrehen zoomt wieder hinaus bis zur weiten Übersicht. Shift springt direkt ins Fernglas (mit der zuletzt benutzten Vergrößerung) und zurück. Der Zielpunkt bleibt beim Zoomen liegen, die Maus wird mit dem Zoom feiner.</p>
-            <p><b>Fahren.</b> Telegraf und Ruder bleiben stehen, wo du sie hinstellst — links unten neben der Seekarte siehst du beides. Große Schiffe reagieren träge: früh einlenken!</p>
+            <p><b>Fahren.</b> Telegraf und Ruder bleiben stehen, wo du sie hinstellst — rechts unten neben der Seekarte siehst du beides. Große Schiffe reagieren träge: früh einlenken!</p>
             <p><b>Auf Tablet und Handy</b> (quer halten): Links der Maschinenhebel (Stufe antippen) und die Ruderleiste, rechts der große Feuerknopf mit Fernglas, Zielerfassung und freier Kamera. Wischen über das Meer zielt, zwei Finger zoomen bis ins Fernglas. Munition, Torpedos und Verbrauchsgüter tippst du direkt auf ihren Anzeigen an; oben in der Mitte liegen Pause, Lagekarte, Übersicht und Hilfe. Träger und U-Boote bekommen ihre eigenen Knöpfe.</p>
-            <p><b>Überleben.</b> R (Leckwehr) löscht Brände und stoppt Wassereinbrüche, T (Notreparatur) flickt den Rumpf. Die Lampe rechts unten an der Schiffstafel zeigt, ob der Feind dich gesichtet hat. Rote Pfeile um das Fadenkreuz warnen vor Torpedos.</p>
+            <p><b>Überleben.</b> R (Leckwehr) löscht Brände und stoppt Wassereinbrüche, T (Notreparatur) flickt den Rumpf. Die Lampe an der Schiffstafel links unten zeigt, ob der Feind dich gesichtet hat. Rote Pfeile um das Fadenkreuz warnen vor Torpedos.</p>
          </div>
          <div class="btn-row"><button class="play" id="btn-how-close">Verstanden</button></div>
       </div>

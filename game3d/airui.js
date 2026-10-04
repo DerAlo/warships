@@ -63,6 +63,8 @@ const setCls = (e, c, on) => { const k = '_c' + c; if (e && e[k] !== on) { e[k] 
 const setW = (e, f) => { const v = Math.round(clamp01(f) * 100); if (e && e._w !== v) { e._w = v; e.style.width = v + '%'; } };
 const AA_TEXT = { '-1': 'Backbord', 0: 'gleichmäßig', 1: 'Steuerbord' };
 const pt = () => ({ x: 0, y: 0, visible: false });
+// touch overlay on (touch3d.js sets body.touch): hints name the on-screen buttons, not the keys
+const touch = () => typeof document !== 'undefined' && !!document.body?.classList.contains('touch');
 
 export class AirUi {
    // onView(on): main3d's hook when the squadron view opens / closes (camera override, shell cam)
@@ -105,9 +107,9 @@ export class AirUi {
          + '<div class="ap-sq hidden"><div class="ap-sqn"></div>'
          + '<div class="ap-bar fuel"><i></i></div><div class="ap-lbl"><span>Treibstoff</span><span class="ap-fuel"></span></div>'
          + '<div class="ap-bar boost"><i></i></div><div class="ap-lbl"><span>Leistung (W)</span><span class="ap-boost"></span></div></div>'
-         + '<div class="ap-aa">Flak: <span class="ap-aav"></span> · <b>4</b></div>'
+         + '<div class="ap-aa">Flak: <span class="ap-aav"></span><i class="kb"> · <b>4</b></i></div>'
          + '<div class="ap-keys"></div>');
-      const aa = el('div', 'aa-panel', 'panel hidden', 'FLAK <b>4</b> · <span></span>');
+      const aa = el('div', 'aa-panel', 'panel hidden', 'FLAK <i class="kb"><b>4</b> · </i><span></span>');
       const host = document.getElementById('hud') || document.getElementById('bottom-right');
       if (host) { host.appendChild(panel); host.appendChild(aa); }
       this.dom = {
@@ -149,8 +151,10 @@ export class AirUi {
       if (!this.flying) { this.flying = true; this.onView(true); }
       if (this.cam3) this.cam3.override = this.pose;
       this._pose(world, sq, 1);
-      const k = sq.type === 'ft' ? 'LMB: Patrouille' : 'LMB halten: Anflug, loslassen: Abwurf';
-      this.hud.msg(AIR_NAMES[sq.type] + ' übernommen – ' + k + ' · F: Rückruf · E: Schiff', 'info');
+      const k = touch()
+         ? (sq.type === 'ft' ? 'Patrouille: Knopf antippen' : 'Angriff halten: Anflug, loslassen: Abwurf') + ' · Rückruf / Schiff: Knöpfe rechts'
+         : (sq.type === 'ft' ? 'LMB: Patrouille' : 'LMB halten: Anflug, loslassen: Abwurf') + ' · F: Rückruf · E: Schiff';
+      this.hud.msg(AIR_NAMES[sq.type] + ' übernommen – ' + k, 'info');
    }
    _close(msg = true) {
       if (!this.flying) return;
@@ -219,7 +223,7 @@ export class AirUi {
             else if (!down && (this.wasDown || click) && this.aiming) {
                // a net client knows the run's length from its own hold (the host's lags by the ping)
                const need = sq.type === 'tb' ? AIR.tbAimMin : AIR.dbAimMin;
-               if ((client && this.aimHold < need) || !run(['B', sq.id])) { this.audio.denied?.(); this.hud.msg('Anflug zu kurz – Taste länger halten', 'warn'); }
+               if ((client && this.aimHold < need) || !run(['B', sq.id])) { this.audio.denied?.(); this.hud.msg(touch() ? 'Anflug zu kurz – Angriff länger halten' : 'Anflug zu kurz – Taste länger halten', 'warn'); }
                this.aiming = false;
             }
             if (!down && !click) this.aiming = false;
@@ -366,7 +370,7 @@ export class AirUi {
          setW(d.fuel, fuel); setText(d.fuelT, Math.max(0, Math.ceil(sq.fuel)) + ' s');
          if (d.fuel._low !== fuel < 0.25) { d.fuel._low = fuel < 0.25; d.fuel.style.background = fuel < 0.25 ? 'var(--enemy, #ff5a4d)' : ''; }
          setW(d.boost, sq.boost / AIR.boostMax); setText(d.boostT, sq.throttle > 0 ? 'Vollgas' : sq.throttle < 0 ? 'gedrosselt' : 'Reise');
-         setText(d.keys, sq.type === 'ft' ? 'A/D Maus lenken · W/S Tempo · LMB Patrouille · F Rückruf · E Schiff'
+         setText(d.keys, touch() ? 'Ruderleiste lenkt · Hebel: Tempo' : sq.type === 'ft' ? 'A/D Maus lenken · W/S Tempo · LMB Patrouille · F Rückruf · E Schiff'
             : 'A/D Maus lenken · W/S Tempo · LMB halten Anflug · F Rückruf · E Schiff');
          return;
       }
@@ -382,7 +386,7 @@ export class AirUi {
       const ok = a.deckT <= 0;
       setCls(d.deck, 'ready', ok);
       setText(d.deck, ok ? 'Flugdeck frei' : 'Flugdeck belegt ' + Math.ceil(a.deckT) + ' s');
-      setText(d.keys, activeSquad(world, p, a.sel) ? '1-3 Typ · E Staffel übernehmen' : '1-3 Typ · E Staffel starten');
+      setText(d.keys, touch() ? '' : activeSquad(world, p, a.sel) ? '1-3 Typ · E Staffel übernehmen' : '1-3 Typ · E Staffel starten');
    }
 
    // flight path marker, wanted heading, torpedo fan / bombing ellipse (from the render pose)
@@ -501,7 +505,7 @@ export function drawAir(g, ui, W, H, t) {
          g.fillText(a.ready ? (a.type === 'tb' ? 'Loslassen: Torpedos los' : 'Loslassen: Bomben los') : 'Anflug …', W / 2, y0 + 20);
       } else if (a.armed > 0 && a.type !== 'ft') {
          g.textAlign = 'center'; g.fillStyle = COL_LOOSE;
-         g.fillText('LMB halten: Zielanflug (' + a.armed + ' bewaffnet)', W / 2, H * 0.72 + 6);
+         g.fillText((touch() ? 'Angriff halten: Zielanflug (' : 'LMB halten: Zielanflug (') + a.armed + ' bewaffnet)', W / 2, H * 0.72 + 6);
       }
    }
    g.restore();
