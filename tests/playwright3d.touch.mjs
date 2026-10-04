@@ -191,6 +191,7 @@ for (const [vp, ship] of [[{ width: 915, height: 412 }, 'Bismarck'], [{ width: 1
    await page.screenshot({ path: `${OUT}/3d-touch-squadron.png` });
    await tap('#tu-ship');
    check(tag + 'carrier: back to the ship', await waitFor(() => !window.__air().flying && !window.__air().override, 3000));
+   await t.wait(400);          // let the overlay swap the button back before tapping it
    await tap('#tu-launch');
    check(tag + 'carrier: take over the flying squadron again', await waitFor(() => window.__air().flying, 3000));
    await t.wait(400);          // the overlay refreshes its buttons five times a second
