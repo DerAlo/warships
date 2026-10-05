@@ -31,6 +31,25 @@ export class Renderer3D {
       r.shadowMap.enabled = true;
       r.shadowMap.type = THREE.PCFSoftShadowMap;
       r.info.autoReset = false;
+      // GPU facts once, while the context is alive (a lost context answers null to everything)
+      this._gpu = gpuInfo(r.getContext());
+      // a lost context (mobile GPU out of memory / reset) would leave the canvas white for good:
+      // three.js keeps it restorable; here the tier steps down for this and every later visit
+      this.lost = 0;
+      this.onContextLost = null; this.onContextRestored = null;   // main3d: the veil over the battle
+      canvas.addEventListener('webglcontextlost', () => {
+         this.lost++;
+         const next = lowerTier(this.tier);
+         rememberFallback(next);
+         console.warn(`[gfx] WebGL context lost on tier ${this.tier}, next tier ${next}`);
+         this.onContextLost?.();
+      });
+      canvas.addEventListener('webglcontextrestored', () => {
+         this.setTier(lowerTier(this.tier));
+         if (this.env) this.sky.apply(this.env);   // re-render the reflection cube and the IBL
+         console.warn(`[gfx] WebGL context restored, tier ${this.tier}`);
+         this.onContextRestored?.();
+      });
 
       this.scene = new THREE.Scene();
       // near 3 m keeps depth precision usable at 20 km (shorelines would z-fight with 0.5);
@@ -199,7 +218,7 @@ export class Renderer3D {
    _probeFrame() {
       const wd = this._wd, gl = this.renderer.getContext();
       const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
-      if (W < 8 || H < 8) return;
+      if (W < 8 || H < 8 || gl.isContextLost()) return;
       wd.checks++;
       const px = new Uint8Array(PROBES.length * 4);
       for (let i = 0; i < PROBES.length; i++) {
@@ -222,8 +241,8 @@ export class Renderer3D {
 
    gfxState() {
       return { tier: this.tier, pixelRatio: this.pixelRatio, samples: this.post.sceneRT.samples, bloom: this.post.bloomOn,
-         shadow: this.sun.shadow.mapSize.x, ...gpuInfo(this.renderer.getContext()),
-         probes: this._wd.checks, blankStrikes: this._wd.strikes, stillBlank: this._wd.blank, lastProbe: this._wd.last };
+         shadow: this.sun.shadow.mapSize.x, ...this._gpu,
+         contextLost: this.renderer.getContext().isContextLost(), losses: this.lost, probes: this._wd.checks, blankStrikes: this._wd.strikes, stillBlank: this._wd.blank, lastProbe: this._wd.last };
    }
 
    _applyDebugView() {

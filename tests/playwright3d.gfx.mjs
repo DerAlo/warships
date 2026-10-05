@@ -68,6 +68,38 @@ async function open(query = '', ctxOpts = {}) {
    check('touch device starts on medium', g.tier === 'medium' && g.samples === 2 && g.pixelRatio === 1.5, { tier: g.tier, pr: g.pixelRatio });
    await ctx.close();
 }
+// a lost WebGL context (what a phone GPU running out of memory does): dark veil instead of a white canvas,
+// the next tier is remembered, and after the browser hands the context back the battle goes on one tier lower
+{
+   const { ctx, page, gfx } = await open('?diag');
+   await page.evaluate(() => window.__start({ difficulty: 'easy', mission: 'standard', ship: 'Bismarck' }));
+   await page.waitForFunction(() => window.__phase() === 'playing');
+   await page.waitForTimeout(1500);
+   await page.evaluate(() => { window.__loseExt = window.__renderer3d.renderer.getContext().getExtension('WEBGL_lose_context'); window.__loseExt.loseContext(); });
+   await page.waitForTimeout(400);
+   let g = await gfx();
+   check('context loss: veil instead of a white canvas', await page.locator('#gfx-lost').isVisible() && g.contextLost === true && g.losses === 1, { lost: g.contextLost, losses: g.losses });
+   check('context loss: GPU facts still in ?diag', typeof g.gpu === 'string' && g.maxTex > 0 && /contextLost: true/.test(await page.evaluate(() => document.getElementById('gfx-diag').textContent)));
+   check('context loss: next tier remembered', (await page.evaluate(() => localStorage.getItem('ks3d.gfxFallback'))) === 'medium');
+   await page.evaluate(() => window.__loseExt.restoreContext());
+   const t0 = Date.now();
+   while (Date.now() - t0 < 8000 && !((g = await gfx()).probes > 1)) await page.waitForTimeout(250);
+   const lit = (g.lastProbe || []).some((v, i) => i % 4 !== 3 && v > 8 && v < 240);
+   check('context restored: veil gone, one tier lower, the scene draws again', !(await page.locator('#gfx-lost').count()) && g.tier === 'medium' && !g.contextLost && lit, { tier: g.tier, last: g.lastProbe });
+   // (on a desktop the released pointer lock pauses the battle; "Weiter" goes on)
+   check('context restored: still in the battle', await page.evaluate(() => ['playing', 'paused'].includes(window.__phase())));
+   await page.screenshot({ path: 'tests/shots/3d-gfx-restored.png' });
+   // lost for good: the reload button turns up
+   await page.evaluate(() => window.__renderer3d.renderer.getContext().getExtension('WEBGL_lose_context').loseContext());
+   await page.waitForTimeout(4500);
+   check('context lost for good: reload button', await page.locator('#gfx-lost-reload').isVisible());
+   await page.screenshot({ path: 'tests/shots/3d-gfx-lost.png' });
+   await page.click('#gfx-lost-reload');
+   await page.waitForLoadState('load'); await page.waitForTimeout(1000);
+   check('reload starts on the remembered lower tier', (await gfx()).tier === 'low');
+   await page.evaluate(() => localStorage.removeItem('ks3d.gfxFallback'));
+   await ctx.close();
+}
 {
    const { ctx, page, gfx } = await open('?gfx=low&diag');
    check('?gfx=low forces low', (await gfx()).tier === 'low');

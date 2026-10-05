@@ -68,6 +68,33 @@ export function gpuInfo(gl) {
    };
 }
 
+// The dark veil over the battle while the WebGL context is lost (instead of a white canvas).
+// If the browser does not hand the context back within `wait` ms, a button reloads the page;
+// the fallback tier is already stored, so the reload starts lower.
+export function lostVeil(wait = 4000) {
+   let el = null, timer = 0;
+   const hide = () => { clearTimeout(timer); if (el) { el.remove(); el = null; } };
+   const show = () => {
+      if (el) return;
+      el = document.createElement('div');
+      el.id = 'gfx-lost';
+      el.setAttribute('role', 'alert');
+      el.style.cssText = 'position:fixed;inset:0;z-index:250;display:flex;align-items:center;justify-content:center;padding:16px;'
+         + 'background:#0b1114;color:var(--hud,#d9e2e4);font:15px/1.45 var(--font,sans-serif);text-align:center';
+      el.innerHTML = '<div style="max-width:440px"><div style="font:700 20px var(--font-cond,sans-serif);letter-spacing:1px;'
+         + 'text-transform:uppercase;color:var(--gold,#d6a740);margin-bottom:8px">Grafik wird neu gestartet</div>'
+         + '<div>Der Grafikspeicher des Geräts ist übergelaufen. Das Spiel macht mit niedrigerer Grafik weiter, sobald der Browser die Grafik zurückgibt.</div>'
+         + '<button type="button" id="gfx-lost-reload" style="display:none;margin:16px auto 0;min-height:48px;padding:0 22px;border:0;border-radius:3px;'
+         + 'background:var(--gold,#d6a740);color:var(--ink,#111);font:700 15px var(--font,sans-serif);letter-spacing:1px;text-transform:uppercase">'
+         + 'Mit niedriger Grafik neu laden</button></div>';
+      document.body.appendChild(el);
+      const b = el.querySelector('#gfx-lost-reload');
+      b.addEventListener('click', () => location.reload());
+      timer = setTimeout(() => { if (el) b.style.display = 'block'; }, wait);
+   };
+   return { show, hide, get shown() { return !!el; } };
+}
+
 // ?diag: a small always-on box with the GPU facts and the live quality state (for bug reports)
 export function mountDiag(getState) {
    if (!/[?&]diag\b/.test(location.search)) return;

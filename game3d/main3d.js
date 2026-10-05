@@ -30,7 +30,7 @@ import { activeSquad } from './air.js';
 import { TouchUi } from './touch3d.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
 import { createNetGame } from './net/game.js';
-import { gfxPref, setGfxPref, startTier, mountDiag } from './gfxquality.js';
+import { gfxPref, setGfxPref, startTier, mountDiag, lostVeil, TIERS } from './gfxquality.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -59,6 +59,9 @@ const OLD_BEAM = { DD: 13, LC: 18, HC: 22, EB: 36, Bismarck: 36 };
 // ------------------------------------------------------------------ setup
 const scene3d = $('scene3d');
 const renderer = new Renderer3D(scene3d);
+const gfxVeil = lostVeil();
+renderer.onContextLost = () => { gfxVeil.show(); if (document.pointerLockElement) document.exitPointerLock(); };   // the mouse must reach the reload button
+renderer.onContextRestored = () => { gfxVeil.hide(); hud.msg('Grafik neu gestartet · Stufe ' + TIERS[renderer.tier].label, 'info', 4); };
 const overlay = new Overlay3D($('fx'));
 const hud = new Hud();
 const audio = new Audio();
