@@ -3,6 +3,7 @@
 // torpedo floods). Pure functions over the World; no rendering.
 import { WORLD, TUNE } from './config.js';
 import { PERI_SHELL_MULT } from './submarine.js';
+import { impactOnSites } from './sites.js';
 import {
    DEG, clamp, clamp01, dist2, toLocal, insideHull, halfBeamAt, islandHeightAt, obstacleT, truncGauss,
 } from './utils.js';
@@ -165,6 +166,7 @@ export function resolveShells(world, dt) {
             for (const o of world.obstacles) {
                if (o.kind !== 'island' || a > o.height) continue;
                if (a <= islandHeightAt(o, p)) {
+                  if (world.sites.length) shellOnSite(world, s, p);   // V2: land positions stand on islands
                   world.addEffect('terrain', p, 1.2, 14 + s.caliber * 0.08);
                   s.alive = false; break;
                }
@@ -175,6 +177,7 @@ export function resolveShells(world, dt) {
       }
       if (s.alive && u >= 1) {
          s.alive = false;
+         if (world.sites.length) shellOnSite(world, s, s.target);
          world.addEffect('splash', s.target, 1.6, 8 + s.caliber * 0.09, { big: s.caliber >= 280 });
          noteNearMiss(world, s);
       }
@@ -183,6 +186,12 @@ export function resolveShells(world, dt) {
    let j = 0;
    for (let i = 0; i < shells.length; i++) if (shells[i].alive) shells[j++] = shells[i];
    shells.length = j;
+}
+
+// V2: a shell that comes down inside a land position (sites.js) damages it like an HE penetration.
+function shellOnSite(world, s, p) {
+   const shooter = s.shooter && s.shooter.alive !== undefined ? s.shooter : world.shipById(s.ownerId);
+   return impactOnSites(world, p, s.side, s.dmg / 3, shooter, 'shell');
 }
 
 // "Potential damage" (WoWs stat): enemy shells that landed close to the player.

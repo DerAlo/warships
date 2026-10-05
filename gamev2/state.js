@@ -10,6 +10,8 @@ import { setupMission, updateMission } from './missions.js';
 import { updateSubs, hullContact, PERI_PROX, HYDRO_SUB } from './submarine.js';
 import { updateAir, airSpots, airSpotMask } from './air.js';
 import { radarHolds, sitesSee, updateEsm, updateMissileTracks } from './sensors.js';
+import { updateMissiles } from './missile.js';
+import { updateSites } from './sites.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -31,6 +33,8 @@ export function makeStats() {
       dmg: 0, kills: 0, citadels: 0, pens: 0, overpens: 0, ricochets: 0, shatters: 0, heHits: 0, secHits: 0,
       fires: 0, floods: 0, torpHits: 0, torpsFired: 0, shotsFired: 0, hits: 0, spottingDmg: 0, tanked: 0,
       potential: 0, healed: 0, caps: 0, spotted: 0, bombHits: 0, planesDown: 0, planesLost: 0,
+      // V2 (missile.js / sites.js)
+      ssmFired: 0, ssmHits: 0, ssmDmg: 0, samFired: 0, missilesDown: 0, siteDmg: 0, sitesDown: 0,
    };
 }
 const SUN = { day: [0.9, 0.75], dawn: [1.75, 0.07], dusk: [-1.6, 0.06], night: [2.4, -0.35] };
@@ -249,6 +253,8 @@ export class World {
       if (!st) return;
       // main-battery accuracy = hits / shotsFired: secondaries fire on their own and are counted apart
       if (type === 'torp') st.torpHits++;
+      else if (type === 'ssm' || type === 'cruise') st.ssmHits++;   // missiles are not gun accuracy either
+      else if (type === 'rocket') st.secHits++;
       else if (proj?.kind === 'bomb') st.bombHits++;   // aircraft hits are not gun accuracy
       else if (proj?.kind !== 'sec') st.hits++;   // secondary shatters too
       if (type === 'citadel') st.citadels++;
@@ -260,7 +266,7 @@ export class World {
       else if (type === 'sec') st.secHits++;
    }
    onDamage(target, shooter, amt, type) {
-      if (shooter && shooter.stats) shooter.stats.dmg += amt;
+      if (shooter && shooter.stats) { shooter.stats.dmg += amt; if (type === 'ssm' || type === 'cruise') shooter.stats.ssmDmg += amt; }
       if (shooter && target.side !== shooter.side) {
          if (shooter.side === 'player' && target.spottedByPlayer && shooter !== this.player) this.stats.spottingDmg += amt;
          // net game: every human of the shooter's team that sees the target itself (PvP: either team)
@@ -332,6 +338,8 @@ export class World {
       this._collideShips();
       resolveShells(this, dt);
       resolveTorpedoes(this, dt);
+      updateMissiles(this, dt);
+      if (this.sites.length) updateSites(this, dt);
       this._updateSmoke(dt);
       this._updateEffects(dt);
       this._spotT -= dt;

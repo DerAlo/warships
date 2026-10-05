@@ -21,12 +21,26 @@
 //       ['R', sqId]     recall it
 //       ['W', sqId, x, y]  fighters: patrol that point
 //       ['B', sqId]     attack run: release the weapons of one flight
+//     V2 missiles and sensors (missile.js, sensors.js):
+//       ['m', targetId] launch the selected anti-ship missile at a ship with a fire-control track
+//       ['b', bearing]  ... bearing-only along the absolute bearing (rad)
+//       ['M', x, y]     ... at a map point (the seeker searches there)
+//       ['q', idx]      select the anti-ship missile type (index into cfg.weapons.ssm)
+//       ['D', doctrine] air-defence doctrine 'free' | 'self' | 'hold'
+//       ['p', id|null]  SAM priority target (missile or squadron id)
+//       ['r', 0|1]      radar off (EMCON) / on
+//       ['k', x, y]     cruise missile at a map point;  ['K', siteId] at a land position
+//       ['o', x, y]     rocket salvo at a point (swarm boats)
+//       ['h', x, y]     send the helicopter to a point;  ['S'] SEAL team  (accepted, not implemented yet)
+//     decoys and the jammer are consumables: ['c', 'decoy'] / ['c', 'jammer']
 //   - air control (continuous, while the captain flies a squadron): c.air = [sqId, want, throttle,
 //     aiming] (want: wanted heading in rad, throttle -1 | 0 | +1, aiming 0 | 1)
 import { diveDeeper, diveUp, dropDepthCharges } from '../submarine.js';
 import { AIR_TYPES, launchSquadron, takeSquadron, releaseSquadron, recallSquadron, orderPatrol, dropWeapons,
    squadById, setAaFocus } from '../air.js';
 import { clamp, angleDelta } from '../utils.js';
+import { launchSSM, launchCruise, fireRockets, setDoctrine, setPriorityTarget, selectSsm } from '../missile.js';
+import { setRadar } from '../sensors.js';
 
 export function makeCommand() { return { telegraph: 0, rudder: 0, aim: null, lock: null, air: null }; }
 
@@ -92,6 +106,18 @@ export function execAction(ship, world, a) {
          return sq && fin(a[2]) && fin(a[3]) ? orderPatrol(world, sq, { x: clamp(a[2], -A, A), y: clamp(a[3], -A, A) }) : false;
       }
       case 'B': { const sq = ownSquad(ship, world, a[1]); return sq && sq.human ? dropWeapons(world, sq) : 0; }
+      // ---- V2 ----
+      case 'm': return fin(a[1]) ? !!launchSSM(world, ship, { targetId: a[1] }) : false;
+      case 'b': return fin(a[1]) ? !!launchSSM(world, ship, { bearing: a[1] }) : false;
+      case 'M': return fin(a[1]) && fin(a[2]) ? !!launchSSM(world, ship, { x: a[1], y: a[2] }) : false;
+      case 'q': return fin(a[1]) ? selectSsm(ship, a[1]) : false;
+      case 'D': return setDoctrine(world, ship, a[1]);
+      case 'p': return setPriorityTarget(world, ship, fin(a[1]) ? a[1] : null);
+      case 'r': setRadar(world, ship, !!a[1]); return true;
+      case 'k': return fin(a[1]) && fin(a[2]) ? !!launchCruise(world, ship, { x: a[1], y: a[2] }) : false;
+      case 'K': return fin(a[1]) ? !!launchCruise(world, ship, { siteId: a[1] }) : false;
+      case 'o': return fin(a[1]) && fin(a[2]) ? fireRockets(world, ship, { x: a[1], y: a[2] }) : 0;
+      case 'h': case 'S': return false;   // helicopter / SEAL team: helo.js / seal.js (not built yet)
    }
    return 0;
 }

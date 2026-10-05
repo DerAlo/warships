@@ -9,6 +9,7 @@ export function emptySea(opts = {}) {
    w.ships = [p]; w.roster = [p]; w.bots = [];
    w._byId = new Map([[p.id, p]]);
    w.obstacles = [];
+   w.sites = []; w.missiles = []; w.decoys = [];
    w.arena = opts.arena || 40000;
    w.timeLeft = null;
    w.mission.objectives = [];

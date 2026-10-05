@@ -40,7 +40,7 @@ export const WORLD = {
    ALIGN_TOL: 1.5 * DEG,     // turret counts as aligned within this
    FIRE_TOL: 2.5 * DEG,      // fireMain accepts a turret this close to its firing solution
    AMMO_SWITCH: 0.5,         // switching AP/HE: guns reload with max(current, 50% of reload)
-   HIT_POOL: { pen: 0.5, citadel: 0.1, he: 0.5, sec: 0.5, fire: 1, flood: 1, torp: 0.33, overpen: 0.5, ssm: 0.3, rocket: 0.5 }, // repair regen share
+   HIT_POOL: { pen: 0.5, citadel: 0.1, he: 0.5, sec: 0.5, fire: 1, flood: 1, torp: 0.33, overpen: 0.5, ssm: 0.3, cruise: 0.3, rocket: 0.5 }, // repair regen share
    // throttle fraction per telegraph position (-1 reverse .. 4 full ahead)
    TELEGRAPH: { '-1': -0.3, 0: 0, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 },
 };
@@ -78,11 +78,11 @@ export const MISSILES = {
    kh35: { kind: 'ssm', name: 'Ch-35', speed: 540, range: 20000, dmg: 4200, seeker: 4000, cone: 22 * DEG, evade: 1, skim: true },
    kowsar: { kind: 'ssm', name: 'Kowsar', speed: 480, range: 7500, dmg: 1500, seeker: 2600, cone: 20 * DEG, evade: 1.05, skim: true },
    // --- anti-ship, supersonic
-   oniks: { kind: 'ssm', name: 'P-800 Oniks', speed: 940, range: 26000, dmg: 6800, seeker: 5500, cone: 20 * DEG, evade: 0.6, skim: true, supersonic: true },
-   vulkan: { kind: 'ssm', name: 'P-1000 Wulkan', speed: 980, range: 30000, dmg: 9800, seeker: 6500, cone: 22 * DEG, evade: 0.62, skim: false, alt: 400, supersonic: true },
-   granit: { kind: 'ssm', name: 'P-700 Granit', speed: 960, range: 30000, dmg: 10500, seeker: 6500, cone: 22 * DEG, evade: 0.62, skim: false, alt: 400, supersonic: true },
-   yj18: { kind: 'ssm', name: 'YJ-18', speed: 560, range: 26000, dmg: 6000, seeker: 5200, cone: 22 * DEG, evade: 0.68, skim: true, supersonic: true, sprint: { at: 5500, speed: 980 } },
-   kalibr: { kind: 'ssm', name: '3M-54 Kalibr', speed: 560, range: 26000, dmg: 5600, seeker: 5000, cone: 22 * DEG, evade: 0.7, skim: true, supersonic: true, sprint: { at: 5000, speed: 940 } },
+   oniks: { kind: 'ssm', name: 'P-800 Oniks', speed: 940, range: 26000, dmg: 6800, seeker: 5500, cone: 20 * DEG, evade: 0.7, skim: true, supersonic: true },
+   vulkan: { kind: 'ssm', name: 'P-1000 Wulkan', speed: 980, range: 30000, dmg: 9800, seeker: 6500, cone: 22 * DEG, evade: 0.7, skim: false, alt: 400, supersonic: true },
+   granit: { kind: 'ssm', name: 'P-700 Granit', speed: 960, range: 30000, dmg: 10500, seeker: 6500, cone: 22 * DEG, evade: 0.7, skim: false, alt: 400, supersonic: true },
+   yj18: { kind: 'ssm', name: 'YJ-18', speed: 560, range: 26000, dmg: 6000, seeker: 5200, cone: 22 * DEG, evade: 0.75, skim: true, supersonic: true, sprint: { at: 5500, speed: 980 } },
+   kalibr: { kind: 'ssm', name: '3M-54 Kalibr', speed: 560, range: 26000, dmg: 5600, seeker: 5000, cone: 22 * DEG, evade: 0.76, skim: true, supersonic: true, sprint: { at: 5000, speed: 940 } },
    // --- land attack
    tomahawk: { kind: 'cruise', name: 'Tomahawk', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
    kalibrLA: { kind: 'cruise', name: 'Kalibr-NK', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
@@ -111,19 +111,19 @@ export const MISSILES = {
 // Close-in weapon systems: one target at a time per mount. kps = kill chance per second against a
 // subsonic missile inside range (supersonic: * CIWS_SUPER); air = dps against aircraft.
 export const CIWS = {
-   phalanx: { name: 'Phalanx', range: 1800, kps: 0.30 },
-   goalkeeper: { name: 'Goalkeeper', range: 2000, kps: 0.34 },
-   ak630: { name: 'AK-630', range: 1600, kps: 0.24 },
-   kashtan: { name: 'Kaschtan', range: 2400, kps: 0.34 },
-   type730: { name: 'Typ 730', range: 2000, kps: 0.32 },
-   type1130: { name: 'Typ 1130', range: 2200, kps: 0.38 },
-   gun40: { name: '40-mm-Flak', range: 1500, kps: 0.12 },
+   phalanx: { name: 'Phalanx', range: 1800, kps: 0.18 },
+   goalkeeper: { name: 'Goalkeeper', range: 2000, kps: 0.20 },
+   ak630: { name: 'AK-630', range: 1600, kps: 0.15 },
+   kashtan: { name: 'Kaschtan', range: 2400, kps: 0.20 },
+   type730: { name: 'Typ 730', range: 2000, kps: 0.19 },
+   type1130: { name: 'Typ 1130', range: 2200, kps: 0.23 },
+   gun40: { name: '40-mm-Flak', range: 1500, kps: 0.08 },
 };
 export const CIWS_SUPER = 0.5;
 // Defence tuning shared by ships and SAM sites (missile.js).
 export const DEFENCE = {
-   react: 1.2,               // s from detection of a threat to the first SAM leaving the rail
-   relook: 0.6,              // s between an intercept result and the next shot of that channel (shoot-look-shoot)
+   react: 2.5,               // s from detection of a threat to the first SAM leaving the rail
+   relook: 1.5,              // s between an intercept result and the next shot of that channel (shoot-look-shoot)
    minRange: 900,            // m: SAMs cannot engage closer than this (the CIWS layer)
    farPk: 0.75,              // pk factor at maximum range (1 at half range and closer)
    aircraftPk: 0.85,         // pk factor against aircraft (they manoeuvre and use flares)
@@ -131,6 +131,22 @@ export const DEFENCE = {
    decoyPkSuper: 0.42,       // ... a supersonic one
    decoyPkPassive: 0.3,      // ... an IR seeker (NSM)
    launchGap: 1.1,           // s between two SSMs leaving the same ship
+   samGap: 8,                // s between two SAMs leaving the same platform, for one with two channels:
+                             // interval = samGap * 4 / (2 + channels) (missile.samInterval) ...
+   samGapUrgent: 0.25,       // ... times this against a supersonic threat
+   salvo: 1,                 // interceptors in flight per threat (shoot-look-shoot) ...
+   salvoClose: 2,            // ... and against a supersonic threat or one closer than panicT seconds
+   panicT: 7,
+   aamGap: 3,                // s between two air-to-air missiles of a fighter squadron
+   armDist: 2500,            // m a bearing-only SSM flies before its seeker switches on
+   turnCruise: 0.7,          // rad/s turn rate of an anti-ship / cruise missile in mid-course ...
+   turnTerminal: 1.5,        // ... and with the seeker on
+   friendlySeek: true,       // a seeker that finds nothing else takes a ship of its own side
+   friendlyDmg: 0.5,         // damage factor of such a hit
+   hitFire: 0.55,            // chance an SSM hit starts a fire / knocks out a module
+   hitModule: 0.3,
+   cruiseBlast: 150,         // m blast radius of a cruise missile against land positions
+   rocketBlast: 25,          // m of an unguided rocket
 };
 
 // Consumable catalogue: display name/icon; per-ship charges/durations live in SHIPS[].consumables.

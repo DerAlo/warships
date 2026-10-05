@@ -32,6 +32,8 @@ import { aaProfile } from './config.js';
 import { DEG, clamp, clamp01, angleDelta, dist2, toLocal, insideHull, gaussR } from './utils.js';
 import { resolveHit } from './combat.js';
 import { squadThink } from './ai_air.js';
+import { launchAirSSM } from './missile.js';
+import { impactOnSites } from './sites.js';
 
 export const AIR_TYPES = ['tb', 'db', 'ft'];
 export const AIR_NAMES = { tb: 'Torpedobomber', db: 'Sturzkampfbomber', ft: 'Jäger' };
@@ -212,7 +214,12 @@ export function dropWeapons(world, sq) {
    const k = Math.min(sq.cfg.flight, sq.armed);
    const w = sq.cfg.weapon, mult = carrier ? carrier.dmgMult || 1 : 1;
    const c = Math.cos(sq.heading), s = Math.sin(sq.heading);
-   if (sq.type === 'tb') {
+   if (sq.type === 'tb' && w.missile) {
+      // V2: the attack squadron releases stand-off anti-ship missiles (missile.js) instead of torpedoes
+      const tid = sq.order && sq.order.targetId != null ? sq.order.targetId : null;
+      for (let i = 0; i < k * (w.per || 1); i++) launchAirSSM(world, sq, tid != null ? { targetId: tid } : { bearing: sq.heading }, w.missile, mult);
+      if (carrier?.stats) carrier.stats.torpsFired += k;
+   } else if (sq.type === 'tb') {
       const dx = sq.pos.x + c * AIR.tbDrop, dy = sq.pos.y + s * AIR.tbDrop;
       const spd = w.speedKn * 2.6;
       for (let i = 0; i < k; i++) {
@@ -302,6 +309,8 @@ function bombImpact(world, b) {
       s.shooter = null;
       return;
    }
+   // V2: bombs on a land position (sites.js)
+   if (world.sites.length && impactOnSites(world, p, b.side, b.dmg * 0.75, world.shipById(b.ownerId), 'bomb')) { world.addEffect('explosion', p, 1.2, 30, { big: true }); return; }
    world.addEffect('splash', p, 1.6, 18);
 }
 
@@ -450,7 +459,7 @@ function planeDown(world, sq, by) {
    if (sq.n <= 0) { sq.state = 'land'; if (sq.human) sq.human = false; }
 }
 
-function hurtSquad(world, sq, dmg, by) {
+export function hurtSquad(world, sq, dmg, by) {
    sq.hp -= dmg;
    while (sq.hp <= 0 && sq.n > 0) planeDown(world, sq, by);
 }

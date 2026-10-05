@@ -7,6 +7,7 @@ import { TAU, DEG, clamp, clamp01, angleDelta, approach, toWorld, toLocal, obsta
 import { makeShell, launchAngle, flightTime } from './combat.js';
 import { initSubState, subSpeedFactor, subDetectRange, SUB_TUBE_ARC } from './submarine.js';
 import { initAirState } from './air.js';
+import { deployDecoys } from './missile.js';
 
 const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, SS: 18, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
 const FLOOD_DUR = 40;
@@ -236,7 +237,7 @@ export class Ship {
          for (const t of this.turrets) if (!t.alive) { t.alive = true; t.disabledT = 0; }
       } else if (key === 'smoke') {
          this._smokeT = 0;
-      }
+      } else if (key === 'decoy') deployDecoys(world, this);   // V2 soft kill (missile.js)
       world.pushEvent('consumable', { srcId: this.id, text: c.name, key });
       return true;
    }
