@@ -61,7 +61,7 @@ export function westMissions(H) {
                { c: P(9500, -8200), r: 900, height: 140, seed: 53, lobes: 4, rough: 0.5, name: 'Südriff' },
             ]);
             add(w, shipKey, 'player', P(-12200, 600), 0, { isPlayer: true });
-            S.escort = add(w, 'Braunschweig', 'player', P(-14800, -1900), 0, { dmgMult: 0.6, ai: { escortId: null } });
+            S.escort = add(w, 'Braunschweig', 'player', P(-14800, -1900), 0, { dmgMult: by(w, 0.05, 0.6, 0.6), ai: { escortId: null } });
             const route = [P(-4000, -900), P(4500, 200), P(9800, 0)];
             S.convoy = [
                add(w, 'Tanker', 'player', P(-13600, -600), 0, { name: 'MT Nordstern', speedKn: 18, ai: { route } }),
@@ -144,7 +144,7 @@ export function westMissions(H) {
             S.convoy = ['MV Hansa Carrier', 'MV Baltic Star', 'MV Elbe Trader'].map((name, i) =>
                add(w, 'Container', 'player', P(-2200, 14800 + i * 1250), -Math.PI / 2, { name, speedKn: 18, ai: { route } }));
             S.ally = add(w, 'Daring', 'player', P(-3600, 16600), -Math.PI / 2, { ai: { escortId: S.convoy[2].id } });
-            S.ally.mag.aster30 = by(w, 12, 10, 8); S.ally.mag.camm = by(w, 10, 8, 6);
+            S.ally.mag.aster30 = by(w, 1, 10, 8); S.ally.mag.camm = by(w, 0, 8, 6);
             S.goal = zone(w, -2200, -9500, 1800, 'Golf von Aden');
             S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.queue = []; S.wave = 0; S.launched = 0;
             S.launchers = [['Startrampe Nord', 7500], ['Startrampe Mitte', 300], ['Startrampe Süd', -7000]].map(([name, y]) => {
@@ -169,7 +169,7 @@ export function westMissions(H) {
             const live = S.launchers.filter(L => L.alive);
             if (!live.length || S.arrived + S.lost >= S.convoy.length) return;
             S.wave++;
-            const n = by(w, 1, 2, 2) + (k >= by(w, 2, 2, 3) ? 1 : 0) + (k >= by(w, 99, 5, 6) ? 1 : 0);
+            const n = by(w, 2, 2, 2) + (k >= by(w, 3, 2, 3) ? 1 : 0) + (k >= by(w, 99, 5, 6) ? 1 : 0);
             radio(w, 'Operationszentrale', `Flugkörperstart an der Ostküste, Welle ${S.wave}. Anflug aus Ost.`, 'warn');
             for (const L of live) for (let i = 0; i < n; i++)
                S.queue.push({ L, t: w.time + S.launchers.indexOf(L) * 2.5 + i * 1.3, type: k >= 4 && i === 0 && w.difficultyKey !== 'easy' ? 'oniks' : 'kh35', tries: 0 });

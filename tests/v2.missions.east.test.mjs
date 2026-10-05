@@ -374,20 +374,23 @@ test('east/countdown: a submarine puts the team ashore and the charges destroy t
 });
 
 // ------------------------------------------------------------------------------------ balance table
-test('east: balance table (EAST_BALANCE=<runs>)', { skip: !process.env.EAST_BALANCE }, () => {
+test('east: balance table (EAST_BALANCE=<runs>, optional ONLY, SHIP, DIFFS, MODES)', { skip: !process.env.EAST_BALANCE }, () => {
    const runs = +process.env.EAST_BALANCE || 30;
-   for (const id of IDS) for (const [diff, mode] of [['easy', 'bot'], ['normal', 'bot'], ['hard', 'bot'], ['normal', 'passive']]) {
+   const only = process.env.ONLY ? process.env.ONLY.split(',') : IDS;
+   const diffs = process.env.DIFFS ? process.env.DIFFS.split(',') : DIFFS;
+   const modes = process.env.MODES ? process.env.MODES.split(',') : ['bot', 'passive'];
+   for (const id of only) for (const ship of (process.env.SHIP ? process.env.SHIP.split(',') : [def(id).recommendedShip])) for (const diff of diffs) for (const mode of modes) {
       const d = def(id);
       let win = 0, tsum = 0, tmax = 0;
       for (let i = 0; i < runs; i++) {
-         const w = mk(id, { diff, seed: 101 + i * 37 });
+         const w = mk(id, { diff, ship, seed: 101 + i * 37 });
          const cap = captain(w, mode);
          let n = 0;
          while (w.phase === 'playing' && n++ < (d.timeLimit + 5) * 60) { w.update(1 / 60); cap(); }
          if (w.phase === 'won') win++;
          tsum += w.time; tmax = Math.max(tmax, w.time);
       }
-      console.log(`${id.padEnd(10)} ${diff.padEnd(7)} ${mode.padEnd(8)} win ${String(Math.round(100 * win / runs)).padStart(3)} %  avg ${Math.round(tsum / runs)} s  max ${Math.round(tmax)} s`);
+      console.log(`${id.padEnd(10)} ${ship.padEnd(12)} ${diff.padEnd(6)} ${mode.padEnd(7)} wins ${String(Math.round(100 * win / runs)).padStart(3)} %   t ${Math.round(tsum / runs)} (${Math.round(tmax)}) / ${d.timeLimit}`);
       assert.ok(tmax <= d.timeLimit + 1);
    }
 });
