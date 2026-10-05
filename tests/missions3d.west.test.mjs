@@ -195,16 +195,18 @@ test('Pedestal: the convoy steams east; submarine, air raids and fast boats arri
    assert.ok(ohio && S.freighters.length === 3 && S.escort.length === 3);
    assert.strictEqual(w.squadrons.length, 0);
    const x0 = ohio.pos.x;
+   runTo(w, 30);
+   assert.strictEqual(w.squadrons.length, 0, 'no aircraft in the first seconds');
    runTo(w, 40);
    assert.ok(S.sub.alive && S.sub.depth >= 1, 'Axum is submerged before the convoy reaches her');
    assert.ok(ohio.pos.x > x0 + 800, 'the tanker makes way on her own');
-   assert.strictEqual(w.squadrons.length, 0, 'no aircraft in the first seconds');
+   assert.ok(w.squadrons.every(q => q.pos.y < -w.arena), 'the raid is still beyond the map edge');
    runTo(w, 60);
-   assert.ok(w.squadrons.some(q => q.side === 'enemy' && q.type === 'db'), 'first wave: dive bombers');
+   assert.ok(w.squadrons.some(q => q.side === 'enemy' && q.type === 'db' && q.pos.y > -w.arena), 'first wave: dive bombers over the map');
    assert.ok(!S.boats, 'no boats before dark');
    runTo(w, 190);
    if (w.phase !== 'playing') return;   // (the tanker can be lost early with an idle player)
-   assert.ok(w.roster.length >= 10);
+   assert.strictEqual(w.roster.length, 9, 'convoy, escort, player and the submarine: the airfield is no ship');
    runTo(w, 272);
    if (w.phase !== 'playing') return;
    assert.strictEqual(S.boats.length, 4);
@@ -216,14 +218,99 @@ test('Pedestal: the convoy steams east; submarine, air raids and fast boats arri
    }
 });
 
-test('Pedestal: the airfield stand-in stays out of the fight', () => {
+test('Pedestal: the airfield is off the map: in no list, never seen or hit, and still flies both raids', () => {
+   for (const diff of ['easy', 'normal', 'hard']) {
+      const w = world('pedestal', diff);
+      const cv = w._script.cv;
+      for (const list of [w.ships, w.roster, w.bots]) assert.ok(!list.includes(cv), 'in no list of the battle');
+      assert.strictEqual(w.shipById(cv.id), cv, 'the squadrons still find their base');
+      assert.ok(cv.pos.y < -w.arena - 1000, 'beyond the northern edge');
+      assert.deepStrictEqual(foes(w).map(s => s.name), ['Axum'], 'the only enemy ship at the start is the submarine');
+      assert.ok(!w.roster.some(s => s.type === 'CV'), 'no carrier in the scoreboard');
+   }
    const w = world('pedestal');
-   const cv = w._script.cv;
+   const cv = w._script.cv, p0 = { ...cv.pos };
    w.autoPlayer = true;
-   runTo(w, 200);
+   const seen = new Set(), first = new Map();
+   let drops = 0;
+   const ev = w.pushEvent;
+   w.pushEvent = function (type, data) { if (type === 'airDrop') drops++; return ev.call(this, type, data); };
+   while (w.phase === 'playing' && w.time < 240) {
+      w.update(DT);
+      for (const q of w.squadrons) {
+         assert.strictEqual(q.ownerId, cv.id);
+         seen.add(q.type);
+         if (q.state === 'launch' && !first.has(q)) first.set(q, w.time);
+      }
+      assert.ok(!cv.detected && !cv.spottedByPlayer, 'never sighted');
+   }
+   assert.deepStrictEqual([...seen].sort(), ['db', 'tb'], 'Stukas and torpedo bombers, no fighters');
+   assert.ok(drops >= 2, `the raids drop their weapons (${drops})`);
    assert.ok(cv.alive && cv.hp === cv.maxHP, 'never engaged');
-   assert.ok(cv.pos.y < -10000, 'stays at the northern edge');
-   assert.ok(!cv.detected, 'never sighted');
+   assert.deepStrictEqual(cv.pos, p0, 'an airfield does not move');
+   if (w.time >= 170) assert.ok([...first.values()].some(t => t < 40) && [...first.values()].some(t => t > 150), 'a launch in each wave');
+});
+
+test('Pedestal: the fast boats run in, launch torpedoes from short range, turn away and come back', () => {
+   const w = world('pedestal', 'normal', 4);
+   w.autoPlayer = true;
+   const S = w._script;
+   runTo(w, 271);
+   assert.strictEqual(w.phase, 'playing');
+   const ids = new Set(S.boats.map(b => b.id));
+   for (const b of S.boats) {
+      assert.ok(b.ai.passive && b.ai.boat.st === 'in', `${b.name} is steered by the mission`);
+      assert.ok(b.cfg.main.range <= 2500 && b.cfg.main.he.dmg < 400, 'light guns only');
+      assert.strictEqual(b.turrets.length, 4, 'same turret layout as the stock class (co-op clients)');
+      assert.strictEqual(b.torps.launchers.length, 2);
+   }
+   const near = (b) => Math.min(...w.ships.filter(s => s.alive && s.side === 'player').map(s => Math.hypot(s.pos.x - b.pos.x, s.pos.y - b.pos.y)));
+   const launches = new Map(), known = new Set();
+   let outSeen = 0, back = 0, gunFar = 0, shots = 0;
+   const prev = new Map(S.boats.map(b => [b, 'in']));
+   while (w.phase === 'playing' && w.time < 430) {
+      w.update(DT);
+      for (const t of w.torpedoes) {
+         if (!ids.has(t.ownerId) || known.has(t.id)) continue;
+         known.add(t.id);
+         const b = w.shipById(t.ownerId);
+         if (t.traveled < 60) {
+            const d = Math.min(...S.convoy.filter(c => c.alive).map(c => Math.hypot(c.pos.x - b.pos.x, c.pos.y - b.pos.y)));
+            assert.ok(d < 2700, `${b.name} launches from short range (${Math.round(d)} m)`);
+            launches.set(b, (launches.get(b) || 0) + 1);
+         }
+      }
+      for (const b of S.boats) {
+         if (!b.alive) continue;
+         if (b.lastMainFire === w.time) { shots++; if (near(b) > 2600) gunFar++; }
+         const st = b.ai.boat.st;
+         if (st !== prev.get(b)) {
+            if (st === 'out') outSeen++;
+            if (st === 'in' && prev.get(b) === 'out') back++;
+            prev.set(b, st);
+         }
+      }
+   }
+   assert.ok(launches.size >= 3, `most boats get their torpedoes off (${launches.size})`);
+   assert.ok(outSeen >= 3, 'they turn away after the launch');
+   assert.ok(back >= 1, 'and come back for another run');
+   assert.ok([...launches.values()].some(n => n >= 4), 'a second salvo from the same boat');
+   assert.strictEqual(gunFar, 0, 'no gunfire from beyond point-blank range');
+   for (const b of S.boats) assert.ok(b.ai.boat.left >= 0 && b.ai.boat.left <= 4);
+});
+
+test('Pedestal: boats that are out of torpedoes make for home and leave the battle', () => {
+   const w = world('pedestal');
+   const S = w._script;
+   runTo(w, 271);
+   if (w.phase !== 'playing') return;
+   for (const b of S.boats) { b.ai.boat.left = 0; b.ai.boat.st = 'out'; b.ai.boat.t = w.time; b.ai.boat.from = S.ohio.id; }
+   const n0 = w.torpedoes.filter(t => S.boats.some(b => b.id === t.ownerId)).length;
+   runTo(w, 420);
+   assert.strictEqual(w.torpedoes.filter(t => S.boats.some(b => b.id === t.ownerId)).length, n0, 'no launch without torpedoes');
+   assert.ok(S.boats.every(b => !b.alive), 'all gone or sunk');
+   assert.ok(S.boats.some(b => b.escaped === 'retreated'), 'they withdraw instead of fighting on with guns');
+   assert.ok(S.boats.every(b => !w.ships.includes(b) || b.sinking));
 });
 
 test('Pedestal: only the tanker counts; her state and the freighters decide the optional objectives', () => {
