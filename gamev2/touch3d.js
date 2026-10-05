@@ -18,7 +18,7 @@ const REFRESH = 0.2;             // s between state refreshes of the buttons
 const TELE_STEPS = [4, 3, 2, 1, 0, -1];
 const TELE_TXT = { 4: 'Voll', 3: '3/4', 2: '1/2', 1: '1/4', 0: 'Stopp', '-1': 'Zurück' };
 const RUD_TXT = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'halb Stb', 2: 'hart Stb' };
-const AIR_TYPES = [['1', 'tb', 'Torpedo&shy;bomber'], ['2', 'db', 'Sturz&shy;bomber'], ['3', 'ft', 'Jäger']];
+const AIR_TYPES = [['1', 'tb', 'Anti&shy;Schiff-Jet'], ['2', 'db', 'Mehrzweck-Jet'], ['3', 'ft', 'Jagdjet']];
 // keep in step with the media queries of CSS below
 const MQ_COMPACT = '(max-height: 480px)';                        // phone held sideways
 const MQ_NARROW = '(max-height: 480px) and (max-width: 899px)';  // ... and a short one: consumables go left
@@ -173,6 +173,13 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    #tu-more { display: flex; }
    body.touch:not(.tu-more) #tu-map, body.touch:not(.tu-more) #tu-board, body.touch:not(.tu-more) #tu-help,
    body.touch:not(.tu-more) #tu-sec, body.touch:not(.tu-more) #tu-aa { display: none; }
+   /* phone: the orders get their own band in the middle (the left column has no room for four long lines and
+      would clip them); the radio banner is narrowed so it never runs into the columns beside it */
+   #tu-hud-o { position: absolute; top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(284px + env(safe-area-inset-left, 0px)); width: 330px; pointer-events: none; }
+   body.touch #tu-hud-o > #objectives { position: static; width: 410px; zoom: var(--tu-hud); }
+   body.touch:has(#mx-threat:not(.hidden)) #tu-hud-o { display: none; }   /* an incoming salvo takes the band */
+   body.touch #msgs { width: 310px; max-width: 310px; }
+   body.touch .msg, body.touch .msg.radio { max-width: 310px; font-size: 12px; }
    body.touch #objectives { transition: opacity .6s; }
    body.touch #objectives:not(.tu-fresh) { opacity: 0; }
    body.touch #scorebox { width: 250px; padding: 4px 10px 5px; grid-template-columns: auto 1fr; grid-template-areas: "timer score" "caps caps"; }
@@ -305,7 +312,7 @@ export class TouchUi {
       const ctx = {
          sec: btn('tu-sec', '', 'Sek.<br>Ziel', col),
          asw: btn('tu-asw', '', 'Wasser&shy;bomben', col),
-         aa: btn('tu-aa', '', 'Flak<br><span>aus</span>', col),   // carriers: AA sector
+         aa: btn('tu-aa', '', 'Luftabw.<br><span>aus</span>', col),   // carriers: AA sector
          dive: btn('tu-dive', '', '▼<br>Tiefer', col),
          up: btn('tu-up', '', '▲<br>Auf', col),
          launch: btn('tu-launch', '', 'Start', col),
@@ -455,7 +462,7 @@ export class TouchUi {
       if (!hud) return;
       if (!this.cols) {
          const box = (id) => { const e = el('div', id); hud.appendChild(e); return e; };
-         this.cols = { l: box('tu-hud-l'), r: box('tu-hud-r'), b: box('tu-hud-b'), t: box('tu-hud-t') };
+         this.cols = { l: box('tu-hud-l'), r: box('tu-hud-r'), b: box('tu-hud-b'), t: box('tu-hud-t'), o: box('tu-hud-o') };
          this.cols.b.appendChild(el('div', 'tu-tsch'));     // room for hud3d's turret schematic
          this.mq = { compact: matchMedia(MQ_COMPACT), narrow: matchMedia(MQ_NARROW), upright: matchMedia(MQ_UPRIGHT) };
          this.mq.compact.addEventListener?.('change', () => this._arrange());
@@ -469,12 +476,13 @@ export class TouchUi {
             this.input.virtualTap('M');
          });
       }
-      const { l, r, b, t } = this.cols;
+      const { l, r, b, t, o } = this.cols;
       const compact = this.mq.compact.matches, narrow = this.mq.narrow.matches;
       const put = (col, ids) => { for (const id of ids) { const e = id && $(id); if (e) col.appendChild(e); } };
-      put(l, ['scorebox', 'ship-card', ...LATE_PLATES, 'objectives', 'roster-ally', narrow && 'cons']);
+      put(l, ['scorebox', 'ship-card', ...LATE_PLATES, !compact && 'objectives', 'roster-ally', narrow && 'cons']);
       put(r, ['minimap-wrap', !compact && 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
-      put(t, [compact && 'lock-panel']);      // phone: the target card under the system buttons, clear of the fire cluster
+      put(t, [compact && 'lock-panel']);
+      put(o, [compact && 'objectives']);      // phone: the target card under the system buttons, clear of the fire cluster
       put(b, [!compact && 'tally', 'tu-tsch', !narrow && 'cons', LATE_BOTTOM, 'weapons']);
       this.late = [...LATE_PLATES, LATE_BOTTOM].filter(id => !$(id));
    }
@@ -638,6 +646,6 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · U-Jagd-Schiffe: U-Jagd-Torpedo bzw. Wasserbomben</span></div>
    <div><span class="k">Hubschrauber</span><span class="d">Feld antippen: Start voraus / Rückruf · bei offener Lagekarte: Feld, dann Punkt auf der Karte antippen</span></div>
    <div><span class="k">Kommandotrupp</span><span class="d">U-Boot nahe am Einsatzpunkt, langsam, höchstens auf Sehrohrtiefe: Feld antippen · zur Aufnahme zum Trupp zurück</span></div>
-   <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Flak und Sek.-Ziel aus</span></div>
+   <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Luftabwehr und Sek.-Ziel aus</span></div>
    <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
 </div>`;

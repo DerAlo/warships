@@ -48,7 +48,7 @@ export function displayKn(s) {
    if (s?.maxSpeed > 0) return Math.abs(s.speed || 0) / s.maxSpeed * (REAL_KN[shipType(s)] || 30);
    return Math.abs(s?.speed || 0) * 1.94384;
 }
-export const TYPE_NAME = { DD: 'Zerstörer', CL: 'Leichter Kreuzer', CA: 'Schwerer Kreuzer', BB: 'Schlachtschiff', CV: 'Flugzeugträger', TR: 'Transporter', SS: 'U-Boot' };
+export const TYPE_NAME = { FAC: 'Schnellboot', CO: 'Korvette', FF: 'Fregatte', DD: 'Zerstörer', CG: 'Kreuzer', CL: 'Kreuzer', CA: 'Kreuzer', BB: 'Kreuzer', CV: 'Flugzeugträger', TR: 'Transporter', SS: 'U-Boot' };
 export const TYPE_SHORT = { DD: 'Z', CL: 'LK', CA: 'SK', BB: 'SS', CV: 'FT', TR: 'TR', SS: 'UB' };
 export function shipLen(s) {
    return s?.cfg?.hull?.L || ({ DD: 120, LC: 170, HC: 205, EB: 251, Bismarck: 251 }[s?.cls]) || 180;
