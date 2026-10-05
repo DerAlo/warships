@@ -297,6 +297,16 @@
       #loading .ld-title { bottom: 9vh; }
       #loading .ld-title b { font-size: min(9vw, 84px); }   /* room for the wider fallback font phones use */
    }
+   /* the boot guard's message when the game cannot start (no WebGL, a script error, far too slow) */
+   #loading .ld-fail { max-width: 480px; padding: 10px 14px 12px; border-radius: 4px; background: rgba(6, 10, 14, .82); font: 14px/1.45 var(--font); letter-spacing: 0; text-transform: none; color: var(--paper); text-shadow: 0 1px 3px #000; }
+   #loading .ld-fail h2 { margin: 0 0 6px; font: 700 17px var(--font-cond); letter-spacing: 1px; text-transform: uppercase; color: var(--brass-hi); }
+   #loading .ld-fail p { margin: 0 0 6px; }
+   #loading .ld-fail small { display: block; margin-top: 4px; color: var(--hud-dim); font: 11px monospace; word-break: break-word; }
+   #loading .ld-act { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
+   #loading .ld-act a, #loading .ld-act button { min-height: 44px; padding: 0 18px; display: inline-flex; align-items: center; border: 0; border-radius: 3px; cursor: pointer;
+      font: 700 13px var(--font); letter-spacing: 1px; text-transform: uppercase; text-decoration: none; background: var(--brass-hi); color: #111; }
+   #loading .ld-act a { background: transparent; color: var(--paper); box-shadow: inset 0 0 0 1.5px var(--paper); }
+   #loading.ld-failed .ld::after { animation: none; opacity: 0; }
    @media (prefers-reduced-motion: reduce) { #loading .ld-fa, #loading .ld-fb, #loading .ld-fire, #loading .ld::after { animation: none; } #loading .ld-fb { opacity: 0; } }
 </style>
 </head>
@@ -469,6 +479,43 @@
       </div>
       <div class="ld-title"><b>Kriegsschiffe</b><i>Seekrieg 1939 – 1945</i><div class="ld">Geschütze werden geladen …</div></div>
    </div>
+   <script>
+   // Boot guard: if the game cannot start (no WebGL — Chrome locks it for a while after a page crashed
+   // the graphics — a script error, or far too slow), the loading screen says so and offers a way out
+   // instead of animating forever. main3d.js removes #loading once the game is up.
+   (function () {
+      var failed = false;
+      function fail(title, text, detail) {
+         var ld = document.getElementById('loading');
+         if (!ld || failed) return;
+         failed = true;
+         ld.classList.add('ld-failed');
+         var box = ld.querySelector('.ld'), sub = ld.querySelector('.ld-title i');
+         if (sub) sub.remove();
+         var el = document.createElement('div');
+         el.className = 'ld-fail';
+         el.setAttribute('role', 'alert');
+         el.innerHTML = '<h2></h2><p></p><small></small><div class="ld-act"><button type="button" id="ld-retry">Neu laden</button><a href="index.html">2D-Version spielen</a></div>';
+         el.querySelector('h2').textContent = title;
+         el.querySelector('p').textContent = text;
+         el.querySelector('small').textContent = detail || '';
+         el.querySelector('#ld-retry').addEventListener('click', function () { location.reload(); });
+         if (box) box.replaceWith(el); else ld.appendChild(el);
+      }
+      function crashed(msg) {
+         msg = String(msg || '');
+         if (/webgl|context/i.test(msg)) fail('Keine 3D-Grafik verfügbar',
+            'Der Browser gibt dem Spiel gerade keine 3D-Grafik. Nach einem Grafikabsturz sperrt Chrome sie für diese Seite eine Weile. '
+            + 'Schließe den Tab oder Chrome ganz, warte einen Moment und öffne das Spiel neu. Es startet dann mit niedriger Grafik.', msg);
+         else fail('Start fehlgeschlagen', 'Beim Laden ist ein Fehler aufgetreten. Lade die Seite neu; hilft das nicht, schick einen Screenshot dieser Meldung.', msg);
+      }
+      window.addEventListener('error', function (e) { crashed(e.message || (e.error && e.error.message)); });
+      window.addEventListener('unhandledrejection', function (e) { crashed(e.reason && (e.reason.message || e.reason)); });
+      setTimeout(function () {
+         fail('Das Laden dauert ungewöhnlich lange', 'Vielleicht ist die Verbindung langsam. Warte noch etwas oder lade die Seite neu.');
+      }, 45000);
+   })();
+   </script>
 
    <!-- Port + mission picker (menu3d.js renders into #menu) and the battle report (into #end) -->
    <div id="menu" class="overlay hidden"></div>

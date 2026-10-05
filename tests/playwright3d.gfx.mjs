@@ -100,6 +100,29 @@ async function open(query = '', ctxOpts = {}) {
    await page.evaluate(() => localStorage.removeItem('ks3d.gfxFallback'));
    await ctx.close();
 }
+// no WebGL at all (Chrome locks it for a while after a page crashed the graphics): the loading screen
+// explains it and offers a reload and the 2D version instead of animating forever
+{
+   const ctx = await browser.newContext({ viewport: { width: 915, height: 412 } });
+   await ctx.addInitScript(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (kind, ...a) { return /webgl/.test(kind) ? null : get.call(this, kind, ...a); };
+   });
+   const page = await ctx.newPage();
+   await page.goto(URL, { waitUntil: 'load' });
+   await page.waitForTimeout(1500);
+   const fail = page.locator('#loading .ld-fail');
+   check('no WebGL: the loading screen says so', await fail.isVisible() && /Keine 3D-Grafik/.test(await fail.textContent()), await fail.count() ? await fail.textContent() : 'none');
+   const fits = await page.evaluate(() => [...document.querySelectorAll('#loading .ld-fail, #ld-retry, #loading .ld-act a')].every(e => {
+      const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.height >= (e.matches('.ld-fail') ? 0 : 44);
+   }));
+   check('no WebGL: message and buttons fit a landscape phone', fits);
+   await page.screenshot({ path: 'tests/shots/3d-gfx-nowebgl.png' });
+   await page.click('#ld-retry');
+   await page.waitForLoadState('load'); await page.waitForTimeout(800);
+   check('no WebGL: "Neu laden" reloads', await page.locator('#loading').isVisible());
+   await ctx.close();
+}
 {
    const { ctx, page, gfx } = await open('?gfx=low&diag');
    check('?gfx=low forces low', (await gfx()).tier === 'low');
