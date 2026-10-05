@@ -9,6 +9,7 @@
 // follows (stay with the convoy, ...), 'passive' = the player ship lies stopped and does nothing.
 // The stealth mission (pipeline) is flown by a scripted route instead of the combat AI.
 import { test } from 'node:test';
+import { damageSite } from '../gamev2/sites.js';
 import assert from 'node:assert/strict';
 import { World } from '../gamev2/state.js';
 import { MISSIONS, getMission, opStars } from '../gamev2/missions.js';
@@ -208,6 +209,55 @@ test('hormus: two tankers lost = defeat, the sub objective counts', () => {
    assert.equal(w.phase, 'playing');
    assert.equal(obj(w, 'all').state, 'failed');
    S.convoy[1].takeDamage(1e9, null, 'he');
+   fast(w, 1);
+   assert.equal(w.phase, 'lost');
+});
+
+// ---------------------------------------------------------------- 2. Rotes Meer
+test('redsea: waves are launched from hidden ramps, a ramp that fired is located, the magazines run down', () => {
+   const w = new World('normal', { mission: 'redsea', ship: 'Burke', seed: 3 });
+   const S = w._script;
+   assert.equal(S.launchers.length, 3);
+   assert.ok(S.launchers.every(L => !L.detected && !L.targetable), 'ramps unknown at the start');
+   assert.ok(S.ally.mag.aster30 < SHIPS.Daring.mag.aster30, 'the ally starts with depleted magazines');
+   w.autoPlayer = true; w.player.ai = { escortId: S.convoy[1].id };
+   const sam0 = w.player.mag.sm2 + w.player.mag.essm;
+   fast(w, 28);
+   assert.equal(w.events.filter(e => e.type === 'ssmLaunch' && S.launchers.some(L => L.id === e.srcId)).length, 0, 'quiet before the first wave');
+   fast(w, 22);
+   assert.ok(S.launched >= 6, 'first wave: ' + S.launched);
+   assert.ok(S.launchers.every(L => L.detected && L.targetable), 'ramps located after firing');
+   fast(w, 150);
+   assert.ok(S.wave >= 3);
+   assert.ok(w.player.mag.sm2 + w.player.mag.essm < sam0, 'defence costs missiles');
+   assert.equal(w.phase, 'playing');
+});
+test('redsea: destroyed ramps stop firing and complete the optional objective, the convoy then arrives', () => {
+   const w = new World('normal', { mission: 'redsea', ship: 'Ticonderoga', seed: 4 });
+   const S = w._script;
+   w.autoPlayer = true; w.player.ai = { passive: true, anchored: true };
+   fast(w, 5);
+   damageSite(w, S.launchers[0], 1e9, w.player, 'cruise');
+   assert.match(obj(w, 'sites').text, /1\/3/);
+   damageSite(w, S.radar, 1e9, w.player, 'cruise');
+   for (const L of S.launchers) damageSite(w, L, 1e9, w.player, 'cruise');
+   assert.equal(obj(w, 'sites').state, 'done');
+   fast(w, 640);
+   assert.equal(S.launched, 0, 'no ramp, no launch');
+   assert.equal(w.phase, 'won');
+   assert.equal(S.arrived, 3);
+   assert.equal(obj(w, 'all').state, 'done');
+   assert.ok(w.time < 640, 'through before the limit: ' + w.time);
+   assert.equal(opStars(w), 2);
+});
+test('redsea: two container ships lost = defeat', () => {
+   const w = new World('normal', { mission: 'redsea', ship: 'Burke', seed: 4 });
+   const S = w._script;
+   S.convoy[0].takeDamage(1e9, null, 'he');
+   fast(w, 1);
+   assert.equal(w.phase, 'playing');
+   assert.equal(obj(w, 'all').state, 'failed');
+   S.convoy[2].takeDamage(1e9, null, 'he');
    fast(w, 1);
    assert.equal(w.phase, 'lost');
 });

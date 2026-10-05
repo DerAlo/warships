@@ -119,5 +119,111 @@ export function westMissions(H) {
             else w.end(false, 'Die Zeit ist abgelaufen – das Geleit hat die Meerenge nicht passiert.');
          },
       },
+      // ========================================================= 2. Rotes Meer – Bab al-Mandab
+      {
+         id: 'redsea', group: 'ops', name: 'Rotes Meer – Bab al-Mandab', subtitle: 'Flugkörperabwehr · Containerschiffe unter Beschuss von Land',
+         briefing: 'Drei Containerschiffe laufen nach Süden durch die Meerenge. Von der Ostküste werden Seezielflugkörper in Wellen gestartet. ' +
+            'Sie führen die Luftverteidigung: Bleiben Sie zwischen Küste und Geleit und teilen Sie Ihre Flugkörper ein – die Magazine sind endlich. ' +
+            'Der Zerstörer im Verband hat bereits Angriffe abgewehrt und nur noch halbe Magazine. ' +
+            'Startrampen, die gefeuert haben, werden geortet: Dann können Marschflugkörper sie ausschalten.',
+         debrief: 'Das Geleit ist durch die Meerenge. Wer jeden Flugkörper mit dem teuersten Abwehrmittel bekämpft, steht am Ende mit leeren Magazinen da – ' +
+            'und die sicherste Abwehr ist eine Startrampe, die nicht mehr feuert.',
+         fleet: { own: 'Luftverteidigungsschiff, 1 Zerstörer, 3 Containerschiffe', foe: '3 Startrampen, Radarstation, Flugabwehrstellung an der Ostküste' },
+         env: { time: 'dusk', weather: 'clear' }, type: 'escort', playableShips: ['Burke', 'Ticonderoga'], recommendedShip: 'Burke',
+         arena: 20000, timeLimit: 11 * 60, stars: 2,
+         setup(w, shipKey) {
+            const S = w._script;
+            islands(w, [
+               { c: P(18200, 0), r: 3400, height: 520, seed: 71, lobes: 6, elong: 4, rot: Math.PI / 2, rough: 0.7, name: 'Ostküste' },
+               { c: P(-15500, -7000), r: 1500, height: 180, seed: 77, lobes: 5, elong: 1.6, rot: 1.2, rough: 0.5, name: 'Westinseln' },
+               { c: P(-13000, 9500), r: 1100, height: 140, seed: 83, lobes: 4, rough: 0.5 },
+            ]);
+            add(w, shipKey, 'player', P(-200, 13200), -Math.PI / 2, { isPlayer: true });
+            const route = [P(-2500, 5000), P(-1800, -3000), P(-2200, -9500)];
+            S.convoy = ['MV Hansa Carrier', 'MV Baltic Star', 'MV Elbe Trader'].map((name, i) =>
+               add(w, 'Container', 'player', P(-2200, 14800 + i * 1250), -Math.PI / 2, { name, speedKn: 18, ai: { route } }));
+            S.ally = add(w, 'Daring', 'player', P(-3600, 16600), -Math.PI / 2, { ai: { escortId: S.convoy[2].id } });
+            S.ally.mag.aster30 = by(w, 12, 10, 8); S.ally.mag.camm = by(w, 10, 8, 6);
+            S.goal = zone(w, -2200, -9500, 1800, 'Golf von Aden');
+            S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.queue = []; S.wave = 0; S.launched = 0;
+            S.launchers = [['Startrampe Nord', 7500], ['Startrampe Mitte', 300], ['Startrampe Süd', -7000]].map(([name, y]) => {
+               const L = addSite(w, 'launcher', 'enemy', P(15000, y), { name, hidden: true, hp: by(w, 9000, 16000, 18000), ssm: { type: 'kh35', n: 400 } });
+               L.cfg.weapons.ssm.push({ type: 'oniks', n: 400 }); L.mag.oniks = 400;
+               return L;
+            });
+            S.radar = addSite(w, 'radar', 'enemy', P(15000, 3900), { name: 'Radarstation Küste' });
+            if (w.difficultyKey !== 'easy') S.sam = addSite(w, 'sam', 'enemy', P(15000, -3300), { name: 'Flugabwehrstellung Küste', sam: { type: 'hq16', n: by(w, 0, 14, 20), ch: 2 } });
+            objective(w, 'convoy', 'Schützen Sie die Containerschiffe (0/3 am Ziel, mindestens 2)');
+            objective(w, 'all', 'Kein Containerschiff geht verloren', { optional: true });
+            objective(w, 'sites', 'Schalten Sie die georteten Startrampen aus (0/3)', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
+            radio(w, 'Geleitführer', 'Geleit läuft nach Süden. Erwarten Flugkörper von der Ostküste – Radar an, Abwehr klar.');
+            // waves: every living launcher ripples n missiles; from the fifth wave on the first of each is supersonic
+            const T0 = 30, GAP = by(w, 62, 54, 48);
+            for (let k = 0; k < 9; k++) later(S, T0 + k * GAP, () => this.wave(w, S, k));
+            later(S, T0 + 2.5 * GAP, () => radio(w, 'Operationszentrale', 'Magazinstand beachten. Feuerordnung anpassen – nicht jeden Flugkörper doppelt bekämpfen.'));
+            later(S, T0 + 4 * GAP - 8, () => radio(w, 'Operationszentrale', 'Warnung: Die nächsten Salven enthalten Überschall-Flugkörper. Täuschkörper bereithalten.', 'warn'));
+         },
+         wave(w, S, k) {
+            const live = S.launchers.filter(L => L.alive);
+            if (!live.length || S.arrived + S.lost >= S.convoy.length) return;
+            S.wave++;
+            const n = by(w, 1, 2, 2) + (k >= by(w, 2, 2, 3) ? 1 : 0) + (k >= by(w, 99, 5, 6) ? 1 : 0);
+            radio(w, 'Operationszentrale', `Flugkörperstart an der Ostküste, Welle ${S.wave}. Anflug aus Ost.`, 'warn');
+            for (const L of live) for (let i = 0; i < n; i++)
+               S.queue.push({ L, t: w.time + S.launchers.indexOf(L) * 2.5 + i * 1.3, type: k >= 4 && i === 0 && w.difficultyKey !== 'easy' ? 'oniks' : 'kh35', tries: 0 });
+         },
+         update(w, dt, S) {
+            // launch queue: one round per entry, at a merchant (every fourth round at an escort)
+            for (let i = S.queue.length - 1; i >= 0; i--) {
+               const q = S.queue[i], L = q.L;
+               if (w.time < q.t) continue;
+               const ships = S.convoy.filter(m => m.alive);
+               if (!L.alive || !ships.length || q.tries++ > 200) { S.queue.splice(i, 1); continue; }
+               let T = ships[(S.launched + S.launchers.indexOf(L)) % ships.length];
+               if (S.launched % 4 === 3) {
+                  const esc = w.ships.filter(e => e.alive && e.side === 'player' && !S.convoy.includes(e));
+                  if (esc.length) T = esc[S.launched % esc.length];
+               }
+               const m = (T.targetable && launchSSM(w, L, { targetId: T.id }, q.type)) || (q.tries > 3 ? launchSSM(w, L, { x: T.pos.x, y: T.pos.y }, q.type) : null);
+               if (!m) continue;
+               S.launched++;
+               S.queue.splice(i, 1);
+               if (!L.detected && !L.locating) {
+                  L.locating = true;
+                  later(S, w.time + 7, () => {
+                     if (!L.alive) return;
+                     L.detected = L.targetable = true;
+                     radio(w, 'Operationszentrale', L.name + ' geortet. Freigabe für Marschflugkörper.');
+                  });
+               }
+            }
+            if ((S.tick -= dt) > 0) return;
+            S.tick = 1;
+            if (!convoyTick(w, S, 'Schützen Sie die Containerschiffe')) return;
+            if (S.arrived >= S.need) {
+               if (!S.lost) setObj(w, 'all', 'done');
+               setObj(w, 'convoy', 'done');
+               w.end(true, S.lost ? 'Das Geleit ist durch die Meerenge – ein Schiff ging verloren.' : 'Alle Containerschiffe haben die Meerenge sicher passiert.');
+            } else w.end(false, 'Zu viele Schiffe gingen verloren.');
+         },
+         onSiteDestroyed(w, site, by_, S) {
+            if (site === S.radar) { radio(w, 'Operationszentrale', 'Radarstation zerstört. Die Rampen feuern jetzt ohne Zieldaten – deutlich ungenauer.'); return; }
+            if (!S.launchers.includes(site)) return;
+            const n = S.launchers.filter(L => !L.alive).length;
+            objText(w, 'sites', `Schalten Sie die georteten Startrampen aus (${n}/3)`);
+            if (n >= 3) { setObj(w, 'sites', 'done'); radio(w, 'Operationszentrale', 'Alle Startrampen ausgeschaltet. Der Beschuss hört auf.'); }
+            else radio(w, 'Operationszentrale', site.name + ' ausgeschaltet.');
+         },
+         onSink(w, ship, killer, S) {
+            if (!convoyLoss(w, S, ship)) return;
+            radio(w, 'Geleitführer', ship.name + ' ist schwer getroffen und sinkt. Rettungsmittel sind ausgebracht.', 'warn');
+            if (S.lost > S.convoy.length - S.need) w.end(false, 'Zwei Containerschiffe gingen verloren – der Auftrag ist gescheitert.');
+         },
+         timeout(w, S) {
+            if (S.arrived >= S.need) { setObj(w, 'convoy', 'done'); w.end(true, 'Das Geleit ist durch die Meerenge – ein Nachzügler blieb zurück.'); }
+            else w.end(false, 'Die Zeit ist abgelaufen – das Geleit hat die Meerenge nicht passiert.');
+         },
+      },
    ];
 }
