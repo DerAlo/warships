@@ -12,11 +12,13 @@
 //   capId        preferred capture point (domination)
 //   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
 //   aggro        >1 closes range more eagerly
+//   anchored     V2: lies stopped (moored target ship)
 import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
 import { subPlan, subFireRange } from './ai_sub.js';
 import { carrierPlan, airEvade } from './ai_air.js';
+import { botMissiles, botSoftKill } from './ai_missile.js';
 
 const DECIDE_DT = 0.4;             // s between navigation decisions
 const TARGET_DT = 2;               // s between target re-evaluations
@@ -66,6 +68,7 @@ function init(b, w) {
 function think(b, w, dt) {
    const ai = b.ai;
    if (!ai._init) init(b, w);
+   if (ai.anchored) { b.setTelegraph(0); b.setRudder(0); return; }   // V2
    const d = skill(b, w);
    ai.targetT -= dt;
    if (ai.targetT <= 0 || (ai.target && (!ai.target.alive || !w.canSee(b.side, ai.target)))) {
@@ -78,7 +81,8 @@ function think(b, w, dt) {
    ai.decideT -= dt;
    if (ai.decideT <= 0) { ai.decideT = DECIDE_DT; decide(b, w, d); }
    steer(b, dt);
-   if (!ai.passive) { gunnery(b, w, d, dt); torpedoes(b, w, dt); }
+   if (!ai.passive) { gunnery(b, w, d, dt); torpedoes(b, w, dt); botMissiles(b, w, d, dt); }   // V2: + missiles (ai_missile.js)
+   botSoftKill(b, w, d);                                                                       // V2: decoys / jammer
    ai.consT -= dt;
    if (ai.consT <= 0) { ai.consT = 0.5 + w.rng() * 0.5; consumables(b, w, d); }
 }

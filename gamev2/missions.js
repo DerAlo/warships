@@ -8,6 +8,7 @@
 // PvP and tests). Further missions: build a definition with missionHelpers and pass it to addMissions().
 import { SHIPS, PLAYABLE, BOT_POOLS, BOT_SUBS, BOT_CVS } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
+import { addSite } from './sites.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -217,10 +218,20 @@ const DEFS = [
          add(w, 'Tanker', 'enemy', P(1500, 1800), Math.PI / 2, { telegraph: 1, name: 'Zielschiff Alfa', ai: { ...tgt, patrol: [P(1500, 1800), P(1800, 6500)] } });
          add(w, 'Container', 'enemy', P(4800, -600), -Math.PI / 2, { telegraph: 1, name: 'Zielschiff Bravo', ai: { ...tgt, patrol: [P(4800, -600), P(4400, -7000)] } });
          add(w, 'LNG', 'enemy', P(6500, 2200), 0, { telegraph: 1, name: 'Zielschiff Charlie', ai: { ...tgt, patrol: [P(6500, 2200), P(10500, 1500)] } });
+         // V2: two land positions (sites.js): the radar station sees the player from afar, the bunker
+         // is a hard target for cruise missiles and guns
+         addSite(w, 'radar', 'enemy', P(8200, 5200), { name: 'Radarstation Ost' });
+         addSite(w, 'bunker', 'enemy', P(1200, -3400), { name: 'Übungsbunker' });
+         objective(w, 'sites', 'Zerstören Sie die Radarstation und den Bunker (0/2)', { optional: true });
          objective(w, 'targets', 'Versenken Sie die Zielschiffe (0/3)');
          w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
          w.message('Übung beginnt. Zielschiffe liegen östlich – Feuer frei!');
          w._script.phase = 1;
+      },
+      onSiteDestroyed(w) {
+         const n = w.sites.filter(s => s.side === 'enemy' && !s.alive).length;
+         objText(w, 'sites', `Zerstören Sie die Radarstation und den Bunker (${n}/2)`);
+         if (n >= 2) setObj(w, 'sites', 'done');
       },
       onSink(w, ship, killer, S) {
          if (ship.side !== 'enemy') return;
@@ -336,7 +347,8 @@ export function setupMission(w, id, shipKey) {
    w.setEnv(def.env);
    w.mission = { id: def.id, name: def.name, subtitle: def.subtitle, briefing: def.briefing, type: def.type, group: def.group || 'battle', objectives: [], zones: [] };
    w.timeLeft = def.timeLimit;
-   w._script = { def, timers: [], used: new Set(), dup: 0, onSink: (ww, ship, killer) => def.onSink && def.onSink(ww, ship, killer, ww._script) };
+   w._script = { def, timers: [], used: new Set(), dup: 0, onSink: (ww, ship, killer) => def.onSink && def.onSink(ww, ship, killer, ww._script),
+      onSiteDestroyed: (ww, site, by) => def.onSiteDestroyed && def.onSiteDestroyed(ww, site, by, ww._script) };
    def.setup.call(def, w, pickShip(def, shipKey));
    if (!w.player) throw new Error('mission ' + def.id + ' spawned no player');
 }
