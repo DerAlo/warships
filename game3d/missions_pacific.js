@@ -41,10 +41,10 @@ export function pacificMissions(H) {
             islands(w, []);
             const S = w._script, key = w.difficulty.key;
             S.maxLoss = 3;
-            S.jd = w.difficulty.botDmg * 0.4;           // Japanese gunnery: armour-piercing shells, poor spotting
-            S.breakAt = key === 'easy' ? 0.75 : key === 'hard' ? 0.6 : 0.68;   // a cruiser this battered turns away
+            S.jd = w.difficulty.botDmg * 0.34;          // Japanese gunnery: armour-piercing shells, poor spotting
+            S.breakAt = key === 'easy' ? 0.8 : key === 'hard' ? 0.66 : 0.74;   // a cruiser this battered turns away
             S.aggro = 1.6;                               // they close to finish the carriers instead of sniping from the horizon
-            const cveHP = key === 'easy' ? 0.46 : key === 'hard' ? 0.33 : 0.38;
+            const cveHP = key === 'easy' ? 0.44 : key === 'hard' ? 0.3 : 0.35;
             const anchor = P(-2000, -2500), route = [P(5500, 5000), P(2500, 10500), P(-5000, 14500)];
             S.cves = [['USS Fanshaw Bay', 0, 0], ['USS White Plains', 1100, 700], ['USS St. Lo', -300, 1300], ['USS Kalinin Bay', -1100, -500], ['USS Gambier Bay', 500, -1200]]
                .map(([name, dx, dy]) => add(w, 'Enterprise', 'player', P(anchor.x + dx, anchor.y + dy), 0.78,
@@ -68,9 +68,9 @@ export function pacificMissions(H) {
             const me = add(w, shipKey, 'player', P(-3400, -5200), -1.9, { isPlayer: true, name: 'USS Johnston', telegraph: 4 });
             me.ai.huntId = S.cruisers[0].id; me.ai.press = true;   // only read by the autopilot (tests)
             S.screen = [
-               add(w, 'Fletcher', 'player', P(-900, -5000), -1.7, { name: 'USS Hoel', telegraph: 4, dmgMult: 0.4, ai: { huntId: S.cruisers[1].id, press: true } }),
-               add(w, 'Fletcher', 'player', P(1200, 1200), -1.6, { name: 'USS Heermann', telegraph: 4, dmgMult: 0.4, ai: { huntId: S.cruisers[1].id, press: true } }),
-               add(w, 'Benham', 'player', P(-3600, -1700), -1.6, { name: 'USS Samuel B. Roberts', telegraph: 4, dmgMult: 0.35, ai: { escortId: S.cves[3].id } }),
+               add(w, 'Fletcher', 'player', P(-900, -5000), -1.7, { name: 'USS Hoel', telegraph: 4, dmgMult: 0.25, ai: { huntId: S.cruisers[1].id, press: true } }),
+               add(w, 'Fletcher', 'player', P(1200, 1200), -1.6, { name: 'USS Heermann', telegraph: 4, dmgMult: 0.25, ai: { huntId: S.cruisers[1].id, press: true } }),
+               add(w, 'Benham', 'player', P(-3600, -1700), -1.6, { name: 'USS Samuel B. Roberts', telegraph: 4, dmgMult: 0.25, ai: { escortId: S.cves[3].id } }),
             ];
             later(S, 4, () => radio(w, 'Konteradmiral Sprague', 'Pagodenmasten im Nordwesten – das ist die japanische Schlachtflotte! Träger: Kurs Südost, alles nebelt!', 'warn'));
             later(S, 26, () => radio(w, 'Konteradmiral Sprague', 'Kleine Jungs: Angriff! Haltet sie uns vom Leib, so lange ihr könnt.'));
@@ -189,10 +189,10 @@ export function pacificMissions(H) {
             const bb = shipKey === 'Washington';
             S.bbPlayer = bb;
             S.gulf = zone(w, 0, -11600, 1700, 'Golf von Leyte', 'danger');
-            S.jd = w.difficulty.botDmg * 0.55;
-            S.ad = bb ? 0.3 : 0.42;                       // allied bots: the player's ship decides the night
-            S.shimaBreak = key === 'easy' ? 0.7 : key === 'hard' ? 0.5 : 0.6;
-            const bbHP = w.difficulty.botHP * 0.95;
+            S.jd = w.difficulty.botDmg * (bb ? 0.42 : 0.34);   // the destroyer captain is the one under their guns
+            S.ad = bb ? 0.3 : 0.22;                        // allied bots: the player's ship decides the night
+            S.shimaBreak = key === 'easy' ? 0.75 : key === 'hard' ? 0.55 : 0.65;
+            const bbHP = w.difficulty.botHP * 1.1;
             const lane = (x) => [P(x, 1500), P(x, -6000), P(S.gulf.x, S.gulf.y)];
             S.bbs = [['Yamashiro', P(0, 9300)], ['Fusō', P(150, 10600)]].map(([name, pos]) =>
                add(w, 'Kirishima', 'enemy', pos, NORTH, { name, nation: 'jp', telegraph: 4, speedKn: 17, hpMult: bbHP, dmgMult: S.jd, ai: { route: lane(pos.x) } }));
@@ -203,21 +203,21 @@ export function pacificMissions(H) {
             // the American side: [class, name, position, heading, ai]; the first slot of the chosen class is the player
             const across = (y) => [P(3800, y), P(-3800, y)];
             const slots = [
-               ['Fletcher', 'USS McDermut', P(-4300, 3300), 0.9, { huntId: S.bbs[0].id, press: true }],
+               ['Fletcher', 'USS McDermut', P(-5600, 2600), 0.9, { huntId: S.bbs[0].id, press: true }],
                ['Washington', 'USS West Virginia', P(-1200, -6400), 0, { patrol: across(-6400) }],
                ['Washington', 'USS Tennessee', P(-2700, -6500), 0, { patrol: across(-6500) }],
                ['Cleveland', 'USS Denver', P(2600, -4500), Math.PI, { patrol: across(-4500).reverse() }],
                ['Cleveland', 'USS Columbia', P(4000, -4600), Math.PI, { patrol: across(-4600).reverse() }],
-               ['Fletcher', 'USS Monssen', P(-5000, 2300), 0.9, { huntId: S.bbs[1].id, press: true }],
-               ['Fletcher', 'USS Remey', P(4400, 3000), 2.3, { huntId: S.bbs[0].id, press: true }],
-               ['Fletcher', 'USS Melvin', P(5000, 2000), 2.3, { huntId: S.bbs[1].id, press: true }],
+               ['Fletcher', 'USS Monssen', P(-6300, 1600), 0.9, { huntId: S.bbs[1].id, press: true }],
+               ['Fletcher', 'USS Remey', P(5600, 2400), 2.3, { huntId: S.bbs[0].id, press: true }],
+               ['Fletcher', 'USS Melvin', P(6300, 1400), 2.3, { huntId: S.bbs[1].id, press: true }],
             ];
             S.line = [];
             let me = null;
             for (const [cls, name, pos, hdg, ai] of slots) {
                if (!me && cls === shipKey) {
                   me = add(w, shipKey, 'player', pos, hdg, { isPlayer: true, name, telegraph: bb ? 2 : 3 });
-                  me.ai.huntId = S.bbs[0].id; me.ai.press = !bb;   // only read by the autopilot (tests)
+                  me.ai.huntId = S.bbs[0].id; me.ai.aggro = bb ? 1 : 1.3;   // only read by the autopilot (tests)
                   continue;
                }
                const s = add(w, cls, 'player', pos, hdg, { name, telegraph: ai.patrol ? 2 : 3, dmgMult: S.ad, ai });
@@ -246,7 +246,7 @@ export function pacificMissions(H) {
             objective(w, 'shima', 'Vertreiben oder versenken Sie Shimas Kreuzer Nachi und Ashigara (0/2)');
             const route = (x) => [P(x, 2000), P(x, -6000), P(S.gulf.x, S.gulf.y)];
             S.shima = [['Nachi', P(-500, 12700)], ['Ashigara', P(600, 13100)]].map(([name, pos]) =>
-               add(w, 'Takao', 'enemy', pos, NORTH, { name, nation: 'jp', telegraph: 4, speedKn: 28, minDist: 7000, dmgMult: S.jd, ai: { route: route(pos.x) } }));
+               add(w, 'Takao', 'enemy', pos, NORTH, { name, nation: 'jp', telegraph: 4, speedKn: 24, minDist: 7000, dmgMult: S.jd, ai: { route: route(pos.x) } }));
             const n = key === 'easy' ? 0 : key === 'hard' ? 2 : 1;
             ['Shiranui', 'Kasumi'].slice(0, n).forEach((name, i) =>
                add(w, 'Fubuki', 'enemy', P(-1500 + i * 3000, 12400), NORTH, { name, nation: 'jp', telegraph: 4, minDist: 7000, dmgMult: S.jd * 0.8, ai: { escortId: S.shima[0].id } }));
@@ -275,7 +275,8 @@ export function pacificMissions(H) {
             for (const c of S.shima) {
                if (!c.alive) continue;
                if (!S.turned.has(c)) {
-                  if (c.hp >= c.maxHP * S.shimaBreak) continue;
+                  // with Nishimura's ships burning wrecks ahead, Shima needs far less persuasion
+                  if (c.hp >= c.maxHP * (S.sunk >= 2 ? S.shimaBreak + 0.25 : S.shimaBreak)) continue;
                   S.turned.set(c, w.time);
                   c.ai.route = [P(c.pos.x, w.arena - 700)]; c.ai.routeIdx = 0;
                   radio(w, 'USS Denver', `Die ${c.name} dreht um – sie läuft nach Süden ab!`);
@@ -343,10 +344,10 @@ export function pacificMissions(H) {
             const S = w._script, key = w.difficulty.key;
             S.need = 3;
             S.wakeR = key === 'easy' ? 3200 : key === 'hard' ? 5000 : 4200;       // a Japanese ship this close is sighted
-            S.surprise = key === 'easy' ? 34 : key === 'hard' ? 16 : 24;          // seconds until the cruisers answer
+            S.surprise = key === 'easy' ? 34 : key === 'hard' ? 20 : 30;          // seconds until the cruisers answer
             S.northDelay = key === 'easy' ? 95 : key === 'hard' ? 55 : 75;        // the northern group reads the gun flashes late
             S.exit = zone(w, -11600, -8600, 1600, 'Der Slot', 'goal');
-            const ed = w.difficulty.botDmg * 0.8, eh = w.difficulty.botHP * 0.85;
+            const ed = w.difficulty.botDmg * 0.32, eh = w.difficulty.botHP * 0.85;
             const sleeper = (cls, name, pos, to, nation = 'us') => add(w, cls, 'enemy', pos, Math.atan2(to.y - pos.y, to.x - pos.x),
                { name, nation, telegraph: 2, speedKn: 12, dmgMult: ed, hpMult: cls === 'Benham' ? w.difficulty.botHP : eh, ai: { passive: true, patrol: [to, pos] } });
             S.south = {
@@ -361,7 +362,7 @@ export function pacificMissions(H) {
             S.targets = [...S.south.ca, ...S.north.ca];
             const me = add(w, shipKey, 'player', P(-8600, 2900), 0.12, { isPlayer: true, name: 'Chōkai', telegraph: 4 });
             me.ai.huntId = S.south.ca[0].id; me.ai.press = true; me.ai.aggro = 2.2;   // only read by the autopilot (tests)
-            const ad = key === 'easy' ? 0.6 : 0.5;
+            const ad = key === 'easy' ? 0.8 : 0.65;
             S.own = [['Aoba', P(-9600, 2800)], ['Kako', P(-10600, 2700)], ['Kinugasa', P(-11600, 2600)]]
                .map(([name, pos]) => add(w, 'Takao', 'player', pos, 0.12, { name, nation: 'jp', telegraph: 4, dmgMult: ad, ai: { escortIdPlayer: true } }));
             S.yunagi = add(w, 'Fubuki', 'player', P(-12500, 3300), 0.12, { name: 'Yūnagi', nation: 'jp', telegraph: 4, dmgMult: ad, ai: { escortIdPlayer: true } });
