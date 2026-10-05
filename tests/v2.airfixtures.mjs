@@ -1,6 +1,6 @@
 // Squadron fixtures for the V2 aircraft preview / tests: one of every airframe, in a line along x
 // at 150 m, flying toward +x (so a camera on +z sees them from starboard).
-const mk = (i, o) => ({ id: i + 1, n: 1, visible: true, pos: { x: i * 22, y: 0 }, alt: 150, heading: 0, speed: 0, armed: 1, ...o });
+const mk = (i, o) => ({ id: i + 1, n: 1, visible: true, pos: { x: i * 36, y: 0 }, alt: 150, heading: 0, speed: 0, armed: 1, ...o });
 export function airFixtures() {
    return [
       mk(0, { kind: 'strike', nation: 'us' }),          // F/A-18E

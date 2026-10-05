@@ -30,7 +30,8 @@ const open = async () => {
 await open();
 
 const keys = await page.evaluate(async () => Object.keys((await import('./v2.modelfixtures.mjs')).FIXTURES));
-const list = only ? only.split(',') : keys.filter(k => !k.includes('_'));
+const airOnly = only === 'air';   // 'air' alone: just the aircraft line-up
+const list = airOnly ? [] : only ? only.split(',') : keys.filter(k => !k.includes('_'));
 const stats = {};
 const settle = () => page.waitForFunction(() => window.__lab.frames > 3, null, { timeout: 120000 });
 let n = 0;
@@ -58,20 +59,20 @@ for (const key of [...(only ? [] : REF), ...list]) {
    }
 }
 
-if (opt('air', '1') !== '0' && !only) {
+if (opt('air', '1') !== '0' && (!only || airOnly)) {
    // every aircraft model in a line, banking slightly, seen from the side and from above
    for (const det of [0, 3]) {
       const n = await page.evaluate(async (det) => {
          const { airFixtures } = await import('./v2.airfixtures.mjs');
          const list = airFixtures();
          window.__lab.air(det, list);
-         window.__lab.R.debugView = { pos: [55, 172, 95], look: [55, 150, 0], fov: 40 };
+         window.__lab.R.debugView = { pos: [90, 176, 140], look: [90, 150, 0], fov: 40 };
          return list.length;
       }, det).catch(e => { fails.push('air: ' + e.message); return 0; });
       if (!n) continue;
       await settle();
       const a = (await page.screenshot({ type: 'png' })).toString('base64');
-      await page.evaluate(() => { window.__lab.R.debugView = { pos: [55, 265, 4], look: [55, 150, 0], fov: 40 }; window.__lab.frames = 0; });
+      await page.evaluate(() => { window.__lab.R.debugView = { pos: [90, 310, 4], look: [90, 150, 0], fov: 40 }; window.__lab.frames = 0; });
       await settle();
       const b = (await page.screenshot({ type: 'png' })).toString('base64');
       stats['air@' + det] = await page.evaluate(() => window.__lab.R.air.stats ? window.__lab.R.air.stats() : null);
@@ -82,11 +83,11 @@ if (opt('air', '1') !== '0' && !only) {
 await browser.close();
 
 const row = (k) => `${k.padEnd(11)}` + [0, 1, 2, 3].map(d => stats[k][d] ? `${String(stats[k][d].tris).padStart(6)}/${String(stats[k][d].meshes).padEnd(2)}` : '     -   ').join(' ');
-if (!only) {
+if (!only || airOnly) {
    console.log('model       d0 tris/draws  d1  d2  d3');
    for (const k of Object.keys(stats)) if (!k.startsWith('air@')) console.log(row(k));
    for (const k of Object.keys(stats)) if (k.startsWith('air@')) console.log(k, JSON.stringify(stats[k]));
-   writeFileSync(`${OUT}/v2-model-stats.json`, JSON.stringify(stats, null, 1));
+   if (!only) writeFileSync(`${OUT}/v2-model-stats.json`, JSON.stringify(stats, null, 1));
    // phone tiers must not be heavier than the WW2 ships they stand next to
    for (const k of list) for (const d of [0, 1]) {
       const s = stats[k][d], ref = stats[s && s.size[0] > 135 ? 'Bismarck' : 'Fletcher'][d];

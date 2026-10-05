@@ -17,6 +17,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { Renderer3D } from '../gamev2/render3d.js';
 import { GFX } from '../gamev2/gfxquality.js';
+import { AirModels } from '../gamev2/air3d.js';
 import { FIXTURES, mkModernShip, mkWW2Ship, recStats } from './v2.modelfixtures.mjs';
 
 const q = new URLSearchParams(location.search);
@@ -65,6 +66,9 @@ lab.view = (kind) => {
 lab.frameInfo = () => ({ calls: R.renderer.info.render.calls, tris: R.renderer.info.render.triangles });
 lab.air = (detail, list) => {
    GFX.detail = detail;
+   // the aircraft meshes are built once per renderer: swap them for a set of the wanted detail
+   for (const M of [...R.air.list, R.air.wreckMesh, R.air.bombMesh]) R.scene.remove(M);
+   R.air = new AirModels(R.scene, R.fx);
    lab.world = mkWorld([], list);
    R.buildWorld(lab.world);
    lab.frames = 0;

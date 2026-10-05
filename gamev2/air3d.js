@@ -308,7 +308,7 @@ const AIR_SHADER = {
          if (vPart > 5.5 && vPart < 6.5) {
             float ang = atan(vRot.y, vRot.x) + vRot.z;
             float blade = smoothstep(0.34, 0.5, abs(fract(ang * 0.63662) - 0.5));
-            if (airHash(gl_FragCoord.xy) > mix(0.12, 0.7, blade)) discard;
+            if (airHash(gl_FragCoord.xy) > mix(0.07, 0.8, blade)) discard;
          } else if (vPart > 10.5 && airHash(gl_FragCoord.xy) > 0.3) discard;`],
       ['#include <emissivemap_fragment>', `#include <emissivemap_fragment>
          if (vPart > 6.5 && vPart < 8.5) totalEmissiveRadiance += diffuseColor.rgb * 2.5;
