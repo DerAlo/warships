@@ -9,6 +9,8 @@
 import { SHIPS, PLAYABLE, BOT_POOLS, BOT_SUBS, BOT_CVS } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { addSite } from './sites.js';
+import { westMissions } from './missions_west.js';
+import { eastMissions } from './missions_east.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -311,6 +313,9 @@ function timeoutByHP(w) {
 // Building blocks for further mission modules: defs made with these go through addMissions().
 export const missionHelpers = { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, scatter, combatants, spawnTeam,
    teamHPFrac, annihilationSink, timeoutByHP, safePos, SHIPS };
+
+// The ten operations: missions_west.js (1-5), missions_east.js (6-10)
+DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
 
 // ---------------------------------------------------------------- public API
 const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
