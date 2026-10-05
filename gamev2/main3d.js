@@ -630,6 +630,7 @@ function frameInput(dt) {
    // --- weapons
    const ti = torpInfo(p);
    // 1 gun · 2 anti-ship missile · 3 cruise missile (map) · 4 rockets · 5 torpedoes; carriers: 1-4 belong to the air group (airui)
+   const cruiseChart = ctl.mode === 'cruise' && ctl.mapOpen;
    if (!p.air && inp.tapped('1')) {
       if (p.turrets?.length) selectAmmo('HE');
       else { audio.denied(); hud.msg('Kein Geschütz an Bord', 'warn'); }
@@ -648,6 +649,8 @@ function frameInput(dt) {
    opsui.input(inp, p, world, act, mctx());
    // 2 / 3 / 4, R radar, V doctrine, T priority target, map targeting (missileui.js)
    mui.input(inp, p, world, act, mctx());
+   // touch: another weapon chosen on the cruise-missile chart puts the chart away (no second tap on the minimap)
+   if (cruiseChart && touch.shown && !opsui.mapMode && (ctl.mode === 'guns' || ctl.mode === 'ssm' || ctl.mode === 'torp')) ctl.mapOpen = false;
    if (inp.tapped('SPACE')) inp.mouse.clicked = true;
    if (inp.tapped('L')) { ctl.lead = !ctl.lead; hud.msg('Vorhaltemarker ' + (ctl.lead ? 'an' : 'aus'), 'info'); audio.uiClick(); }
    if (inp.tapped('X')) toggleLock();
@@ -773,7 +776,7 @@ function toggleLock() {
       if (assistWanted() && !assist.told) { assist.told = true; hud.msg('Zielhilfe: das Fadenkreuz folgt dem Vorhalt · Wischen korrigiert', 'info'); }
    }
    else if (ctl.lockId != null) { ctl.lockId = null; audio.uiClick(); }
-   else audio.denied();
+   else { audio.denied(); hud.msg('Kein Ziel im Blickfeld', 'warn'); }   // a silent button reads as a missed tap
 }
 // Ctrl+left click (WoWs): the enemy under the crosshair becomes the secondary battery's priority
 // target (sim: ship.secTarget); the same ship again or open sea clears it. Picking: the crosshair
