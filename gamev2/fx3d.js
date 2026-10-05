@@ -1455,6 +1455,7 @@ export class FX {
          }
          T.add(st.x, st.y, st.z, 0, 1, 0, 0, w * (5.5 + 2 * ck), cr, cg, cb, 0.9 * fade);
       }
+      if (this.tracerHook) this.tracerHook(T, cam);   // missiles3d.js: exhaust streaks, close-in gun tracers
       T.end();
       for (const [s, st] of this.shellState) {
          if (st.frame === f) continue;

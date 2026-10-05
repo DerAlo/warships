@@ -1628,6 +1628,7 @@ function frame() {
       const alpha = phase === 'playing' || (net && (phase === 'paused' || phase === 'photo')) ? clamp01(acc / SIM_DT) : 1;
       if (world) {
          applyInterp(alpha);
+         renderer.simAlpha = alpha;       // missiles3d.js interpolates the missiles itself
          airui.frame(world, alpha, dt);   // squadron render positions + squadron camera
          try {
             shellcam.update(dt, alpha);

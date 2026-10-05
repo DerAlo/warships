@@ -14,6 +14,7 @@ import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
+import { MissileFX } from './missiles3d.js';
 import { TIERS, GFX, OPTION_KEYS, tierOptions, applyGfx, startTier, gfxCustom, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
@@ -75,6 +76,8 @@ export class Renderer3D {
       this.fx =new FX(this.scene, this.ocean, this.terrain);
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.air = new AirModels(this.scene, this.fx);
+      this.missiles = new MissileFX(this.scene, this.fx, this.terrain);
+      this.simAlpha = 1;            // interpolation factor between two sim steps (main3d sets it every frame)
       this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
       this.post = new Post(r, { samples: this._samples(tq), bloomLevels: tq.bloomLevels });
       this.post.setQuality({ bloom: tq.bloom });
@@ -155,6 +158,7 @@ export class Renderer3D {
       this.ships.clear();
       this.fx.clear();
       this.air.clear();
+      this.missiles.clear();
       this.arena = arena;
    }
    buildObstacles(world) { this.buildWorld(world); }
@@ -182,6 +186,8 @@ export class Renderer3D {
       this.ships.sync(world, dt, this.time, this.camera);
       this.ocean.setHulls(this.ships.hulls);
       this._updateShadow(world);
+      this.missiles.alpha = this.simAlpha;
+      this.missiles.update(world, dt, this.time, this.camera, this.ships);
       this.fx.update(world, dt, this.time, this.camera, this.ships);
       this.air.update(world, dt, this.time);
 
