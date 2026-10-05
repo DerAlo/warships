@@ -403,5 +403,98 @@ export function westMissions(H) {
             };
          },
       },
+      // ========================================================= 4. Schwarzes Meer
+      // Surface strike. The allied captains hold their anti-ship missiles until the flagship (or any
+      // human captain) fires: then they join on the same target (world.strike, ai_missile.js).
+      {
+         id: 'blacksea', group: 'ops', name: 'Schwarzes Meer', subtitle: 'Seezielangriff · Kreuzerverband vor verteidigter Küste',
+         briefing: 'Ein Lenkwaffenkreuzer mit Korvetten sichert die Zufahrt zu einer Bucht; an der Küste stehen eine Flugkörperbatterie, eine Flugabwehrstellung und ein Radar. ' +
+            'Einzelne Flugkörper fängt der Kreuzer ab – seine Abwehr hat aber nur wenige Feuerkanäle. ' +
+            'Ihr Verband hält die Seezielflugkörper zurück, bis Sie feuern, und schießt dann auf dasselbe Ziel: Viele Flugkörper zur selben Zeit übersättigen die Abwehr. ' +
+            'Räumen Sie zuerst die Korvetten ab, dann den Kreuzer.',
+         debrief: 'Der Kreuzer ist versenkt. Seine Abwehr hätte jede Einzelsalve abgefangen – entschieden hat, dass alle Schiffe gleichzeitig auf dasselbe Ziel geschossen haben.',
+         fleet: { own: '2 Fregatten, 1 Zerstörer, 1 Korvette', foe: '1 Lenkwaffenkreuzer, 2–4 Korvetten, Küstenbatterie, Flugabwehrstellung, Radar' },
+         env: { time: 'day', weather: 'overcast' }, type: 'strike', playableShips: ['Sachsen'], recommendedShip: 'Sachsen',
+         arena: 24000, timeLimit: 11 * 60, stars: 2,
+         setup(w, shipKey) {
+            const S = w._script;
+            islands(w, [
+               { c: P(16500, 17000), r: 4600, height: 380, seed: 111, lobes: 6, elong: 1.5, rot: -0.6, rough: 0.6, name: 'Kap' },
+               { c: P(21000, 4500), r: 3000, height: 260, seed: 117, lobes: 5, elong: 1.4, rot: 1.3, rough: 0.6, name: 'Ostufer' },
+               { c: P(-6000, 15000), r: 1300, height: 120, seed: 123, lobes: 4, rough: 0.5 },
+            ]);
+            const p = add(w, shipKey, 'player', P(-15500, -10500), 0.6, { isPlayer: true });
+            S.allies = [
+               add(w, 'Daring', 'player', P(-16700, -9000), 0.6, { ai: { escortId: p.id } }),
+               add(w, 'Sachsen', 'player', P(-14300, -12000), 0.6, { name: 'Hessen', ai: { escortId: p.id } }),
+               add(w, 'Braunschweig', 'player', P(-17200, -11600), 0.6, { ai: { escortId: p.id } }),
+            ];
+            S.cruiser = add(w, 'Slawa', 'enemy', P(11000, 8500), Math.PI + 0.6, { telegraph: 2, hpMult: by(w, 0.5, 1.2, 1.35), ai: { patrol: [P(6500, 10500), P(11500, 7000)] } });
+            S.boats = [
+               add(w, 'BuyanM', 'enemy', P(7500, 5000), Math.PI + 0.6, {}),
+               add(w, 'BuyanM', 'enemy', P(4000, 10500), Math.PI + 0.6, {}),
+            ];
+            if (w.difficultyKey !== 'easy') S.boats.push(add(w, 'BuyanM', 'enemy', P(9500, 1500), Math.PI + 0.6, {}));
+            if (w.difficultyKey === 'hard') S.boats.push(add(w, 'BuyanM', 'enemy', P(1500, 14500), Math.PI + 0.6, {}));
+            S.battery = addSite(w, 'battery', 'enemy', P(13800, 14600), { name: 'Küstenbatterie Kap', ssm: { type: 'kh35', n: by(w, 4, 6, 8) }, salvo: 2, interval: by(w, 40, 32, 26) });
+            S.sam = addSite(w, 'sam', 'enemy', P(19200, 5200), { name: 'Flugabwehrstellung Ostufer', sam: { type: 's300f', n: by(w, 6, 10, 14), ch: 2 } });
+            S.radar = addSite(w, 'radar', 'enemy', P(14800, 13600), { name: 'Radarstation Kap' });
+            S.tick = 0; S.called = -99; S.calls = 0; S.best = 0; S.seen = new Set(); S.free = false;
+            S.needSalvo = by(w, 6, 8, 8);
+            objective(w, 'cruiser', 'Versenken Sie den Lenkwaffenkreuzer');
+            objective(w, 'salvo', `Koordinierte Salve: ${S.needSalvo} Flugkörper von mindestens zwei Schiffen gleichzeitig im Anflug auf den Kreuzer`, { optional: true });
+            objective(w, 'battery', 'Schalten Sie die Küstenbatterie aus', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: 1 };
+            radio(w, 'Verbandsführer', 'Verband läuft an. Alle Schiffe halten die Seezielflugkörper zurück, bis das Führungsschiff feuert.');
+            later(S, 70, () => radio(w, 'Operationszentrale', 'Zwei Korvetten laufen uns als Vorposten entgegen. Sie tragen Seezielflugkörper – Radar an, Abwehr klar.'));
+            later(S, 200, () => { if (S.cruiser.alive) radio(w, 'Operationszentrale', 'Der Kreuzer steht unter dem Schirm der Küstenstellungen. Einzelne Flugkörper kommen nicht durch – feuern Sie, wenn der ganze Verband in Reichweite ist.'); });
+         },
+         update(w, dt, S) {
+            // the flagship or a human captain has fired an anti-ship missile at a ship: strike call
+            const humans = w.net ? w.net.humans : [w.player];
+            let n = 0, own = new Set();
+            for (const m of w.missiles) {
+               if (m.side !== 'player' || m.kind !== 'ssm') continue;
+               if (m.target === S.cruiser.id) { n++; own.add(m.ownerId); }
+               if (S.seen.has(m.id)) continue;
+               S.seen.add(m.id);
+               if (m.target == null || !humans.some(h => h.id === m.ownerId) || w.time - S.called < 12) continue;
+               S.called = w.time; S.calls++;
+               (w.strike || (w.strike = {})).player = { id: m.target, t: w.time };
+               let k = 0;
+               for (const a of S.allies) if (a.alive && a.ai && !humans.includes(a)) { a.ai.ssmT = 0.3 + 0.5 * k++; a.ai.ssmLeft = 0; a.ai.joined = null; }
+               if (S.calls === 1) radio(w, 'Verbandsführer', 'Führungsschiff feuert. Alle Schiffe: Salve auf dasselbe Ziel, jetzt!');
+            }
+            if (n > S.best) S.best = n;
+            if (n >= S.needSalvo && own.size >= 2 && objState(w, 'salvo') === 'active') {
+               setObj(w, 'salvo', 'done');
+               radio(w, 'Operationszentrale', `${n} Flugkörper gleichzeitig im Anflug auf den Kreuzer. Seine Abwehr ist übersättigt.`);
+            }
+            if ((S.tick -= dt) > 0) return;
+            S.tick = 0.5;
+            // hold fire between the calls (released for good when the flagship has no missile left)
+            const lead = w.player;
+            if (!S.free && (!lead.alive || !(lead.cfg.weapons.ssm || []).some(x => lead.mag[x.type] > 0))) {
+               S.free = true;
+               radio(w, 'Verbandsführer', 'Führungsschiff hat keine Seezielflugkörper mehr. Feuer frei für alle Schiffe.');
+            }
+            if (!S.free) for (const a of S.allies) if (a.alive && a.ai && !humans.includes(a) && w.time - S.called > 14 && !(a.ai.ssmLeft > 0)) a.ai.ssmT = 3;
+            if (objState(w, 'salvo') === 'active') objText(w, 'salvo', `Koordinierte Salve: ${S.needSalvo} Flugkörper von mindestens zwei Schiffen gleichzeitig im Anflug auf den Kreuzer (bisher ${S.best})`);
+         },
+         onSink(w, ship, killer, S) {
+            if (ship === S.cruiser) {
+               setObj(w, 'cruiser', 'done'); w.score.player = 1;
+               w.end(true, 'Der Lenkwaffenkreuzer ist versenkt.');
+            } else if (S.boats.includes(ship) && S.boats.every(b => !b.alive) && S.cruiser.alive) {
+               radio(w, 'Operationszentrale', 'Die Vorposten sind ausgeschaltet. Der Weg zum Kreuzer ist frei.');
+            } else if (ship.side === 'player' && !ship.isPlayer) radio(w, 'Verbandsführer', ship.name + ' ist ausgefallen. Die Besatzung wird geborgen.', 'warn');
+         },
+         onSiteDestroyed(w, site, by_, S) {
+            if (site === S.battery) { setObj(w, 'battery', 'done'); radio(w, 'Operationszentrale', 'Küstenbatterie ausgeschaltet.'); }
+            else if (site === S.sam) radio(w, 'Operationszentrale', 'Flugabwehrstellung zerstört. Der Kreuzer hat seinen Schirm verloren.');
+            else if (site === S.radar) radio(w, 'Operationszentrale', 'Radarstation zerstört. Der Gegner sieht uns jetzt später.');
+         },
+         timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – der Kreuzer beherrscht weiter die Zufahrt.'); },
+      },
    ];
 }

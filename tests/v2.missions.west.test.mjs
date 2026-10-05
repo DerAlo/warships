@@ -37,6 +37,7 @@ const HINT = {
    hormus(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
    redsea(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
    giuk(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
+   blacksea(w) { w.player.ai = { huntId: w._script.cruiser.id }; },
 };
 // Scripted captains (a function called every step) for missions the combat AI cannot play.
 const SCRIPTED = {
@@ -322,4 +323,52 @@ test('pipeline: the patrols keep to their loops (seeded phase)', () => {
    assert.ok(near < 450, 'Alfa passes over the task point: ' + near);
    assert.ok(Math.abs(at - eta0) < 40, `as announced: ${at} vs ${eta0}`);
    assert.ok(S.kilo.alive && S.kilo.ai.routeIdx != null);
+});
+
+// ---------------------------------------------------------------- 4. Schwarzes Meer
+test('blacksea: the group holds its missiles until the flagship fires, then joins on the same target', async () => {
+   const { launchSSM } = await import('../gamev2/missile.js');
+   const w = new World('normal', { mission: 'blacksea', ship: 'Sachsen', seed: 3 });
+   const S = w._script, p = w.player;
+   assert.equal(S.allies.length, 3);
+   assert.equal(S.boats.length, 3);
+   assert.equal(w.sites.filter(s => s.side === 'enemy').length, 3);
+   // put the cruiser 14 km ahead of the group, in plain sight, and keep everybody else quiet
+   for (const b of S.boats) w.removeShip(b, 'test');
+   for (const s of w.sites) { s.mag = {}; s.radarOn = false; }
+   S.cruiser.pos.x = p.pos.x + 12000; S.cruiser.pos.y = p.pos.y + 7000;
+   S.cruiser.ai = { passive: true, anchored: true }; S.cruiser.mag = {};
+   const allied = () => w.missiles.filter(m => m.side === 'player' && m.kind === 'ssm' && m.ownerId !== p.id).length;
+   w.autoPlayer = true; p.ai = { passive: true, anchored: true };
+   let before = 0;
+   for (let t = 0; t < 40; t++) { fast(w, 1); before += allied(); }
+   assert.ok(S.cruiser.targetable, 'the cruiser is tracked');
+   assert.equal(before, 0, 'no allied missile before the call');
+   let fired = 0, most = 0, owners = new Set();
+   for (let t = 0; t < 12 / DT; t++) {
+      if (fired < 4 && launchSSM(w, p, { targetId: S.cruiser.id })) fired++;
+      w.update(DT); most = Math.max(most, allied()); for (const m of w.missiles) if (m.side === 'player' && m.target === S.cruiser.id) owners.add(m.ownerId);
+   }
+   assert.equal(fired, 4, 'flagship fires');
+   assert.equal(S.calls, 1);
+   assert.ok(most >= 6, 'allied salvo: ' + most);
+   assert.ok(owners.size >= 3, 'ships in the salvo: ' + owners.size);
+   assert.equal(obj(w, 'salvo').state, 'done');
+   assert.match(obj(w, 'salvo').text, /Koordinierte Salve/);
+});
+test('blacksea: sinking the cruiser wins, the battery is optional, the clock loses', () => {
+   const w = new World('normal', { mission: 'blacksea', ship: 'Sachsen', seed: 4 });
+   const S = w._script;
+   damageSite(w, S.battery, 1e9, w.player, 'cruise');
+   assert.equal(obj(w, 'battery').state, 'done');
+   S.boats[0].takeDamage(1e9, w.player, 'he');
+   fast(w, 1);
+   assert.equal(w.phase, 'playing');
+   S.cruiser.takeDamage(1e9, w.player, 'he');
+   fast(w, 1);
+   assert.equal(w.phase, 'won');
+   assert.equal(obj(w, 'cruiser').state, 'done');
+   assert.equal(opStars(w), 1, 'one optional objective is open');
+   const t = play('blacksea', 'normal', 5, 'passive');
+   assert.match(t.result.reason, /Zeit ist abgelaufen/);
 });
