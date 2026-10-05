@@ -328,8 +328,6 @@ test('command kinds: missile launch, type, doctrine, priority, radar, cruise, ro
    assert.strictEqual(execAction(p, w, ['q', 0]), true);
    assert.strictEqual(ssmType(p), 'harpoon');
    assert.ok(selectSsm(p, 5) && p.ssmSel === 0);
-   assert.strictEqual(execAction(p, w, ['h', 100, 100]), false);
-   assert.strictEqual(execAction(p, w, ['S']), false);
    assert.strictEqual(execAction(p, w, ['o', 500, 0]), 0, 'a destroyer has no rockets');
    const boat = put(w, 'Boghammar', 'player', 0, 3000, 0, still);
    assert.strictEqual(execAction(boat, w, ['o', 1500, 3000]), 12);

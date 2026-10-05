@@ -164,7 +164,10 @@ function updateSonar(world) {
          const O = ships[j];
          if (!O.alive || O.side === T.side || O.sonarDeafT > now) continue;
          const fast = clamp01((Math.abs(O.speed) / (O.maxSpeed || 1) - 0.5) * 2);
-         let r = (SONAR_RANGE[O.type] ?? 1200) * loud * (1 - (1 - SONAR_DEAF) * fast);
+         // V2: the class carries its own sets (cfg.sonar): hull sonar, and a towed array that only
+         // works streamed at low speed
+         const sn = O.cfg.sonar, base = sn && (sn.hull || sn.towed) ? Math.max(sn.hull || 0, (sn.towed || 0) * (1 - fast)) : SONAR_RANGE[O.type] ?? 1200;
+         let r = base * loud * (1 - (1 - SONAR_DEAF) * fast);
          if (O.consumableActive('hydro')) r = Math.max(r, (O.consumable('hydro').range || 0) * HYDRO_SUB * loud);
          const d2 = dist2(O.pos, T.pos);
          if (d2 < r * r && d2 < bd) { bd = d2; by = O; }

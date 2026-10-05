@@ -4,6 +4,7 @@
 import { WORLD, TUNE } from './config.js';
 import { PERI_SHELL_MULT } from './submarine.js';
 import { impactOnSites } from './sites.js';
+import { steerAswTorpedo } from './helo.js';
 import {
    DEG, clamp, clamp01, dist2, toLocal, insideHull, halfBeamAt, islandHeightAt, obstacleT, truncGauss,
 } from './utils.js';
@@ -292,6 +293,7 @@ export function resolveTorpedoes(world, dt) {
       if (!t.alive) continue;
       const px = t.pos.x, py = t.pos.y;
       const step = t.speed * dt;
+      if (t.homeId != null) steerAswTorpedo(world, t, dt);        // V2 lightweight torpedo: homes on a boat
       t.pos.x += Math.cos(t.heading) * step;
       t.pos.y += Math.sin(t.heading) * step;
       t.traveled += step; t.age += dt;
@@ -301,7 +303,8 @@ export function resolveTorpedoes(world, dt) {
       }
       if (!t.alive || t.traveled < (t.arm ?? 120)) continue;   // arming distance (aerial torpedoes: longer)
       for (const ship of world.ships) {
-         if (!ship.alive || ship.side === t.side || ship.depth === 2) continue;   // runs over a deep boat
+         if (!ship.alive || ship.side === t.side) continue;
+         if (t.asw ? !ship.sub : ship.depth === 2) continue;   // runs over a deep boat; an ASW torpedo only hits boats
          const r = ship.cfg.hull.L / 2 + step + 10;
          if (dist2(ship.pos, t.pos) > r * r) continue;
          let hit = null;

@@ -22,6 +22,7 @@ import { angleDelta, clamp, obstacleT, islandHeightAt, pointSegDist, toLocal, in
 import { jammed } from './sensors.js';
 import { damageSite, siteById } from './sites.js';
 import { hurtSquad, squadById } from './air.js';
+import { heloById, killHelo } from './helo.js';
 
 const DEF_DT = 0.2;                  // s between two fire-control passes
 const SCAN_DT = 0.2;                 // s between two seeker sweeps
@@ -414,7 +415,12 @@ function stepRocket(world, m, dt) {
 
 // ---------------------------------------------------------------- interceptors
 function threatRef(world, m, idx) {
-   if (m.tk === 'squad') { const q = squadById(world, m.target); return q && q.n > 0 && q.state !== 'land' ? q : null; }
+   if (m.tk === 'squad') {
+      const q = squadById(world, m.target);
+      if (q) return q.n > 0 && q.state !== 'land' ? q : null;
+      const h = heloById(world, m.target);      // helicopters are engaged like a flight of one
+      return h && h.alive ? h : null;
+   }
    const t = idx.get(m.target);
    return t && t.alive ? t : null;
 }
@@ -441,7 +447,8 @@ function stepInterceptor(world, m, dt, idx) {
       const by = m.kind === 'aam' ? 'aam' : 'sam', owner = platformById(world, m.ownerId);
       done();
       if (world.rng() < Math.min(0.95, pk)) {
-         if (sq) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); hurtSquad(world, T, T.hp + 1, owner && owner.aa ? owner : null); }
+         if (sq && T.isHelo) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); killHelo(world, T, owner, 'sam'); }
+         else if (sq) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); hurtSquad(world, T, T.hp + 1, owner && owner.aa ? owner : null); }
          else killMissile(world, T, by, owner, m);
       } else world.pushEvent('samMiss', { srcId: m.ownerId, missileId: sq ? null : T.id, sqId: sq ? T.id : null, mtype: m.type, pos: { x: Tx, y: Ty }, alt: T.alt });
       return;
@@ -602,6 +609,11 @@ function fightersPass(world, bySide) {
          const d = Math.hypot(q.pos.x - sq.pos.x, q.pos.y - sq.pos.y);
          if (d < bd) { bd = d; best = q; }
       }
+      if (!best) for (const h of world.helos) {      // a helicopter in reach is an easy kill
+         if (h.side === sq.side || !h.alive || (h.eng || 0) >= 1) continue;
+         const d = Math.hypot(h.pos.x - sq.pos.x, h.pos.y - sq.pos.y);
+         if (d < bd) { bd = d; best = h; }
+      }
       if (!best) for (const m of bySide[opp(sq.side)]) {
          if (!m.alive || !m.detected || (m.eng || 0) >= 1) continue;
          const d = Math.hypot(m.x - sq.pos.x, m.y - sq.pos.y);
@@ -616,7 +628,7 @@ const _by = { player: [], enemy: [] }, _sq = { player: [], enemy: [] }, _idx = n
 export function updateMissiles(world, dt) {
    const ms = world.missiles;
    if (world.decoys.length && world.time - world.decoys[0].t0 > SENSOR.DECOY_LIFE) world.decoys = world.decoys.filter(d => world.time - d.t0 <= SENSOR.DECOY_LIFE);
-   if (!ms.length && !world.squadrons.length) return;
+   if (!ms.length && !world.squadrons.length && !world.helos.length) return;
    _idx.clear();
    let guided = false;
    for (const m of ms) { if (m.kind === 'sam' || m.kind === 'aam') guided = true; else if (m.kind !== 'rocket') _idx.set(m.id, m); }
@@ -647,6 +659,7 @@ export function updateMissiles(world, dt) {
       world._defT = DEF_DT;
       _sq.player.length = _sq.enemy.length = 0;
       for (const q of world.squadrons) if (q.n > 0 && q.state !== 'land' && q.alt > 15) _sq[q.side].push(q);
+      for (const h of world.helos) if (h.alive && h.alt > 15 && (h.side === 'enemy' ? h.visible : h.visE)) _sq[h.side].push(h);
       for (const side of ['player', 'enemy']) {
          const o = opp(side);
          let threats = null;

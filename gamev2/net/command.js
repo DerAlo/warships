@@ -31,7 +31,9 @@
 //       ['r', 0|1]      radar off (EMCON) / on
 //       ['k', x, y]     cruise missile at a map point;  ['K', siteId] at a land position
 //       ['o', x, y]     rocket salvo at a point (swarm boats)
-//       ['h', x, y]     send the helicopter to a point;  ['S'] SEAL team  (accepted, not implemented yet)
+//       ['h', x, y]     send the helicopter to a point (launches it);  ['h'] recall it;  ['h', 0] screen ahead (helo.js)
+//       ['S']           put the special-forces team ashore at the nearest task point (submarines, seal.js)
+//       ['g']           also: a lightweight torpedo at a sonar contact in reach (before depth charges)
 //     decoys and the jammer are consumables: ['c', 'decoy'] / ['c', 'jammer']
 //   - air control (continuous, while the captain flies a squadron): c.air = [sqId, want, throttle,
 //     aiming] (want: wanted heading in rad, throttle -1 | 0 | +1, aiming 0 | 1)
@@ -41,6 +43,8 @@ import { AIR_TYPES, launchSquadron, takeSquadron, releaseSquadron, recallSquadro
 import { clamp, angleDelta } from '../utils.js';
 import { launchSSM, launchCruise, fireRockets, setDoctrine, setPriorityTarget, selectSsm } from '../missile.js';
 import { setRadar } from '../sensors.js';
+import { sendHelo, recallHelo, fireAswTorpedo } from '../helo.js';
+import { launchTeam } from '../seal.js';
 
 export function makeCommand() { return { telegraph: 0, rudder: 0, aim: null, lock: null, air: null }; }
 
@@ -95,7 +99,7 @@ export function execAction(ship, world, a) {
       case 's': ship.setTorpSpread(a[1] === 'wide' ? 'wide' : 'narrow'); return true;
       case 'x': ship.setSecTarget(fin(a[1]) ? a[1] : null); return true;
       case 'd': return a[1] > 0 ? diveDeeper(ship, world) : diveUp(ship, world);
-      case 'g': return dropDepthCharges(ship, world);
+      case 'g': return fireAswTorpedo(world, ship) || dropDepthCharges(ship, world);
       case 'F': return fin(a[1]) ? setAaFocus(world, ship, a[1]) !== null : false;
       case 'L': return ship.air && AIR_TYPES.includes(a[1]) ? launchSquadron(world, ship, a[1], null, true) || 0 : 0;
       case 'P': return takeSquadron(world, ownSquad(ship, world, a[1]));
@@ -117,7 +121,11 @@ export function execAction(ship, world, a) {
       case 'k': return fin(a[1]) && fin(a[2]) ? !!launchCruise(world, ship, { x: a[1], y: a[2] }) : false;
       case 'K': return fin(a[1]) ? !!launchCruise(world, ship, { siteId: a[1] }) : false;
       case 'o': return fin(a[1]) && fin(a[2]) ? fireRockets(world, ship, { x: a[1], y: a[2] }) : 0;
-      case 'h': case 'S': return false;   // helicopter / SEAL team: helo.js / seal.js (not built yet)
+      case 'h': {
+         if (fin(a[1]) && fin(a[2])) return !!sendHelo(world, ship, { x: a[1], y: a[2] });
+         return a.length > 1 ? !!sendHelo(world, ship, null) : recallHelo(world, ship);
+      }
+      case 'S': return !!launchTeam(world, ship);
    }
    return 0;
 }

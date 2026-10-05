@@ -12,6 +12,9 @@ import { updateAir, airSpots, airSpotMask } from './air.js';
 import { radarHolds, sitesSee, updateEsm, updateMissileTracks } from './sensors.js';
 import { updateMissiles } from './missile.js';
 import { updateSites } from './sites.js';
+import { updateHelos } from './helo.js';
+import { updateTeams } from './seal.js';
+import { updateBlasts } from './blast.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -72,6 +75,9 @@ export class World {
       this.decoys = [];         // V2: chaff clouds (missile.js)
       this.strike = {};         // V2: strike calls of the bot captains, side -> { id: target ship, t } (ai_missile.js)
       this.helos = [];          // V2: ship helicopters (helo.js)
+      this.teams = [];          // V2: special-forces teams of the submarines (seal.js), never pruned
+      this.taskPoints = [];     // V2: points a team can work on (seal.js addTaskPoint)
+      this.blasts = [];         // V2: scripted detonations (blast.js)
       this.events = [];
       this._eventSeq = 0;
       this.obstacles = [];
@@ -336,11 +342,14 @@ export class World {
       for (const s of this.ships) s.update(dt, this);
       updateSubs(this, dt);
       updateAir(this, dt);
+      updateHelos(this, dt);
       this._collideShips();
       resolveShells(this, dt);
       resolveTorpedoes(this, dt);
       updateMissiles(this, dt);
       if (this.sites.length) updateSites(this, dt);
+      if (this.teams.length) updateTeams(this, dt);
+      if (this.blasts.length) updateBlasts(this, dt);
       this._updateSmoke(dt);
       this._updateEffects(dt);
       this._spotT -= dt;
