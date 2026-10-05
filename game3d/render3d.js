@@ -14,7 +14,7 @@ import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
-import { TIERS, startTier, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
+import { TIERS, applyGfx, startTier, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
 
@@ -23,6 +23,7 @@ export class Renderer3D {
       this.canvas = canvas;
       const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
       this.tier = startTier();
+      applyGfx(this.tier);
       const tq = TIERS[this.tier];
       this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
       r.setPixelRatio(this.pixelRatio);
@@ -199,6 +200,7 @@ export class Renderer3D {
       const tq = TIERS[name];
       if (!tq) return;
       this.tier = name;
+      applyGfx(name);
       this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize(this._cssW, this._cssH);

@@ -5,12 +5,20 @@
 // every probe (what broken half-float / NaN paths do on some mobile GPUs) steps the tier down and
 // remembers the fallback for the next visit.
 
+// detail: model / landscape detail 0..3 (extra geometry, props); effects: particle density 0..3
 export const TIERS = {
-   high:   { label: 'Hoch',    pr: 2,   samples: 4, bloom: true,  shadow: 4096, oceanSegs: 256 },
-   medium: { label: 'Mittel',  pr: 1.5, samples: 2, bloom: true,  shadow: 2048, oceanSegs: 192 },
-   low:    { label: 'Niedrig', pr: 1,   samples: 0, bloom: false, shadow: 1024, oceanSegs: 128 },
+   ultra:  { label: 'Ultra',   pr: 2,   samples: 4, bloom: true,  shadow: 4096, oceanSegs: 320, detail: 3, effects: 3 },
+   high:   { label: 'Hoch',    pr: 2,   samples: 4, bloom: true,  shadow: 4096, oceanSegs: 256, detail: 2, effects: 2 },
+   medium: { label: 'Mittel',  pr: 1.5, samples: 2, bloom: true,  shadow: 2048, oceanSegs: 192, detail: 1, effects: 1 },
+   low:    { label: 'Niedrig', pr: 1,   samples: 0, bloom: false, shadow: 1024, oceanSegs: 128, detail: 0, effects: 0 },
 };
-const ORDER = ['high', 'medium', 'low'];
+const ORDER = ['ultra', 'high', 'medium', 'low'];
+
+// The live quality state every render module reads (render3d.js keeps it in step with the tier).
+// detail / effects as in TIERS; modules that build geometry read them when they build, effects
+// read them every frame.
+export const GFX = { tier: 'high', detail: 2, effects: 2 };
+export function applyGfx(name) { const t = TIERS[name]; if (t) { GFX.tier = name; GFX.detail = t.detail; GFX.effects = t.effects; } }
 const PREF_KEY = 'ks3d.gfx', FALLBACK_KEY = 'ks3d.gfxFallback';
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
