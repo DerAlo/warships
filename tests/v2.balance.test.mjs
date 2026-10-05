@@ -5,7 +5,9 @@ import assert from 'node:assert';
 import { emptySea, put, run } from './v2.util.mjs';
 import { SHIPS, MISSILES, DEFENCE } from '../gamev2/config.js';
 import { launchSSM, deployDecoys } from '../gamev2/missile.js';
-import { salvoFor } from '../gamev2/ai_missile.js';
+import { salvoFor, pickSiteTarget } from '../gamev2/ai_missile.js';
+import { addSite } from '../gamev2/sites.js';
+import { sendHelo, heloOf } from '../gamev2/helo.js';
 
 const still = { ai: { passive: true, anchored: true } };
 const ev = (w, type) => w.events.filter(e => e.type === type);
@@ -124,4 +126,64 @@ test('a bot without anti-ship missiles closes to gun range', () => {
 test('supersonic missiles stay harder to stop than subsonic ones', () => {
    assert.ok(MISSILES.oniks.evade < MISSILES.harpoon.evade);
    assert.ok(DEFENCE.decoyPkSuper < DEFENCE.decoyPk && DEFENCE.decoyCap >= 1);
+});
+
+test('bots: cruise missiles at hostile land positions in reach, air defence first', () => {
+   const w = emptySea({ ship: 'Typ022', seed: 2 });
+   w.player.pos.x = -39000; w.player.pos.y = 39000;
+   const b = put(w, 'Burke', 'enemy', 0, 0, 0, { telegraph: 0 });
+   const bunker = addSite(w, 'bunker', 'player', { x: 14000, y: 0 }, { inland: true });
+   const sam = addSite(w, 'sam', 'player', { x: 20000, y: 4000 }, { inland: true, sam: { type: 'hq16', n: 0, ch: 1 } });
+   addSite(w, 'radar', 'enemy', { x: 5000, y: 5000 }, { inland: true });          // its own side: never a target
+   assert.strictEqual(pickSiteTarget(b, w), sam);
+   const n0 = b.mag.tomahawk;
+   run(w, 60);
+   const l = ev(w, 'cruiseLaunch');
+   assert.ok(l.length >= 2, 'fired ' + l.length);
+   assert.ok(l.every(e => e.srcId === b.id && (e.dstId === sam.id || e.dstId === bunker.id)));
+   assert.strictEqual(l[0].dstId, sam.id);
+   assert.strictEqual(b.mag.tomahawk, n0 - l.length);
+   run(w, 240);
+   assert.strictEqual(sam.alive, false);
+   assert.ok(ev(w, 'cruiseLaunch').some(e => e.dstId === bunker.id), 'then the next position');
+});
+
+test('bots: easy captains fire fewer cruise missiles at a time', () => {
+   const count = (difficulty) => {
+      const w = emptySea({ ship: 'Typ022', seed: 2, difficulty });
+      w.player.pos.x = -39000; w.player.pos.y = 39000;
+      put(w, 'Burke', 'enemy', 0, 0, 0, { telegraph: 0 });
+      addSite(w, 'bunker', 'player', { x: 14000, y: 0 }, { inland: true, hp: 1e6 });
+      run(w, 120);
+      return ev(w, 'cruiseLaunch').length;
+   };
+   const easy = count('easy'), hard = count('hard');
+   assert.ok(easy >= 1 && hard > easy, 'easy ' + easy + ', hard ' + hard);
+});
+
+test('bots: with the SAM magazines nearly empty a captain goes to self-defence', () => {
+   const w = emptySea({ ship: 'Typ022', seed: 2 });
+   w.player.pos.x = -39000;
+   const b = put(w, 'Sachsen', 'enemy', 0, 0, 0, { telegraph: 0 });
+   run(w, 3);
+   assert.strictEqual(b.samDoctrine, 'free');
+   b.mag.sm2 = 1; b.mag.essm = 2; b.mag.ram = 3;
+   run(w, 3);
+   assert.strictEqual(b.samDoctrine, 'self');
+});
+
+test('bots: a captain sends the helicopter at a submarine contact and fires lightweight torpedoes', () => {
+   const w = emptySea({ ship: 'Typ022', seed: 2 });
+   w.player.pos.x = -39000;
+   const b = put(w, 'Burke', 'enemy', 0, 0, 0, { telegraph: 0, ai: { anchored: true } });
+   const s = put(w, 'U212', 'player', 6000, 0, 0, still);
+   s.depth = s.depthF = s.depthTarget = 1; s.hp = s.maxHP = 1e9;
+   s.detected = true;                                     // a periscope sighting
+   run(w, 3, () => { s.detected = true; });
+   const h = heloOf(w, b);
+   assert.ok(h, 'helicopter launched');
+   assert.ok(Math.hypot(h.goal.x - 6000, h.goal.y) < 1000);
+   run(w, 200, (w) => { s.detected = true; return !ev(w, 'aswTorp').length; });
+   assert.ok(ev(w, 'aswTorp').length >= 1);
+   assert.ok(sendHelo);
 });
