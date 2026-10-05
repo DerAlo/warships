@@ -8,7 +8,7 @@ import { mkdirSync } from 'node:fs';
 
 const URL = process.env.URLV2 || 'http://localhost:8832/index-v2.html';
 const OUT = process.env.OUT || 'tests/shots';
-const ONLY = (process.env.ONLY || 'helo,asw,team,phone,blast,perf').split(',');
+const ONLY = (process.env.ONLY || 'helo,asw,team,phone,blast,perf,menu').split(',');
 mkdirSync(OUT, { recursive: true });
 const errors = [], results = [];
 const check = (name, ok, info = '') => {
@@ -313,6 +313,78 @@ if (ONLY.includes('perf')) {
    check('perf: the scene really ran (helicopter, team boat, detonation drawn)', live.helos === 1 && live.boats >= 1 && live.blast.active === 1, live);
    check('perf: helicopter + team + detonation cost less than 3 ms per frame on average (uncapped, medium)', busy.avg - base.avg < 3 && late.avg - base.avg < 3, { base: base.avg, busy: busy.avg, late: late.avg });
    await S.ctx.close();
+}
+
+// ------------------------------------------------------------------ menu texts and the HUD layout of the finale
+if (ONLY.includes('menu')) {
+   for (const [tag, w, h, touch] of [['desk', 1440, 810, false], ['phone', 844, 390, true]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
+      const page = await ctx.newPage();
+      page.on('console', m => { if (m.type() === 'error') errors.push('menu-' + tag + ': ' + m.text().slice(0, 300)); });
+      page.on('pageerror', e => errors.push('menu-' + tag + ' PAGEERROR: ' + e.message));
+      await page.addInitScript(() => { HTMLCanvasElement.prototype.requestPointerLock = function () { return Promise.reject(new Error('blocked by test')); }; });
+      await page.goto(URL + '?nohint', { waitUntil: 'load' });
+      await page.waitForFunction(() => typeof window.__phase === 'function' && window.__phase() === 'menu', null, { timeout: 30000 });
+      await page.waitForTimeout(700);
+      await page.screenshot({ path: `${OUT}/v2-view2-menu-${tag}.png` });
+      const m = await page.evaluate(() => {
+         const e = document.querySelector('.m3-era'); if (!e) return null;
+         const r = e.getBoundingClientRect(), bar = e.parentElement.getBoundingClientRect();
+         const sib = [...e.parentElement.children].filter(c => c !== e).map(c => c.getBoundingClientRect());
+         const hit = sib.some(q => Math.min(q.right, r.right) - Math.max(q.left, r.left) > 1 && Math.min(q.bottom, r.bottom) - Math.max(q.top, r.top) > 1);
+         const t = document.body.innerText;
+         return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), inside: r.right <= innerWidth && r.bottom <= innerHeight && r.left >= 0 && r.top >= 0, hit, text: e.innerText.replace(/\s+/g, ' '),
+            old: /Historisch|HISTORISCH|1939|Sprenggranate|Panzergranate|Torpedobomber|Sturzkampf/.test(t + document.getElementById('loading')?.innerText) };
+      });
+      check(`menu ${tag}: mode button is visible, inside the screen, overlaps nothing`, m && m.w > 20 && m.inside && !m.hit && /HAUPTSPIEL|WK2/.test(m.text), m);
+      check(`menu ${tag}: no WW2 wording left on the start screen`, m && !m.old, m);
+      // the ship card shows the modern loadout; the mission list says Einsatz
+      const card = await page.evaluate(async () => { const M = await import('./gamev2/config.js'); const S = M.SHIP_STATS; return Object.keys(S).length; });
+      const txt = await page.evaluate(() => document.body.innerText);
+      if (tag === 'desk') {
+         await page.evaluate(() => document.querySelector('[data-act="ship"], .m3-tab[data-tab="ship"]')?.click());
+         await page.waitForTimeout(400);
+         const t2 = await page.evaluate(() => document.body.innerText);
+         check('menu: ship card lists missiles / air defence, not shell types', /Seezielflugkörper|Luftabwehr|Marschflugkörper/.test(t2) && !/Sprenggranate|Panzergranate/.test(t2), { card, hasEinsatz: /Einsätze/.test(txt) });
+         await page.screenshot({ path: `${OUT}/v2-view2-menu-ship.png` });
+      }
+      await ctx.close();
+   }
+   // the finale, with an incoming salvo: objectives, VAMPIRE plate and the radio banner must not lie on each other
+   for (const [tag, w, h, touch] of [['desk', 1440, 810, false], ['phone', 844, 390, true]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
+      const page = await ctx.newPage();
+      page.on('console', m => { if (m.type() === 'error') errors.push('lay-' + tag + ': ' + m.text().slice(0, 300)); });
+      page.on('pageerror', e => errors.push('lay-' + tag + ' PAGEERROR: ' + e.message));
+      await page.addInitScript(() => { HTMLCanvasElement.prototype.requestPointerLock = function () { return Promise.reject(new Error('blocked by test')); }; });
+      await page.goto(URL + '?nohint', { waitUntil: 'load' });
+      await page.waitForFunction(() => typeof window.__phase === 'function' && window.__phase() === 'menu', null, { timeout: 30000 });
+      await page.evaluate(() => window.__start({ mission: 'countdown', difficulty: 'normal' }));
+      await page.waitForFunction(() => window.__phase() === 'playing', null, { timeout: 30000 });
+      await page.waitForTimeout(2500);
+      await page.evaluate(async () => {
+         const w = window.__world(), p = w.player, M = await import('./gamev2/missile.js'), St = await import('./gamev2/sites.js');
+         w.message('Funkspruch: Verband meldet starke Luftaktivität im Nordosten, Gegenmaßnahmen einleiten und Position halten.', 'info');
+         p.hp = p.maxHP;
+         const site = St.addSite(w, 'battery', 'enemy', { x: p.pos.x + 9000, y: p.pos.y - 7000 });
+         const brg = Math.atan2(p.pos.y - site.pos.y, p.pos.x - site.pos.x);
+         for (let i = 0; i < 3; i++) { site.lastSsmFire = -99; M.launchSSM(w, site, { bearing: brg + (i - 1) * 0.02 }); }
+      });
+      await page.waitForTimeout(1600);
+      const L = await page.evaluate(() => {
+         const R = s => { const e = document.querySelector(s); if (!e) return null; const q = e.getBoundingClientRect(); const cs = getComputedStyle(e); return (cs.display === 'none' || q.width < 2 || e.classList.contains('hidden')) ? null : { l: q.left, t: q.top, r: q.right, b: q.bottom, op: +cs.opacity * +getComputedStyle(e.parentElement).opacity }; };
+         const o = R('#objectives'), thr = R('#mx-threat'), msg = R('.msg.radio');
+         const hit = (a, b) => a && b && a.op > 0.3 && b.op > 0.3 && Math.min(a.r, b.r) - Math.max(a.l, b.l) > 2 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 2;
+         const lines = [...document.querySelectorAll('#objectives .obj')].map(e => e.scrollHeight - e.clientHeight);
+         const ob = document.getElementById('objectives');
+         const clipped = ob ? ob.scrollHeight > ob.clientHeight + 1 || ob.getBoundingClientRect().bottom > innerHeight - 90 * (innerHeight < 500) : false;
+         return { o, thr: !!thr, msg: !!msg, objThr: hit(o, thr), objMsg: hit(o, msg), thrMsg: hit(thr, msg), clipped, lines };
+      });
+      check(`layout ${tag}: objectives / VAMPIRE plate / radio banner do not overlap`, L.thr && L.msg && !L.objThr && !L.objMsg && !L.thrMsg, L);
+      check(`layout ${tag}: objectives are not clipped`, !L.clipped && L.lines.every(v => v <= 1), L);
+      await page.screenshot({ path: `${OUT}/v2-view2-layout-${tag}.png` });
+      await ctx.close();
+   }
 }
 
 await browser.close(); await freeBrowser?.close();

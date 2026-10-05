@@ -50,6 +50,6 @@ export const CREST_SVG = '<svg class="ks-crest" viewBox="0 0 40 46" aria-hidden=
    + '<path class="tu" d="M12 30.5h16l-2.2-7.2H14.2Z"/><rect class="tu" x="10" y="30.5" width="20" height="2.6" rx=".8"/>'
    + '<path class="wv" d="M10 36.6q2.5-1.8 5 0t5 0 5 0 5 0"/></svg>';
 
-export function logoSvg(sub = 'Seekrieg 1939 – 1945') {
+export function logoSvg(sub = 'Seekrieg der Gegenwart') {
    return `<div class="ks-mark">${CREST_SVG}<span class="wm"><b>Kriegsschiffe</b>${sub ? `<i>${sub}</i>` : ''}</span></div>`;
 }

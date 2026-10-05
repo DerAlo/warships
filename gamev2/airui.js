@@ -12,11 +12,13 @@
 // (wanted heading, throttle, attack run) is written to the squadron directly, or on a net client
 // handed to main3d as `netCtl` for the command stream (CONTRACT.md); a client sees its planes
 // from the host's snapshots.
-import { AIR, AIR_TYPES, AIR_NAMES, planeCount, activeSquad, canLaunch, squadById, nextAaFocus } from './air.js';
+import { AIR, AIR_TYPES, AIR_NAMES as AIR_NAMES_WW2, planeCount, activeSquad, canLaunch, squadById, nextAaFocus } from './air.js';
 import { execAction } from './net/command.js';
 import { angleDelta, clamp, clamp01 } from './utils.js';
 import { T, rgba } from './theme.js';
 
+// V2 wording: the sim keeps its WW2 type names, the screen says what a modern deck launches
+const AIR_NAMES = { ...AIR_NAMES_WW2, tb: 'Anti-Schiff-Jet', db: 'Mehrzweck-Jet', ft: 'Jagdjet' };
 const TAU = Math.PI * 2;
 const MAX_MARKS = 24, FAN_PTS = 9, ELL_PTS = 28;
 const STEER_MOUSE = 0.0026;       // rad of wanted heading per mouse px
@@ -107,9 +109,9 @@ export class AirUi {
          + '<div class="ap-sq hidden"><div class="ap-sqn"></div>'
          + '<div class="ap-bar fuel"><i></i></div><div class="ap-lbl"><span>Treibstoff</span><span class="ap-fuel"></span></div>'
          + '<div class="ap-bar boost"><i></i></div><div class="ap-lbl"><span>Leistung (W)</span><span class="ap-boost"></span></div></div>'
-         + '<div class="ap-aa">Flak: <span class="ap-aav"></span><i class="kb"> · <b>4</b></i></div>'
+         + '<div class="ap-aa">Luftabwehr: <span class="ap-aav"></span><i class="kb"> · <b>4</b></i></div>'
          + '<div class="ap-keys"></div>');
-      const aa = el('div', 'aa-panel', 'panel hidden', 'FLAK <i class="kb"><b>4</b> · </i><span></span>');
+      const aa = el('div', 'aa-panel', 'panel hidden', 'LUFTABWEHR <i class="kb"><b>4</b> · </i><span></span>');
       const host = document.getElementById('hud') || document.getElementById('bottom-right');
       if (host) { host.appendChild(panel); host.appendChild(aa); }
       this.dom = {
@@ -502,7 +504,7 @@ export function drawAir(g, ui, W, H, t) {
          g.fillStyle = a.ready ? COL_AIM : 'rgba(235,245,255,0.7)'; g.fillRect(x0, y0, w * a.aimFrac, 6);
          g.fillStyle = '#ffffff'; g.fillRect(x0 + w * a.minFrac - 1, y0 - 3, 2, 12);
          g.textAlign = 'center'; g.fillStyle = a.ready ? COL_AIM : COL_LOOSE;
-         g.fillText(a.ready ? (a.type === 'tb' ? 'Loslassen: Torpedos los' : 'Loslassen: Bomben los') : 'Anflug …', W / 2, y0 + 20);
+         g.fillText(a.ready ? (a.type === 'tb' ? 'Loslassen: Flugkörper los' : 'Loslassen: Waffen los') : 'Anflug …', W / 2, y0 + 20);
       } else if (a.armed > 0 && a.type !== 'ft') {
          g.textAlign = 'center'; g.fillStyle = COL_LOOSE;
          g.fillText((touch() ? 'Angriff halten: Zielanflug (' : 'LMB halten: Zielanflug (') + a.armed + ' bewaffnet)', W / 2, H * 0.72 + 6);

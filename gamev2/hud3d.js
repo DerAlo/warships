@@ -204,7 +204,7 @@ export class Overlay3D {
       if (ui.mode === 'guns') {
          g.font = F_LBL;
          g.fillStyle = ui.ammo === 'HE' ? T.he : T.ap;
-         g.fillText(ui.ammo === 'HE' ? 'GESCHÜTZ' : 'PANZER', cx - 40, ty);
+         g.fillText(!r.total ? 'KEIN GESCHÜTZ' : ui.ammo === 'HE' ? 'GESCHÜTZ' : 'PANZERBRECHEND', cx - 40, ty);
          g.font = F_READ; g.fillStyle = dim;
          g.fillText(r.anyReady ? `${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? r.left.toFixed(1).replace('.', ',') + ' s' : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Winkel' : '—', cx - 40, ty + 15);
       } else if (ui.mode !== 'torp') {

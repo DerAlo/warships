@@ -11,7 +11,7 @@ import { logoSvg } from './theme.js';
 
 const TYPE_LABEL = {
    training: 'Übung', annihilation: 'Vernichtung', domination: 'Seeraum', escort: 'Geleitschutz',
-   historic: 'Historisch', survival: 'Überleben', raid: 'Handelskrieg',
+   historic: 'Einsatz', ops: 'Einsatz', survival: 'Überleben', raid: 'Handelskrieg',
    defense: 'Verteidigung', delay: 'Nachhut', fleet: 'Flottenschlacht', breakout: 'Durchbruch',
    torpedo: 'Torpedoangriff', harbour: 'Hafenüberfall',
 };
@@ -159,14 +159,14 @@ body.touch .m3 { --tap:44px; }
    font:italic 700 17px var(--font-serif); }
 .m3-help:hover { background:var(--navy-2); color:var(--paper); }
 /* the main button (also used by the lobby): signal red in a brass ring, an arrow pointing out to sea */
-.m3-battle { cursor:pointer; display:flex; align-items:center; justify-content:center; gap:14px; padding:0 22px; overflow:hidden; white-space:nowrap; border:1px solid var(--signal-lo);
-   font:700 24px/1 var(--font-cond); letter-spacing:8px; text-indent:8px; color:var(--flag-w); background:var(--signal);
+.m3-battle { cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; padding:0 14px; overflow:hidden; white-space:nowrap; border:1px solid var(--signal-lo);
+   font:700 22px/1 var(--font-cond); letter-spacing:4px; text-indent:0; color:var(--flag-w); background:var(--signal);
    box-shadow:inset 0 0 0 3px var(--signal), inset 0 0 0 4px rgba(255,235,200,.55), 0 0 0 3px var(--navy), 0 0 0 4px var(--brass), 0 8px 24px rgba(0,0,0,.45);
    transition:filter .12s; }
-.m3-battle::after { content:''; flex:none; width:26px; height:13px; background:currentColor; clip-path:polygon(0 36%,66% 36%,66% 0,100% 50%,66% 100%,66% 64%,0 64%); }
+.m3-battle::after { content:''; flex:none; width:20px; height:13px; background:currentColor; clip-path:polygon(0 36%,66% 36%,66% 0,100% 50%,66% 100%,66% 64%,0 64%); }
 .m3-battle:hover { filter:brightness(1.12); }
 .m3-battle:disabled { filter:grayscale(.9) brightness(.7); cursor:not-allowed; }
-.m3 .m3-go .m3-battle { flex:1 1 auto; min-width:0; min-height:46px; font-size:24px; }
+.m3 .m3-go .m3-battle { flex:1 1 auto; min-width:0; min-height:46px; font-size:22px; }
 
 /* ---- deck: orders | briefing | dossier */
 .m3-deck { flex:1; min-height:0; display:grid; grid-template-columns:minmax(230px,300px) minmax(0,1fr) minmax(290px,360px); gap:18px; padding:14px 18px 12px; }
@@ -321,7 +321,7 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
    .m3-deck { grid-template-columns:minmax(210px,250px) minmax(0,1fr) minmax(270px,300px); gap:14px; padding:12px 14px 10px; }
    .m3-mast { padding:6px 14px; gap:12px; }
    .m3-foe > span { display:none; }
-   .m3 .m3-go .m3-battle { font-size:22px; letter-spacing:6px; text-indent:6px; }
+   .m3 .m3-go .m3-battle { font-size:20px; letter-spacing:3px; text-indent:0; }
    .m3-dbar .m3-h.ttl { display:none; }
 }
 @media (max-width: 1060px) {
@@ -602,7 +602,7 @@ export class Menu3D {
       const el = document.createElement('div');
       el.className = 'm3-op';
       el.innerHTML = `<div class="box">
-            <div class="k">HISTORISCHE OPERATION</div>
+            <div class="k">EINSATZ</div>
             <div class="t">${esc(m.name)}</div>
             <div class="st">${esc(m.subtitle)} · ${esc(TIME_LABEL[m.env.time] || m.env.time)} · ${esc(WEATHER_LABEL[m.env.weather] || m.env.weather)}</div>
             <p>${esc(m.briefing)}</p>
@@ -691,10 +691,10 @@ export class Menu3D {
       };
       const ops = MISSIONS.filter(x => x.group === 'ops');
       const misList = MISSIONS.filter(x => x.group !== 'ops').map(misItem).join('') +
-         (ops.length ? `<div class="m3-sec">Historische Operationen</div>${ops.map(misItem).join('')}` : '');
+         (ops.length ? `<div class="m3-sec">Einsätze</div>${ops.map(misItem).join('')}` : '');
       const envChip = `${icon(m.env.time, 16)}${esc(TIME_LABEL[m.env.time] || m.env.time)} · ${esc(WEATHER_LABEL[m.env.weather] || m.env.weather)}`;
       const brief = `
-         <div class="stp">${m.group === 'ops' ? 'Historisch' : 'Geheim'}</div>
+         <div class="stp">${m.group === 'ops' ? 'Einsatz' : 'Geheim'}</div>
          <div class="k">Einsatzbefehl · ${esc(TYPE_LABEL[m.type] || m.type)}</div>
          <div class="t">${esc(m.name)}</div>
          <div class="st">${esc(m.subtitle)}</div>
@@ -710,22 +710,24 @@ export class Menu3D {
          <div class="nm">${classSvg(S.type, 18)}${esc(S.name)}</div>
          <div class="cl">${S.tier ? `<b>Stufe ${S.tier}</b> · ` : ''}${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
          ${S.desc ? `<p class="ds">${esc(S.desc)}</p>` : ''}
-         <div class="bars">${RATING_LABEL.map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
+         <div class="bars">${RATING_LABEL.filter(([k]) => k !== 'torpedoes' || S.ratings[k] > 0).map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${k === 'torpedoes' ? (S.torp || S.air ? l : 'U-Jagd') : k === 'antiAir' ? 'Luftabwehr' : l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
          <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div></div>
          <div><div class="m3-kv">
             <span>Kampfkraft</span><span>${fmtInt(S.hp)} HP</span>
-            <span>Hauptbatterie</span><span>${esc(S.main)}</span>
-            <span>Reichweite</span><span>${String(S.rangeKm).replace('.', ',')} km</span>
-            <span>Nachladen</span><span>${String(S.reload).replace('.', ',')} s · 180° in ${S.traverse180} s</span>
-            <span>Sprenggranate</span><span>${fmtInt(S.heDmg)}</span>
-            <span>Panzergranate</span><span>${fmtInt(S.apDmg)}</span>
+            ${S.mainGuns ? `<span>Geschütz</span><span>${esc(S.main)}</span>
+            <span>Reichweite</span><span>${String(S.rangeKm).replace('.', ',')} km · ${fmtInt(S.heDmg)} Schaden</span>
+            <span>Nachladen</span><span>${String(S.reload).replace('.', ',')} s</span>` : '<span>Geschütz</span><span>keines</span>'}
+            ${S.ssm?.length ? `<span>Seezielflugkörper</span><span>${esc(S.ssm.join(', '))} · ${String(S.ssmRangeKm).replace('.', ',')} km</span>` : ''}
+            ${S.cruise ? `<span>Marschflugkörper</span><span>${esc(S.cruise)}</span>` : ''}
+            ${S.sam?.length ? `<span>Luftabwehr</span><span>${esc(S.sam.join(', '))}</span>` : ''}
+            ${S.ciws ? `<span>Nahbereichsschutz</span><span>${esc(S.ciws)}</span>` : ''}
+            ${S.helo ? `<span>Hubschrauber</span><span>${esc(S.helo)}</span>` : ''}
             ${S.torp ? `<span>Torpedos</span><span>${S.torp.launchers}× ${Math.round(S.torp.tubes / S.torp.launchers)} · ${String(S.torp.rangeKm).replace('.', ',')} km · ${S.torp.speedKn} kn</span>` : ''}
             ${S.secRangeKm ? `<span>Mittelartillerie</span><span>${String(S.secRangeKm).replace('.', ',')} km</span>` : ''}
-            ${S.air ? ['tb', 'db', 'ft'].map(t => `<span>${esc(S.air[t].name)}</span><span>${S.air[t].hangar} im Hangar · Staffel ${S.air[t].squad}</span>`).join('') : ''}
-            ${S.aaKm ? `<span>Flugabwehr</span><span>${String(S.aaKm).replace('.', ',')} km · ${S.aaDps} Schaden/s</span>` : ''}
+            ${S.air ? `<span>Luftgruppe</span><span>${['tb', 'db', 'ft'].reduce((n, t) => n + (S.air[t]?.hangar || 0), 0)} Jets im Hangar</span>` : ''}
+            ${S.radarKm ? `<span>Radar</span><span>${String(S.radarKm).replace('.', ',')} km</span>` : ''}
             <span>Geschwindigkeit</span><span>${String(S.speedKn).replace('.', ',')} kn</span>
             <span>Tarnwert</span><span>${String(S.detectKm).replace('.', ',')} km</span>
-            <span>Gürtelpanzer</span><span>${S.belt} mm</span>
             <span>Abmessungen</span><span>${S.lengthM} × ${String(S.beamM).replace('.', ',')} m</span>
          </div>
          ${prog}</div>` : '';
@@ -897,7 +899,7 @@ export class Menu3D {
             </div>
                ${objs ? `<div class="m3-h" style="margin-top:14px"><span>Einsatzziele</span></div><div class="m3r-obj" style="margin-top:4px">${objs}</div>` : ''}
                ${isOp && medal ? `<div class="m3r-medal">${'◆'.repeat(medal)} ${MEDAL[medal]} verliehen</div>` : ''}
-               ${isOp && m.debrief ? `<div class="m3r-hist"><b>HISTORISCHER HINTERGRUND</b>${esc(m.debrief)}</div>` : ''}</div>
+               ${isOp && m.debrief ? `<div class="m3r-hist"><b>LAGE NACH DEM EINSATZ</b>${esc(m.debrief)}</div>` : ''}</div>
          </div>
          <div class="m3r-foot">
             <div class="m3r-earn"><div class="xp"><b data-count="${res.xp || 0}">0</b><span>ERFAHRUNG</span></div><div class="cr"><b data-count="${res.credits || 0}">0</b><span>MARK</span></div></div>

@@ -520,6 +520,13 @@ export class MissileUi {
       setCls(d.thr, 'hidden', !show);
       if (show) {
          setCls(d.thr, 'hot', u.nMine > 0 && u.minTti < 8);
+         // desktop: sit right under the mission orders instead of on top of the third and fourth line
+         const now = performance.now();
+         if (now - (this.objT || 0) > 500 && !document.body.classList.contains('touch')) {
+            this.objT = now;
+            const ob = document.getElementById('objectives'), bt = ob ? Math.ceil(ob.getBoundingClientRect().bottom) + 8 : 96;
+            if (bt !== this.objBt) { this.objBt = bt; d.thr.style.top = Math.max(96, bt) + 'px'; }
+         }
          setText(d.vn, th.length + (u.nMine ? ' · ' + u.nMine + ' auf dich' : ''));
          const n = Math.min(MAX_ROWS, th.length);
          if (d.rowN !== n) {
