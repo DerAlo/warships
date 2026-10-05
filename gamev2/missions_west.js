@@ -432,7 +432,7 @@ export function westMissions(H) {
                add(w, 'Sachsen', 'player', P(-14300, -12000), 0.6, { name: 'Hessen', ai: { escortId: p.id } }),
                add(w, 'Braunschweig', 'player', P(-17200, -11600), 0.6, { ai: { escortId: p.id } }),
             ];
-            S.cruiser = add(w, 'Slawa', 'enemy', P(11000, 8500), Math.PI + 0.6, { telegraph: 2, hpMult: by(w, 0.5, 1.2, 1.35), ai: { patrol: [P(6500, 10500), P(11500, 7000)] } });
+            S.cruiser = add(w, 'Slawa', 'enemy', P(11000, 8500), Math.PI + 0.6, { telegraph: 2, hpMult: by(w, 0.5, 1.2, 1.05), ai: { patrol: [P(6500, 10500), P(11500, 7000)] } });
             S.boats = [
                add(w, 'BuyanM', 'enemy', P(7500, 5000), Math.PI + 0.6, {}),
                add(w, 'BuyanM', 'enemy', P(4000, 10500), Math.PI + 0.6, {}),
