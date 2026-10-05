@@ -5,6 +5,24 @@
 //   juno       Scharnhorst and Gneisenau run down the carrier Glorious behind her destroyers' smoke
 import { canLaunch, launchSquadron } from './air.js';
 import { orderDepth } from './submarine.js';
+import { SHIPS } from './config.js';
+import { interceptPoint } from './utils.js';
+
+// Pedestal's fast boats: no hull of that size exists, so a destroyer hull is cut down to what an
+// S-boat was. Small and hard to see, 20 mm guns that only matter at point-blank range, and the
+// torpedoes as the one real weapon (four salvoes of two, see _boats). Only values change, never the
+// number of turrets or launchers: a co-op client builds the ship from the stock class.
+const sBoat = () => {
+   const c = SHIPS.Gnevny, m = c.main;
+   return {
+      ...c, speedKn: 40,
+      detect: { ...c.detect, surface: 4800, fire: 5600 },
+      main: { ...m, range: 2400, reload: 2.5, ap: { ...m.ap, dmg: 300 }, he: { ...m.he, dmg: 260, fire: 0.01 } },
+      torp: { ...c.torp, range: 4500, launchers: c.torp.launchers.map(l => ({ ...l, tubes: 2 })) },
+   };
+};
+const BOAT_DMG = 0.7, BOAT_ERR = 0.07;   // torpedo damage (x difficulty) and aiming error (rad) of a boat
+const BOAT = { fire: 2600, clear: 3600, salvoes: 4 };   // m: launch range, distance to open before the next run
 
 export function westMissions(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, inZone, islands } = H;
@@ -12,6 +30,13 @@ export function westMissions(H) {
    const soft = (k) => 1 + (k - 1) * 0.25;   // a quarter of the difficulty step: the bots' gunnery scales as well
    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+   // Take a ship off the map: it keeps its id (squadrons find their base through it) but is in no
+   // list that is drawn, spotted, targeted, hit, counted or steered. Every peer of a co-op game
+   // builds the same world, so the ship is missing from the snapshots on both ends alike.
+   const offMap = (w, ship) => {
+      for (const list of [w.ships, w.roster, w.bots]) { const i = list.indexOf(ship); if (i >= 0) list.splice(i, 1); }
+      return ship;
+   };
 
    return [
       // ------------------------------------------------------------ op: River Plate
@@ -145,8 +170,8 @@ export function westMissions(H) {
 
       // ------------------------------------------------------------ op: Pedestal
       // Escort with three different threats in a row: a submarine ahead of the track, air strikes
-      // from Sicily (flown from a carrier far outside the battle that stands in for the airfields)
-      // and torpedo boats after dark. Only the tanker counts.
+      // from Sicily (their base is a carrier object beyond the map edge that is no ship of the
+      // battle, see offMap) and torpedo boats after dark. Only the tanker counts.
       {
          id: 'pedestal', group: 'ops', name: 'Operation Pedestal', subtitle: 'Straße von Sizilien · 12. August 1942',
          fleet: { own: 'HMS Kenya, HMS Manchester, Ashanti, Pathfinder · Tanker Ohio, 3 Frachter', foe: 'U-Boot Axum · II. Fliegerkorps (Ju 87) · Schnellboote' },
@@ -183,10 +208,11 @@ export function westMissions(H) {
                .map(([cls, name, pos, t]) => add(w, cls, 'player', pos, 0, { name, dmgMult: 0.3, ai: { escortId: S.convoy[t].id } }));
             // the close escort's flak is thin after two days of raids: the player's umbrella matters
             for (const e of S.escort) for (const b of e.aa.bands) b.dps *= 0.55;
-            // II. Fliegerkorps: the Sicilian airfields, played by a carrier parked far to the north
-            S.cv = add(w, 'GrafZeppelin', 'enemy', P(-5200, -11800), 0, { name: 'II. Fliegerkorps (Sizilien)', telegraph: 1, speedKn: 3, ai: { passive: true, patrol: [P(-4700, -11800), P(-5700, -11800)] } });
-            // an airfield is not a ship: out of sight unless somebody runs right into it
-            S.cv.cfg = { ...S.cv.cfg, detect: { ...S.cv.cfg.detect, surface: 2500, fire: 2500 } };
+            // II. Fliegerkorps: the Sicilian airfields. The squadrons need a base to start from and
+            // to return to, so a carrier stands in for it, north of the map and off every list.
+            S.cv = offMap(w, add(w, 'GrafZeppelin', 'enemy', P(-5200, -11800), 0, { name: 'II. Fliegerkorps (Sizilien)', telegraph: 0, ai: { passive: true } }));
+            S.cv.pos.y = -w.arena - 1500;
+            S.cv.speed = 0;
             S.cv.air.ft.max = S.cv.air.ft.hangar = 0;
             S.cv.dmgMult = kd * 0.55;   // scales the bombs and torpedoes of her squadrons
             // Axum waits submerged just off the track
@@ -195,26 +221,35 @@ export function westMissions(H) {
             const strike = (type, targetId) => {
                const cv = S.cv, o = S.ohio;
                if (!cv.alive || !o.alive || w.phase !== 'playing') return;
+               // nobody services the hangar of a ship that is not in the world: the airfield always
+               // has the next squadron ready
                cv.air.deckT = 0;
+               cv.air[type].hangar = Math.max(cv.air[type].hangar, cv.cfg.air[type].squad);
                if (canLaunch(w, cv, type)) launchSquadron(w, cv, type, { kind: 'strike', targetId, pos: { x: o.pos.x + 2200, y: o.pos.y } });
             };
             const wave = (t, text, types) => {
                types.forEach(([type, onOhio], i) => later(S, t + i * 7, () => strike(type, onOhio ? S.ohio.id : null)));
-               later(S, t + 38, () => { if (S.ohio.alive) radio(w, 'Radar HMS Kenya', text, 'warn'); });
+               later(S, t + 54, () => { if (S.ohio.alive) radio(w, 'Radar HMS Kenya', text, 'warn'); });
             };
-            wave(50, 'Flugzeuge aus Nord, zwanzig Meilen – Stukas! Flak klar, dicht an den Tanker!', [['db', true]]);
-            wave(170, 'Zweite Welle: Torpedoflieger tief über dem Wasser, dahinter Stukas!', [['tb', false], ['db', true]]);
+            wave(34, 'Flugzeuge aus Nord, zwanzig Meilen – Stukas! Flak klar, dicht an den Tanker!', [['db', true]]);
+            wave(154, 'Zweite Welle: Torpedoflieger tief über dem Wasser, dahinter Stukas!', [['tb', false], ['db', true]]);
             // after dark: fast boats from behind Pantelleria and from under Cape Bon
             later(S, 270, () => {
                if (!S.ohio.alive) return;
                radio(w, 'HMS Ashanti', 'Es wird dunkel. Motorengeräusche an Backbord voraus – Schnellboote!', 'warn');
                const o = S.ohio;
                const boats = [['MS 16', 5200, -5200], ['MS 22', 6000, -4300], ['S 30', 5400, 5600], ['S 36', 6400, 5000]];
-               S.boats = boats.slice(0, 4).map(([name, dx, dy]) =>
-                  add(w, 'Gnevny', 'enemy', P(Math.min(o.pos.x + dx, 11500), o.pos.y + dy), Math.PI, {
-                     name, nation: 'it', telegraph: 4, hpMult: 0.36, dmgMult: kd * 0.45,
-                     ai: { huntId: o.id, press: true, aggro: 1.6 },
-                  }));
+               const cfg = sBoat();
+               // unlike the air raids these do not sharpen by themselves, while the escort's gunnery does
+               const bk = key === 'hard' ? 1.2 : key === 'easy' ? 0.85 : 1;
+               S.boats = boats.map(([name, dx, dy]) => {
+                  const b = add(w, 'Gnevny', 'enemy', P(Math.min(o.pos.x + dx, 11500), o.pos.y + dy), Math.PI, {
+                     name, nation: 'it', telegraph: 4, hpMult: 1.2 * bk, dmgMult: BOAT_DMG * bk, cfg,
+                     ai: { passive: true, route: [P(o.pos.x, o.pos.y)], routeIdx: 0 },   // steered and fought by _boats
+                  });
+                  b.ai.boat = { st: 'in', left: BOAT.salvoes, t: w.time, home: { x: b.pos.x, y: b.pos.y } };
+                  return b;
+               });
             });
             later(S, 3, () => radio(w, 'Konteradmiral Burrough', 'Wir stehen in der Enge. Kenya übernimmt das Nahgeleit der Ohio – ohne den Tanker war alles umsonst.'));
             later(S, 20, () => { if (S.sub.alive) radio(w, 'Asdic HMS Ashanti', 'Kontakt voraus, Peilung Steuerbord 20 – U-Boot auf Sehrohrtiefe! Wasserbomben klar (G).', 'warn'); });
@@ -228,6 +263,7 @@ export function westMissions(H) {
          update(w, dt, S) {
             if (w.phase !== 'playing') return;
             const o = S.ohio;
+            if (S.boats) this._boats(w, S);
             for (const t of S.freighters) {
                if (t.alive && inZone(t, S.exit)) { w.removeShip(t, 'arrived'); S.arrived++; w.score.player = S.arrived; }
             }
@@ -250,6 +286,60 @@ export function westMissions(H) {
                radio(w, 'Malta', 'Tanker in Sicht! Die ganze Insel steht an den Kaimauern.');
                w.end(true, 'Die Ohio läuft nach Malta – der Treibstoff hält die Insel im Krieg.');
             }
+         },
+         // The fast boats' attack: run in at full speed, launch one salvo from short range, turn away
+         // and open the distance, come back while salvoes are left, then make for home. Their guns only
+         // speak at point-blank range.
+         _boats(w, S) {
+            const lim = w.arena - 900, cl = (v) => Math.max(-lim, Math.min(lim, v));
+            const go = (b, x, y) => { b.ai.route = [{ x: cl(x), y: cl(y) }]; b.ai.routeIdx = 0; };
+            S.boats.forEach((b, i) => {
+               if (!b.alive) return;
+               const st = b.ai.boat;
+               // two boats go for the tanker, the others first for whatever ship of the convoy is closest
+               let tgt = S.ohio;
+               if (st.st === 'out') tgt = w.shipById(st.from) || tgt;   // open the range to the ship just attacked
+               else if (i % 2 && st.left === BOAT.salvoes) for (const c of S.convoy) if (c.alive && dist(c.pos, b.pos) < dist(tgt.pos, b.pos)) tgt = c;
+               const d = dist(b.pos, tgt.pos), brgT = Math.atan2(tgt.pos.y - b.pos.y, tgt.pos.x - b.pos.x);
+               if (st.st === 'in') {
+                  const tc = b.cfg.torp;
+                  const ip = d <= BOAT.fire ? interceptPoint(b.pos, tc.speed, tgt.pos, tgt.vel) : null;
+                  if (ip && ip.t * tc.speed < tc.range * 0.9) {
+                     const brg = Math.atan2(ip.y - b.pos.y, ip.x - b.pos.x) + (w.rng() - 0.5) * BOAT_ERR;
+                     if (b.torpLauncherFor(brg)) {
+                        b.setTorpSpread('narrow');
+                        if (b.fireTorpedoes(w, brg) > 0) { st.left--; st.st = 'out'; st.t = w.time; st.from = tgt.id; b.useConsumable(w, 'smoke'); }
+                     } else {
+                        // swing the tubes on: they train around the beam
+                        const want = brg - Math.sign(Math.sin(brg - b.heading) || 1) * 1.2;
+                        go(b, b.pos.x + Math.cos(want) * 1500, b.pos.y + Math.sin(want) * 1500);
+                     }
+                  } else {
+                     const lead = d / (b.maxSpeed || 20) * 0.7;
+                     go(b, tgt.pos.x + tgt.vel.x * lead, tgt.pos.y + tgt.vel.y * lead);
+                  }
+                  if (st.st === 'in' && d < BOAT.fire && w.time - st.t > 150) { st.st = 'out'; st.t = w.time; st.from = tgt.id; }   // never got the tubes to bear
+               } else if (st.st === 'out') {
+                  go(b, b.pos.x - Math.cos(brgT) * 3000, b.pos.y - Math.sin(brgT) * 3000);
+                  if (d > BOAT.clear || w.time - st.t > 50) { st.st = st.left > 0 ? 'in' : 'home'; st.t = w.time; }
+               } else {
+                  go(b, st.home.x, st.home.y);
+                  if (d > 7000 || dist(b.pos, st.home) < 900) {
+                     w.removeShip(b, 'retreated');
+                     if (S.boats.every(q => !q.alive)) radio(w, 'HMS Manchester', 'Die Schnellboote laufen ab – sie haben sich verschossen. Der Weg nach Malta ist frei!');
+                     return;
+                  }
+               }
+               // 20 mm guns: only against what is right in front of the bow
+               let near = null, nd = b.cfg.main.range;
+               for (const e of w.ships) {
+                  if (!e.alive || e.side === b.side || !w.canSee(b.side, e) || e.depth > 0) continue;
+                  const ed = dist(e.pos, b.pos);
+                  if (ed < nd) { nd = ed; near = e; }
+               }
+               if (near) b.fireMain(w, { x: near.pos.x + near.vel.x * 1.2, y: near.pos.y + near.vel.y * 1.2 });
+               else b.aimPoint = null;
+            });
          },
          onSink(w, ship, killer, S) {
             if (ship === S.ohio) {
