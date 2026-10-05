@@ -72,6 +72,18 @@ export class Ship {
       this.lastSeen = null;           // enemy: last position seen by the player team {x, y, heading, t}
       this.spottedByPlayer = false;
       this.lastMainFire = -999;
+      // ---- V2 sensors (sensors.js) ----
+      this.radarOn = opts.radarOn ?? !!(cfg.radar && cfg.hull.type !== 'SS');
+      this.jamming = false;           // jammer consumable active
+      this.targetable = false;        // the other side holds a fire-control track
+      this.esmSeen = null;            // the other side's ESM fix on this ship's emissions
+      this.seekerWarn = null;         // ESM warning: a radar seeker is locked on / sweeping this ship
+      // ---- V2 missiles (missile.js) ----
+      this.mag = { ...(cfg.mag || {}) };   // missile type -> rounds left
+      this.samDoctrine = opts.samDoctrine || 'free';   // 'free' | 'self' | 'hold'
+      this.samPriority = null;        // id of a missile / squadron the SAMs take first
+      this.ssmSel = 0;                // index into cfg.weapons.ssm the player has selected
+      this.lastSsmFire = -999;
       // ---- weapons ----
       const m = cfg.main;
       this.ammo = m.he && !(cfg.hull.type === 'BB' && m.ap) ? 'HE' : (m.ap ? 'AP' : 'HE');
@@ -336,6 +348,7 @@ export class Ship {
             if (c.t <= 0) { c.active = false; c.t = 0; c.cd = c.cdMax; }
          } else if (c.cd > 0) c.cd = Math.max(0, c.cd - dt);
       }
+      this.jamming = this.consumableActive('jammer');
       // damage over time
       if (this.fires.length || this.floods.length) {
          for (const f of this.fires) {

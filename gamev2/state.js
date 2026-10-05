@@ -9,6 +9,7 @@ import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
 import { updateSubs, hullContact, PERI_PROX, HYDRO_SUB } from './submarine.js';
 import { updateAir, airSpots, airSpotMask } from './air.js';
+import { radarHolds, sitesSee, updateEsm, updateMissileTracks } from './sensors.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -62,6 +63,10 @@ export class World {
       this.planes = [];         // legacy (unused)
       this.squadrons = [];      // airborne squadrons (air.js)
       this.bombs = [];          // falling bombs, pooled (alive flag), see air.js
+      this.missiles = [];       // V2: missiles in flight (missile.js), plain data
+      this.sites = [];          // V2: land positions (sites.js), plain data
+      this.decoys = [];         // V2: chaff clouds (missile.js)
+      this.helos = [];          // V2: ship helicopters (helo.js)
       this.events = [];
       this._eventSeq = 0;
       this.obstacles = [];
@@ -357,29 +362,35 @@ export class World {
       const ships = this.ships, prox2 = WORLD.PROXIMITY * WORLD.PROXIMITY;
       for (const T of ships) {
          if (!T.alive) continue;
-         let seen = false, byPlayer = false, mask = 0;
+         let seen = false, byPlayer = false, mask = 0, fc = false;
          // submarines (submarine.js): a deep boat is never seen and sees nothing itself; at periscope
          // depth the proximity rule shrinks and radar finds nothing, the hydrophone still does
          const td = T.depth, tprox2 = td === 1 ? PERI_PROX * PERI_PROX : prox2;
          for (const O of td === 2 ? NONE : ships) {
             if (!O.alive || O.side === T.side || O.depth === 2) continue;
-            if (seen && !O.isPlayer && !O.human) continue;
+            if (seen && fc && !O.isPlayer && !O.human) continue;
             const d2 = dist2(O.pos, T.pos);
-            let sees = d2 < tprox2;
+            let sees = d2 < tprox2, q = sees ? 2 : 0;
             if (!sees) {
                const radar = td === 0 && O.consumableActive('radar') ? O.consumable('radar').range : 0;
                const hydro = O.consumableActive('hydro') ? O.consumable('hydro').range * (td === 1 ? HYDRO_SUB : 1) : 0;
                if (d2 < Math.max(radar, hydro) ** 2) sees = true;
                else if (T.detectRange > 0 && d2 < T.detectRange * T.detectRange) {
                   sees = !this.losBlocked(O.pos, T.pos) && (T.inSmoke || !this.smokeBlocks(O.pos, T.pos));
+                  if (sees) q = 2;
                }
+               // V2 radar (sensors.js): reaches far beyond the eye, but only with the set switched on
+               if (!q) { q = radarHolds(this, O, T, d2); if (q) sees = true; }
             }
+            if (q === 2) fc = true;
             if (sees) { seen = true; if (O.isPlayer) byPlayer = true; else if (O.human) mask |= 1 << O.slot; }
          }
          // aircraft overhead (air.js): 2 = a squadron of the player's own carrier
          if ((!byPlayer || this.net) && this.squadrons.length) { const a = airSpots(this, T); if (a) { seen = true; if (a === 2) byPlayer = true; mask |= airSpotMask; } }
+         if (this.sites.length && !fc) { const q = sitesSee(this, T); if (q) { seen = true; if (q === 2) fc = true; } }
          const was = T.detected;
          T.detected = seen;
+         T.targetable = seen && fc;
          T.spottedByPlayer = byPlayer;
          T.spotMask = mask;             // net game: bit per remote human slot that sees T itself
          T.spotted = T.side === 'player' ? true : seen;
@@ -407,6 +418,8 @@ export class World {
          t.visibleToOpp = vis;
          t.spotted = t.side === 'player' || vis;
       }
+      updateEsm(this);
+      updateMissileTracks(this);
    }
 
    _updateCaps(dt) {
