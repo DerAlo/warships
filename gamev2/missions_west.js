@@ -503,7 +503,7 @@ export function westMissions(H) {
          id: 'giuk', group: 'ops', name: 'Nordatlantik – GIUK-Lücke', subtitle: 'U-Jagd · Bordhubschrauber, Tauchsonar, Leichtgewichtstorpedos',
          briefing: 'Drei Versorger laufen durch die Lücke zwischen Island und Schottland nach Osten. Mehrere konventionelle U-Boote lauern am Kurs. ' +
             'Ihr Rumpfsonar reicht nur wenige Kilometer – der Bordhubschrauber setzt sein Tauchsonar weit voraus und wirft selbst Leichtgewichtstorpedos. ' +
-            'Schicken Sie ihn dorthin, wo ein Kontakt gemeldet wird, bleiben Sie zwischen U-Boot und Geleit und halten Sie Täuschkörper gegen Torpedos bereit. ' +
+            'Schicken Sie ihn dorthin, wo ein Kontakt gemeldet wird, und bekämpfen Sie das Boot, bevor das Geleit in seine Torpedoreichweite läuft. ' +
             'Mindestens zwei Versorger müssen durchkommen.',
          debrief: 'Das Geleit ist durch. Ein U-Boot, das geortet ist, hat seinen größten Vorteil verloren – der Hubschrauber findet es, bevor es in Schussweite ist.',
          fleet: { own: 'U-Jagd-Schiff mit Bordhubschrauber, 1 Korvette (ohne U-Jagd-Waffen), 3 Versorger', foe: '3–5 konventionelle U-Boote' },
