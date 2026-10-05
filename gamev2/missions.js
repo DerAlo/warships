@@ -1,0 +1,1118 @@
+// game3d/missions.js — singleplayer missions: maps (islands), environment, teams, objectives,
+// scripted reinforcements and win/lose logic. MISSIONS is pure data for the menu; setupMission /
+// updateMission are called by World. Mission text is German (UI), code English.
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC } from './config.js';
+import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
+import { extraMissions } from './missions_extra.js';
+import { pacificMissions } from './missions_pacific.js';
+import { westMissions } from './missions_west.js';
+import { canLaunch, launchSquadron } from './air.js';
+
+// ---------------------------------------------------------------- names
+const POOLS = {
+   Bismarck: ['Tirpitz', 'Bismarck'],
+   Scharnhorst: ['Gneisenau', 'Scharnhorst'],
+   Hipper: ['Prinz Eugen', 'Admiral Hipper', 'Blücher', 'Seydlitz'],
+   Nuernberg: ['Leipzig', 'Nürnberg', 'Köln', 'Karlsruhe', 'Emden'],
+   Z23: ['Z 24', 'Z 25', 'Z 26', 'Z 28', 'Z 29', 'Z 30', 'Hans Lody', 'Karl Galster', 'Erich Steinbrinck', 'Friedrich Ihn', 'Z 23'],
+   KGV: ['King George V', 'Prince of Wales', 'Duke of York'],
+   Rodney: ['HMS Rodney', 'HMS Nelson'],
+   Hood: ['HMS Hood'],
+   Norfolk: ['HMS Norfolk', 'HMS Suffolk', 'HMS Dorsetshire', 'HMS Devonshire', 'HMS Sussex'],
+   Fiji: ['HMS Fiji', 'HMS Kenya', 'HMS Mauritius', 'HMS Nigeria', 'HMS Sheffield'],
+   Jervis: ['HMS Jervis', 'HMS Javelin', 'HMS Janus', 'HMS Cossack', 'HMS Maori', 'HMS Zulu', 'HMS Sikh', 'HMS Kelly', 'HMS Kashmir', 'HMS Tartar'],
+   Transport_player: ['Dampfer Ostmark', 'Dampfer Weser', 'Dampfer Elbe', 'Dampfer Oder', 'Dampfer Ems'],
+   Transport_enemy: ['SS Clan Fraser', 'SS Empire Star', 'SS Port Hardy', 'SS Ohio Star', 'SS City of Leeds', 'SS Baron Kinnaird', 'Zielschiff Hulk'],
+};
+function nextName(w, cls, side) {
+   const S = w._script;
+   const pool = POOLS[cls === 'Transport' ? 'Transport_' + side : cls] || SHIPS[cls].sisters || [SHIPS[cls].name];
+   for (const n of pool) if (!S.used.has(n)) { S.used.add(n); return n; }
+   const n = pool[0] + ' ' + (++S.dup + 1);
+   S.used.add(n);
+   return n;
+}
+
+// ---------------------------------------------------------------- helpers
+const P = (x, y) => ({ x, y });
+// Push a spawn / waypoint position out of any island (with margin).
+function safePos(w, p, margin = 1.3) {
+   const lim = w.arena - 600;
+   const ok = q => Math.abs(q.x) <= lim && Math.abs(q.y) <= lim && w.obstacles.every(o => obstacleT(o, q) >= margin);
+   const q = { x: p.x, y: p.y };
+   for (let k = 0; k < 3; k++) {
+      for (const o of w.obstacles) {
+         if (obstacleT(o, q) >= margin) continue;
+         const a = Math.atan2(q.y - o.c.y, q.x - o.c.x);
+         const r = obstacleRadiusAt(o, a) * margin + 150;
+         q.x = o.c.x + Math.cos(a) * r; q.y = o.c.y + Math.sin(a) * r;
+      }
+   }
+   q.x = Math.max(-lim, Math.min(lim, q.x)); q.y = Math.max(-lim, Math.min(lim, q.y));
+   if (ok(q)) return q;
+   // the clamp put it back on land (a coast running into the arena wall, e.g. a reinforcement
+   // slid into a corner): nearest open water on growing rings, map-centre side first
+   for (let r = 300; r <= 9000; r += 300) {
+      let best = null, bd = Infinity;
+      for (let k = 0; k < 32; k++) {
+         const a = k * TAU / 32, c = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r };
+         const d = c.x * c.x + c.y * c.y;
+         if (d < bd && ok(c)) { bd = d; best = c; }
+      }
+      if (best) return best;
+   }
+   return q;
+}
+// Reinforcements (minDist): slide the spawn point away from the nearest opposing ship so nothing
+// materialises inside torpedo range of the player.
+function keepAway(w, side, pos, minDist) {
+   const q = { x: pos.x, y: pos.y }, lim = w.arena - 700;
+   for (let k = 0; k < 4; k++) {
+      let near = null, nd = Infinity;
+      for (const s of w.ships) {
+         if (!s.alive || s.side === side) continue;
+         const d = Math.hypot(s.pos.x - q.x, s.pos.y - q.y);
+         if (d < nd) { nd = d; near = s; }
+      }
+      if (!near || nd >= minDist) break;
+      let dx = q.x - near.pos.x, dy = q.y - near.pos.y;
+      const l = Math.hypot(dx, dy) || 1;
+      dx /= l; dy /= l;
+      q.x = Math.max(-lim, Math.min(lim, near.pos.x + dx * minDist));
+      q.y = Math.max(-lim, Math.min(lim, near.pos.y + dy * minDist));
+      // squeezed against the border: swing sideways along it
+      if (Math.hypot(q.x - near.pos.x, q.y - near.pos.y) < minDist * 0.9) { q.x = Math.max(-lim, Math.min(lim, q.x - dy * minDist * 0.6)); q.y = Math.max(-lim, Math.min(lim, q.y + dx * minDist * 0.6)); }
+   }
+   return q;
+}
+function add(w, cls, side, pos, heading, opts = {}) {
+   const ai = { ...(opts.ai || {}) };
+   if (opts.minDist) {
+      pos = keepAway(w, side, pos, opts.minDist);
+      // face the enemy centre of mass on arrival
+      const foes = w.ships.filter(s => s.alive && s.side !== side);
+      if (foes.length) {
+         const cx = foes.reduce((a, s) => a + s.pos.x, 0) / foes.length, cy = foes.reduce((a, s) => a + s.pos.y, 0) / foes.length;
+         heading = Math.atan2(cy - pos.y, cx - pos.x);
+      }
+   }
+   const ship = w.spawn(cls, side, safePos(w, pos), heading, {
+      telegraph: opts.isPlayer ? 2 : 3, ...opts, ai,
+      name: opts.name || (opts.isPlayer ? SHIPS[cls].name : nextName(w, cls, side)),
+   });
+   w._script.used.add(ship.name);
+   return ship;
+}
+function objective(w, id, text, opts = {}) {
+   const o = { id, text, state: 'active', optional: !!opts.optional, progress: opts.progress || null };
+   w.mission.objectives.push(o);
+   return o;
+}
+function setObj(w, id, state, text) {
+   const o = w.mission.objectives.find(x => x.id === id);
+   if (!o || o.state === state) return;
+   if (text) o.text = text;
+   o.state = state;
+   w.pushEvent('objective', { text: (state === 'done' ? '✔ ' : state === 'failed' ? '✘ ' : '') + o.text, objId: id, state });
+}
+function objText(w, id, text) {
+   const o = w.mission.objectives.find(x => x.id === id);
+   if (o) o.text = text;
+}
+const combatants = (w, side) => w.ships.filter(s => s.alive && s.side === side && s.type !== 'TR');
+const later = (S, t, fn) => S.timers.push({ t, fn });
+// Operations: radio traffic = mission message with the sender in front (HUD banner + radio chirp)
+function radio(w, from, text, level = 'info') { w.message(`📻 ${from}: ${text}`, level); }
+// Mission area drawn on the minimap ('goal' green, 'danger' red); returns the zone for checks.
+function zone(w, x, y, r, label, kind = 'goal') {
+   const z = { x, y, r, label, kind };
+   w.mission.zones.push(z);
+   return z;
+}
+const inZone = (s, z) => dist2(s.pos, z) < z.r * z.r;
+function teamHPFrac(w, side) {
+   let hp = 0, max = 0;
+   for (const s of w.roster) if (s.side === side && s.type !== 'TR') { max += s.maxHP; hp += s.alive ? s.hp : 0; }
+   return max ? hp / max : 0;
+}
+
+// Standard 7-ship team: slot offsets are relative to the team anchor, facing +x.
+const DE_TEAM = [['Bismarck', 0, -700], ['Scharnhorst', -300, 700], ['Hipper', 500, -2500], ['Hipper', 500, 2500],
+   ['Nuernberg', 700, -4000], ['Z23', 1600, -1600], ['Z23', 1600, 1600]];
+const UK_TEAM = [['KGV', 0, -700], ['Rodney', -300, 700], ['Norfolk', 500, -2500], ['Norfolk', 500, 2500],
+   ['Fiji', 700, 4000], ['Jervis', 1600, -1600], ['Jervis', 1600, 1600]];
+// Random-battle line-ups: each slot draws a comparable class from config.BOT_POOLS (seeded by the
+// world seed and the slot index only, so both teams roll the same weight class and the sim's own
+// rng stream stays untouched). A player sailing for the other bloc (Allied ship in the Axis
+// line-up) swaps the two fleets: the player's team is always called first.
+const SUB_CHANCE = 0.4;
+// Carriers (missions flagged `carriers`): CV_CHANCE of the battles put one carrier on each side in
+// place of the light cruiser, set well back. Never in co-op worlds (the net codec carries no planes).
+const CV_CHANCE = 0.3;
+function rollFleet(w, slots, playerCls) {
+   const S = w._script;
+   if (playerCls) S.swap = (NATION_BLOC[SHIPS[playerCls].hull.nation] || 'axis') !== (BOT_POOLS.axis[slots[0][0]] ? 'axis' : 'allies');
+   return slots.map(([cls, fx, fy], i) => {
+      const base = S.swap && BOT_MIRROR[cls] ? BOT_MIRROR[cls] : cls;
+      const pool = BOT_POOLS.axis[base] || BOT_POOLS.allies[base];
+      if (!pool) return [base, fx, fy];
+      let h = (Math.imul((w.seed >>> 0) ^ 0x9e3779b9, 2654435761) + Math.imul(i + 1, 40503)) >>> 0;
+      h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13;
+      return [pool[(h >>> 0) % pool.length], fx, fy];
+   });
+}
+// Spawn a team at anchor facing `heading`; `playerCls` takes the slot of the first matching class
+// (or the first slot of the same type, or slot 0).
+function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({})) {
+   const axis = !!BOT_POOLS.axis[slots[0][0]];
+   slots = rollFleet(w, slots, playerCls);
+   // submarines: at most one boat per side, in place of the last destroyer. The player's team is
+   // rolled first: a player boat always meets an enemy boat, otherwise SUB_CHANCE of the battles
+   // (seeded like the fleet roll) have one on each side.
+   const S = w._script, pSub = !!playerCls && SHIPS[playerCls].hull.type === 'SS';
+   let h = (Math.imul((w.seed >>> 0) ^ 0x51ed270b, 2246822519) >>> 0);
+   h ^= h >>> 15; h = Math.imul(h, 2654435761) >>> 0; h ^= h >>> 13;
+   if (S.subs === undefined) S.subs = pSub || (h >>> 0) % 100 < SUB_CHANCE * 100;
+   let dd = -1;
+   slots.forEach((s, i) => { if (SHIPS[s[0]].hull.type === 'DD') dd = i; });
+   let pIdx = -1;
+   if (S.subs && dd >= 0) {
+      if (pSub) pIdx = dd;
+      else {
+         const pool = BOT_SUBS[axis !== !!S.swap ? 'axis' : 'allies'];
+         slots[dd] = [pool[(h >>> 8) % pool.length], slots[dd][1], slots[dd][2]];
+      }
+   }
+   const pCV = !!playerCls && SHIPS[playerCls].hull.type === 'CV';
+   if (S.cvs === undefined) {
+      let hc = (Math.imul((w.seed >>> 0) ^ 0x2c1b3c6d, 2654435761) >>> 0);
+      hc ^= hc >>> 15; hc = Math.imul(hc, 2246822519) >>> 0; hc ^= hc >>> 13;
+      S.cvHash = hc >>> 0;
+      S.cvs = !!S.def?.carriers && (pCV || S.cvHash % 100 < CV_CHANCE * 100);
+   }
+   let cl = -1;
+   slots.forEach((s, i) => { if (SHIPS[s[0]].hull.type === 'CL') cl = i; });
+   if (S.cvs && cl >= 0) {
+      const pool = BOT_CVS[axis !== !!S.swap ? 'axis' : 'allies'];
+      slots[cl] = [pCV ? playerCls : pool[(S.cvHash >>> 8) % pool.length], -2600, slots[cl][2] * 0.3];
+      if (pCV) pIdx = cl;
+   }
+   if (playerCls && pIdx < 0) {
+      pIdx = slots.findIndex(s => s[0] === playerCls);
+      if (pIdx < 0) pIdx = slots.findIndex(s => SHIPS[s[0]].hull.type === SHIPS[playerCls].hull.type);
+      if (pIdx < 0) pIdx = 0;
+   }
+   const c = Math.cos(heading), s = Math.sin(heading);
+   const out = [];
+   slots.forEach(([cls, fx, fy], i) => {
+      const pos = P(anchor.x + fx * c - fy * s, anchor.y + fx * s + fy * c);
+      const isP = i === pIdx;
+      out.push(add(w, isP ? playerCls : cls, side, pos, heading, isP ? { isPlayer: true } : { ai: aiFor(cls, i) }));
+   });
+   return out;
+}
+function pickShip(def, shipKey) {
+   const allowed = def.playableShips || PLAYABLE;
+   return allowed.includes(shipKey) ? shipKey : (def.recommendedShip || allowed[0]);
+}
+function islands(w, list) {
+   const A = w.arena - 60;
+   for (const o of list) {
+      const isl = w.addIsland(o);
+      // a sub-1.3 km channel between a coast and the arena wall is a dead end the AI (and players)
+      // wedge into: push such islands onto the wall so the coast closes the gap instead
+      let gx = Infinity, gy = Infinity;
+      for (const l of isl.lobes) {
+         gx = Math.min(gx, A - Math.abs(isl.c.x + Math.cos(l.a) * l.r));
+         gy = Math.min(gy, A - Math.abs(isl.c.y + Math.sin(l.a) * l.r));
+      }
+      if (gx > 0 && gx < 1300) isl.c.x += Math.sign(isl.c.x) * (gx + 300);
+      if (gy > 0 && gy < 1300) isl.c.y += Math.sign(isl.c.y) * (gy + 300);
+   }
+}
+// Deterministic archipelago filler: n islands in a box, keeping clear of `keepOut` circles.
+function scatter(w, seed, n, box, rMin, rMax, keepOut = []) {
+   let s = seed >>> 0;
+   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+   let placed = 0, guard = 0;
+   while (placed < n && guard++ < n * 40) {
+      const r = rMin + rnd() * (rMax - rMin);
+      const c = P(box[0] + rnd() * (box[2] - box[0]), box[1] + rnd() * (box[3] - box[1]));
+      if (keepOut.some(k => Math.hypot(c.x - k.x, c.y - k.y) < k.r + r * 1.6)) continue;
+      if (w.obstacles.some(o => Math.hypot(c.x - o.c.x, c.y - o.c.y) < (o.rMax || o.r) + r * 1.8 + 500)) continue;
+      w.addIsland({ c, r, height: 70 + rnd() * 260, seed: seed * 31 + placed, lobes: 3 + ((rnd() * 5) | 0),
+         elong: 1 + rnd() * 1.4, rot: rnd() * TAU, rough: 0.35 + rnd() * 0.5 });
+      placed++;
+   }
+}
+
+// ---------------------------------------------------------------- mission definitions
+const DEFS = [
+   // ------------------------------------------------------------ 1. training
+   {
+      id: 'training', name: 'Übungsgefecht', subtitle: 'Schießübung in der Danziger Bucht',
+      briefing: 'Kommandant, willkommen an Bord. Drei ausgemusterte Frachter dienen heute als Zielschiffe – ' +
+         'sie liegen 9 bis 12 km östlich. Bringen Sie Ihr Schiff auf Fahrt, richten Sie die Türme aus und versenken Sie die Ziele. ' +
+         'Achten Sie auf die Flugzeit Ihrer Granaten und halten Sie entsprechend vor. Gerüchten zufolge operieren feindliche Zerstörer in der Nähe.',
+      env: { time: 'day', weather: 'clear' }, type: 'training', playableShips: null, recommendedShip: 'Hipper',
+      arena: 9000, timeLimit: 15 * 60, stars: 1,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(0, 8300), r: 2300, height: 180, seed: 5, lobes: 6, elong: 3, rot: 0, rough: 0.4, name: 'Hela' },
+            { c: P(1500, -2600), r: 700, height: 150, seed: 9, lobes: 4, rough: 0.6 },
+            { c: P(-3200, -6800), r: 1100, height: 240, seed: 13, lobes: 5, elong: 1.6, rot: 0.8 },
+         ]);
+         add(w, shipKey, 'player', P(-6500, 0), 0, { isPlayer: true });
+         const tgt = { passive: true, patrolSpeed: 1 };
+         add(w, 'Transport', 'enemy', P(3200, -3800), Math.PI / 2, { telegraph: 1, speedKn: 8, ai: { ...tgt, patrol: [P(3200, -3800), P(3600, 1500)] } });
+         add(w, 'Transport', 'enemy', P(5200, 600), -Math.PI / 2, { telegraph: 1, speedKn: 8, ai: { ...tgt, patrol: [P(5200, 600), P(5000, -4200)] } });
+         add(w, 'Transport', 'enemy', P(4200, 3600), 0, { telegraph: 1, speedKn: 8, ai: { ...tgt, patrol: [P(4200, 3600), P(6800, 3200)] } });
+         objective(w, 'targets', 'Versenken Sie die Zielschiffe (0/3)');
+         w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
+         w.message('Übung beginnt. Zielschiffe liegen östlich – Feuer frei!');
+         w._script.phase = 1;
+      },
+      onSink(w, ship, killer, S) {
+         if (ship.side !== 'enemy') return;
+         w.score.player++;
+         if (S.phase === 1) {
+            const n = S.def._count(w, 'Transport');
+            objText(w, 'targets', `Versenken Sie die Zielschiffe (${n}/3)`);
+            if (n >= 3) {
+               setObj(w, 'targets', 'done');
+               S.phase = 2;
+               later(S, w.time + 6, () => {
+                  w.message('Alarm! Britische Zerstörer greifen aus Osten an. Z 25 kommt zur Unterstützung.', 'warn');
+                  add(w, 'Jervis', 'enemy', P(8200, -4500), Math.PI * 0.9, { minDist: 10000 });
+                  add(w, 'Jervis', 'enemy', P(8200, 4200), -Math.PI * 0.9, { minDist: 10000 });
+                  add(w, 'Z23', 'player', P(-7000, 1500), 0, { name: 'Z 25' });
+                  objective(w, 'dds', 'Wehren Sie den Zerstörerangriff ab (0/2)');
+                  w.score = { kind: 'count', player: 0, enemy: 0, target: 2 };
+               });
+            }
+         } else if (S.phase === 2 && ship.type === 'DD') {
+            const n = S.def._count(w, 'Jervis');
+            objText(w, 'dds', `Wehren Sie den Zerstörerangriff ab (${n}/2)`);
+            if (n >= 2) { setObj(w, 'dds', 'done'); w.end(true, 'Übung erfolgreich abgeschlossen.'); }
+         }
+      },
+      _count: (w, cls) => w.roster.filter(s => s.side === 'enemy' && s.cls === cls && !s.alive).length,
+      timeout(w) { w.end(false, 'Die Übungszeit ist abgelaufen.'); },
+   },
+
+   // ------------------------------------------------------------ 2. standard battle
+   {
+      id: 'standard', name: 'Begegnungsgefecht', subtitle: 'Nordkap-Schären · 7 gegen 7',
+      briefing: 'Ein britischer Kampfverband wurde vor dem Nordkap gemeldet. Unser Verband aus zwei Schlachtschiffen, ' +
+         'drei Kreuzern und zwei Zerstörern stellt ihn zwischen den Schären. Vernichten Sie alle feindlichen Schiffe. ' +
+         'Nutzen Sie die Inseln als Deckung und bleiben Sie in der Nähe Ihrer Verbündeten.',
+      env: { time: 'day', weather: 'overcast', front: { at: 150, dur: 50, to: 'storm' } }, type: 'annihilation', carriers: true, playableShips: null, recommendedShip: 'Bismarck',
+      arena: 12000, timeLimit: 20 * 60, stars: 2,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(0, 0), r: 1300, height: 240, seed: 11, lobes: 6, rough: 0.6, peaks: [{ x: -250, y: 150, h: 330, r: 600 }] },
+            { c: P(-2600, -5200), r: 1100, height: 190, seed: 23, lobes: 5, elong: 1.8, rot: 0.5 },
+            { c: P(2800, 5000), r: 1150, height: 200, seed: 37, lobes: 5, elong: 1.6, rot: -0.4 },
+            { c: P(4300, -2300), r: 620, height: 120, seed: 41, lobes: 4 },
+            { c: P(-4300, 2600), r: 680, height: 140, seed: 53, lobes: 4 },
+            { c: P(600, -9900), r: 1900, height: 380, seed: 61, lobes: 6, elong: 2.2, rot: 0.1, rough: 0.7 },
+            { c: P(-900, 9800), r: 1600, height: 300, seed: 71, lobes: 6, elong: 2, rot: -0.1, rough: 0.7 },
+            { c: P(7400, 6200), r: 750, height: 160, seed: 83, lobes: 4 },
+            { c: P(-7400, -6000), r: 780, height: 170, seed: 89, lobes: 4 },
+         ]);
+         spawnTeam(w, 'player', DE_TEAM, P(-9200, 0), 0, shipKey);
+         spawnTeam(w, 'enemy', UK_TEAM, P(9200, 0), Math.PI, null);
+         objective(w, 'kill', 'Vernichten Sie alle feindlichen Schiffe (0/7)');
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 7 };
+      },
+      onSink(w, ship, killer, S) { annihilationSink(w, ship, 'kill', 'Vernichten Sie alle feindlichen Schiffe'); },
+      timeout(w) { timeoutByHP(w); },
+   },
+
+   // ------------------------------------------------------------ 3. domination
+   {
+      id: 'domination', name: 'Seeraumkontrolle', subtitle: 'Drei Punkte · Erster auf 1000',
+      briefing: 'Drei strategische Seegebiete – A, B und C – entscheiden über die Kontrolle der Fjordausfahrt. ' +
+         'Jeder gehaltene Punkt bringt laufend Punkte, jede Versenkung ebenfalls. Das erste Team mit 1000 Punkten gewinnt; ' +
+         'fällt ein Team auf 0 oder wird vernichtet, ist das Gefecht ebenfalls entschieden. Zerstörer sollten die Punkte früh besetzen.',
+      env: { time: 'day', weather: 'clear', front: { at: 240, dur: 60, to: 'rain', text: 'Regenböen ziehen auf' } }, type: 'domination', carriers: true, playableShips: null, recommendedShip: 'Hipper',
+      arena: 11000, timeLimit: 20 * 60, stars: 2,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-1900, -2400), r: 900, height: 210, seed: 101, lobes: 5, elong: 1.5, rot: 0.9 },
+            { c: P(2000, 2500), r: 950, height: 230, seed: 103, lobes: 5, elong: 1.5, rot: 0.9 },
+            { c: P(300, -9000), r: 2000, height: 420, seed: 107, lobes: 7, elong: 2.4, rot: 0.05, rough: 0.7 },
+            { c: P(-300, 9100), r: 2000, height: 400, seed: 109, lobes: 7, elong: 2.4, rot: -0.05, rough: 0.7 },
+            { c: P(-5200, -5600), r: 700, height: 150, seed: 113, lobes: 4 },
+            { c: P(5200, 5700), r: 700, height: 150, seed: 127, lobes: 4 },
+            { c: P(4900, -3900), r: 620, height: 130, seed: 131, lobes: 4 },
+            { c: P(-4900, 3900), r: 620, height: 130, seed: 137, lobes: 4 },
+         ]);
+         w.caps = ['A', 'B', 'C'].map((id, i) => ({ id, pos: P(0, (i - 1) * 5000), r: 800, owner: null, progress: 0, capper: null, contested: false, time: 40 }));
+         const capFor = (side) => (cls, i) => SHIPS[cls].hull.type === 'DD' ? { capId: i % 2 ? 'C' : 'A' } : SHIPS[cls].hull.type === 'CL' ? { capId: 'B' } : {};
+         spawnTeam(w, 'player', DE_TEAM, P(-8800, 0), 0, shipKey, capFor('player'));
+         spawnTeam(w, 'enemy', UK_TEAM, P(8800, 0), Math.PI, null, capFor('enemy'));
+         objective(w, 'points', 'Erreichen Sie 1000 Punkte');
+         objective(w, 'caps', 'Halten Sie die Punkte A, B und C', { optional: true });
+         w.score = { kind: 'points', player: 300, enemy: 300, target: 1000 };
+         w._script.capTick = 0;
+      },
+      update(w, dt, S) {
+         S.capTick += dt;
+         if (S.capTick >= 5) {
+            S.capTick -= 5;
+            for (const c of w.caps) if (c.owner) w.score[c.owner] += 3 * 2;
+         }
+         const own = w.caps.filter(c => c.owner === 'player').length;
+         objText(w, 'caps', `Halten Sie die Punkte A, B und C (${own}/3)`);
+         dominationCheck(w);
+      },
+      onSink(w, ship, killer, S) {
+         const big = ship.type === 'BB';
+         if (ship.side === 'enemy') { w.score.player += big ? 45 : 35; w.score.enemy -= big ? 60 : 45; }
+         else if (ship.side === 'player') { w.score.enemy += big ? 45 : 35; w.score.player -= big ? 60 : 45; }
+         if (!combatants(w, 'enemy').length) w.score.player = Math.max(w.score.player, 1000);
+         if (!combatants(w, 'player').length) w.score.enemy = Math.max(w.score.enemy, 1000);
+         dominationCheck(w);
+      },
+      timeout(w) {
+         const s = w.score;
+         if (s.player > s.enemy) w.end(true, 'Zeit abgelaufen – Ihr Team führt nach Punkten.');
+         else w.end(false, 'Zeit abgelaufen – der Gegner führt nach Punkten.');
+      },
+   },
+
+   // ------------------------------------------------------------ 4. convoy escort
+   {
+      id: 'convoy', name: 'Geleitzug', subtitle: 'Skagerrak-Enge · Geleitschutz',
+      briefing: 'Fünf Frachter mit Nachschub für Norwegen müssen die Skagerrak-Enge passieren. Britische Kreuzer und ' +
+         'Zerstörer lauern im Osten und werden in Wellen angreifen. Schützen Sie den Geleitzug, bis mindestens zwei Frachter ' +
+         'den Ausgang im Osten erreichen. Gehen vier Frachter verloren, ist die Mission gescheitert. Rechnen Sie mit Torpedoangriffen.',
+      env: { time: 'dusk', weather: 'overcast' }, type: 'escort', playableShips: null, recommendedShip: 'Hipper',
+      arena: 12000, timeLimit: 16 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-300, -8700), r: 2600, height: 420, seed: 201, lobes: 7, elong: 2.6, rot: 0.08, rough: 0.7, peaks: [{ x: -1200, y: 400, h: 480, r: 900 }] },
+            { c: P(300, 8900), r: 2500, height: 380, seed: 203, lobes: 7, elong: 2.6, rot: -0.05, rough: 0.7 },
+            { c: P(-2400, -3900), r: 1150, height: 220, seed: 207, lobes: 5, elong: 1.4, rot: 0.3 },
+            { c: P(2600, 3700), r: 1250, height: 240, seed: 211, lobes: 5, elong: 1.4, rot: 0.2 },
+            { c: P(7000, 3900), r: 850, height: 160, seed: 213, lobes: 4 },
+            { c: P(-7200, -3700), r: 850, height: 170, seed: 217, lobes: 4 },
+            { c: P(6200, -4600), r: 700, height: 140, seed: 219, lobes: 4 },
+         ]);
+         const route = [P(-4000, 1500), P(0, 0), P(4800, -1000), P(9800, -700)];
+         const S = w._script;
+         S.exit = { x: 8800, y: -700, r: 1400 };
+         S.transports = [];
+         // two columns 800 m apart, each on its own lane of the route: a single shared track funnels
+         // all five hulls into one waypoint where they ram and lock each other
+         for (let i = 0; i < 5; i++) {
+            const lane = i % 2 ? 400 : -400;
+            const t = add(w, 'Transport', 'player', P(-8000 - i * 600, 1150 + lane), 0,
+               { telegraph: 4, speedKn: 14, nation: 'de', hpMult: 2.5, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true } });
+            S.transports.push(t);
+         }
+         add(w, shipKey, 'player', P(-6800, 2300), 0, { isPlayer: true });
+         add(w, 'Z23', 'player', P(-6500, -300), 0, { ai: { escortId: S.transports[0].id } });
+         add(w, 'Z23', 'player', P(-9800, 2300), 0, { ai: { escortId: S.transports[3].id } });
+         add(w, 'Nuernberg', 'player', P(-7700, -700), 0, { ai: { escortId: S.transports[1].id } });
+         // wave 1 waits in the east
+         add(w, 'Jervis', 'enemy', P(8500, 2500), Math.PI, { ai: { huntId: S.transports[0].id } });
+         add(w, 'Jervis', 'enemy', P(9200, 4200), Math.PI, { ai: { huntId: S.transports[1].id } });
+         later(S, 150, () => {
+            w.message('Zweite Angriffswelle aus Nordosten gemeldet!', 'warn');
+            add(w, 'Norfolk', 'enemy', P(10800, -5200), Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[1].id } });
+            add(w, 'Jervis', 'enemy', P(11000, -4000), Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[3].id } });
+         });
+         later(S, 330, () => {
+            w.message('Dritte Welle: Kreuzer Fiji aus Südosten!', 'warn');
+            add(w, 'Fiji', 'enemy', P(10800, 5200), -Math.PI * 0.85, { minDist: 11000, ai: { huntId: S.transports[2].id } });
+         });
+         objective(w, 'arrive', 'Mindestens 2 Frachter erreichen den Ausgang (0/2)');
+         objective(w, 'lose', 'Nicht mehr als 3 Frachter verlieren (0 verloren)');
+         w.score = { kind: 'convoy', player: 0, enemy: 0, target: 2 };
+         S.arrived = 0; S.lost = 0;
+         w.message('Geleitzug läuft aus. Halten Sie sich nahe bei den Frachtern.');
+      },
+      update(w, dt, S) {
+         for (const t of S.transports) {
+            if (t.alive && dist2(t.pos, S.exit) < S.exit.r * S.exit.r) {
+               w.removeShip(t, 'arrived');
+               S.arrived++;
+               w.score.player = S.arrived;
+               w.message(`${t.name} hat den Ausgang erreicht.`);
+               objText(w, 'arrive', `Mindestens 2 Frachter erreichen den Ausgang (${S.arrived}/2)`);
+               if (S.arrived >= 2) setObj(w, 'arrive', 'done');
+            }
+         }
+         const inTransit = S.transports.filter(t => t.alive).length;
+         if (S.arrived >= 2 && inTransit === 0) w.end(true, `${S.arrived} Frachter sicher durchgebracht.`);
+      },
+      onSink(w, ship, killer, S) {
+         if (ship.type === 'TR' && ship.side === 'player') {
+            S.lost++;
+            w.score.enemy = S.lost;
+            objText(w, 'lose', `Nicht mehr als 3 Frachter verlieren (${S.lost} verloren)`);
+            if (S.lost >= 4) { setObj(w, 'lose', 'failed'); w.end(false, 'Der Geleitzug wurde aufgerieben.'); return; }
+            if (S.arrived + S.transports.filter(t => t.alive).length < 2) { w.end(false, 'Zu wenige Frachter übrig.'); return; }
+         }
+         if (S.arrived >= 2 && !S.transports.some(t => t.alive)) w.end(true, `${S.arrived} Frachter sicher durchgebracht.`);
+      },
+      timeout(w, S) {
+         if (S.arrived >= 2) w.end(true, `${S.arrived} Frachter sicher durchgebracht.`);
+         else w.end(false, 'Der Geleitzug hat sein Ziel nicht rechtzeitig erreicht.');
+      },
+   },
+
+   // ------------------------------------------------------------ 6. last stand
+   {
+      id: 'laststand', name: 'Letztes Gefecht', subtitle: 'Nordatlantik · 27. Mai 1941',
+      briefing: 'Ein Torpedotreffer hat das Ruder der Bismarck bei 12° Backbord verklemmt – Ihr Schiff zieht Kreise. ' +
+         'Im Sturm nähern sich King George V und Rodney, begleitet von Kreuzern und Zerstörern. Lassen Sie Ihre Leckwehr ' +
+         'das Ruder freibekommen und halten Sie zehn Minuten durch, bis der Home Fleet der Treibstoff ausgeht – oder versenken Sie beide Schlachtschiffe.',
+      env: { time: 'day', weather: 'storm' }, type: 'survival', playableShips: ['Bismarck'], recommendedShip: 'Bismarck',
+      arena: 11000, timeLimit: 10 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-6500, 6500), r: 700, height: 110, seed: 401, lobes: 4, rough: 0.8 },
+            { c: P(6800, -6000), r: 600, height: 90, seed: 403, lobes: 4, rough: 0.8 },
+            { c: P(2500, 3200), r: 380, height: 70, seed: 405, lobes: 3, rough: 0.9 },
+         ]);
+         const S = w._script;
+         // Heavy seas: the Home Fleet's gunlayers struggle too (the player cannot dodge with a jammed
+         // rudder). Below hard more so: at x1.4 Rodney's 406 mm sank the autopilot Bismarck in 6/6 normal runs.
+         w.difficulty = { ...w.difficulty, aimErr: w.difficulty.aimErr * (w.difficulty.key === 'hard' ? 1.4 : 1.8) };
+         const p = add(w, pickShip(this, shipKey), 'player', P(0, 0), 0.8, { isPlayer: true, telegraph: 2 });
+         p.hp = Math.round(p.maxHP * 0.85);
+         p.modules.rudder = 60;           // jammed: DC (R) frees it early
+         p.rudder = -0.55; p.rudderCmd = -1;
+         S.kgv = add(w, 'KGV', 'enemy', P(-9000, -9500), 0.9, { name: 'King George V', telegraph: 4 });
+         S.rodney = add(w, 'Rodney', 'enemy', P(-10200, -7600), 0.8, { name: 'HMS Rodney', telegraph: 4 });
+         // Cossack's spread was a third of the hull in every autopilot run at 100 s, before the rudder
+         // drill and the first salvoes were even done -- the first torpedo attack now comes later
+         later(S, 150, () => {
+            w.message('Zerstörer Cossack läuft zum Torpedoangriff an!', 'warn');
+            add(w, 'Jervis', 'enemy', P(9500, 2500), Math.PI, { name: 'HMS Cossack', minDist: 10000 });
+         });
+         later(S, 120, () => {
+            w.message('Kreuzer Norfolk und Dorsetshire greifen ein!', 'warn');
+            add(w, 'Norfolk', 'enemy', P(1500, -10500), 1.6, { name: 'HMS Norfolk', minDist: 12000 });
+            add(w, 'Norfolk', 'enemy', P(4000, 10500), -1.8, { name: 'HMS Dorsetshire', minDist: 12000 });
+         });
+         later(S, 300, () => {
+            // the second destroyer of this wave only on hard (two more torpedo boats sank the autopilot
+            // Bismarck in every normal run)
+            const hard = w.difficulty.key === 'hard';
+            w.message(hard ? 'Weitere Zerstörer: Maori und Zulu!' : 'Weiterer Zerstörer: Maori!', 'warn');
+            add(w, 'Jervis', 'enemy', P(10500, 4000), Math.PI, { name: 'HMS Maori', minDist: 11000 });
+            if (hard) add(w, 'Jervis', 'enemy', P(10500, -3000), Math.PI, { name: 'HMS Zulu', minDist: 11000 });
+         });
+         objective(w, 'survive', 'Überleben Sie bis zum Abdrehen der Home Fleet (10:00)');
+         objective(w, 'bbs', 'Oder: Versenken Sie King George V und Rodney (0/2)');
+         objective(w, 'rudder', 'Ruder freibekommen (Leckwehr)', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 2 };
+         w.message('Ruder klemmt! Leckwehr einsetzen!', 'warn');
+      },
+      update(w, dt, S) {
+         const p = w.player;
+         if (p && p.alive && p.modules.rudder <= 0) setObj(w, 'rudder', 'done');
+         const m = Math.floor(w.timeLeft / 60), s = Math.floor(w.timeLeft % 60);
+         objText(w, 'survive', `Überleben Sie bis zum Abdrehen der Home Fleet (${m}:${String(s).padStart(2, '0')})`);
+      },
+      onSink(w, ship, killer, S) {
+         if (ship === S.kgv || ship === S.rodney) {
+            const n = [S.kgv, S.rodney].filter(s => !s.alive).length;
+            w.score.player = n;
+            objText(w, 'bbs', `Oder: Versenken Sie King George V und Rodney (${n}/2)`);
+            if (n >= 2) { setObj(w, 'bbs', 'done'); setObj(w, 'survive', 'done'); w.end(true, 'Die Schlachtschiffe der Home Fleet sind versenkt!'); }
+         }
+      },
+      timeout(w) { setObj(w, 'survive', 'done'); w.end(true, 'Die Home Fleet dreht mit leeren Bunkern ab – die Bismarck lebt!'); },
+   },
+
+   // ------------------------------------------------------------ 7. night action
+   {
+      id: 'night', name: 'Nachtgefecht', subtitle: 'Norwegische Schären · Zerstörerschlacht',
+      briefing: 'Neumond über den Schären. Eine britische Zerstörerflottille mit Kreuzerunterstützung versucht, in den Fjord ' +
+         'einzudringen. Bei Nacht sieht man Schiffe erst auf kurze Distanz – das Mündungsfeuer verrät jedoch jeden Schützen. ' +
+         'Nutzen Sie Inseln, Nebel und Torpedos. Vernichten Sie den Feind.',
+      env: { time: 'night', weather: 'clear' }, type: 'annihilation', playableShips: null, recommendedShip: 'Z23',
+      arena: 10000, timeLimit: 15 * 60, stars: 2,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(0, -8600), r: 2400, height: 450, seed: 501, lobes: 8, elong: 2.8, rot: 0, rough: 0.8, peaks: [{ x: 800, y: 300, h: 520, r: 900 }] },
+            { c: P(-200, 8700), r: 2300, height: 420, seed: 503, lobes: 8, elong: 2.8, rot: 0, rough: 0.8 },
+         ]);
+         scatter(w, 507, 11, [-6500, -6000, 6500, 6000], 380, 950, [P(-8200, 0), P(8200, 0)].map(p => ({ ...p, r: 2400 })));
+         const DE = [['Z23', 0, -800], ['Z23', 0, 800], ['Z23', 500, 0], ['Nuernberg', -700, -1800], ['Hipper', -900, 1800]];
+         // the 4th destroyer only on hard: 6 vs 5 in the dark was a coin flip even for cruisers
+         const UK = [['Jervis', 0, -900], ['Jervis', 0, 900], ['Jervis', 500, -2400], ['Fiji', -700, -600], ['Norfolk', -900, 1000]];
+         if (w.difficulty.key === 'hard') UK.push(['Jervis', 500, 2400]);
+         spawnTeam(w, 'player', DE, P(-8200, 0), 0, shipKey);
+         spawnTeam(w, 'enemy', UK, P(8200, 0), Math.PI, null);
+         const n = combatants(w, 'enemy').length;
+         objective(w, 'kill', `Vernichten Sie alle feindlichen Schiffe (0/${n})`);
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: n };
+      },
+      onSink(w, ship) { annihilationSink(w, ship, 'kill', 'Vernichten Sie alle feindlichen Schiffe'); },
+      timeout(w) { timeoutByHP(w); },
+   },
+
+   // ------------------------------------------------------------ 8. commerce raid
+   {
+      id: 'raid', name: 'Handelskrieg', subtitle: 'Nordatlantik · Unternehmen Berlin',
+      briefing: 'Ein britischer Geleitzug aus sechs Frachtern läuft nach Osten, gesichert von einem Kreuzer und Zerstörern. ' +
+         'Gemeinsam mit der Gneisenau sollen Sie mindestens vier Frachter versenken, bevor sie den Schutz der Küste erreichen. ' +
+         'Vorsicht: Die Funkaufklärung meldet ein britisches Schlachtschiff, das dem Geleitzug zu Hilfe eilt.',
+      env: { time: 'day', weather: 'rain' }, type: 'raid', playableShips: null, recommendedShip: 'Hipper',
+      arena: 12500, timeLimit: 18 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(11200, -9000), r: 2600, height: 360, seed: 601, lobes: 7, elong: 2, rot: 0.9, rough: 0.7, name: 'Küste' },
+            { c: P(3000, -4500), r: 900, height: 170, seed: 603, lobes: 5 },
+            { c: P(-4500, -3500), r: 750, height: 150, seed: 607, lobes: 4 },
+            { c: P(5500, 6200), r: 1000, height: 190, seed: 611, lobes: 5, elong: 1.5 },
+            { c: P(-6000, 8200), r: 1200, height: 230, seed: 613, lobes: 5, elong: 1.8, rot: 0.4 },
+         ]);
+         const S = w._script;
+         const route = [P(-6000, 4500), P(0, 2200), P(6000, 800), P(11600, -2600)];
+         S.exit = { x: 11000, y: -2400, r: 1300 };
+         S.transports = [];
+         // light, half-laden freighters (hpMult): four kills must be possible while the escort still fights
+         for (let i = 0; i < 6; i++) {
+            const lane = i & 1 ? 400 : -400;   // two columns, one lane each (see the escort mission)
+            S.transports.push(add(w, 'Transport', 'enemy', P(-10800 + (i >> 1) * -700, 5950 + lane), -0.2,
+               { telegraph: 4, speedKn: 9, hpMult: 0.7 * w.difficulty.botHP, ai: { route: route.map(p => P(p.x, p.y + lane)), routeIdx: 0, passive: true, convoy: true, zigzag: true } }));
+         }
+         add(w, 'Fiji', 'enemy', P(-9200, 4500), -0.2, { ai: { escortId: S.transports[0].id } });
+         add(w, 'Jervis', 'enemy', P(-9700, 7300), -0.2, { ai: { escortId: S.transports[1].id } });
+         if (w.difficulty.key === 'hard') add(w, 'Jervis', 'enemy', P(-12000, 5200), -0.2, { ai: { escortId: S.transports[4].id } });
+         // huntId + press: the raiders go for the freighters and fight the escort on the way instead of
+         // duelling it at long range (the player's only matters for the autopilot); the heavy cover
+         // arrives after 6 min so the first strike can land
+         add(w, pickShip(this, shipKey), 'player', P(-3000, -9000), 1.2, { isPlayer: true, ai: { huntId: S.transports[2].id, press: true } });
+         add(w, 'Scharnhorst', 'player', P(-1500, -10000), 1.3, { name: 'Gneisenau', ai: { huntId: S.transports[0].id, press: true } });
+         later(S, 360, () => {
+            w.message('HMS Rodney und HMS Sussex nähern sich aus Osten!', 'warn');
+            add(w, 'Rodney', 'enemy', P(12000, 2500), Math.PI, { name: 'HMS Rodney', minDist: 12000 });
+            add(w, 'Norfolk', 'enemy', P(12000, 4200), Math.PI, { name: 'HMS Sussex', minDist: 12000 });
+         });
+         objective(w, 'sink', 'Versenken Sie 4 Frachter (0/4)');
+         objective(w, 'escape', 'Höchstens 2 Frachter entkommen lassen (0 entkommen)');
+         w.score = { kind: 'raid', player: 0, enemy: 0, target: 4 };
+         S.sunk = 0; S.escaped = 0;
+      },
+      update(w, dt, S) {
+         for (const t of S.transports) {
+            if (t.alive && dist2(t.pos, S.exit) < S.exit.r * S.exit.r) {
+               w.removeShip(t, 'escaped');
+               S.escaped++;
+               w.score.enemy = S.escaped;
+               w.message(`${t.name} ist entkommen.`, 'warn');
+               objText(w, 'escape', `Höchstens 2 Frachter entkommen lassen (${S.escaped} entkommen)`);
+               if (S.escaped > 2) { setObj(w, 'escape', 'failed'); w.end(false, 'Zu viele Frachter sind entkommen.'); }
+            }
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (ship.type !== 'TR' || ship.side !== 'enemy') return;
+         S.sunk++;
+         w.score.player = S.sunk;
+         objText(w, 'sink', `Versenken Sie 4 Frachter (${Math.min(S.sunk, 4)}/4)`);
+         if (S.sunk >= 4) { setObj(w, 'sink', 'done'); setObj(w, 'escape', 'done'); w.end(true, `${S.sunk} Frachter versenkt – der Geleitzug ist zerschlagen.`); }
+      },
+      timeout(w, S) { w.end(false, `Nur ${S.sunk} Frachter versenkt – zu wenig.`); },
+   },
+
+   // ============================================================ Historische Operationen
+   // group 'ops': fixed ships, intro briefing, scripted radio traffic, staged objectives, a debrief
+   // with the historical outcome and medal stars (opStars). Listed in their own menu section.
+
+   // ------------------------------------------------------------ op 1: Denmark Strait
+   {
+      id: 'rheinuebung', group: 'ops', name: 'Unternehmen Rheinübung', subtitle: 'Dänemarkstraße · 24. Mai 1941',
+      fleet: { own: 'Bismarck, Prinz Eugen', foe: 'HMS Hood, HMS Prince of Wales · später Norfolk, Suffolk' },
+      briefing: 'Mai 1941: Bismarck und Prinz Eugen sollen durch die Dänemarkstraße in den Atlantik ausbrechen und britische Geleitzüge angreifen. ' +
+         'Im Morgengrauen zwischen Packeis und Nebelbänken laufen ihnen der Schlachtkreuzer HMS Hood und das neue Schlachtschiff HMS Prince of Wales entgegen. ' +
+         'Versenken Sie die Hood und schalten Sie die Prince of Wales aus – oder brechen Sie nach Süden in den Atlantik durch.',
+      debrief: 'Um 6:00 Uhr traf eine Salve der Bismarck die Hood; eine Magazinexplosion zerriss das Schiff, nur 3 von 1.418 Mann überlebten. ' +
+         'Die schwer getroffene Prince of Wales drehte unter Nebel ab. Doch auch die Bismarck verlor nach drei Treffern Öl und musste Kurs auf Saint-Nazaire nehmen – ' +
+         'am 27. Mai wurde sie von der Home Fleet gestellt und versenkt.',
+      env: { time: 'dawn', weather: 'overcast', visibility: 0.74 }, type: 'historic', playableShips: ['Bismarck'], recommendedShip: 'Bismarck',
+      arena: 13000, timeLimit: 20 * 60, stars: 2,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-5500, -11300), r: 3000, height: 620, seed: 301, lobes: 8, elong: 3, rot: 0.15, rough: 0.8, snow: true, name: 'Grönland' },
+            { c: P(5200, -11800), r: 2700, height: 560, seed: 303, lobes: 8, elong: 2.6, rot: -0.1, rough: 0.8, snow: true },
+            { c: P(-1200, -6200), r: 700, height: 180, seed: 307, lobes: 4, snow: true },
+            { c: P(9800, 9800), r: 1500, height: 300, seed: 311, lobes: 6, elong: 1.8, rot: 0.7, snow: true },
+            // pack-ice floes off the Greenland shelf
+            { c: P(-8200, -7400), r: 320, height: 14, seed: 313, lobes: 5, elong: 1.8, rot: 0.4, rough: 0.9, snow: true },
+            { c: P(2300, -7600), r: 260, height: 12, seed: 317, lobes: 4, elong: 2.2, rot: 1.1, rough: 0.9, snow: true },
+         ]);
+         const S = w._script;
+         S.eugen = add(w, 'Hipper', 'player', P(-7400, -1700), 0.25, { name: 'Prinz Eugen', ai: { escortIdPlayer: true } });
+         add(w, pickShip(this, shipKey), 'player', P(-8400, -2000), 0.25, { isPlayer: true });
+         S.hood = add(w, 'Hood', 'enemy', P(6500, 6200), -2.35, { name: 'HMS Hood', telegraph: 4, ai: { aggro: 1.2 } });
+         // breaks off to the east wall once badly hit (the SE corner is taken by the island)
+         S.pow = add(w, 'KGV', 'enemy', P(7500, 6700), -2.35, { name: 'HMS Prince of Wales', telegraph: 4, ai: { retreatBelow: 0.45, retreatTo: P(12500, 4500) } });
+         S.exit = zone(w, -5200, 11000, 1800, 'Atlantik', 'goal');
+         later(S, 4, () => radio(w, 'Prinz Eugen', 'Horchgerät meldet Schraubengeräusche – zwei schwere Einheiten, Peilung Südost!'));
+         later(S, 30, () => radio(w, 'Flottenchef Lütjens', 'Feuererlaubnis! Ziel ist das führende Schiff.'));
+         later(S, 210, () => {
+            radio(w, 'Funkaufklärung', 'Norfolk und Suffolk schließen von achtern auf!', 'warn');
+            add(w, 'Norfolk', 'enemy', P(-12000, -4800), 0.2, { name: 'HMS Norfolk', minDist: 13000, dmgMult: 0.6 });
+            add(w, 'Norfolk', 'enemy', P(-12200, -2600), 0.1, { name: 'HMS Suffolk', minDist: 13000, dmgMult: 0.6 });
+         });
+         objective(w, 'hood', 'Versenken Sie HMS Hood');
+         objective(w, 'pow', 'Versenken oder vertreiben Sie HMS Prince of Wales');
+         objective(w, 'break', 'Oder: Durchbruch nach Süden in den Atlantik', { optional: true });
+         objective(w, 'eugen', 'Prinz Eugen darf nicht sinken', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 2 };
+      },
+      update(w, dt, S) {
+         const pow = S.pow, p = w.player;
+         if (!S.fire && S.hood.alive && (S.hood.fires.length || S.hood.hp < S.hood.maxHP * 0.75)) {
+            S.fire = true;
+            radio(w, 'Prinz Eugen', 'Treffer! Brand auf der Hood mittschiffs!');
+         }
+         if (pow.alive && pow.ai.retreating && !S.powTurn) { S.powTurn = true; radio(w, 'Prinz Eugen', 'Prince of Wales dreht unter Nebel ab!'); }
+         if (pow.alive && pow.ai.retreating) S.powT = (S.powT || 0) + dt;
+         // she counts as driven off once she has broken away for a while or reached the map edge
+         if (pow.alive && pow.ai.retreating && (S.powT > 45 || Math.abs(pow.pos.x) > w.arena - 900 || Math.abs(pow.pos.y) > w.arena - 900)) {
+            w.removeShip(pow, 'retreated');
+            setObj(w, 'pow', 'done', 'HMS Prince of Wales vertrieben');
+            w.score.player++;
+            rheinCheck(w);
+         }
+         if (p && p.alive && w.phase === 'playing' && inZone(p, S.exit)) {
+            setObj(w, 'break', 'done', 'Durchbruch in den Atlantik geglückt');
+            if (S.eugen.alive) setObj(w, 'eugen', 'done');
+            for (const o of w.mission.objectives) if (o.state === 'active' && !o.optional) o.state = 'failed';   // not achieved, just bypassed
+            w.end(true, S.hood.alive ? 'Durchbruch geglückt – die Bismarck steht im Atlantik.' : 'Hood versenkt und Durchbruch in den Atlantik geglückt!');
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (ship === S.hood) {
+            setObj(w, 'hood', 'done'); w.score.player++;
+            radio(w, 'Bismarck', 'Die Hood explodiert! Sie ist weg!');
+            // the loss of the flagship broke the British attack: Prince of Wales disengages much earlier
+            if (S.pow.alive) { S.pow.ai.retreatBelow = 0.8; objText(w, 'pow', 'Vertreiben oder versenken Sie HMS Prince of Wales'); }
+         } else if (ship === S.pow) { setObj(w, 'pow', 'done'); w.score.player++; }
+         else if (ship === S.eugen) setObj(w, 'eugen', 'failed');
+         rheinCheck(w);
+      },
+      timeout(w) { w.end(false, 'Die Home Fleet ist heran – Sie müssen den Kampf abbrechen.'); },
+   },
+
+   // ------------------------------------------------------------ op 2: Guadalcanal
+   {
+      id: 'guadalcanal', group: 'ops', name: 'Nachtschlacht vor Guadalcanal', subtitle: 'Ironbottom Sound · 14./15. November 1942',
+      fleet: { own: 'Washington, South Dakota, 4 Zerstörer', foe: 'Kirishima, Atago, Zerstörer mit Long-Lance-Torpedos' },
+      briefing: 'Kurz vor Mitternacht läuft ein japanischer Verband um das Schlachtschiff Kirishima in den Ironbottom Sound, um das Flugfeld Henderson Field auf Guadalcanal zu beschießen. ' +
+         'Konteradmiral Lee stellt sich mit Washington, South Dakota und vier Zerstörern entgegen. ' +
+         'Wehren Sie die Zerstörer mit ihren gefürchteten Long-Lance-Torpedos ab, versenken Sie die Kirishima und retten Sie das Flugfeld. Ihr SG-Radar sieht weiter als jeder Ausguck.',
+      debrief: 'Die japanischen Torpedos und Geschütze trafen zuerst: Walke und Preston sanken, Benham ging später verloren, und die South Dakota wurde nach einem Stromausfall schwer getroffen. ' +
+         'Unbemerkt nahm die Washington die Kirishima per Radar auf knapp 8 km ins Visier und traf sie mit mindestens neun 406-mm-Granaten. ' +
+         'Die Kirishima sank in den Morgenstunden nordwestlich von Savo – Henderson Field blieb unversehrt, ein Wendepunkt im Kampf um Guadalcanal.',
+      env: { time: 'night', weather: 'clear' }, type: 'historic', playableShips: ['Washington'], recommendedShip: 'Washington',
+      arena: 12000, timeLimit: 15 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-3500, -3000), r: 1400, height: 480, seed: 701, lobes: 6, elong: 1.2, rough: 0.6, name: 'Savo' },
+            { c: P(-500, 10800), r: 3000, height: 650, seed: 703, lobes: 9, elong: 3.6, rot: 0.06, rough: 0.7, name: 'Guadalcanal' },
+            { c: P(9000, -9800), r: 2200, height: 300, seed: 707, lobes: 7, elong: 2, rot: -0.5, rough: 0.7, name: 'Florida' },
+         ]);
+         const S = w._script, hard = w.difficulty.key === 'hard';
+         S.henderson = zone(w, 6200, 5300, 1500, 'Henderson Field', 'danger');
+         // TF 64: destroyers in the van, the battleships 3 km astern (as on the night)
+         S.usDD = ['USS Walke', 'USS Benham', 'USS Preston', 'USS Gwin'].map((n, i) =>
+            add(w, 'Benham', 'player', P(-2300 - (i >> 1) * 700, 2700 + (i & 1) * 900), 0, { name: n, telegraph: 3, dmgMult: 0.6 }));
+         add(w, pickShip(this, shipKey), 'player', P(-5600, 3100), 0, { isPlayer: true });
+         S.dak = add(w, 'Washington', 'player', P(-6900, 3300), 0, { name: 'USS South Dakota', dmgMult: 0.5, ai: { escortIdPlayer: true } });
+         // the van: Fubuki-class destroyers charging in with Long Lances
+         const vanNames = ['Ayanami', 'Uranami', 'Shikinami', 'Shirayuki'];
+         S.van = vanNames.slice(0, hard ? 4 : 3).map((n, i) =>
+            add(w, 'Fubuki', 'enemy', P(3200 + i * 500, -1800 - i * 900), 2.6, { name: n, telegraph: 4, ai: { aggro: 1.3 } }));
+         later(S, 3, () => radio(w, 'Adm. Lee (Washington)', 'TF 64 an alle: Kurs Ost, südlich von Savo. Feuer frei nach Radar.'));
+         later(S, 75, () => {
+            if (!S.dak.alive) return;
+            radio(w, 'USS South Dakota', 'Stromausfall! Radar und Feuerleitung sind ausgefallen!', 'warn');
+            S.dak.ai.passive = true;
+            later(S, w.time + 40, () => { if (S.dak.alive) { S.dak.ai.passive = false; radio(w, 'USS South Dakota', 'Strom wieder da – Feuerleitung klar.'); } });
+         });
+         later(S, 60, () => {
+            radio(w, 'SG-Radar Washington', 'Großes Ziel, Peilung Nord, 16.000 Meter, hohe Fahrt – das ist ein Schlachtschiff!', 'warn');
+            // down the east side of Savo towards TF 64, then south-east to the Lunga roads
+            const route = [P(4200, -2500), P(1200, 1300), P(S.henderson.x, S.henderson.y)];
+            S.kiri = add(w, 'Kirishima', 'enemy', P(3000, -7400), 1.35, { name: 'Kirishima', telegraph: 4, ai: { route } });
+            add(w, 'Takao', 'enemy', P(1800, -8200), 1.35, { name: 'Atago', telegraph: 4, ai: { escortId: S.kiri.id } });
+            if (hard) add(w, 'Takao', 'enemy', P(4200, -8400), 1.35, { name: 'Takao', telegraph: 4, ai: { escortId: S.kiri.id } });
+            objective(w, 'kiri', 'Versenken Sie die Kirishima');
+            if (w.player) w.player.ai.huntId = S.kiri.id;   // only read by the autopilot (tests)
+         });
+         objective(w, 'screen', `Zerstörer-Vorhut abwehren (0/${S.van.length})`, { optional: true });
+         objective(w, 'henderson', 'Verhindern Sie die Beschießung von Henderson Field');
+         S.bomb = 0; S.pct = -1;
+         S.bombMax = { easy: 330, normal: 250, hard: 190 }[w.difficulty.key] || 190;   // s of shelling until the field is out
+         objective(w, 'dakota', 'USS South Dakota darf nicht sinken', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 1 };
+      },
+      update(w, dt, S) {
+         if (!S.torpWarn && w.torpedoes.some(t => t.side === 'enemy')) {
+            S.torpWarn = true;
+            radio(w, 'USS Walke', 'Torpedos im Wasser! Alle Schiffe ausweichen!', 'warn');
+         }
+         const k = S.kiri;
+         if (!k || !k.alive) return;
+         if (!S.hurt && k.hp < k.maxHP * 0.5) {
+            // Kirishima's steering was wrecked: she circled helplessly to port
+            S.hurt = true;
+            k.maxSpeedKn = 17;
+            radio(w, 'Washington', 'Treffer auf Treffer! Die Kirishima brennt und läuft aus dem Ruder!');
+         }
+         const H = S.henderson;
+         if (!S.bombard && inZone(k, H)) {
+            // arrived: steam up and down off Lunga Point and shell the airfield
+            S.bombard = true;
+            k.ai.route = null;
+            k.ai.patrol = [P(H.x - 2600, H.y - 1400), P(H.x + 1800, H.y - 2400), P(H.x + 2600, H.y + 300)].map(q => safePos(w, q));
+            radio(w, 'Henderson Field', 'Schwerer Beschuss! Granaten schlagen auf dem Flugfeld ein!', 'warn');
+         }
+         if (S.bombard && dist2(k.pos, H) < 4500 * 4500) {
+            S.bomb += dt;
+            const pct = Math.min(100, Math.floor(S.bomb / S.bombMax * 20) * 5);
+            if (pct !== S.pct) { S.pct = pct; objText(w, 'henderson', `Henderson Field unter Beschuss: ${pct} % zerstört`); }
+            if (S.bomb >= S.bombMax) {
+               setObj(w, 'henderson', 'failed');
+               w.end(false, 'Die Kirishima hat Henderson Field zusammengeschossen – das Flugfeld ist ausgeschaltet.');
+            }
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (S.van.includes(ship)) {
+            const n = S.van.filter(s => !s.alive).length;
+            objText(w, 'screen', `Zerstörer-Vorhut abwehren (${n}/${S.van.length})`);
+            if (n >= S.van.length) setObj(w, 'screen', 'done');
+         } else if (ship === S.dak) setObj(w, 'dakota', 'failed');
+         else if (ship === S.kiri) {
+            w.score.player = 1;
+            setObj(w, 'kiri', 'done');
+            radio(w, 'Adm. Lee (Washington)', 'Die Kirishima sinkt! Der Verband dreht ab.');
+            if (S.dak.alive) setObj(w, 'dakota', 'done');
+            setObj(w, 'henderson', 'done');
+            w.end(true, 'Die Kirishima ist versenkt – Henderson Field ist gerettet.');
+         }
+      },
+      timeout(w) { w.end(false, 'Morgengrauen – der japanische Verband entkommt, die Kirishima schwimmt noch.'); },
+   },
+
+   // ------------------------------------------------------------ op 3: North Cape
+   {
+      id: 'nordkap', group: 'ops', name: 'Schlacht am Nordkap', subtitle: 'Nordmeer · 26. Dezember 1943',
+      fleet: { own: 'Duke of York, Jamaica · Force 1: Belfast, Norfolk, Sheffield', foe: 'Scharnhorst' },
+      briefing: 'Polarnacht vor dem Nordkap: Die Scharnhorst hat den Angriff auf den Geleitzug JW 55B abgebrochen und läuft mit hoher Fahrt zurück zum Altafjord. ' +
+         'Admiral Fraser steht mit der Duke of York, dem Kreuzer Jamaica und vier Zerstörern südwestlich von ihr, die Kreuzer von Force 1 halten von Norden Fühlung. ' +
+         'Ein Sturm zieht auf: Finden Sie die Scharnhorst mit dem Radar, bremsen Sie sie und versenken Sie sie, bevor sie die norwegische Küste erreicht.',
+      debrief: 'Am Vormittag hatten Belfast, Norfolk und Sheffield die Scharnhorst zweimal vom Geleitzug abgedrängt. Am Abend stellte die Duke of York sie per Radar; ' +
+         'ein 356-mm-Treffer im Kesselraum kostete sie die entscheidende Fahrt, britische und norwegische Zerstörer trafen sie mit Torpedos. ' +
+         'Um 19:45 Uhr sank die Scharnhorst – nur 36 von 1.968 Mann überlebten. Es war das letzte Gefecht zwischen Schlachtschiffen in europäischen Gewässern.',
+      env: { time: 'night', weather: 'overcast', front: { at: 50, dur: 120, to: 'storm', text: 'Arktischer Sturm zieht auf' } },
+      type: 'historic', playableShips: ['DukeOfYork'], recommendedShip: 'DukeOfYork',
+      arena: 14000, timeLimit: 14 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(12600, 9200), r: 2600, height: 420, seed: 801, lobes: 8, elong: 2.2, rot: -0.6, rough: 0.8, snow: true, name: 'Nordkap' },
+            { c: P(4200, 11800), r: 1500, height: 300, seed: 803, lobes: 6, elong: 2, rot: 0.2, rough: 0.8, snow: true },
+            { c: P(-9500, 9000), r: 420, height: 60, seed: 807, lobes: 4, rough: 0.9, snow: true },
+         ]);
+         const S = w._script, hard = w.difficulty.key === 'hard';
+         S.exit = zone(w, 10600, 2400, 1600, 'Altafjord', 'danger');
+         // her dog-leg home: north-east away from Force 1, east, then south to the fjord (~32 km)
+         S.sch = add(w, 'Scharnhorst', 'enemy', P(-10500, -7200), -0.35, {
+            name: 'Scharnhorst', telegraph: 4, speedKn: 31, hpMult: w.difficulty.botHP * 1.2,
+            ai: { route: [P(-3000, -10800), P(5000, -8800), P(9200, -2500), P(S.exit.x, S.exit.y)] },
+         });
+         // Force 2 from the south-west, Force 1 shadowing from the north-east
+         // allies support (dmgMult): the kill is meant to be the Duke of York's work
+         const me = add(w, pickShip(this, shipKey), 'player', P(800, 4600), 0.2, { isPlayer: true });
+         me.ai.huntId = S.sch.id;   // only read by the autopilot (tests)
+         S.cruisers = [add(w, 'Fiji', 'player', P(-400, 5300), 0.2, { name: 'HMS Jamaica', dmgMult: 0.4, ai: { escortIdPlayer: true } })];
+         S.cruisers.push(add(w, 'Fiji', 'player', P(7500, -11800), 2.9, { name: 'HMS Belfast', telegraph: 3, dmgMult: 0.15, ai: { aggro: 0.5 } }));
+         S.cruisers.push(add(w, 'Norfolk', 'player', P(8600, -11200), 2.9, { name: 'HMS Norfolk', telegraph: 3, dmgMult: 0.15, ai: { aggro: 0.5 } }));
+         S.cruisers.push(add(w, 'Fiji', 'player', P(8800, -12600), 2.9, { name: 'HMS Sheffield', telegraph: 3, dmgMult: 0.15, ai: { aggro: 0.5 } }));
+         later(S, 3, () => radio(w, 'Admiral Fraser', 'Scharnhorst läuft auf den Altafjord zu. Force 1 hält Fühlung – wir schneiden ihr den Weg ab.'));
+         later(S, 25, () => radio(w, 'HMS Belfast', 'Radarkontakt, Peilung Südwest – großes Schiff, hohe Fahrt!'));
+         objective(w, 'contact', 'Nehmen Sie Kontakt zur Scharnhorst auf (Radar: T)');
+         objective(w, 'slow', 'Bremsen Sie die Scharnhorst: Treffer im Kesselraum');
+         objective(w, 'sink', 'Versenken Sie die Scharnhorst, bevor sie den Altafjord erreicht');
+         objective(w, 'cruisers', 'Kein Kreuzer darf verloren gehen', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 1 };
+      },
+      update(w, dt, S) {
+         const s = S.sch;
+         if (!s.alive) return;
+         if (!S.contact && s.detected) {
+            S.contact = true;
+            setObj(w, 'contact', 'done', 'Kontakt zur Scharnhorst hergestellt');
+            radio(w, 'HMS Belfast', 'Leuchtgranaten! Ziel beleuchtet – Feuer eröffnen!');
+         }
+         const f = s.hp / s.maxHP;
+         if (!S.boiler && f < 0.75) {
+            // historically ~18:20: one 14-inch shell into No. 1 boiler room -- down to 10 kn, later 22
+            S.boiler = true;
+            s.maxSpeedKn = 20;
+            setObj(w, 'slow', 'done', 'Scharnhorst gebremst (Kesselraum getroffen)');
+            radio(w, 'HMS Duke of York', 'Treffer im Kesselraum! Die Scharnhorst verliert Fahrt!');
+            later(S, w.time + 20, () => {
+               if (!s.alive) return;
+               const hard = w.difficulty.key === 'hard';
+               radio(w, 'Zerstörer Savage', hard ? 'Savage und Saumarez laufen zum Torpedoangriff an!' : 'Savage, Saumarez, Scorpion und Stord laufen zum Torpedoangriff an!', 'warn');
+               const names = ['HMS Savage', 'HMS Saumarez', 'HMS Scorpion', 'HNoMS Stord'];
+               names.slice(0, hard ? 3 : 4).forEach((n, i) => {
+                  const a = s.heading + (i & 1 ? 1 : -1) * (0.9 + (i >> 1) * 0.35);
+                  add(w, 'Jervis', 'player', P(s.pos.x + Math.cos(a) * 9000, s.pos.y + Math.sin(a) * 9000), a + Math.PI,
+                     { name: n, telegraph: 4, dmgMult: 0.25, ai: { huntId: s.id, press: true } });
+               });
+            });
+         }
+         if (!S.last && f < 0.3) {
+            S.last = true;
+            s.maxSpeedKn = Math.min(s.maxSpeedKn, 14);
+            radio(w, 'Funkaufklärung', 'Abgefangener Funkspruch der Scharnhorst: „Wir kämpfen bis zur letzten Granate.“');
+         }
+         if (!S.near && dist2(s.pos, S.exit) < 6500 * 6500) { S.near = true; radio(w, 'Admiralität', 'Die Scharnhorst nähert sich der norwegischen Küste!', 'warn'); }
+         if (inZone(s, S.exit)) {
+            w.removeShip(s, 'escaped');
+            setObj(w, 'sink', 'failed');
+            w.end(false, 'Die Scharnhorst hat den Altafjord erreicht und ist entkommen.');
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (S.cruisers.includes(ship)) setObj(w, 'cruisers', 'failed');
+         else if (ship === S.sch) {
+            w.score.player = 1;
+            if (!S.contact) setObj(w, 'contact', 'done');
+            setObj(w, 'slow', 'done');
+            setObj(w, 'sink', 'done');
+            if (S.cruisers.every(c => c.alive)) setObj(w, 'cruisers', 'done');
+            radio(w, 'Admiral Fraser', 'Scharnhorst gesunken. Alle Schiffe: nach Überlebenden suchen.');
+            w.end(true, 'Die Scharnhorst ist versenkt – der Weg der Nordmeer-Geleitzüge ist frei.');
+         }
+      },
+      timeout(w) {
+         setObj(w, 'sink', 'failed');
+         w.end(false, 'Die Scharnhorst ist im Schneesturm entkommen.');
+      },
+   },
+
+   // ------------------------------------------------------------ op 4: Midway (carriers; singleplayer only)
+   {
+      id: 'midway', group: 'ops', name: 'Schlacht um Midway', subtitle: 'Zentralpazifik · 4. Juni 1942',
+      fleet: { own: 'Enterprise · Hornet, Yorktown, Atlanta, Vincennes, 4 Zerstörer', foe: 'Akagi, Kaga, Sōryū, Hiryū · Kirishima, Tone, Chikuma, 3 Zerstörer' },
+      briefing: 'Nordöstlich von Midway: Die US-Funkaufklärung hat den japanischen Angriff vorhergesagt. Task Force 16 und 17 stehen mit drei Trägern auf der Flanke der Kido Butai, ' +
+         'deren vier Träger gerade die Insel angreifen. Finden Sie den Verband mit Ihren Flugzeugen und schlagen Sie zu, solange seine Staffeln an Deck aufmunitioniert werden. ' +
+         'Jäger schützen Ihre Träger; Sturzkampfbomber treffen die Flugdecks, Torpedobomber die Wasserlinie. Halten Sie die Enterprise außerhalb der Reichweite der japanischen Geschütze.',
+      debrief: 'Am Vormittag des 4. Juni stürzten sich die Dauntless-Bomber der Enterprise und der Yorktown fast gleichzeitig auf Akagi, Kaga und Sōryū – binnen sechs Minuten brannten alle drei. ' +
+         'Die Hiryū schlug zurück und traf die Yorktown schwer, wurde aber am Nachmittag selbst versenkt. Vier Flottenträger und über 200 Flugzeuge gingen verloren; ' +
+         'die japanische Marine hat die Initiative im Pazifik nie zurückgewonnen.',
+      env: { time: 'day', weather: 'clear' }, type: 'historic', playableShips: ['Enterprise'], recommendedShip: 'Enterprise',
+      arena: 16000, timeLimit: 24 * 60, stars: 3,
+      setup(w, shipKey) {
+         islands(w, [
+            { c: P(-12400, -11800), r: 900, height: 22, seed: 951, lobes: 5, elong: 1.6, rot: 0.7, rough: 0.5, name: 'Midway' },
+            { c: P(2600, 11200), r: 260, height: 30, seed: 953, lobes: 3, rough: 0.8 },
+         ]);
+         const S = w._script, hard = w.difficulty.key === 'hard';
+         // Kido Butai: four carriers in a box, the battleship and the heavy cruisers on the flanks
+         const ax = 7600, ay = -2200, hj = Math.PI * 0.9;
+         S.cvs = [['Akagi', 'Akagi', 0, -1400], ['Akagi', 'Kaga', -1600, -1500], ['Hiryu', 'Sōryū', 0, 1400], ['Hiryu', 'Hiryū', -1600, 1500]]
+            .map(([cls, name, fx, fy]) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, telegraph: 3, hpMult: w.difficulty.botHP * 0.25 }));
+         // fuelled and armed planes on the hangar decks: the carriers burn easily (hpMult above);
+         // the morning raid on Midway cost planes, and the decks are busy rearming: thinner hangars
+         // and no launch for the first minutes (the American first strike meets little air cover)
+         // the combat air patrol is worn out from chasing the torpedo bombers all morning; lost planes
+         // are not replaced (max = what is left)
+         const kStrike = hard ? 0.75 : 0.6, kFt = hard ? 0.6 : 0.4;
+         S.ftAmmo = hard ? 0.7 : 0.5;
+         for (const c of S.cvs) {
+            for (const t of ['tb', 'db', 'ft']) c.air[t].max = c.air[t].hangar = Math.ceil(c.air[t].hangar * (t === 'ft' ? kFt : kStrike));
+            c.ai.launchT = hard ? 100 : 150;
+         }
+         S.escorts = [['Kirishima', 'Kirishima', 1600, 0], ['Takao', 'Tone', 600, -3200], ['Takao', 'Chikuma', 600, 3200],
+            ['Fubuki', 'Nowaki', 2600, -1800], ['Fubuki', 'Arashi', 2600, 1800], ['Fubuki', 'Hagikaze', -3200, 0]]
+            .slice(0, hard ? 6 : 5)
+            .map(([cls, name, fx, fy], i) => add(w, cls, 'enemy', P(ax - fx, ay - fy), hj, { name, ai: { escortId: S.cvs[i % 4].id } }));
+         // 1942 Japanese flak: few directors, slow 25 mm mounts that could not track fast dive bombers
+         const aaK = hard ? 0.75 : 0.6;
+         for (const s of [...S.cvs, ...S.escorts]) for (const b of s.aa.bands) b.dps *= aaK;
+         // Task Forces 16/17
+         const me = add(w, pickShip(this, shipKey), 'player', P(-6800, 4000), -0.25, { isPlayer: true });
+         S.own = [add(w, 'Enterprise', 'player', P(-8000, 5600), -0.25, { name: 'USS Hornet' }),
+            add(w, 'Enterprise', 'player', P(-9000, 1800), -0.25, { name: 'USS Yorktown' })];
+         S.screen = [['Cleveland', 'USS Atlanta', -5000, 3400], ['Cleveland', 'USS Vincennes', -7200, 1800],
+            ['Benham', 'USS Benham', -5200, 5000], ['Benham', 'USS Balch', -5800, 2200], ['Benham', 'USS Ellet', -7800, 6800], ['Benham', 'USS Maury', -8400, 400]]
+            .map(([cls, name, x, y], i) => add(w, cls, 'player', P(x, y), -0.25, { name, ai: { escortId: i < 2 || i > 3 ? me.id : S.own[i & 1].id } }));
+         later(S, 3, () => radio(w, 'Adm. Spruance', 'Catalina meldet zwei Träger, Peilung 320, Entfernung 180 Meilen. Alle Staffeln starten!'));
+         later(S, 40, () => radio(w, 'USS Yorktown', 'Unsere Wildcats übernehmen den Jagdschutz über dem Verband.'));
+         objective(w, 'find', 'Finden Sie die japanischen Träger (Flugzeuge klären auf)');
+         objective(w, 'sink', 'Versenken Sie mindestens zwei japanische Träger (0/4)');
+         objective(w, 'yorktown', 'Die Yorktown darf nicht verloren gehen', { optional: true });
+         w.score = { kind: 'kills', player: 0, enemy: 0, target: 4 };
+      },
+      update(w, dt, S) {
+         // Catalina flying boats shadow the Kido Butai: a rough fix on the carriers every 150 s
+         if (w.time >= (S.pby ?? 2)) {
+            S.pby = w.time + 150;
+            for (const s of S.cvs) if (s.alive && !s.detected) s.lastSeen = { x: s.pos.x + (w.rng() - 0.5) * 2400, y: s.pos.y + (w.rng() - 0.5) * 2400, heading: s.heading, speed: s.speed, t: w.time };
+         }
+         if (!S.found && S.cvs.some(s => s.alive && s.detected)) {
+            S.found = true;
+            setObj(w, 'find', 'done', 'Japanischer Trägerverband gefunden');
+            radio(w, 'Lt. Cdr. McClusky', 'Feindliche Träger in Sicht! Wir greifen an.');
+         }
+         // Hornet and Yorktown send Wildcats ahead of their strikes to tie down the Zeros over the
+         // Kido Butai (the player escorts his own strikes: fighters patrol where they are released)
+         // the Zeros of the combat air patrol go up with what ammunition the morning left them
+         for (const q of w.squadrons) if (q.side === 'enemy' && q.type === 'ft' && q.state === 'launch' && !q.mwAmmo) { q.mwAmmo = true; q.ammo *= S.ftAmmo; }
+         if (S.found && w.time >= (S.sweepT ?? 0)) {
+            S.sweepT = w.time + 5;
+            let jx = 0, jy = 0, n = 0;
+            for (const s of S.cvs) if (s.alive) { jx += s.pos.x; jy += s.pos.y; n++; }
+            jx /= n || 1; jy /= n || 1;
+            // the inbound strike closest to the Kido Butai: the escort's post moves with it
+            let inbound = null, bd = 14000 * 14000;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type === 'ft' || q.armed <= 0 || (q.state !== 'fly' && q.state !== 'attack')) continue;
+               const d2 = (q.pos.x - jx) ** 2 + (q.pos.y - jy) ** 2;
+               if (d2 < bd) { bd = d2; inbound = q; }
+            }
+            let covered = false;
+            for (const q of w.squadrons) {
+               if (q.side !== 'player' || q.type !== 'ft' || !q.order?.sweep || q.state === 'return' || q.state === 'land') continue;
+               covered = true;
+               if (inbound) { q.center.x = inbound.pos.x; q.center.y = inbound.pos.y; q.patrolT = Math.max(q.patrolT, 20); }
+            }
+            if (n && inbound && !covered) {
+               for (const c of S.own) {
+                  if (!c.alive || !canLaunch(w, c, 'ft') || c.air.ft.hangar < 2) continue;
+                  launchSquadron(w, c, 'ft', { kind: 'patrol', pos: { x: inbound.pos.x, y: inbound.pos.y }, sweep: true });
+                  break;
+               }
+            }
+         }
+         if (!S.raid && w.squadrons.some(q => q.side === 'enemy' && q.order?.kind === 'strike' && q.state === 'fly')) {
+            S.raid = true;
+            radio(w, 'Radar Yorktown', 'Feindliche Flugzeuge im Anflug! Jäger auf Abfangkurs!', 'warn');
+         }
+      },
+      onSink(w, ship, killer, S) {
+         if (S.cvs.includes(ship)) {
+            w.score.player = S.cvs.filter(s => !s.alive).length;
+            objText(w, 'sink', `Versenken Sie mindestens zwei japanische Träger (${w.score.player}/4)`);
+            if (w.score.player === 2) radio(w, 'Adm. Spruance', 'Zwei Träger erledigt – weiter so, die Hiryū darf nicht entkommen!');
+            radio(w, 'Adm. Spruance', `${ship.name} sinkt!`);
+            if (w.score.player >= 4) {
+               setObj(w, 'find', 'done');
+               setObj(w, 'sink', 'done');
+               if (S.own[1].alive) setObj(w, 'yorktown', 'done');
+               w.end(true, 'Alle vier japanischen Träger sind versenkt – Midway ist gerettet.');
+            }
+         } else if (ship === S.own[1]) setObj(w, 'yorktown', 'failed');
+         if (ship.side === 'player' && ship.type === 'CV' && S.own.every(s => !s.alive) && w.player && !w.player.alive) w.end(false, 'Die amerikanischen Träger sind verloren.');
+      },
+      timeout(w, S) {
+         const sunk = S.cvs.filter(s => !s.alive).length;
+         if (sunk >= 2) {
+            setObj(w, 'sink', 'done', `Japanische Träger versenkt (${sunk}/4)`);
+            if (S.own[1].alive) setObj(w, 'yorktown', 'done');
+            w.end(true, 'Die Kido Butai ist zerschlagen – der Rest dreht nach Westen ab.');
+         } else {
+            setObj(w, 'sink', 'failed');
+            w.end(false, 'Die japanischen Träger sind entkommen – Midway bleibt bedroht.');
+         }
+      },
+   },
+];
+
+// ---------------------------------------------------------------- shared win logic
+function annihilationSink(w, ship, objId, base) {
+   if (ship.side === 'enemy' && ship.type !== 'TR') w.score.player++;
+   else if (ship.side === 'player' && ship.type !== 'TR') w.score.enemy++;
+   objText(w, objId, `${base} (${w.score.player}/${w.score.target})`);
+   if (!combatants(w, 'enemy').length) { setObj(w, objId, 'done'); w.end(true, 'Alle feindlichen Schiffe wurden versenkt.'); }
+   else if (!combatants(w, 'player').length) w.end(false, 'Ihr Verband wurde vernichtet.');
+}
+function timeoutByHP(w) {
+   const own = teamHPFrac(w, 'player'), foe = teamHPFrac(w, 'enemy');
+   if (own > foe) w.end(true, 'Zeit abgelaufen – Ihr Verband hat die Oberhand behalten.');
+   else w.end(false, 'Zeit abgelaufen – der Gegner hat die Oberhand behalten.');
+}
+function dominationCheck(w) {
+   const s = w.score;
+   if (s.player >= s.target || s.enemy <= 0) { s.player = Math.min(s.player, s.target); setObj(w, 'points', 'done'); w.end(true, 'Ihr Team hat 1000 Punkte erreicht.'); }
+   else if (s.enemy >= s.target || s.player <= 0) { s.enemy = Math.min(s.enemy, s.target); setObj(w, 'points', 'failed'); w.end(false, 'Der Gegner hat 1000 Punkte erreicht.'); }
+}
+function rheinCheck(w) {
+   const o = w.mission.objectives;
+   if (o.find(x => x.id === 'hood').state === 'done' && o.find(x => x.id === 'pow').state === 'done') {
+      const eu = o.find(x => x.id === 'eugen');
+      if (eu.state === 'active') setObj(w, 'eugen', 'done');
+      w.mission.objectives = o.filter(x => x.id !== 'break');   // the alternative is moot now
+      w.end(true, 'Die Dänemarkstraße gehört der Kriegsmarine.');
+   }
+}
+
+// second batch (missions_extra.js): three battles are listed with the battles, four ops after the ops
+{
+   const H = { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, combatants, spawnTeam, teamHPFrac, SHIPS };
+   const extra = extraMissions(H);
+   const firstOp = DEFS.findIndex(d => d.group === 'ops');
+   DEFS.splice(firstOp < 0 ? DEFS.length : firstOp, 0, ...extra.filter(d => d.group !== 'ops'));
+   DEFS.push(...extra.filter(d => d.group === 'ops'));
+   // third batch (missions_west.js, missions_pacific.js): all historical operations
+   DEFS.push(...westMissions(H), ...pacificMissions(H));
+}
+
+// ---------------------------------------------------------------- public API
+const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
+// Menu data only (no functions).
+export const MISSIONS = DEFS.map(d => ({
+   id: d.id, name: d.name, subtitle: d.subtitle, briefing: d.briefing, env: { ...d.env }, type: d.type,
+   playableShips: d.playableShips ? [...d.playableShips] : [...PLAYABLE], recommendedShip: d.recommendedShip,
+   timeLimit: d.timeLimit, arena: d.arena, stars: d.stars || 2,   // stars = difficulty 1..3 for the menu
+   group: d.group || 'battle', debrief: d.debrief || '',          // 'ops' = Historische Operationen
+   fleet: d.fleet ? { ...d.fleet } : null,
+   fixedShips: !!d.playableShips,                                 // the mission prescribes its ships
+}));
+export const MISSION_IDS = DEFS.map(d => d.id);
+export function getMission(id) { return MISSIONS.find(m => m.id === id) || null; }
+// Medal stars of a finished operation: 1 = victory, 2 = + every optional objective, 3 = that on hard.
+export function opStars(w) {
+   if (!w || w.phase !== 'won' || !w.mission) return 0;
+   const opt = w.mission.objectives.filter(o => o.optional && o.id !== 'break');
+   const all = opt.every(o => o.state === 'done');
+   return 1 + (all ? 1 : 0) + (all && w.difficultyKey === 'hard' ? 1 : 0);
+}
+
+export function setupMission(w, id, shipKey) {
+   const def = BY_ID[id] || BY_ID.standard;
+   w.arena = def.arena;
+   w.setEnv(def.env);
+   w.mission = { id: def.id, name: def.name, subtitle: def.subtitle, briefing: def.briefing, type: def.type, group: def.group || 'battle', objectives: [], zones: [] };
+   w.timeLeft = def.timeLimit;
+   w._script = { def, timers: [], used: new Set(), dup: 0, onSink: (ww, ship, killer) => def.onSink && def.onSink(ww, ship, killer, ww._script) };
+   def.setup.call(def, w, pickShip(def, shipKey));
+   if (!w.player) throw new Error('mission ' + def.id + ' spawned no player');
+}
+
+export function updateMission(w, dt) {
+   const S = w._script;
+   if (!S) return;
+   if (S.timers.length) {
+      const due = S.timers.filter(t => w.time >= t.t);
+      if (due.length) { S.timers = S.timers.filter(t => w.time < t.t); for (const t of due) t.fn(); }
+   }
+   if (S.def.update) S.def.update(w, dt, S);
+   if (w.phase === 'playing' && w.timeLeft != null && w.timeLeft <= 0) S.def.timeout(w, S);
+}

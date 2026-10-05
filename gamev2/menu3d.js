@@ -24,7 +24,7 @@ const RATING_LABEL = [
 ];
 const RIBBON_ORDER = ['kill', 'citadel', 'pen', 'overpen', 'he', 'sec', 'torp', 'fire', 'flood', 'ricochet', 'shatter', 'spotted', 'cap'];
 const ESCAPE_LABEL = { arrived: 'angekommen', retreated: 'abgelaufen', escaped: 'entkommen' };
-const STORE_KEY ='warships3d.progress.v1';
+const STORE_KEY ='warshipsv2.progress.v1';
 const CLASS_ORDER = { CV: 0, BB: 1, CA: 2, CL: 3, DD: 4, SS: 5 };
 const natOf = (k) => SHIPS[k]?.hull?.nation || 'de';
 // register tabs: two-letter codes (the full navy name is the tooltip)
@@ -767,7 +767,7 @@ export class Menu3D {
             <div class="m3-ml"><div class="m3-logo">${logoSvg('Hafen · Einzelspieler')}</div>
                <button class="m3-capt" data-act="captain" title="Kommandant &amp; Lehrgänge">${icon('capt', 17)}<span class="lb">KOMMANDANT</span><b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button>
                <button class="m3-capt" data-act="mp" title="Mehrspieler: gemeinsam mit anderen Spielern über das Internet">${icon('mp', 17)}<span class="lb">MEHRSPIELER</span></button>
-               <a class="m3-capt m3-era" data-act="era" href="index-v2.html" title="V2 (Test): moderne Schiffe, Raketen und heutige Szenarien – getrennt vom Hauptspiel"><span class="lb">MODERN</span><b>V2</b></a></div>
+               <a class="m3-capt m3-era" data-act="era" href="index-3d.html" title="Zurück zum Hauptspiel (Zweiter Weltkrieg)"><span class="lb">HAUPTSPIEL</span><b>WK2</b></a></div>
             <div class="m3-go"><button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst in Dienst stellen"' : 'title="Auslaufen (Enter)"'}>AUSLAUFEN</button></div>
             <div class="m3-mr">
                <div class="m3-foe"><span>Gegner</span><div>${DIFFS.map(([k, l]) => `<button data-diff="${k}" class="${k === this.difficulty ? 'sel' : ''}" title="Gegner: ${l}">${l}</button>`).join('')}</div></div>
