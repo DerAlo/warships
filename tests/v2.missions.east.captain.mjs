@@ -7,6 +7,7 @@ import { setRadar } from '../gamev2/sensors.js';
 import { launchCruise, cruiseBlock } from '../gamev2/missile.js';
 import { canLaunch, launchSquadron } from '../gamev2/air.js';
 import { SEAL, launchTeam } from '../gamev2/seal.js';
+import { orderDepth } from '../gamev2/submarine.js';
 
 export function captain(w, mode = 'bot') {
    const p = w.player, S = w._script, id = w.mission.id;
@@ -29,14 +30,40 @@ export function captain(w, mode = 'bot') {
    };
    if (id === 'reefs') return () => strike([S.radarId, ...S.bat, ...S.sam]);
    if (id === 'countdown' && p.sub && p.cfg.sub.seal) {
-      // the boat creeps to the task point at periscope depth, stops and puts the team ashore
+      // the boat goes in deep, slows down and stops while a surface ship is near, comes up to periscope
+      // depth short of the task point and puts the team ashore
       const tp = w.taskPoints[0];
       const d0 = Math.hypot(tp.x - p.pos.x, tp.y - p.pos.y);
       const stop = { x: tp.x + (p.pos.x - tp.x) / d0 * 1500, y: tp.y + (p.pos.y - tp.y) / d0 * 1500 };
-      p.ai.passive = true; p.ai.route = [stop];
+      w.autoPlayer = false;
+      const surf = () => w.ships.filter(s => s.alive && s.side === 'enemy' && s.depth === 0 && s.type !== 'SS');
+      let last = Infinity, lastT = 0, rising = false, parked = false;
       return () => {
-         const d = Math.hypot(tp.x - p.pos.x, tp.y - p.pos.y);
-         if (d < 1700 && p.teamOut == null && (p.teamsLeft ?? 1) > 0) { p.ai.anchored = true; p.setTelegraph(0); p.depthTarget = 1; launchTeam(w, p); }
+         if (!p.alive) return;
+         const near = surf().reduce((m, s) => Math.min(m, Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y) * (s.cls === 'Typ054A' ? 1 : 1.9)), Infinity);
+         if (w.time - lastT >= 3) { rising = near > last + 20; last = near; lastT = w.time; }
+         const closing = near < 3400 || (near < 4400 && !rising);
+         const d = Math.hypot(tp.x - p.pos.x, tp.y - p.pos.y), ds = Math.hypot(stop.x - p.pos.x, stop.y - p.pos.y);
+         // held by a sonar: break contact at full speed, away from the nearest frigate
+         if (!p.teamOut && p.sonarSeen && w.time - p.sonarSeen.t < 20) {
+            const f = surf().reduce((m, x) => (!m || Math.hypot(x.pos.x - p.pos.x, x.pos.y - p.pos.y) < Math.hypot(m.pos.x - p.pos.x, m.pos.y - p.pos.y) ? x : m), null);
+            if (f) {
+               const want = Math.atan2(p.pos.y - f.pos.y, p.pos.x - f.pos.x), e = Math.atan2(Math.sin(want - p.heading), Math.cos(want - p.heading));
+               p.setRudder(Math.abs(e) < 0.05 ? 0 : e > 0 ? 2 : -2); p.setTelegraph(4); orderDepth(p, 2, w); parked = false; return;
+            }
+         }
+         if (p.teamOut != null || (p.teamsLeft ?? 1) <= 0) { orderDepth(p, near < 4000 ? 2 : 1, w); p.setTelegraph(0); return; }
+         if (!parked) {
+            orderDepth(p, 2, w);
+            const want = Math.atan2(stop.y - p.pos.y, stop.x - p.pos.x);
+            const e = Math.atan2(Math.sin(want - p.heading), Math.cos(want - p.heading));
+            p.setRudder(Math.abs(e) < 0.03 ? 0 : e > 0 ? (Math.abs(e) > 0.3 ? 2 : 1) : (Math.abs(e) > 0.3 ? -2 : -1));
+            p.setTelegraph(closing ? 0 : ds < 600 ? 1 : near < 4300 ? 2 : near < 5400 ? 3 : 4);
+            if (ds < 160) parked = true;
+         } else {
+            p.setTelegraph(0); p.setRudder(0);
+            if (near > 2600) { orderDepth(p, 1, w); if (p.depth <= 1 && d < 1800) launchTeam(w, p); } else orderDepth(p, 2, w);
+         }
       };
    }
    if (id === 'countdown') return () => { if (w.time > 20) strike([S.radarId, ...S.sam, ...(site(S.launcherId)?.targetable ? [S.launcherId] : [])]); };

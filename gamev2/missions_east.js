@@ -40,9 +40,9 @@ export const EAST_TUNE = {
       hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0 },
    },
    countdown: {
-      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26 },
-      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 21 },
-      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 20 },
+      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 700 },
+      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570 },
+      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 565 },
    },
 };
 
@@ -474,10 +474,10 @@ export function eastMissions(H) {
             'Kommandotrupp am Einsatzpunkt absetzen. Die Insel ist unbewohnt.',
          debrief: 'Die Startrampe ist zerstört, der Start wurde verhindert. Der Kommandeur hat sich ergeben.',
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ticonderoga', 'Virginia', 'U212'],
-         recommendedShip: 'Ticonderoga', arena: 22000, timeLimit: 660, stars: 3,
+         recommendedShip: 'Ticonderoga', arena: 22000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
             const S = w._script, T = tune(w, 'countdown');
-            w.timeLeft = T.time;
+            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime + (shipKey === 'U212' ? 60 : 0) : T.time;
             const C = P(9000, 0), R = 2400;
             islands(w, [{ c: C, r: R, height: 320, seed: 71, lobes: 6, rough: 0.55, name: 'Felseninsel', peaks: [{ x: 300, y: 200, h: 420, r: 900 }] }]);
             const g = fleet(w, shipKey, [['Ticonderoga', 0, 0], ['Burke', -1600, -2400], ['Burke', -1600, 2400], ['Daring', 1600, 2600]],
@@ -506,7 +506,12 @@ export function eastMissions(H) {
                for (let k = 0; k < 6; k++) ring.push(P(C.x + Math.cos(a0 + k * Math.PI / 3) * (R + 3400), C.y + Math.sin(a0 + k * Math.PI / 3) * (R + 3400)));
                S.boats.push(add(w, 'Typ022', 'enemy', ring[0], a0 + Math.PI / 2, { telegraph: 2, ai: { passive: true, patrol: ring } }).id);
             }
-            if (T.sub) add(w, 'Kilo', 'enemy', P(6500, -6500), 0, { depth: 1, telegraph: 1, ai: { patrol: [P(5000, -6000), P(9500, -6500)] } });      // guards the approach to the launcher
+            if (T.sub && SHIPS[shipKey].hull.type !== 'SS') add(w, 'Kilo', 'enemy', P(6500, -6500), 0, { depth: 1, telegraph: 1, ai: { patrol: [P(5000, -6000), P(9500, -6500)] } });      // guards the approach to the launcher
+            // a submarine meets a sonar screen on its way in: frigates with towed arrays patrol across the approach
+            if (w.player.sub) {
+               const lines = [[P(6800, -3800), P(4200, -7200)], [P(9600, -9000), P(6800, -7200)], [P(2200, -3000), P(3800, -5600)]];
+               for (let i = 0; i < T.asw; i++) scr.push(add(w, 'Typ054A', 'enemy', lines[i][0], Math.PI, { telegraph: 1, ai: { patrol: [lines[i][0], lines[i][1]] } }));
+            }
             S.screen = ids(scr);
             S.test = zone(w, -1500, 17500, 3600, 'Sperrgebiet (geräumt)', 'danger');
             objective(w, 'ad', 'Schalten Sie Radar und Flugabwehr der Insel aus (0/3)');
