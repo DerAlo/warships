@@ -71,10 +71,12 @@ export function westMissions(H) {
             S.escort.ai.escortId = S.convoy[2].id;
             S.goal = zone(w, 9800, 0, 1800, 'Golf von Oman');
             S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.boats = 0;
+            const extra = { Burke: 2 }[shipKey] || 0;      // one more boat per wave for the strongest escort
+            const gun = { Burke: 2, Daring: 1.6 }[shipKey] || 1;      // the better-armed escorts meet heavier batteries
             // the batteries stay silent (radar off, not yet located) until the convoy is deep in the strait
             S.batteries = [
-               addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: by(w, 4, 6, 8) } }),
-               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Nord', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: by(w, 4, 6, 8) } }),
+               addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
+               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Nord', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
             ];
             S.sub = add(w, 'Ghadir', 'enemy', P(4200, -2600), Math.PI, { depth: 1, telegraph: 1, ai: { huntId: S.convoy[0].id } });
             objective(w, 'convoy', 'Geleiten Sie die Tanker durch die Meerenge (0/3 am Ziel, mindestens 2)');
@@ -82,7 +84,8 @@ export function westMissions(H) {
             objective(w, 'sub', 'Versenken Sie das Kleinst-U-Boot', { optional: true });
             w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
             radio(w, 'Geleitführer', 'Geleit läuft mit 18 Knoten an. Halten Sie Position am Geleit, Radar an.');
-            const wave = (n, from, hunt, text) => {
+            const wave = (n0, from, hunt, text) => {
+               const n = n0 + extra;
                radio(w, 'Ausguck', text, 'warn');
                for (let i = 0; i < n; i++) {
                   const a = (i - (n - 1) / 2) * 420;
@@ -160,7 +163,7 @@ export function westMissions(H) {
             w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
             radio(w, 'Geleitführer', 'Geleit läuft nach Süden. Erwarten Flugkörper von der Ostküste – Radar an, Abwehr klar.');
             // waves: every living launcher ripples n missiles; from the fifth wave on the first of each is supersonic
-            const T0 = 30, GAP = by(w, 62, 54, 48);
+            const T0 = 30, GAP = by(w, 62, 54, 48) * (shipKey === 'Ticonderoga' ? 0.8 : 1);      // the cruiser's big magazine meets denser salvos
             for (let k = 0; k < 9; k++) later(S, T0 + k * GAP, () => this.wave(w, S, k));
             later(S, T0 + 2.5 * GAP, () => radio(w, 'Operationszentrale', 'Magazinstand beachten. Feuerordnung anpassen – nicht jeden Flugkörper doppelt bekämpfen.'));
             later(S, T0 + 4 * GAP - 8, () => radio(w, 'Operationszentrale', 'Warnung: Die nächsten Salven enthalten Überschall-Flugkörper. Täuschkörper bereithalten.', 'warn'));
@@ -507,7 +510,7 @@ export function westMissions(H) {
             'Mindestens zwei Versorger müssen durchkommen.',
          debrief: 'Das Geleit ist durch. Ein U-Boot, das geortet ist, hat seinen größten Vorteil verloren – der Hubschrauber findet es, bevor es in Schussweite ist.',
          fleet: { own: 'U-Jagd-Schiff mit Bordhubschrauber, 1 Korvette (ohne U-Jagd-Waffen), 3 Versorger', foe: '3–5 konventionelle U-Boote' },
-         env: { time: 'dawn', weather: 'rain' }, type: 'escort', playableShips: ['Sachsen', 'Burke', 'Virginia'], recommendedShip: 'Sachsen',
+         env: { time: 'dawn', weather: 'rain' }, type: 'escort', playableShips: ['Sachsen', 'Burke'], recommendedShip: 'Sachsen',
          arena: 20000, timeLimit: 11 * 60, stars: 2,
          setup(w, shipKey) {
             const S = w._script;

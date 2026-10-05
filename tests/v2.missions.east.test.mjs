@@ -382,15 +382,18 @@ test('east: balance table (EAST_BALANCE=<runs>, optional ONLY, SHIP, DIFFS, MODE
    for (const id of only) for (const ship of (process.env.SHIP ? process.env.SHIP.split(',') : [def(id).recommendedShip])) for (const diff of diffs) for (const mode of modes) {
       const d = def(id);
       let win = 0, tsum = 0, tmax = 0;
+      const why = {};
       for (let i = 0; i < runs; i++) {
          const w = mk(id, { diff, ship, seed: 101 + i * 37 });
          const cap = captain(w, mode);
          let n = 0;
          while (w.phase === 'playing' && n++ < (d.timeLimit + 5) * 60) { w.update(1 / 60); cap(); }
          if (w.phase === 'won') win++;
+         { const r = (w.phase === 'won' ? 'W ' : 'L ') + (w.result?.reason || ''); why[r] = (why[r] || 0) + 1; }
          tsum += w.time; tmax = Math.max(tmax, w.time);
       }
       console.log(`${id.padEnd(10)} ${ship.padEnd(12)} ${diff.padEnd(6)} ${mode.padEnd(7)} wins ${String(Math.round(100 * win / runs)).padStart(3)} %   t ${Math.round(tsum / runs)} (${Math.round(tmax)}) / ${d.timeLimit}`);
+      if (process.env.WHY) for (const k in why) console.log('      ' + String(why[k]).padStart(3) + ' x ' + k);
       assert.ok(tmax <= d.timeLimit + 1);
    }
 });
