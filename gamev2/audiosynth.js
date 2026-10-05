@@ -391,6 +391,24 @@ function torpHit(sr, r) {
    lay(out, sr, fall, 0.3);
    return fade(norm(drive(out, 1.4), 0.93), sr, 0.0005, 0.3);
 }
+// The scripted large detonation heard across the water (blast3d.js / audio.blast): no sharp crack
+// survives the distance. A pressure thump, then half a minute of rolling, slowly darkening rumble
+// with late echoes off the sea.
+function megaBlast(sr, r) {
+   const n = Math.floor(16 * sr), out = new Float32Array(n);
+   lay(out, sr, drive(sweep(n, sr, 46, 15, 1.1, ar(0.012, 3.4)), 3.2), 1.7);
+   const b = pink(n, r);
+   svf(b, sr, LP, expo(2600, 90, 0.7), 0.7); shape(b, sr, ar(0.004, 1.6));
+   lay(out, sr, drive(norm(b, 1), 2.2), 1.2);
+   for (let k = 0; k < 9; k++) {
+      const at = 0.5 + r() * 7.5;
+      explosionCore(out, sr, r, { f0: 58 - 3 * k, f1: 22, tau: 0.7, noiseF: 620, noiseTau: 0.6, at, gain: 0.7 * Math.exp(-at / 4.2) });
+   }
+   const rum = brown(n, r);
+   svf(rum, sr, LP, expo(260, 48, 4.5), 0.7); mul(rum, lfn(n, sr, 2.2, r), 0.4, 1.3); shape(rum, sr, ar(0.2, 5.5));
+   lay(out, sr, rum, 1.5);
+   return fade(norm(drive(out, 1.5), 0.95), sr, 0.002, 2.5);
+}
 function detonation(sr, r) {
    const n = Math.floor(7 * sr), out = new Float32Array(n);
    for (const at of [0, 0.075]) {
@@ -935,7 +953,7 @@ def('splashBigA', 1, (sr, r) => splash(sr, r, true)); def('splashBigB', 1, (sr, 
 def('pen', 1, (sr, r) => pen(sr, r, false)); def('citadel', 1, (sr, r) => pen(sr, r, true));
 def('overpen', 1, overpen); def('ricochetA', 1, (sr, r) => ricochet(sr, r, 0)); def('ricochetB', 1, (sr, r) => ricochet(sr, r, 1));
 def('shatter', 1, shatter); def('he', 1, heBurst); def('explosionBig', 1, explosionBig); def('terrain', 1, terrain);
-def('torpHit', 1, torpHit); def('detonation', 1, detonation); def('sink', 2, sink);
+def('torpHit', 1, torpHit); def('detonation', 1, detonation); def('megaBlast', 2, megaBlast); def('sink', 2, sink);
 def('hit', 1, (sr, r) => ownHit(sr, r, false)); def('hitBig', 1, (sr, r) => ownHit(sr, r, true));
 def('whistle', 1, whistle); def('torpLaunch', 1, torpLaunch); def('reload', 1, reloadClank); def('thunder', 2, thunder);
 def('fireStart', 1, (sr, r) => {

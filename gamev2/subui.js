@@ -5,6 +5,7 @@
 // draw functions with the `ui.sub` snapshot. Nothing here allocates per frame.
 import { DEPTH_NAMES, SONAR_KEEP, hydrophoneContacts } from './submarine.js';
 import { angleDelta } from './utils.js';
+import { aswStatus, aswBlock } from './helo.js';
 import { execAction } from './net/command.js';
 import { T, FONT, MONO } from './theme.js';
 
@@ -77,14 +78,15 @@ export class SubUi {
          + DEPTH_NAMES.map((n, i) => `<div class="sp-row" data-d="${i}"><i></i><span>${n}</span></div>`).join('')
          + '<div class="sp-bat"><i></i></div><div class="sp-batt"><span>Batterie</span><span class="sp-pct">100 %</span></div>'
          + '<div class="sp-keys"><b>F</b> tiefer · <b>G</b> auf</div><div class="sp-ping">SONAR-ORTUNG</div>');
-      const asw = el('div', 'asw-panel', 'panel hidden', '<b>WASSERBOMBEN<i class="kb"> · G</i></b><span class="asw-stat">bereit</span>');
+      const asw = el('div', 'asw-panel', 'panel hidden', '<b><span class="asw-title">WASSERBOMBEN</span><i class="kb"> · G</i></b><span class="asw-stat">bereit</span>');
+      asw.dataset.key = 'G';
       const alert = el('div', 'dc-alert', 'hidden'); alert.textContent = 'WASSERBOMBEN!';
       const br = document.getElementById('bottom-right'), hudRoot = document.getElementById('hud');
       // above the chart table (bottom-right), clear of the weapon bar
       const host = hudRoot || br;
       if (host) { host.appendChild(sub); host.appendChild(asw); host.appendChild(alert); }
       this.dom = { sub, asw, alert, rows: [...sub.querySelectorAll('.sp-row')], bat: sub.querySelector('.sp-bat i'),
-         pct: sub.querySelector('.sp-pct'), ping: sub.querySelector('.sp-ping'), aswStat: asw.querySelector('.asw-stat') };
+         pct: sub.querySelector('.sp-pct'), ping: sub.querySelector('.sp-ping'), aswStat: asw.querySelector('.asw-stat'), aswTitle: asw.querySelector('.asw-title') };
    }
 
    reset(world) {
@@ -120,10 +122,11 @@ export class SubUi {
          if (f && !run(['d', 1]) && p.depthTarget >= 2) this.audio.denied?.();
          if (g && !run(['d', -1])) this.audio.denied?.();
       } else if (g) {
-         const a = p.asw;
-         if (!a) { this.audio.denied?.(); this.hud.msg('Keine Wasserbomben an Bord', 'warn'); }
-         else if (run(['g'])) this.hud.msg('Wasserbomben los!', 'info');
-         else { this.audio.denied?.(); this.hud.msg('Wasserbomben laden nach', 'warn'); }
+         // the sim tries the lightweight torpedo first (needs a sonar contact), then the depth charges
+         const a = p.asw, ltt = !!p.cfg?.weapons?.asw, why = ltt ? aswBlock(world, p) : 'x';
+         if (!a && !ltt) { this.audio.denied?.(); this.hud.msg('Keine U-Jagd-Waffen an Bord', 'warn'); }
+         else if (run(['g'])) this.hud.msg(why == null ? 'U-Jagd-Torpedo los!' : 'Wasserbomben los!', 'info');
+         else { this.audio.denied?.(); this.hud.msg(ltt ? why || 'U-Jagd-Torpedo nicht bereit' : 'Wasserbomben laden nach', 'warn'); }
       }
    }
 
@@ -257,10 +260,22 @@ export class SubUi {
             }
          }
          setCls(d.alert, 'hidden', !(this.warnT > 0));
+      } else if (p.cfg?.weapons?.asw) {
+         // lightweight ASW torpedoes: count, reload, whether the sonar holds a contact to shoot at
+         const st = aswStatus(world, p);
+         setCls(d.asw, 'hidden', !st || !p.alive);
+         if (st) {
+            setText(d.aswTitle, 'U-JAGD-TORPEDO');
+            const rdy = st.n > 0 && st.reload <= 0;
+            setCls(d.aswStat, 'ready', rdy && st.contact != null);
+            setText(d.aswStat, st.n <= 0 ? (p.asw ? 'leer · Wasserbomben' : 'verschossen') : st.reload > 0 ? st.n + '/' + st.max + ' · lädt ' + Math.ceil(st.reload) + ' s'
+               : st.n + '/' + st.max + (st.contact != null ? ' · Kontakt' : ' · kein Kontakt'));
+         }
       } else if (p.asw) {
          const a = p.asw, show = world.hasSubs || a.reload > 0;
          setCls(d.asw, 'hidden', !show);
          if (show) {
+            setText(d.aswTitle, 'WASSERBOMBEN');
             const rdy = a.reload <= 0 && a.left <= 0;
             setCls(d.aswStat, 'ready', rdy);
             setText(d.aswStat, rdy ? 'bereit' : a.left > 0 ? 'Wurf läuft' : 'lädt ' + Math.ceil(a.reload) + ' s');

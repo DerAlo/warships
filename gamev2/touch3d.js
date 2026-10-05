@@ -25,7 +25,7 @@ const MQ_NARROW = '(max-height: 480px) and (max-width: 899px)';  // ... and a sh
 const MQ_UPRIGHT = '(orientation: portrait) and (max-width: 600px)';
 const MORE_OPEN = 5;             // s the phone's "more" fold stays open
 const OBJ_SHOW = 8;              // s the phone shows the objectives after a change
-const LATE_PLATES =['sub-panel', 'asw-panel', 'air-panel', 'aa-panel'];   // built by subui / airui on demand
+const LATE_PLATES =['sub-panel', 'asw-panel', 'ops-panel', 'air-panel', 'aa-panel'];   // built by subui / airui on demand
 const LATE_BOTTOM = 'mx-sys';                                            // built by missileui on the first start
 
 const CSS = `
@@ -390,6 +390,8 @@ export class TouchUi {
       plates(document.getElementById('cons'), '.cslot', s => s.dataset.slot);
       // radar, air-defence doctrine and priority target: the plates of missileui.js (built on the first start)
       plates(document.getElementById('hud'), '#mx-sys [data-key]', s => s.dataset.key);
+      // helicopter and swimmer team: the plates of opsui.js (I / K)
+      plates(document.getElementById('hud'), '#ops-panel [data-key]', s => s.dataset.key);
       // no synthetic mouse events, double-tap zoom or long-press menu from the controls
       root.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
       root.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -598,6 +600,7 @@ export class TouchUi {
       setCls(c.sec, 'hidden', !ship || !s.sec || s.cv);
       setCls(c.sec, 'on', s.secTarget);
       setCls(c.asw, 'hidden', !ship || !s.asw);
+      if (this._ltt !== !!s.ltt) { this._ltt = !!s.ltt; c.asw.innerHTML = s.ltt ? 'U-Jagd-<br>Torpedo' : 'Wasser&shy;bomben'; }
       setCls(c.aa, 'hidden', !ship || !s.aa || s.sub || s.net);
       setText(d.ctx.aaV, s.aaFocus < 0 ? 'Bb' : s.aaFocus > 0 ? 'Stb' : 'aus');
       setCls(c.aa, 'on', s.aaFocus !== 0);
@@ -632,7 +635,9 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Radar · Luftabwehr · Vorrang</span><span class="d">Felder über der Waffenleiste antippen: Radar an/aus (EMCON) · Doktrin wechseln · anfliegenden Flugkörper in Blickrichtung zum Vorrangziel machen</span></div>
    <div><span class="k">Runde Felder</span><span class="d">Schadensabwehr, Notreparatur, Täuschkörper, Störsender</span></div>
    <div><span class="k">Träger</span><span class="d">Flugzeugtyp, Start/Übernehmen · Staffel: Leiste links = Kurs, Hebel = Tempo, Schiff, Rückruf</span></div>
-   <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · U-Jagd-Schiffe: Wasserbomben</span></div>
+   <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · U-Jagd-Schiffe: U-Jagd-Torpedo bzw. Wasserbomben</span></div>
+   <div><span class="k">Hubschrauber</span><span class="d">Feld antippen: Start voraus / Rückruf · bei offener Lagekarte: Feld, dann Punkt auf der Karte antippen</span></div>
+   <div><span class="k">Kommandotrupp</span><span class="d">U-Boot nahe am Einsatzpunkt, langsam, höchstens auf Sehrohrtiefe: Feld antippen · zur Aufnahme zum Trupp zurück</span></div>
    <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Flak und Sek.-Ziel aus</span></div>
    <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
 </div>`;

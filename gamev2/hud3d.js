@@ -7,6 +7,7 @@ import { drawSubUnder, drawPeriscope } from './subui.js';
 import { T, rgba, FONT, MONO } from './theme.js';
 import { drawAir } from './airui.js';
 import { drawQuality, drawMissileHud, tacticalMapRect, mapTargetHint } from './missileui.js';
+import { drawOpsHud, opsMapHint } from './opsui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -61,6 +62,7 @@ export class Overlay3D {
       this._markers(ui);
       if (ui.air) drawAir(g, ui, this.W, this.H, this.t);   // squadron markers, attack-run aim (airui.js)
       drawMissileHud(g, ui, this.W, this.H, this.t);        // vampires, ESM bearings, land positions (missileui.js)
+      if (ui.ops) drawOpsHud(g, ui, this.W, this.H, this.t); // own helicopter, task points, swimmer team (opsui.js)
       if (ui.air?.flying) return;                            // squadron view: no ship reticle
       if (ui.torpFan && ui.alive) this._torpFan(ui);
       if (ui.scopeT > 0.01) { if (ui.sub?.peri) drawPeriscope(g, ui, this.W, this.H); else this._binoculars(ui); }
@@ -547,7 +549,7 @@ export class Overlay3D {
       // title + legend under the map: the HTML score box covers the strip above it
       g.textBaseline = 'top';
       g.fillStyle = T.hud; g.font = FONT(15, 'bold'); g.textAlign = 'left';
-      const hint = mapTargetHint(ui);
+      const hint = opsMapHint(ui) || mapTargetHint(ui);
       if (hint) g.font = FONT(size < 420 ? 11 : 13, 'bold');
       g.fillText(hint || 'LAGEKARTE', x0, y0 + size + 7);
       g.font = FONT(12); g.fillStyle = T['hud-dim']; g.textAlign = 'right';

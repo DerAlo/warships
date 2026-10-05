@@ -335,6 +335,15 @@ export class Audio {
       this._one(this._world, prio, name, loud * gain, { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate });
    }
    explosion(big = false, dist = 0, pos = null) { this.impact('explosion', dist, pos, big); }
+   // The scripted large detonation. Called when its shock front reaches the listener (blast3d.js
+   // times that from the real distance, so the usual 3 s cap on the delay does not apply): a deep
+   // rumble that is still loud at 20 km, darker the farther away.
+   blast(dist = 0, pos = null) {
+      if (!this.ctx) return;
+      const gain = Math.max(0.5, 1.25 / (1 + dist / 9000));
+      this._one(this._world, 9, 'megaBlast', gain, { cutoff: Math.max(420, 9000 / (1 + dist / 2500)), pan: this._pan(pos) * 0.6, send: Math.min(0.7, 0.3 + dist / 30000) });
+      if (dist < 6000) this._one(this._world, 8, 'detonation', 0.9 / (1 + dist / 4000), { cutoff: Math.max(700, 12000 / (1 + dist / 1500)), pan: this._pan(pos), send: 0.4 });
+   }
    bounce() { this.hit(false, 'ricochet'); }
 
    // own ship takes a hit, heard from inside the hull. type: the event type ('pen', 'torp', ...).

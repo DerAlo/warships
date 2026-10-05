@@ -1500,7 +1500,8 @@ export class FX {
          st.x = t.pos.x; st.z = t.pos.y; st.frame = f;
          const vis = t.spotted !== false || t.side === 'player' || t.owner === 'player';
          const hd = Number.isFinite(t.heading) ? t.heading : (t.dir || 0);
-         if (vis) this.wakes.feed(t, 1, t.pos.x - Math.cos(hd) * 4, t.pos.y - Math.sin(hd) * 4, Number(t.speed) || 30, 2, 1, time);
+         // a lightweight ASW torpedo (asw: true) runs deeper and is half the size: a thin, faint wake
+         if (vis) this.wakes.feed(t, 1, t.pos.x - Math.cos(hd) * 4, t.pos.y - Math.sin(hd) * 4, Number(t.speed) || 30, t.asw ? 1.1 : 2, t.asw ? 0.55 : 1, time);
       }
       for (const [t, st] of this.torpState) {
          if (st.frame === f) continue;
