@@ -1,6 +1,19 @@
-// game3d/config.js — WoWs-scale tuning for the 3D mode: world constants, ship classes,
-// consumables, difficulty. 1 unit = 1 m. Speeds are data in knots; the sim moves ships at
-// kn * WORLD.KN_TO_MS m/s (~5x real time, WoWs-style compression).
+// gamev2/config.js — tuning for the modern mode (V2): world constants, the missile / SAM / CIWS
+// catalogue, the ship roster, consumables, difficulty. 1 unit = 1 m. Speeds are data in knots; the
+// sim moves ships at kn * WORLD.KN_TO_MS m/s (~5x real time). Ranges are scaled to the arena, not
+// to reality; only the ratios are kept:  gun < point SAM < area SAM < SSM < cruise missile.
+//
+// What a renderer / HUD / net agent reads from a class config (SHIPS[key], ship.cfg):
+//    hull.type   'FAC' | 'CO' | 'FF' | 'DD' | 'CG' | 'CV' | 'SS' | 'TR'      (CLASS_NAMES)
+//    model       key of the 3D model (ships3d.js dispatches on it)
+//    bloc        'west' | 'east' | 'neutral'
+//    stealth     radar cross-section factor: an enemy radar reaches radar.range * stealth
+//    radar       { range, horizon, air } m: surface search / sea-skimmer horizon / air search
+//    weapons     { ssm: [{type, n}], cruise: {type, n}|null, sam: [{type, n, ch}], ciws: {type, n}|null,
+//                  rockets: {...}|null, asw: {...}|null, cells }     (types are keys of MISSILES / CIWS)
+//    helo        { name, ... } | null   (consumable 'helo');   sonar { hull, towed } m
+//    sub.seal    the boat carries a SEAL team (seal.js)
+// The live counts are on the ship: ship.mag[type] (missile.js).
 import { DEG } from './utils.js';
 
 export const WORLD = {
@@ -11,46 +24,137 @@ export const WORLD = {
    FUSE_TRAVEL: 14,          // m an armed AP shell travels before detonating (overpen if the hull is thinner)
    FUSE_DIV: 6,              // AP fuse arms on plates >= caliber / 6
    OVERMATCH: 14.3,          // caliber > 14.3 x plate -> no ricochet
-   BLOOM_TIME: 20,           // s of raised detectability after firing the main battery
-   PROXIMITY: 2000,          // m: always spotted this close (through smoke and islands)
+   BLOOM_TIME: 12,           // s of raised detectability after firing guns or launching missiles
+   PROXIMITY: 1500,          // m: always spotted this close (through smoke and islands)
    SPOT_DT: 0.25,            // spotting recompute interval
    SMOKE_RADIUS: 450,        // m per smoke puff
    SMOKE_LIFE: 60,           // s a puff lingers once laid
-   SMOKE_DURATION: 20,       // legacy (old main3d F key): emission time
+   SMOKE_DURATION: 20,       // legacy
    SMOKE_CD: 120,            // legacy
    FIRE_MAX: 4,              // fire zones (bow, fore-mid, aft-mid, stern)
    FIRE_DPS: 0.003,          // fraction of max HP per second per fire
    FLOOD_MAX: 2,
    FLOOD_DPS: 0.005,
    SINK_TIME: 16,            // s the sinking animation lasts before the wreck is removed
-   MIN_THROTTLE: 0.35,       // legacy throttle floor (old main3d)
+   MIN_THROTTLE: 0.35,       // legacy throttle floor
    ALIGN_TOL: 1.5 * DEG,     // turret counts as aligned within this
    FIRE_TOL: 2.5 * DEG,      // fireMain accepts a turret this close to its firing solution
    AMMO_SWITCH: 0.5,         // switching AP/HE: guns reload with max(current, 50% of reload)
-   HIT_POOL: { pen: 0.5, citadel: 0.1, he: 0.5, sec: 0.5, fire: 1, flood: 1, torp: 0.33, overpen: 0.5 }, // repair-party regen share
+   HIT_POOL: { pen: 0.5, citadel: 0.1, he: 0.5, sec: 0.5, fire: 1, flood: 1, torp: 0.33, overpen: 0.5, ssm: 0.3, rocket: 0.5 }, // repair regen share
    // throttle fraction per telegraph position (-1 reverse .. 4 full ahead)
    TELEGRAPH: { '-1': -0.3, 0: 0, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 },
 };
 
-// Consumable catalogue: display name/icon; per-ship charges/durations live in SHIPS[].consumables.
-export const CONSUMABLES = {
-   damageControl: { name: 'Leckwehr', short: 'Leck', icon: '🧯' },
-   repair: { name: 'Notreparatur', short: 'Rep', icon: '🔧' },
-   smoke: { name: 'Nebelanlage', short: 'Nebel', icon: '🌫️' },
-   boost: { name: 'Äußerste Kraft', short: 'AK', icon: '⚡' },
-   hydro: { name: 'Horchgerät', short: 'Horch', icon: '👂' },
-   radar: { name: 'Funkmessgerät', short: 'FuMG', icon: '📡' },
+// ---------------------------------------------------------------- sensors (sensors.js)
+export const SENSOR = {
+   ESM: 1.5,                 // an emitter is heard at this multiple of its own radar range
+   ESM_ERR: 0.09,            // position error of a single ESM bearing fix, as a share of the distance
+   ESM_KEEP: 12,             // s an ESM contact stays on the plot after the emitter went silent
+   FC: 0.8,                  // inside this share of the radar detection range a track is fire-control quality
+   VISUAL_MISSILE: 2500,     // m: a missile is seen by eye (and by a silent ship's optics) this close
+   JAM_RADAR: 0.6,           // an active jammer shortens enemy radar ranges against ships near it ...
+   JAM_SEEKER: 0.5,          // ... and enemy seeker ranges
+   JAM_R: 3500,              // m around the jamming ship that is covered
+   DECOY_LIFE: 14,           // s a chaff cloud is a valid seeker target
+   SEEKER_ESM: 9000,         // m: an active radar seeker is heard by ESM this far (warning, bearing)
 };
 
-export const CLASS_NAMES = { BB: 'Schlachtschiff', CA: 'Schwerer Kreuzer', CL: 'Leichter Kreuzer', DD: 'Zerstörer', SS: 'U-Boot', TR: 'Transporter', CV: 'Flugzeugträger' };
-export const NATION_NAMES = { de: 'Kriegsmarine', uk: 'Royal Navy', us: 'US Navy', jp: 'Kaiserliche Marine',
-   fr: 'Marine nationale', it: 'Regia Marina', su: 'Sowjetische Marine' };
+// ---------------------------------------------------------------- missiles (missile.js)
+//  ssm     speed m/s, range m, dmg, seeker m (lock-on range of the terminal seeker), cone (half angle),
+//          evade: factor on every defender's kill probability (supersonic and stealthy missiles are
+//          hard to stop), skim: sea-skimmer (seen only inside the radar horizon, cannot cross land),
+//          sprint: { at, speed } terminal sprint, passive: IR seeker (silent, harder to seduce)
+//  cruise  land attack: flies over islands at alt, targets a map point (site or anchored ship)
+//  sam     cls 'area' | 'point', range m against missiles, air m against aircraft, pk per shot at
+//          mid range, passive: IR homing (may fire with the radar off at what the eye sees)
+//  aam     fighters against aircraft
+export const MISSILES = {
+   // --- anti-ship, subsonic
+   harpoon: { kind: 'ssm', name: 'Harpoon', speed: 560, range: 24000, dmg: 5200, seeker: 4500, cone: 22 * DEG, evade: 1, skim: true },
+   rbs15: { kind: 'ssm', name: 'RBS15 Mk3', speed: 550, range: 26000, dmg: 4800, seeker: 4500, cone: 24 * DEG, evade: 0.92, skim: true },
+   nsm: { kind: 'ssm', name: 'NSM', speed: 560, range: 22000, dmg: 3600, seeker: 4200, cone: 26 * DEG, evade: 0.8, skim: true, passive: true },
+   yj83: { kind: 'ssm', name: 'YJ-83', speed: 550, range: 21000, dmg: 4300, seeker: 4200, cone: 22 * DEG, evade: 1, skim: true },
+   noor: { kind: 'ssm', name: 'Noor', speed: 520, range: 18000, dmg: 4000, seeker: 3800, cone: 20 * DEG, evade: 1.05, skim: true },
+   kh35: { kind: 'ssm', name: 'Ch-35', speed: 540, range: 20000, dmg: 4200, seeker: 4000, cone: 22 * DEG, evade: 1, skim: true },
+   kowsar: { kind: 'ssm', name: 'Kowsar', speed: 480, range: 7500, dmg: 1500, seeker: 2600, cone: 20 * DEG, evade: 1.05, skim: true },
+   // --- anti-ship, supersonic
+   oniks: { kind: 'ssm', name: 'P-800 Oniks', speed: 940, range: 26000, dmg: 6800, seeker: 5500, cone: 20 * DEG, evade: 0.6, skim: true, supersonic: true },
+   vulkan: { kind: 'ssm', name: 'P-1000 Wulkan', speed: 980, range: 30000, dmg: 9800, seeker: 6500, cone: 22 * DEG, evade: 0.62, skim: false, alt: 400, supersonic: true },
+   granit: { kind: 'ssm', name: 'P-700 Granit', speed: 960, range: 30000, dmg: 10500, seeker: 6500, cone: 22 * DEG, evade: 0.62, skim: false, alt: 400, supersonic: true },
+   yj18: { kind: 'ssm', name: 'YJ-18', speed: 560, range: 26000, dmg: 6000, seeker: 5200, cone: 22 * DEG, evade: 0.68, skim: true, supersonic: true, sprint: { at: 5500, speed: 980 } },
+   kalibr: { kind: 'ssm', name: '3M-54 Kalibr', speed: 560, range: 26000, dmg: 5600, seeker: 5000, cone: 22 * DEG, evade: 0.7, skim: true, supersonic: true, sprint: { at: 5000, speed: 940 } },
+   // --- land attack
+   tomahawk: { kind: 'cruise', name: 'Tomahawk', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
+   kalibrLA: { kind: 'cruise', name: 'Kalibr-NK', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
+   cj10: { kind: 'cruise', name: 'CJ-10', speed: 500, range: 70000, dmg: 5000, alt: 60, evade: 1.1 },
+   // --- surface to air, area
+   sm2: { kind: 'sam', cls: 'area', name: 'SM-2', speed: 1400, range: 17000, air: 22000, pk: 0.68 },
+   aster30: { kind: 'sam', cls: 'area', name: 'Aster 30', speed: 1500, range: 18000, air: 23000, pk: 0.76 },
+   s300f: { kind: 'sam', cls: 'area', name: 'S-300F', speed: 1500, range: 18000, air: 23000, pk: 0.62 },
+   hq9: { kind: 'sam', cls: 'area', name: 'HQ-9', speed: 1450, range: 17500, air: 22000, pk: 0.65 },
+   redut: { kind: 'sam', cls: 'area', name: 'Poliment-Redut', speed: 1450, range: 15000, air: 19000, pk: 0.68 },
+   hq16: { kind: 'sam', cls: 'area', name: 'HQ-16', speed: 1300, range: 12500, air: 15000, pk: 0.6 },
+   // --- surface to air, point
+   essm: { kind: 'sam', cls: 'point', name: 'ESSM', speed: 1300, range: 9500, air: 11000, pk: 0.66 },
+   ram: { kind: 'sam', cls: 'point', name: 'RAM', speed: 1100, range: 7000, air: 7000, pk: 0.7, passive: true },
+   camm: { kind: 'sam', cls: 'point', name: 'CAMM', speed: 1250, range: 9500, air: 11000, pk: 0.7 },
+   hq10: { kind: 'sam', cls: 'point', name: 'HQ-10', speed: 1050, range: 6500, air: 6500, pk: 0.64, passive: true },
+   kinzhal: { kind: 'sam', cls: 'point', name: 'Kinschal', speed: 1150, range: 8000, air: 9000, pk: 0.58 },
+   osa: { kind: 'sam', cls: 'point', name: 'Osa-MA', speed: 950, range: 7000, air: 8000, pk: 0.45 },
+   igla: { kind: 'sam', cls: 'point', name: 'Gibka', speed: 900, range: 4500, air: 4500, pk: 0.4, passive: true },
+   sayyad: { kind: 'sam', cls: 'point', name: 'Sayyad-2', speed: 1100, range: 9000, air: 11000, pk: 0.48 },
+   // --- air to air
+   amraam: { kind: 'aam', name: 'AIM-120', speed: 1300, range: 9000, pk: 0.6 },
+   r77: { kind: 'aam', name: 'R-77', speed: 1300, range: 8500, pk: 0.55 },
+   pl12: { kind: 'aam', name: 'PL-12', speed: 1300, range: 8500, pk: 0.55 },
+};
+// Close-in weapon systems: one target at a time per mount. kps = kill chance per second against a
+// subsonic missile inside range (supersonic: * CIWS_SUPER); air = dps against aircraft.
+export const CIWS = {
+   phalanx: { name: 'Phalanx', range: 1800, kps: 0.30 },
+   goalkeeper: { name: 'Goalkeeper', range: 2000, kps: 0.34 },
+   ak630: { name: 'AK-630', range: 1600, kps: 0.24 },
+   kashtan: { name: 'Kaschtan', range: 2400, kps: 0.34 },
+   type730: { name: 'Typ 730', range: 2000, kps: 0.32 },
+   type1130: { name: 'Typ 1130', range: 2200, kps: 0.38 },
+   gun40: { name: '40-mm-Flak', range: 1500, kps: 0.12 },
+};
+export const CIWS_SUPER = 0.5;
+// Defence tuning shared by ships and SAM sites (missile.js).
+export const DEFENCE = {
+   react: 1.2,               // s from detection of a threat to the first SAM leaving the rail
+   relook: 0.6,              // s between an intercept result and the next shot of that channel (shoot-look-shoot)
+   minRange: 900,            // m: SAMs cannot engage closer than this (the CIWS layer)
+   farPk: 0.75,              // pk factor at maximum range (1 at half range and closer)
+   aircraftPk: 0.85,         // pk factor against aircraft (they manoeuvre and use flares)
+   decoyPk: 0.6,             // chance a fresh decoy cloud seduces a subsonic radar seeker locked on the ship
+   decoyPkSuper: 0.42,       // ... a supersonic one
+   decoyPkPassive: 0.3,      // ... an IR seeker (NSM)
+   launchGap: 1.1,           // s between two SSMs leaving the same ship
+};
+
+// Consumable catalogue: display name/icon; per-ship charges/durations live in SHIPS[].consumables.
+export const CONSUMABLES = {
+   damageControl: { name: 'Schadensabwehr', short: 'Leck', icon: '🧯' },
+   repair: { name: 'Notreparatur', short: 'Rep', icon: '🔧' },
+   decoy: { name: 'Täuschkörper', short: 'Düppel', icon: '✨' },
+   jammer: { name: 'Störsender', short: 'EloKa', icon: '📶' },
+   helo: { name: 'Bordhubschrauber', short: 'Heli', icon: '🚁' },
+   boost: { name: 'Äußerste Kraft', short: 'AK', icon: '⚡' },
+   hydro: { name: 'Aktivsonar', short: 'Sonar', icon: '👂' },
+   // legacy keys of the WW2 base (unused by the V2 roster, kept so old profiles / HUD tables resolve)
+   smoke: { name: 'Nebelanlage', short: 'Nebel', icon: '🌫️' },
+   radar: { name: 'Radar', short: 'Radar', icon: '📡' },
+};
+
+export const CLASS_NAMES = { FAC: 'Schnellboot', CO: 'Korvette', FF: 'Fregatte', DD: 'Zerstörer', CG: 'Kreuzer', CV: 'Flugzeugträger', SS: 'U-Boot', TR: 'Handelsschiff' };
+export const NATION_NAMES = { de: 'Deutsche Marine', us: 'US Navy', uk: 'Royal Navy', ru: 'Russische Marine', cn: 'Marine der VBA', ir: 'Iranische Marine', nt: 'Handelsschifffahrt' };
 // Port order of the nations and their tab labels.
-export const NATIONS = ['de', 'uk', 'us', 'jp', 'fr', 'it', 'su'];
-export const NATION_SHORT = { de: 'Deutschland', uk: 'Großbritannien', us: 'USA', jp: 'Japan', fr: 'Frankreich', it: 'Italien', su: 'UdSSR' };
-// Random battles: Axis fleets (de/jp/it) fight Allied fleets (uk/us/fr/su).
-export const NATION_BLOC = { de: 'axis', jp: 'axis', it: 'axis', uk: 'allies', us: 'allies', fr: 'allies', su: 'allies' };
-const NATION_COLOR = { de: 0x6c7781, uk: 0x8b939b, us: 0x6f7982, jp: 0x767b80, fr: 0x7f8a94, it: 0x8a9096, su: 0x66727a, tr: 0x5d5348 };
+export const NATIONS = ['de', 'us', 'uk', 'ru', 'cn', 'ir'];
+export const NATION_SHORT = { de: 'Deutschland', us: 'USA', uk: 'Großbritannien', ru: 'Russland', cn: 'China', ir: 'Iran', nt: 'Neutral' };
+export const NATION_BLOC = { de: 'west', us: 'west', uk: 'west', ru: 'east', cn: 'east', ir: 'east', nt: 'neutral' };
+export const BLOCS = ['west', 'east'];
+const NATION_COLOR = { de: 0x7b858c, us: 0x7f8990, uk: 0x868e94, ru: 0x6f7a80, cn: 0x8a9298, ir: 0x7d8384, nt: 0x5d5348 };
 export const TIER_ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
 // ---- builders (keep the ship table readable) ----
@@ -60,11 +164,69 @@ const T = (x, guns, aft = false, arcW = 150) => ({ off: { x, y: 0 }, guns, arcC:
 const L = (x, side, tubes) => ({ off: { x, y: 0 }, side, tubes });
 const C = (key, o = {}) => ({ key, ...o });
 
+// Modern guns: fast, short-ranged, HE only. dispH = max horizontal dispersion (m) at max range;
+// tMax = shell flight time (s) at max range.
+const GUNS = {
+   13: { traverse: 60, reload: 0.35, range: 1800, tMax: 2.2, fallMax: 6, dispH: 40, sigma: 1.6, he: { dmg: 16, pen: 2, fire: 0 } },
+   30: { traverse: 60, reload: 0.4, range: 3200, tMax: 3.2, fallMax: 8, dispH: 45, sigma: 1.8, he: { dmg: 55, pen: 5, fire: 0.002 } },
+   76: { traverse: 45, reload: 1.0, range: 7500, tMax: 6.0, fallMax: 16, dispH: 55, sigma: 2.0, he: { dmg: 340, pen: 13, fire: 0.012 } },
+   100: { traverse: 40, reload: 1.2, range: 8000, tMax: 6.2, fallMax: 16, dispH: 60, sigma: 2.0, he: { dmg: 470, pen: 17, fire: 0.016 } },
+   114: { traverse: 35, reload: 2.4, range: 8800, tMax: 6.6, fallMax: 18, dispH: 62, sigma: 2.0, he: { dmg: 800, pen: 19, fire: 0.025 } },
+   127: { traverse: 32, reload: 3.0, range: 9500, tMax: 7.0, fallMax: 18, dispH: 65, sigma: 2.0, he: { dmg: 920, pen: 21, fire: 0.03 } },
+   130: { traverse: 32, reload: 2.4, range: 9500, tMax: 7.0, fallMax: 18, dispH: 68, sigma: 2.0, he: { dmg: 900, pen: 21, fire: 0.03 } },
+};
+const gun = (caliber, turrets, o = {}) => ({ caliber, turrets, vRatio: 0.5, ...structuredClone(GUNS[caliber]), ...o });
+// ships without a gun (carriers, boats): an empty battery, so nothing has to test for cfg.main
+const noGun = () => ({ caliber: 0, turrets: [], traverse: 30, reload: 9, range: 100, tMax: 1, fallMax: 10, dispH: 10, vRatio: 0.5, sigma: 2, he: { dmg: 0, pen: 0, fire: 0 } });
+// Modern hulls are unarmoured: every shell from 76 mm up penetrates.
+const ARMOR = { belt: 8, deck: 8, ends: 6, sup: 5, cit: 0, citLen: 0, tds: 0 };
+const BOAT_ARMOR = { belt: 1, deck: 1, ends: 1, sup: 1, cit: 0, citLen: 0, tds: 0 };
+const det = (surface) => ({ surface, fire: surface + 2500, smokeFire: Math.round(surface * 0.5), torp: 1400 });
+const RADAR = (range, horizon) => ({ range, horizon, air: Math.round(range * 1.3) });
+// consumable sets
+const DC = (cd = 60) => C('damageControl', { charges: Infinity, dur: 10, cd });
+const REP = (charges = 2) => C('repair', { charges, dur: 20, cd: 80, heal: 0.005 });
+const DECOY = (charges = 4, cd = 28) => C('decoy', { charges, dur: 6, cd });
+const JAM = (charges = 2) => C('jammer', { charges, dur: 30, cd: 75 });
+const HELO = (charges = 2) => C('helo', { charges, dur: 1, cd: 70 });
+const SONAR = (range = 5000) => C('hydro', { charges: 3, dur: 60, cd: 90, range, torpRange: 3200 });
+const ASW = (o = {}) => ({ n: 6, reload: 16, range: 4500, speedKn: 46, dmg: 3600, ...o });
+// Submarines (submarine.js): battery seconds at full speed, speed factors, detectability.
+const SUB = (o = {}) => ({ diveT: 6, battery: { peri: 900, deep: 600, charge: 90 }, periSpeed: 1, deepSpeed: 0.85,
+   periDetect: 1500, torpBloom: 3800, hydrophone: 7000, seal: false, ...o });
+const SUB_ARMOR = { belt: 19, deck: 8, ends: 10, sup: 8, cit: 0, citLen: 0, tds: 0 };
+// Air wing (air.js). The three hangars of the WW2 base are kept as types:
+//    tb  Angriffsstaffel (Seeziel): stand-off anti-ship missiles (weapon.missile, weapon.per plane)
+//    db  Angriffsstaffel (Bomben): guided bombs against ships and land positions (weapon.site = damage to a site)
+//    ft  Jagdstaffel: air-to-air missiles (aam: { type, per }) and guns (dps)
+const AIRW = (tb, db, ft, o = {}) => ({
+   tb: { squad: 4, flight: 2, hp: 1700, speed: 400, restock: 60, hangar: 8, ...tb,
+      weapon: { missile: 'harpoon', per: 2, standoff: 13000, speedKn: 0, range: 0, flood: 0, dmg: 5200, ...tb.weapon } },
+   db: { squad: 4, flight: 2, hp: 1700, speed: 400, restock: 60, hangar: 8, ...db,
+      weapon: { dmg: 3400, pen: 80, fire: 0.3, ap: false, site: 2600, ...db.weapon } },
+   ft: { squad: 4, flight: 4, hp: 1900, speed: 460, restock: 55, hangar: 8, dps: 120, ammo: 18, ...ft, aam: { type: 'amraam', per: 2, ...ft.aam } },
+   service: 22, fuel: 170, jets: true, ...o,
+});
+
 function ship(def) {
    const h = def.hull;
-   h.color = h.color ?? NATION_COLOR[h.type === 'TR' ? 'tr' : h.nation];
-   const m = def.main;
-   if (m) {
+   h.color = h.color ?? NATION_COLOR[h.type === 'TR' ? 'nt' : h.nation] ?? NATION_COLOR.nt;
+   def.bloc = NATION_BLOC[h.nation] || 'neutral';
+   def.tier = def.tier ?? 8;
+   def.stealth = def.stealth ?? 1;
+   def.radar = def.radar || null;
+   def.sonar = def.sonar || { hull: 0, towed: 0 };
+   def.helo = def.helo || null;
+   const w = def.weapons = { ssm: [], cruise: null, sam: [], ciws: null, rockets: null, asw: null, cells: 0, ...(def.weapons || {}) };
+   // magazine at the start of a battle: missile type -> rounds
+   def.mag = {};
+   for (const s of w.ssm) def.mag[s.type] = s.n;
+   if (w.cruise) def.mag[w.cruise.type] = w.cruise.n;
+   for (const s of w.sam) def.mag[s.type] = s.n;
+   for (const k in def.mag) if (!MISSILES[k]) throw new Error(def.key + ': unknown missile ' + k);
+   if (w.ciws && !CIWS[w.ciws.type]) throw new Error(def.key + ': unknown CIWS ' + w.ciws.type);
+   const m = def.main = def.main || noGun();
+   {
       // Game muzzle velocity derived from the max-range flight time, so tMax is the tunable.
       const K = WORLD.DRAG_K;
       m.vShell = m.range * (Math.exp(K) - 1) / (K * m.tMax);
@@ -76,13 +238,8 @@ function ship(def) {
       // legacy aliases (old HUD / main3d read these)
       m.dmg = (m.he || m.ap).dmg; m.type = m.he ? 'HE' : 'AP'; m.ap_ = m.ap || null;
    }
-   if (def.sec) {
-      const s = def.sec, K = WORLD.DRAG_K;
-      s.vShell = s.range * (Math.exp(K) - 1) / (K * (s.tMax || 3.5));
-      s.fallMaxRad = (s.fallMax || 14) * DEG;
-      s.vRatio = s.vRatio ?? 0.6;
-      s.dmg = s.he.dmg; s.type = 'HE';
-   }
+   def.sec = def.sec || null;
+   def.torp = def.torp || null;
    if (def.torp) {
       const t = def.torp;
       t.speed = t.speedKn * WORLD.KN_TO_MS;
@@ -90,1058 +247,391 @@ function ship(def) {
       t.cd = t.reload;            // legacy HUD alias
       t.detect = t.detect || 1300;
    }
+   def.aa = def.aa || { range: 0, reload: 0.5 };
+   def.armor = def.armor || { ...ARMOR };
    def.consumables = def.consumables || [];
    const boost = def.consumables.find(c => c.key === 'boost');
    if (boost) def.boost = { mult: boost.mult, dur: boost.dur, cd: boost.cd }; // legacy HUD "Turbo"
    def.maxSpeed = def.speedKn * WORLD.KN_TO_MS;   // legacy (m/s)
-   def.detect = def.detect;
    def.color = h.color;
    return def;
 }
 
 // ---- ship classes ----
-// Values follow WoWs where it has them (HP, reload, ranges, detectability, consumables),
-// real ship data otherwise (dimensions, turret layout, calibre, speed). dispH = max horizontal
-// dispersion (m) at max range; tMax = shell flight time (s) at max range.
+// Real dimensions and speeds; HP, magazines and channels are game values (see tests/v2.balance.mjs).
 export const SHIPS = {
-   // ============ Kriegsmarine (playable) ============
-   Bismarck: ship({
-      key: 'Bismarck', name: 'Bismarck', className: 'Bismarck-Klasse', playable: true, tier: 8,
-      desc: 'Das stärkste deutsche Schlachtschiff seiner Zeit: dicker Gürtel, Böschungspanzer und eine bissige Mittelartillerie für den Nahkampf.',
-      hull: { type: 'BB', L: 251, beam: 36, draft: 9.3, deckH: 15, nation: 'de',
-         sup: { x: -8, len: 70, w: 22, h: 26 }, funnels: [{ x: -14, r: 6.5, h: 18 }] },
-      hp: 69600, speedKn: 30.8, accel: 26, turnR: 880, rudderShift: 14.6,
-      detect: { surface: 15800, fire: 19500, smokeFire: 13300, torp: 1200 },
-      armor: { belt: 320, deck: 50, ends: 32, sup: 20, cit: 110, citLen: 0.56, tds: 0.36, turtle: 0.45, citH: 0.35 },
-      main: {
-         caliber: 380, turrets: [T(82, 2), T(60, 2), T(-57, 2, true), T(-79, 2, true)],
-         traverse: 5, reload: 26, range: 21200, tMax: 10.5, fallMax: 30, dispH: 250, vRatio: 0.6, sigma: 1.8,
-         ap: { dmg: 11600, pen: 740 }, he: { dmg: 5700, pen: 63, fire: 0.36 },
-      },
-      sec: { caliber: 150, guns: 12, range: 7600, reload: 7.5, tMax: 3.6, dispH: 140, sigma: 1.0, he: { dmg: 1700, pen: 38, fire: 0.08 } },
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-         C('repair', { charges: 4, dur: 28, cd: 80, heal: 0.005 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 6000, torpRange: 3500 }),
-         C('boost', { charges: 3, dur: 60, cd: 120, mult: 1.08 }),
-      ],
-      ai: { prefRange: [11500, 16000], role: 'bb', value: 60 },
+   // =================================================================== West
+   Braunschweig: ship({
+      key: 'Braunschweig', name: 'Braunschweig', className: 'Korvette K130', model: 'k130', playable: true, tier: 5,
+      desc: 'Flugkörperkorvette für die Randmeere: vier RBS15 mit großer Reichweite, kleine Radarsignatur, zur Abwehr nur RAM und Täuschkörper.',
+      sisters: ['Braunschweig', 'Magdeburg', 'Erfurt', 'Oldenburg', 'Ludwigshafen am Rhein'],
+      hull: { type: 'CO', L: 89.1, beam: 13.3, draft: 3.4, deckH: 5.5, nation: 'de', sup: { x: 6, len: 26, w: 9, h: 10 }, funnels: [] },
+      hp: 6500, speedKn: 26, accel: 9, turnR: 330, rudderShift: 3.6, stealth: 0.55,
+      detect: det(5800), radar: RADAR(19000, 8500),
+      main: gun(76, [T(30, 1)]),
+      aa: { range: 2200, dps: 14 },
+      weapons: { ssm: [{ type: 'rbs15', n: 4 }], sam: [{ type: 'ram', n: 24, ch: 2 }] },
+      consumables: [DC(50), DECOY(4), JAM(2)],
+      ai: { prefRange: [5000, 7000], role: 'dd', v2: 'strike', value: 22 },
    }),
-   Hipper: ship({
-      key: 'Hipper', name: 'Admiral Hipper', className: 'Admiral-Hipper-Klasse', playable: true, tier: 8,
-      desc: 'Schwerer Kreuzer mit präzisen 20,3-cm-Geschützen, guter Panzerung und schnellen Torpedos für kurze Distanz.',
-      hull: { type: 'CA', L: 203, beam: 21.3, draft: 7.2, deckH: 10, nation: 'de',
-         sup: { x: 4, len: 52, w: 14, h: 20 }, funnels: [{ x: -6, r: 5, h: 14 }] },
-      hp: 40400, speedKn: 32.5, accel: 18, turnR: 770, rudderShift: 8.8,
-      detect: { surface: 12400, fire: 15300, smokeFire: 7500, torp: 1300 },
-      armor: { belt: 80, deck: 30, ends: 25, sup: 16, cit: 30, citLen: 0.52, tds: 0.2, turtle: 0.6 },
-      main: {
-         caliber: 203, turrets: [T(62, 2), T(46, 2), T(-44, 2, true), T(-60, 2, true)],
-         traverse: 8, reload: 10.5, range: 15900, tMax: 8.5, fallMax: 26, dispH: 150, vRatio: 0.5, sigma: 2.05,
-         ap: { dmg: 5000, pen: 350 }, he: { dmg: 2500, pen: 51, fire: 0.17 },
-      },
-      sec: { caliber: 105, guns: 12, range: 6000, reload: 3.4, tMax: 3.2, dispH: 130, sigma: 1.0, he: { dmg: 1200, pen: 26, fire: 0.05 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: { launchers: [L(-8, 'port', 3), L(-8, 'stbd', 3), L(-20, 'port', 3), L(-20, 'stbd', 3)], range: 6000, speedKn: 76, dmg: 13700, flood: 0.2, reload: 90 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('repair', { charges: 3, dur: 20, cd: 80, heal: 0.005 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-      ],
-      ai: { prefRange: [9500, 13500], role: 'ca', value: 45 },
+   Sachsen: ship({
+      key: 'Sachsen', name: 'Sachsen', className: 'Fregatte F124', model: 'f124', playable: true, tier: 8,
+      desc: 'Luftverteidigungsfregatte: SM-2 für den Verbandsschutz, ESSM und RAM für den Nahbereich, dazu acht Harpoon.',
+      sisters: ['Sachsen', 'Hamburg', 'Hessen'],
+      hull: { type: 'FF', L: 143, beam: 17.4, draft: 5, deckH: 7.5, nation: 'de', sup: { x: 8, len: 46, w: 12, h: 15 }, funnels: [{ x: -14, r: 3, h: 7 }] },
+      hp: 13000, speedKn: 29, accel: 12, turnR: 470, rudderShift: 5, stealth: 0.8,
+      detect: det(7000), radar: RADAR(23000, 10500), sonar: { hull: 3200, towed: 0 },
+      main: gun(76, [T(52, 1)]),
+      aa: { range: 2500, dps: 20 },
+      weapons: { cells: 32, ssm: [{ type: 'harpoon', n: 8 }], sam: [{ type: 'sm2', n: 24, ch: 3 }, { type: 'essm', n: 32, ch: 2 }, { type: 'ram', n: 24, ch: 1 }], asw: ASW() },
+      helo: { name: 'Sea Lynx' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(2), HELO(2)],
+      ai: { prefRange: [5500, 7200], role: 'cl', v2: 'ad', value: 42 },
    }),
-   Nuernberg: ship({
-      key: 'Nuernberg', name: 'Nürnberg', className: 'Leipzig-Klasse', playable: true, tier: 6,
-      desc: 'Leichter Kreuzer mit schnell feuernden 15-cm-Drillingen – zwei der drei Türme stehen achtern.',
-      hull: { type: 'CL', L: 181, beam: 16.4, draft: 5.8, deckH: 9, nation: 'de',
-         sup: { x: 10, len: 40, w: 11, h: 17 }, funnels: [{ x: -4, r: 4.2, h: 12 }] },
-      hp: 30000, speedKn: 32, accel: 15, turnR: 640, rudderShift: 7.6,
-      detect: { surface: 10800, fire: 13600, smokeFire: 6200, torp: 1300 },
-      armor: { belt: 50, deck: 20, ends: 16, sup: 10, cit: 20, citLen: 0.5, tds: 0.1 },
-      main: {
-         caliber: 150, turrets: [T(52, 3), T(-38, 3, true), T(-54, 3, true)],
-         traverse: 10, reload: 7.5, range: 14300, tMax: 7.5, fallMax: 24, dispH: 135, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 3300, pen: 190 }, he: { dmg: 2200, pen: 38, fire: 0.09 },
-      },
-      sec: { caliber: 88, guns: 8, range: 5000, reload: 3, tMax: 3, dispH: 120, sigma: 1.0, he: { dmg: 900, pen: 22, fire: 0.04 } },
-      aa: { range: 4000, reload: 0.5 },
-      torp: { launchers: [L(-2, 'port', 3), L(-2, 'stbd', 3)], range: 8000, speedKn: 64, dmg: 12000, flood: 0.2, reload: 70 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('repair', { charges: 2, dur: 20, cd: 80, heal: 0.005 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-         C('radar', { charges: 2, dur: 25, cd: 120, range: 9000 }),
-      ],
-      ai: { prefRange: [8500, 12000], role: 'cl', value: 40 },
+   Burke: ship({
+      key: 'Burke', name: 'USS Arleigh Burke', className: 'Arleigh-Burke-Klasse', model: 'burke', playable: true, tier: 9,
+      desc: 'Der Alleskönner: Aegis mit großem Senkrechtstartmagazin, Tomahawk gegen Landziele, Harpoon, Hubschrauber und Schleppsonar.',
+      sisters: ['USS Arleigh Burke', 'USS Carney', 'USS Mason', 'USS Gravely', 'USS Laboon', 'USS Thomas Hudner', 'USS Roosevelt'],
+      hull: { type: 'DD', L: 155, beam: 20, draft: 6.6, deckH: 8, nation: 'us', sup: { x: 14, len: 44, w: 14, h: 16 }, funnels: [{ x: 2, r: 3.4, h: 9 }, { x: -22, r: 3.4, h: 9 }] },
+      hp: 16000, speedKn: 31, accel: 12, turnR: 500, rudderShift: 5.4, stealth: 0.85,
+      detect: det(7600), radar: RADAR(25000, 11000), sonar: { hull: 3400, towed: 6500 },
+      main: gun(127, [T(58, 1)]),
+      aa: { range: 2500, dps: 22 },
+      weapons: { cells: 96, ssm: [{ type: 'harpoon', n: 8 }], cruise: { type: 'tomahawk', n: 24 }, sam: [{ type: 'sm2', n: 48, ch: 3 }, { type: 'essm', n: 32, ch: 2 }], ciws: { type: 'phalanx', n: 1 }, asw: ASW() },
+      helo: { name: 'MH-60R' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(2), HELO(2)],
+      ai: { prefRange: [6500, 8500], role: 'cl', v2: 'ad', value: 52 },
    }),
-   Z23: ship({
-      key: 'Z23', name: 'Z 23', className: 'Zerstörer 1936A (Narvik)', playable: true, tier: 8,
-      desc: 'Großer Zerstörer mit 15-cm-Geschützen: schlagkräftig im Artillerieduell, dafür weithin sichtbar.',
-      hull: { type: 'DD', L: 127, beam: 12, draft: 4.6, deckH: 6.5, nation: 'de',
-         sup: { x: 20, len: 20, w: 8, h: 12 }, funnels: [{ x: 4, r: 2.8, h: 9 }, { x: -12, r: 2.8, h: 9 }] },
-      hp: 17500, speedKn: 36.5, accel: 10, turnR: 640, rudderShift: 4.9,
-      detect: { surface: 7500, fire: 9800, smokeFire: 2800, torp: 1500 },
-      armor: { belt: 15, deck: 15, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 150, turrets: [T(45, 2), T(-30, 1, true), T(-42, 1, true), T(-52, 1, true)],
-         traverse: 18, reload: 7.5, range: 12000, tMax: 6.5, fallMax: 20, dispH: 110, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 3200, pen: 190 }, he: { dmg: 2100, pen: 38, fire: 0.09 },
-      },
-      sec: null,
-      aa: { range: 3500, reload: 0.5 },
-      torp: { launchers: [L(-4, 'both', 4), L(-24, 'both', 4)], range: 10000, speedKn: 64, dmg: 14400, flood: 0.28, reload: 80 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 40 }),
-         C('smoke', { charges: 3, dur: 20, cd: 160, radius: 450, life: 60 }),
-         C('boost', { charges: 3, dur: 120, cd: 180, mult: 1.08 }),
-         C('hydro', { charges: 2, dur: 100, cd: 120, range: 4200, torpRange: 2700 }),
-      ],
-      ai: { prefRange: [6500, 9500], role: 'dd', value: 35 },
+   Ticonderoga: ship({
+      key: 'Ticonderoga', name: 'USS Ticonderoga', className: 'Ticonderoga-Klasse', model: 'tico', playable: true, tier: 10,
+      desc: 'Lenkwaffenkreuzer mit dem größten Magazin des Westens: 122 Zellen, zwei 127-mm-Geschütze, vier Feuerleitkanäle.',
+      sisters: ['USS Bunker Hill', 'USS Mobile Bay', 'USS Lake Erie', 'USS Shiloh', 'USS Gettysburg', 'USS Cape St. George'],
+      hull: { type: 'CG', L: 173, beam: 16.8, draft: 7.5, deckH: 8.5, nation: 'us', sup: { x: 10, len: 70, w: 14, h: 18 }, funnels: [{ x: 6, r: 3.6, h: 9 }, { x: -22, r: 3.6, h: 9 }] },
+      hp: 18500, speedKn: 32.5, accel: 13, turnR: 540, rudderShift: 5.8, stealth: 1,
+      detect: det(8400), radar: RADAR(26000, 11500), sonar: { hull: 3400, towed: 6500 },
+      main: gun(127, [T(66, 1), T(-70, 1, true)]),
+      aa: { range: 2500, dps: 28 },
+      weapons: { cells: 122, ssm: [{ type: 'harpoon', n: 8 }], cruise: { type: 'tomahawk', n: 32 }, sam: [{ type: 'sm2', n: 64, ch: 4 }, { type: 'essm', n: 32, ch: 2 }], ciws: { type: 'phalanx', n: 2 }, asw: ASW() },
+      helo: { name: 'MH-60R' },
+      consumables: [DC(), REP(3), DECOY(4), JAM(2), HELO(2)],
+      ai: { prefRange: [6500, 8500], role: 'ca', v2: 'ad', value: 62 },
    }),
-   // ============ Kriegsmarine (AI-only) ============
-   Scharnhorst: ship({
-      key: 'Scharnhorst', name: 'Scharnhorst', className: 'Scharnhorst-Klasse', playable: true, tier: 7,
-      desc: 'Schneller Schlachtkreuzer: 28-cm-Drillinge mit hoher Feuerrate, starker Gürtel und viel Fahrt.',
-      hull: { type: 'BB', L: 235, beam: 30, draft: 9.7, deckH: 13, nation: 'de',
-         sup: { x: 0, len: 62, w: 18, h: 24 }, funnels: [{ x: -8, r: 6, h: 16 }] },
-      hp: 58000, speedKn: 32, accel: 22, turnR: 740, rudderShift: 12.6,
-      detect: { surface: 14800, fire: 17600, smokeFire: 11500, torp: 1300 },
-      armor: { belt: 350, deck: 50, ends: 32, sup: 20, cit: 105, citLen: 0.55, tds: 0.3, turtle: 0.45, citH: 0.35 },
-      main: {
-         caliber: 283, turrets: [T(72, 3), T(52, 3), T(-62, 3, true)],
-         traverse: 7.5, reload: 17, range: 17500, tMax: 9, fallMax: 28, dispH: 220, vRatio: 0.6, sigma: 1.8,
-         ap: { dmg: 7950, pen: 540 }, he: { dmg: 3500, pen: 47, fire: 0.22 },
-      },
-      sec: { caliber: 150, guns: 12, range: 7000, reload: 7.5, tMax: 3.6, dispH: 140, sigma: 1.0, he: { dmg: 1700, pen: 38, fire: 0.08 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-         C('repair', { charges: 4, dur: 28, cd: 80, heal: 0.005 }),
-         C('boost', { charges: 3, dur: 60, cd: 120, mult: 1.08 }),
-      ],
-      ai: { prefRange: [10500, 14500], role: 'bb', value: 55 },
+   Daring: ship({
+      key: 'Daring', name: 'HMS Daring', className: 'Type 45', model: 'type45', playable: true, tier: 9,
+      desc: 'Die beste Luftverteidigung der Flotte: Sea Viper mit fünf Kanälen und sehr treffsicheren Aster-Flugkörpern – dafür nur vier Seezielflugkörper.',
+      sisters: ['HMS Daring', 'HMS Dauntless', 'HMS Diamond', 'HMS Dragon', 'HMS Defender', 'HMS Duncan'],
+      hull: { type: 'DD', L: 152.4, beam: 21.2, draft: 5.3, deckH: 8, nation: 'uk', sup: { x: 12, len: 50, w: 15, h: 20 }, funnels: [{ x: -4, r: 3.6, h: 10 }] },
+      hp: 15000, speedKn: 30, accel: 12, turnR: 490, rudderShift: 5.2, stealth: 0.6,
+      detect: det(7200), radar: RADAR(26000, 12000), sonar: { hull: 3200, towed: 0 },
+      main: gun(114, [T(56, 1)]),
+      aa: { range: 2500, dps: 24 },
+      weapons: { cells: 48, ssm: [{ type: 'nsm', n: 4 }], sam: [{ type: 'aster30', n: 32, ch: 5 }, { type: 'camm', n: 24, ch: 2 }], ciws: { type: 'phalanx', n: 2 } },
+      helo: { name: 'Wildcat' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(2), HELO(2)],
+      ai: { prefRange: [6000, 8000], role: 'cl', v2: 'ad', value: 50 },
    }),
-   // ============ Royal Navy ============
-   Hood: ship({
-      key: 'Hood', name: 'HMS Hood', className: 'Admiral-Klasse (Schlachtkreuzer)', playable: true, tier: 7,
-      desc: 'Der Stolz der Royal Navy: lang, schnell und elegant – aber mit dünnem Deckspanzer.',
-      hull: { type: 'BB', L: 262, beam: 31.8, draft: 9.8, deckH: 14, nation: 'uk',
-         sup: { x: 6, len: 72, w: 18, h: 26 }, funnels: [{ x: 10, r: 5.5, h: 16 }, { x: -12, r: 5.5, h: 16 }] },
-      hp: 67000, speedKn: 31, accel: 26, turnR: 950, rudderShift: 15,
-      detect: { surface: 16400, fire: 18700, smokeFire: 13000, torp: 1300 },
-      armor: { belt: 305, deck: 38, ends: 25, sup: 19, cit: 0, citLen: 0.6, tds: 0.25 },
-      main: {
-         caliber: 381, turrets: [T(80, 2), T(62, 2), T(-62, 2, true), T(-82, 2, true)],
-         traverse: 5, reload: 28, range: 18700, tMax: 10, fallMax: 32, dispH: 230, vRatio: 0.6, sigma: 1.8,
-         ap: { dmg: 12000, pen: 700 }, he: { dmg: 4800, pen: 64, fire: 0.33 },
-      },
-      sec: { caliber: 102, guns: 14, range: 5500, reload: 3.5, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1500, pen: 17, fire: 0.06 } },
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-         C('repair', { charges: 4, dur: 28, cd: 80, heal: 0.005 }),
-      ],
-      ai: { prefRange: [11000, 15500], role: 'bb', value: 60 },
+   Ford: ship({
+      key: 'Ford', name: 'USS Gerald R. Ford', className: 'Gerald-R.-Ford-Klasse', model: 'ford', playable: true, tier: 10,
+      desc: 'Flugzeugträger: F-35C sichern den Luftraum, F/A-18E tragen Harpoon und Lenkbomben weit über jede Schiffswaffe hinaus. Zur Selbstverteidigung nur ESSM, RAM und Phalanx.',
+      sisters: ['USS Gerald R. Ford', 'USS John F. Kennedy', 'USS Enterprise'],
+      hull: { type: 'CV', L: 337, beam: 41, draft: 12, deckH: 20, nation: 'us', sup: { x: -60, len: 22, w: 9, h: 28 }, funnels: [] },
+      hp: 70000, speedKn: 30, accel: 30, turnR: 1050, rudderShift: 14, stealth: 1.25,
+      detect: det(11500), radar: RADAR(26000, 13000),
+      armor: { belt: 40, deck: 30, ends: 20, sup: 10, cit: 30, citLen: 0.5, tds: 0.3 },
+      aa: { range: 2500, dps: 30 },
+      weapons: { sam: [{ type: 'essm', n: 16, ch: 2 }, { type: 'ram', n: 24, ch: 2 }], ciws: { type: 'phalanx', n: 3 } },
+      air: AIRW({ name: 'F/A-18E (Harpoon)', hangar: 10 }, { name: 'F/A-18E (Lenkbomben)', hangar: 8 }, { name: 'F-35C', hangar: 10 }),
+      consumables: [DC(70), REP(3), DECOY(4), JAM(2)],
+      ai: { prefRange: [12000, 16000], role: 'cv', v2: 'cv', value: 90 },
    }),
-   KGV: ship({
-      key: 'KGV', name: 'King George V', className: 'King-George-V-Klasse', playable: true, tier: 7,
-      desc: 'Zehn 35,6-cm-Rohre in zwei Vierlingen und einem Zwilling, dazu ein sehr starker Gürtelpanzer.',
-      hull: { type: 'BB', L: 227, beam: 31.4, draft: 9.9, deckH: 13, nation: 'uk',
-         sup: { x: 2, len: 64, w: 18, h: 25 }, funnels: [{ x: 8, r: 5, h: 14 }, { x: -12, r: 5, h: 14 }] },
-      hp: 63700, speedKn: 28, accel: 25, turnR: 800, rudderShift: 13.9,
-      detect: { surface: 14800, fire: 17800, smokeFire: 11000, torp: 1300 },
-      armor: { belt: 374, deck: 127, ends: 25, sup: 19, cit: 0, citLen: 0.55, tds: 0.34, citH: 0.35 },
-      main: {
-         caliber: 356, turrets: [T(66, 4), T(48, 2), T(-66, 4, true)],
-         traverse: 4.5, reload: 26, range: 17800, tMax: 10, fallMax: 30, dispH: 230, vRatio: 0.6, sigma: 1.8,
-         ap: { dmg: 10500, pen: 590 }, he: { dmg: 5000, pen: 58, fire: 0.33 },
-      },
-      sec: { caliber: 133, guns: 16, range: 5800, reload: 6, tMax: 3.2, dispH: 130, sigma: 1.0, he: { dmg: 1900, pen: 22, fire: 0.08 } },
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-         C('repair', { charges: 4, dur: 28, cd: 80, heal: 0.006 }),
-      ],
-      ai: { prefRange: [10500, 15000], role: 'bb', value: 60 },
+   U212: ship({
+      key: 'U212', name: 'U 31', className: 'U-Boot 212A', model: 'u212', playable: true, tier: 7,
+      desc: 'Brennstoffzellen-U-Boot: fast lautlos, ausdauernd unter Wasser, sechs Rohre für Schwergewichtstorpedos – und ein Kampfschwimmertrupp.',
+      sisters: ['U 31', 'U 32', 'U 33', 'U 34', 'U 35', 'U 36'],
+      hull: { type: 'SS', L: 57.2, beam: 7, draft: 6, deckH: 3, nation: 'de', sup: { x: 4, len: 9, w: 2.6, h: 5.5 }, funnels: [] },
+      hp: 6000, speedKn: 20, accel: 9, turnR: 300, rudderShift: 3.4, stealth: 0.25,
+      detect: det(3800), radar: RADAR(8000, 4000),
+      armor: { ...SUB_ARMOR },
+      torp: { launchers: [L(24, 'bow', 6)], range: 9000, speedKn: 55, dmg: 9000, flood: 0.3, reload: 60 },
+      sub: SUB({ diveT: 5, battery: { peri: 1500, deep: 900, charge: 120 }, periDetect: 1100, torpBloom: 3200, hydrophone: 8000, seal: true, quiet: 0.6 }),
+      consumables: [DC(50)],
+      ai: { prefRange: [2500, 5000], role: 'ss', v2: 'ss', value: 30 },
    }),
-   Rodney: ship({
-      key: 'Rodney', name: 'HMS Rodney', className: 'Nelson-Klasse', playable: true, tier: 7,
-      desc: 'Alle neun 40,6-cm-Geschütze stehen vor der Brücke: gewaltige Breitseite nach vorn, aber langsam.',
-      hull: { type: 'BB', L: 216, beam: 32.3, draft: 9.6, deckH: 14, nation: 'uk',
-         sup: { x: -22, len: 50, w: 20, h: 30 }, funnels: [{ x: -40, r: 5.5, h: 14 }] },
-      hp: 70000, speedKn: 23.8, accel: 28, turnR: 780, rudderShift: 15.3,
-      detect: { surface: 15600, fire: 18000, smokeFire: 12500, torp: 1300 },
-      armor: { belt: 356, deck: 152, ends: 25, sup: 19, cit: 0, citLen: 0.5, tds: 0.3 },
-      // all three triple turrets forward of the bridge -- X turret cannot fire aft past it
-      main: {
-         caliber: 406, turrets: [T(72, 3, false, 150), T(54, 3, false, 150), T(34, 3, false, 138)],
-         traverse: 4, reload: 30, range: 19100, tMax: 10.5, fallMax: 30, dispH: 260, vRatio: 0.55, sigma: 1.9,
-         ap: { dmg: 13500, pen: 800 }, he: { dmg: 5850, pen: 68, fire: 0.35 },
-      },
-      sec: { caliber: 152, guns: 12, range: 6000, reload: 7.5, tMax: 3.4, dispH: 140, sigma: 1.0, he: { dmg: 2100, pen: 25, fire: 0.09 } },
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-         C('repair', { charges: 4, dur: 28, cd: 80, heal: 0.005 }),
-      ],
-      ai: { prefRange: [11000, 16000], role: 'bb', value: 60 },
+   Virginia: ship({
+      key: 'Virginia', name: 'USS Virginia', className: 'Virginia-Klasse', model: 'virginia', playable: true, tier: 9,
+      desc: 'Atomares Jagd-U-Boot: unbegrenzte Ausdauer, schnelle Torpedos, zwölf Tomahawk aus Senkrechtstartrohren und ein Kampfschwimmertrupp.',
+      sisters: ['USS Virginia', 'USS Texas', 'USS Hawaii', 'USS North Carolina', 'USS New Mexico'],
+      hull: { type: 'SS', L: 115, beam: 10.4, draft: 9.3, deckH: 4, nation: 'us', sup: { x: 20, len: 12, w: 3, h: 6.5 }, funnels: [] },
+      hp: 9500, speedKn: 26, accel: 14, turnR: 480, rudderShift: 5, stealth: 0.3,
+      detect: det(4400), radar: RADAR(8000, 4000),
+      armor: { ...SUB_ARMOR },
+      torp: { launchers: [L(48, 'bow', 4)], range: 10000, speedKn: 60, dmg: 9500, flood: 0.3, reload: 55 },
+      weapons: { cells: 12, cruise: { type: 'tomahawk', n: 12 } },
+      sub: SUB({ diveT: 7, battery: { peri: Infinity, deep: Infinity, charge: 1 }, periDetect: 1500, torpBloom: 3800, hydrophone: 9000, seal: true, quiet: 0.8, nuclear: true }),
+      consumables: [DC(50), REP(1)],
+      ai: { prefRange: [3000, 6000], role: 'ss', v2: 'ss', value: 42 },
    }),
-   Norfolk: ship({
-      key: 'Norfolk', name: 'HMS Norfolk', className: 'County-Klasse', playable: true, tier: 6,
-      desc: 'Hochbordiger Vertragskreuzer mit acht 20,3-cm-Geschützen, großer Reichweite und dünner Panzerung.',
-      hull: { type: 'CA', L: 193, beam: 20, draft: 6.2, deckH: 10, nation: 'uk',
-         sup: { x: 12, len: 50, w: 13, h: 18 }, funnels: [{ x: 16, r: 3.6, h: 14 }, { x: 2, r: 3.6, h: 14 }, { x: -12, r: 3.6, h: 14 }] },
-      hp: 38000, speedKn: 32.3, accel: 18, turnR: 800, rudderShift: 9.8,
-      detect: { surface: 12200, fire: 15000, smokeFire: 7000, torp: 1300 },
-      armor: { belt: 25, deck: 25, ends: 25, sup: 13, cit: 114, citLen: 0.45, tds: 0.08 },
-      main: {
-         caliber: 203, turrets: [T(56, 2), T(42, 2), T(-46, 2, true), T(-60, 2, true)],
-         traverse: 6, reload: 12, range: 15300, tMax: 8.5, fallMax: 26, dispH: 160, vRatio: 0.5, sigma: 2.0,
-         ap: { dmg: 4800, pen: 320 }, he: { dmg: 2800, pen: 34, fire: 0.15 },
-      },
-      sec: { caliber: 102, guns: 8, range: 5000, reload: 3.5, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1500, pen: 17, fire: 0.06 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: { launchers: [L(-10, 'port', 4), L(-10, 'stbd', 4)], range: 10000, speedKn: 62, dmg: 13000, flood: 0.24, reload: 80 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('repair', { charges: 2, dur: 20, cd: 80, heal: 0.005 }),
-         C('radar', { charges: 2, dur: 30, cd: 120, range: 10000 }),
-      ],
-      ai: { prefRange: [10000, 13500], role: 'ca', value: 45 },
+
+   // =================================================================== East: Russia
+   BuyanM: ship({
+      key: 'BuyanM', name: 'Grad Swijaschsk', className: 'Bujan-M (Projekt 21631)', model: 'buyan', tier: 5,
+      desc: 'Kleine Flugkörperkorvette mit acht Kalibr-Zellen: große Schlagkraft, kaum Abwehr.',
+      sisters: ['Grad Swijaschsk', 'Uglitsch', 'Weliki Ustjug', 'Seljony Dol', 'Serpuchow', 'Wyschni Wolotschok'],
+      hull: { type: 'CO', L: 75, beam: 11, draft: 2.6, deckH: 5, nation: 'ru', sup: { x: 4, len: 24, w: 8, h: 9 }, funnels: [] },
+      hp: 5500, speedKn: 25, accel: 9, turnR: 310, rudderShift: 3.4, stealth: 0.7,
+      detect: det(5600), radar: RADAR(17000, 8000),
+      main: gun(100, [T(24, 1)]),
+      aa: { range: 2000, dps: 12 },
+      weapons: { cells: 8, ssm: [{ type: 'kalibr', n: 4 }], cruise: { type: 'kalibrLA', n: 4 }, sam: [{ type: 'igla', n: 8, ch: 1 }], ciws: { type: 'ak630', n: 1 } },
+      consumables: [DC(50), DECOY(3)],
+      ai: { prefRange: [5000, 7200], role: 'dd', v2: 'strike', value: 20 },
    }),
-   Fiji: ship({
-      key: 'Fiji', name: 'HMS Fiji', className: 'Crown-Colony-Klasse', playable: true, tier: 7,
-      desc: 'Leichter Kreuzer mit zwölf 15,2-cm-Rohren: nur panzerbrechende Granaten, dafür Nebel und starke Reparatur.',
-      hull: { type: 'CL', L: 169, beam: 18.9, draft: 5, deckH: 9, nation: 'uk',
-         sup: { x: 12, len: 38, w: 12, h: 17 }, funnels: [{ x: 8, r: 3.8, h: 11 }, { x: -12, r: 3.8, h: 11 }] },
-      hp: 31000, speedKn: 32.3, accel: 15, turnR: 680, rudderShift: 8.3,
-      detect: { surface: 10300, fire: 13900, smokeFire: 5300, torp: 1300 },
-      armor: { belt: 83, deck: 51, ends: 16, sup: 10, cit: 0, citLen: 0.45, tds: 0.1 },
-      // Royal Navy light cruisers: AP only, short fuse (few overpens), smoke + big heal
-      main: {
-         caliber: 152, turrets: [T(46, 3), T(32, 3), T(-40, 3, true), T(-54, 3, true)],
-         traverse: 8, reload: 7.5, range: 13900, tMax: 7.5, fallMax: 24, dispH: 140, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 3100, pen: 190, fuse: 7 }, he: null,
-      },
-      sec: { caliber: 102, guns: 8, range: 5000, reload: 3.5, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1500, pen: 17, fire: 0.06 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: { launchers: [L(-6, 'port', 3), L(-6, 'stbd', 3)], range: 10000, speedKn: 62, dmg: 13000, flood: 0.24, reload: 70 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('smoke', { charges: 3, dur: 12, cd: 120, radius: 420, life: 25 }),
-         C('repair', { charges: 3, dur: 20, cd: 80, heal: 0.0099 }),
-         C('radar', { charges: 2, dur: 25, cd: 120, range: 9000 }),
-      ],
-      ai: { prefRange: [8000, 11500], role: 'cl', value: 40 },
+   Gorschkow: ship({
+      key: 'Gorschkow', name: 'Admiral Gorschkow', className: 'Projekt 22350', model: 'gorshkov', tier: 8,
+      desc: 'Moderne Mehrzweckfregatte: Überschall-Seezielflugkörper Oniks, Poliment-Redut zur Luftverteidigung.',
+      sisters: ['Admiral Gorschkow', 'Admiral Kassatonow', 'Admiral Golowko'],
+      hull: { type: 'FF', L: 135, beam: 16, draft: 4.5, deckH: 7.5, nation: 'ru', sup: { x: 10, len: 44, w: 12, h: 16 }, funnels: [{ x: -10, r: 3.2, h: 8 }] },
+      hp: 12500, speedKn: 29.5, accel: 12, turnR: 460, rudderShift: 5, stealth: 0.65,
+      detect: det(6900), radar: RADAR(23000, 10500), sonar: { hull: 3200, towed: 6000 },
+      main: gun(130, [T(50, 1)]),
+      aa: { range: 2500, dps: 22 },
+      weapons: { cells: 48, ssm: [{ type: 'oniks', n: 8 }], cruise: { type: 'kalibrLA', n: 8 }, sam: [{ type: 'redut', n: 32, ch: 3 }], ciws: { type: 'kashtan', n: 2 }, asw: ASW() },
+      helo: { name: 'Ka-27' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(2), HELO(1)],
+      ai: { prefRange: [6000, 8200], role: 'cl', v2: 'strike', value: 46 },
    }),
-   Jervis: ship({
-      key: 'Jervis', name: 'HMS Jervis', className: 'J-Klasse', playable: true, tier: 7,
-      desc: 'Wendiger Flottenzerstörer mit zehn Torpedorohren und schnell richtenden 12-cm-Zwillingen.',
-      hull: { type: 'DD', L: 108, beam: 10.9, draft: 3.7, deckH: 5.5, nation: 'uk',
-         sup: { x: 18, len: 16, w: 7, h: 10 }, funnels: [{ x: 0, r: 2.8, h: 8 }] },
-      hp: 15000, speedKn: 36, accel: 9, turnR: 590, rudderShift: 4.3,
-      detect: { surface: 6800, fire: 8900, smokeFire: 2300, torp: 1400 },
-      armor: { belt: 13, deck: 13, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 120, turrets: [T(36, 2), T(26, 2), T(-36, 2, true)],
-         traverse: 20, reload: 4.8, range: 11000, tMax: 6, fallMax: 18, dispH: 110, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 2100, pen: 140 }, he: { dmg: 1700, pen: 20, fire: 0.07 },
-      },
-      sec: null,
-      aa: { range: 3500, reload: 0.5 },
-      torp: { launchers: [L(-2, 'both', 5), L(-22, 'both', 5)], range: 10000, speedKn: 62, dmg: 13000, flood: 0.25, reload: 72 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 40 }),
-         C('smoke', { charges: 3, dur: 20, cd: 160, radius: 450, life: 60 }),
-         C('boost', { charges: 2, dur: 120, cd: 180, mult: 1.08 }),
-      ],
-      ai: { prefRange: [6000, 9000], role: 'dd', value: 35 },
+   Slawa: ship({
+      key: 'Slawa', name: 'Marschall Ustinow', className: 'Slawa-Klasse (Projekt 1164)', model: 'slava', tier: 9,
+      desc: 'Flugkörperkreuzer aus dem Kalten Krieg: sechzehn schwere Überschallflugkörper Wulkan, S-300F – aber nur zwei Feuerleitkanäle.',
+      sisters: ['Marschall Ustinow', 'Warjag', 'Moskwa'],
+      hull: { type: 'CG', L: 186.4, beam: 20.8, draft: 8.4, deckH: 9, nation: 'ru', sup: { x: 14, len: 60, w: 15, h: 20 }, funnels: [{ x: -14, r: 4.5, h: 10 }] },
+      hp: 19000, speedKn: 32, accel: 14, turnR: 580, rudderShift: 6.2, stealth: 1.05,
+      detect: det(8800), radar: RADAR(26000, 11500), sonar: { hull: 3000, towed: 5500 },
+      main: gun(130, [T(74, 2)], { reload: 2.2 }),
+      aa: { range: 2500, dps: 30 },
+      weapons: { cells: 64, ssm: [{ type: 'vulkan', n: 16 }], sam: [{ type: 's300f', n: 48, ch: 2 }, { type: 'osa', n: 20, ch: 1 }], ciws: { type: 'ak630', n: 3 }, asw: ASW() },
+      helo: { name: 'Ka-27' },
+      consumables: [DC(), REP(3), DECOY(4), JAM(2), HELO(1)],
+      ai: { prefRange: [6500, 8500], role: 'ca', v2: 'strike', value: 64 },
    }),
-   Transport: ship({
-      key: 'Transport', name: 'Frachter', className: 'Geleitzug-Frachter', playable: false, tier: 1,
-      hull: { type: 'TR', L: 135, beam: 18, draft: 7.5, deckH: 9, nation: 'uk',
-         sup: { x: -30, len: 24, w: 14, h: 14 }, funnels: [{ x: -34, r: 3.2, h: 10 }] },
-      hp: 16000, speedKn: 11, accel: 30, turnR: 700, rudderShift: 12,
-      detect: { surface: 9500, fire: 9500, smokeFire: 5000, torp: 1000 },
-      armor: { belt: 10, deck: 10, ends: 10, sup: 6, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 102, turrets: [T(-58, 1, true, 160)],
-         traverse: 12, reload: 8, range: 7000, tMax: 5, fallMax: 16, dispH: 140, vRatio: 0.5, sigma: 1.6,
-         ap: { dmg: 1500, pen: 60 }, he: { dmg: 1500, pen: 17, fire: 0.05 },
-      },
-      sec: null, aa: null, torp: null,
+   PjotrWeliki: ship({
+      key: 'PjotrWeliki', name: 'Pjotr Weliki', className: 'Kirow-Klasse (Projekt 1144)', model: 'kirovn', tier: 10,
+      desc: 'Atomgetriebener Schlachtkreuzer: zwanzig Granit, das größte Flugabwehrmagazin der See und sechs Nahbereichssysteme. Ein Gegner für einen ganzen Verband.',
+      hull: { type: 'CG', L: 252, beam: 28.5, draft: 9.1, deckH: 11, nation: 'ru', sup: { x: 4, len: 90, w: 20, h: 26 }, funnels: [{ x: -6, r: 5, h: 12 }] },
+      hp: 42000, speedKn: 32, accel: 20, turnR: 760, rudderShift: 9, stealth: 1.25,
+      detect: det(10000), radar: RADAR(27000, 12500), sonar: { hull: 3400, towed: 6500 },
+      armor: { belt: 76, deck: 50, ends: 20, sup: 10, cit: 40, citLen: 0.45, tds: 0.15 },
+      main: gun(130, [T(-96, 2, true)], { reload: 2.2 }),
+      aa: { range: 3000, dps: 40 },
+      weapons: { cells: 116, ssm: [{ type: 'granit', n: 20 }], sam: [{ type: 's300f', n: 72, ch: 4 }, { type: 'kinzhal', n: 48, ch: 3 }], ciws: { type: 'kashtan', n: 4 }, asw: ASW({ n: 10 }) },
+      helo: { name: 'Ka-27' },
+      consumables: [DC(), REP(4), DECOY(5), JAM(3), HELO(2)],
+      ai: { prefRange: [7000, 9000], role: 'bb', v2: 'boss', value: 110 },
+   }),
+   Kusnezow: ship({
+      key: 'Kusnezow', name: 'Admiral Kusnezow', className: 'Projekt 1143.5', model: 'kuznetsov', tier: 9,
+      desc: 'Flugdeckkreuzer mit Sprungschanze: Su-33 und MiG-29K, dazu zwölf Granit unter dem Flugdeck.',
+      hull: { type: 'CV', L: 305, beam: 35, draft: 10, deckH: 18, nation: 'ru', sup: { x: -20, len: 34, w: 10, h: 30 }, funnels: [{ x: -24, r: 5, h: 8 }] },
+      hp: 58000, speedKn: 29, accel: 30, turnR: 1000, rudderShift: 14, stealth: 1.25,
+      detect: det(11000), radar: RADAR(25000, 12500),
+      armor: { belt: 40, deck: 30, ends: 20, sup: 10, cit: 30, citLen: 0.5, tds: 0.25 },
+      aa: { range: 3000, dps: 36 },
+      weapons: { ssm: [{ type: 'granit', n: 12 }], sam: [{ type: 'kinzhal', n: 48, ch: 3 }], ciws: { type: 'kashtan', n: 4 } },
+      air: AIRW({ name: 'MiG-29K (Ch-35)', hangar: 6, weapon: { missile: 'kh35', dmg: 4200 } }, { name: 'MiG-29K (Bomben)', hangar: 6 },
+         { name: 'Su-33', hangar: 8, aam: { type: 'r77' } }, { service: 28 }),
+      consumables: [DC(70), REP(3), DECOY(4), JAM(2)],
+      ai: { prefRange: [12000, 16000], role: 'cv', v2: 'cv', value: 85 },
+   }),
+   Kilo: ship({
+      key: 'Kilo', name: 'Noworossijsk', className: 'Kilo-Klasse (Projekt 636.3)', model: 'kilo', tier: 7,
+      desc: 'Dieselelektrisches U-Boot, das „schwarze Loch“: leise, sechs Rohre, Kalibr aus den Torpedorohren.',
+      sisters: ['Noworossijsk', 'Rostow am Don', 'Stary Oskol', 'Krasnodar', 'Weliki Nowgorod', 'Kolpino'],
+      hull: { type: 'SS', L: 73.8, beam: 9.9, draft: 6.2, deckH: 3.5, nation: 'ru', sup: { x: 6, len: 12, w: 3, h: 5.5 }, funnels: [] },
+      hp: 7000, speedKn: 20, accel: 10, turnR: 340, rudderShift: 3.8, stealth: 0.28,
+      detect: det(4000), radar: RADAR(8000, 4000),
+      armor: { ...SUB_ARMOR },
+      torp: { launchers: [L(32, 'bow', 6)], range: 8500, speedKn: 52, dmg: 9000, flood: 0.3, reload: 65 },
+      weapons: { ssm: [{ type: 'kalibr', n: 4 }] },
+      sub: SUB({ diveT: 6, battery: { peri: 600, deep: 380, charge: 85 }, periDetect: 1400, quiet: 0.7 }),
+      consumables: [DC(50)],
+      ai: { prefRange: [2500, 5000], role: 'ss', v2: 'ss', value: 32 },
+   }),
+
+   // =================================================================== East: China
+   Typ022: ship({
+      key: 'Typ022', name: 'Typ 022', className: 'Houbei-Klasse', model: 'type022', tier: 4,
+      desc: 'Flugkörperschnellboot in Katamaranbauweise: acht YJ-83, sehr schnell, sehr kleine Signatur – und keinerlei Flugabwehr.',
+      sisters: ['Typ 022 Nr. 2208', 'Typ 022 Nr. 2209', 'Typ 022 Nr. 2210', 'Typ 022 Nr. 2211', 'Typ 022 Nr. 2212', 'Typ 022 Nr. 2213', 'Typ 022 Nr. 2214', 'Typ 022 Nr. 2215'],
+      hull: { type: 'FAC', L: 42.6, beam: 12.2, draft: 1.5, deckH: 3.5, nation: 'cn', sup: { x: 2, len: 12, w: 7, h: 5 }, funnels: [] },
+      hp: 2200, speedKn: 36, accel: 6, turnR: 220, rudderShift: 2.2, stealth: 0.45,
+      detect: det(4400), radar: RADAR(13000, 6500),
+      armor: { ...BOAT_ARMOR, belt: 3, deck: 3 },
+      main: gun(30, [T(12, 1)]),
+      aa: { range: 1500, dps: 8 },
+      weapons: { ssm: [{ type: 'yj83', n: 8 }] },
+      consumables: [DC(40), DECOY(2)],
+      ai: { prefRange: [2000, 3000], role: 'dd', v2: 'fac', value: 12 },
+   }),
+   Typ054A: ship({
+      key: 'Typ054A', name: 'Xuzhou', className: 'Typ 054A (Jiangkai II)', model: 'type054', tier: 7,
+      desc: 'Geleitfregatte: HQ-16 mittlerer Reichweite, acht YJ-83, Schleppsonar und Hubschrauber.',
+      sisters: ['Xuzhou', 'Zhoushan', 'Chaohu', 'Yantai', 'Yuncheng', 'Hengyang', 'Linyi', 'Weifang', 'Binzhou'],
+      hull: { type: 'FF', L: 134, beam: 16, draft: 5, deckH: 7, nation: 'cn', sup: { x: 8, len: 40, w: 12, h: 14 }, funnels: [{ x: -12, r: 3, h: 7 }] },
+      hp: 12000, speedKn: 27, accel: 12, turnR: 450, rudderShift: 5, stealth: 0.75,
+      detect: det(6900), radar: RADAR(22000, 10000), sonar: { hull: 3000, towed: 6000 },
+      main: gun(76, [T(48, 1)]),
+      aa: { range: 2500, dps: 20 },
+      weapons: { cells: 32, ssm: [{ type: 'yj83', n: 8 }], sam: [{ type: 'hq16', n: 32, ch: 2 }], ciws: { type: 'type730', n: 2 }, asw: ASW() },
+      helo: { name: 'Z-9' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(1), HELO(1)],
+      ai: { prefRange: [5500, 7200], role: 'cl', v2: 'escort', value: 38 },
+   }),
+   Typ052D: ship({
+      key: 'Typ052D', name: 'Kunming', className: 'Typ 052D (Luyang III)', model: 'type052d', tier: 9,
+      desc: 'Lenkwaffenzerstörer: HQ-9 für die Verbandsflugabwehr, YJ-18 mit Überschall-Endanflug, CJ-10 gegen Landziele.',
+      sisters: ['Kunming', 'Changsha', 'Hefei', 'Yinchuan', 'Xining', 'Xiamen', 'Ürümqi', 'Guiyang', 'Nanjing'],
+      hull: { type: 'DD', L: 157, beam: 17, draft: 6, deckH: 8, nation: 'cn', sup: { x: 14, len: 42, w: 13, h: 17 }, funnels: [{ x: -8, r: 3.4, h: 9 }] },
+      hp: 16000, speedKn: 30, accel: 12, turnR: 500, rudderShift: 5.4, stealth: 0.8,
+      detect: det(7500), radar: RADAR(25000, 11000), sonar: { hull: 3200, towed: 6000 },
+      main: gun(130, [T(58, 1)]),
+      aa: { range: 2500, dps: 22 },
+      weapons: { cells: 64, ssm: [{ type: 'yj18', n: 8 }], cruise: { type: 'cj10', n: 8 }, sam: [{ type: 'hq9', n: 40, ch: 3 }, { type: 'hq10', n: 24, ch: 1 }], ciws: { type: 'type730', n: 1 }, asw: ASW() },
+      helo: { name: 'Z-9' },
+      consumables: [DC(), REP(2), DECOY(4), JAM(2), HELO(1)],
+      ai: { prefRange: [6500, 8500], role: 'cl', v2: 'ad', value: 52 },
+   }),
+   Typ055: ship({
+      key: 'Typ055', name: 'Nanchang', className: 'Typ 055 (Renhai)', model: 'type055', tier: 10,
+      desc: 'Der größte Überwasserkämpfer des Ostens: 112 Zellen, vier Feuerleitkanäle, kleine Radarsignatur.',
+      sisters: ['Nanchang', 'Lhasa', 'Dalian', 'Anshan', 'Wuxi', 'Yan’an', 'Zunyi', 'Xianyang'],
+      hull: { type: 'CG', L: 180, beam: 20, draft: 6.6, deckH: 9, nation: 'cn', sup: { x: 12, len: 62, w: 16, h: 20 }, funnels: [{ x: -10, r: 3.8, h: 9 }] },
+      hp: 20000, speedKn: 30, accel: 13, turnR: 550, rudderShift: 5.8, stealth: 0.65,
+      detect: det(8000), radar: RADAR(27000, 12000), sonar: { hull: 3400, towed: 6500 },
+      main: gun(130, [T(66, 1)]),
+      aa: { range: 2500, dps: 28 },
+      weapons: { cells: 112, ssm: [{ type: 'yj18', n: 12 }], cruise: { type: 'cj10', n: 16 }, sam: [{ type: 'hq9', n: 64, ch: 4 }, { type: 'hq10', n: 24, ch: 1 }], ciws: { type: 'type1130', n: 1 }, asw: ASW() },
+      helo: { name: 'Z-9' },
+      consumables: [DC(), REP(3), DECOY(4), JAM(2), HELO(2)],
+      ai: { prefRange: [6500, 8500], role: 'ca', v2: 'ad', value: 68 },
+   }),
+   Shandong: ship({
+      key: 'Shandong', name: 'Shandong', className: 'Typ 002', model: 'shandong', tier: 9,
+      desc: 'Flugzeugträger mit Sprungschanze: J-15 als Jäger und als Träger der YJ-83K.',
+      hull: { type: 'CV', L: 305, beam: 38, draft: 10.5, deckH: 18, nation: 'cn', sup: { x: -24, len: 28, w: 10, h: 30 }, funnels: [{ x: -28, r: 5, h: 8 }] },
+      hp: 60000, speedKn: 31, accel: 30, turnR: 1000, rudderShift: 14, stealth: 1.25,
+      detect: det(11000), radar: RADAR(25000, 12500),
+      armor: { belt: 40, deck: 30, ends: 20, sup: 10, cit: 30, citLen: 0.5, tds: 0.25 },
+      aa: { range: 2500, dps: 30 },
+      weapons: { sam: [{ type: 'hq10', n: 36, ch: 2 }], ciws: { type: 'type1130', n: 3 } },
+      air: AIRW({ name: 'J-15 (YJ-83K)', hangar: 8, weapon: { missile: 'yj83', dmg: 4300 } }, { name: 'J-15 (Bomben)', hangar: 6 },
+         { name: 'J-15', hangar: 8, aam: { type: 'pl12' } }, { service: 26 }),
+      consumables: [DC(70), REP(3), DECOY(4), JAM(2)],
+      ai: { prefRange: [12000, 16000], role: 'cv', v2: 'cv', value: 85 },
+   }),
+   Yuan: ship({
+      key: 'Yuan', name: 'Changcheng 330', className: 'Typ 039A (Yuan)', model: 'yuan', tier: 7,
+      desc: 'U-Boot mit außenluftunabhängigem Antrieb: ausdauernd, leise, YJ-18 aus den Torpedorohren.',
+      sisters: ['Changcheng 330', 'Changcheng 331', 'Changcheng 332', 'Changcheng 333', 'Changcheng 334'],
+      hull: { type: 'SS', L: 77.6, beam: 8.4, draft: 6.7, deckH: 3.5, nation: 'cn', sup: { x: 8, len: 12, w: 3, h: 5.5 }, funnels: [] },
+      hp: 7000, speedKn: 20, accel: 10, turnR: 340, rudderShift: 3.8, stealth: 0.28,
+      detect: det(4000), radar: RADAR(8000, 4000),
+      armor: { ...SUB_ARMOR },
+      torp: { launchers: [L(34, 'bow', 6)], range: 8500, speedKn: 52, dmg: 9000, flood: 0.3, reload: 65 },
+      weapons: { ssm: [{ type: 'yj18', n: 4 }] },
+      sub: SUB({ diveT: 6, battery: { peri: 1200, deep: 700, charge: 110 }, periDetect: 1300, quiet: 0.65 }),
+      consumables: [DC(50)],
+      ai: { prefRange: [2500, 5000], role: 'ss', v2: 'ss', value: 32 },
+   }),
+
+   // =================================================================== East: Iran
+   Boghammar: ship({
+      key: 'Boghammar', name: 'Schnellboot', className: 'Boghammar', model: 'fac', tier: 2,
+      desc: 'Bewaffnetes Schnellboot der Revolutionsgarden: Raketenwerfer, Maschinengewehr und ein leichter Flugkörper. Einzeln harmlos, im Schwarm gefährlich.',
+      sisters: ['Schnellboot 1', 'Schnellboot 2', 'Schnellboot 3', 'Schnellboot 4', 'Schnellboot 5', 'Schnellboot 6', 'Schnellboot 7', 'Schnellboot 8',
+         'Schnellboot 9', 'Schnellboot 10', 'Schnellboot 11', 'Schnellboot 12', 'Schnellboot 13', 'Schnellboot 14', 'Schnellboot 15', 'Schnellboot 16'],
+      hull: { type: 'FAC', L: 13, beam: 2.9, draft: 0.7, deckH: 1.4, nation: 'ir', sup: { x: -1, len: 3, w: 1.8, h: 1.6 }, funnels: [] },
+      hp: 450, speedKn: 45, accel: 3.5, turnR: 110, rudderShift: 1.2, stealth: 0.3,
+      detect: det(3200), radar: RADAR(7000, 4000),
+      armor: { ...BOAT_ARMOR },
+      main: gun(13, [T(3, 1, false, 170)]),
+      weapons: { ssm: [{ type: 'kowsar', n: 1 }], rockets: { n: 12, salvo: 12, range: 3200, speed: 420, dmg: 230, disp: 110, reload: 45 } },
       consumables: [],
-      ai: { prefRange: [0, 0], role: 'tr', value: 30 },
+      ai: { prefRange: [900, 1500], role: 'dd', v2: 'fac', value: 4 },
+   }),
+   Mowdsch: ship({
+      key: 'Mowdsch', name: 'Dschamaran', className: 'Moudge-Klasse', model: 'moudge', tier: 5,
+      desc: 'Leichte Fregatte: vier Noor-Seezielflugkörper, schwache Flugabwehr, Torpedos gegen U-Boote.',
+      sisters: ['Dschamaran', 'Sahand', 'Dena', 'Damawand'],
+      hull: { type: 'FF', L: 95, beam: 11.1, draft: 3.3, deckH: 5.5, nation: 'ir', sup: { x: 6, len: 30, w: 8, h: 11 }, funnels: [{ x: -8, r: 2.6, h: 6 }] },
+      hp: 7500, speedKn: 30, accel: 10, turnR: 380, rudderShift: 4, stealth: 0.95,
+      detect: det(6200), radar: RADAR(19000, 9000), sonar: { hull: 2600, towed: 0 },
+      main: gun(76, [T(34, 1)]),
+      aa: { range: 2200, dps: 14 },
+      weapons: { ssm: [{ type: 'noor', n: 4 }], sam: [{ type: 'sayyad', n: 4, ch: 1 }], ciws: { type: 'gun40', n: 1 }, asw: ASW({ n: 4 }) },
+      consumables: [DC(), REP(1), DECOY(3)],
+      ai: { prefRange: [5000, 7000], role: 'cl', v2: 'strike', value: 24 },
+   }),
+   Ghadir: ship({
+      key: 'Ghadir', name: 'Ghadir', className: 'Ghadir-Klasse', model: 'ghadir', tier: 3,
+      desc: 'Kleinst-U-Boot für flache Küstengewässer: zwei Torpedorohre, kaum zu orten.',
+      sisters: ['Ghadir 942', 'Ghadir 943', 'Ghadir 944', 'Ghadir 945', 'Ghadir 946', 'Ghadir 947'],
+      hull: { type: 'SS', L: 29, beam: 2.75, draft: 2.5, deckH: 1.6, nation: 'ir', sup: { x: 2, len: 4, w: 1.4, h: 2.6 }, funnels: [] },
+      hp: 2500, speedKn: 11, accel: 6, turnR: 160, rudderShift: 2.2, stealth: 0.15,
+      detect: det(2400),
+      armor: { ...SUB_ARMOR, belt: 10 },
+      torp: { launchers: [L(12, 'bow', 2)], range: 6000, speedKn: 45, dmg: 8000, flood: 0.3, reload: 80 },
+      sub: SUB({ diveT: 4, battery: { peri: 500, deep: 300, charge: 80 }, periDetect: 800, torpBloom: 2600, hydrophone: 4500, quiet: 0.5 }),
+      consumables: [DC(60)],
+      ai: { prefRange: [1500, 3500], role: 'ss', v2: 'ss', value: 14 },
+   }),
+
+   // =================================================================== neutral / mission ships
+   Tanker: ship({
+      key: 'Tanker', name: 'Tanker', className: 'Rohöltanker (Suezmax)', model: 'tanker', tier: 1,
+      sisters: ['MT Nordic Aurora', 'MT Hafnia Pride', 'MT Stena Polaris', 'MT Minerva Kalypso', 'MT Front Altair', 'MT Eagle Vancouver'],
+      hull: { type: 'TR', L: 250, beam: 44, draft: 15, deckH: 8, nation: 'nt', sup: { x: -100, len: 26, w: 34, h: 26 }, funnels: [{ x: -108, r: 3.5, h: 10 }] },
+      hp: 30000, speedKn: 15, accel: 40, turnR: 900, rudderShift: 14, stealth: 1.4,
+      detect: det(11000), radar: RADAR(10000, 8000),
+      armor: { belt: 18, deck: 12, ends: 12, sup: 6, cit: 0, citLen: 0, tds: 0.2 },
+      ai: { prefRange: [9000, 12000], role: 'tr', v2: 'tr', value: 30 },
+   }),
+   Container: ship({
+      key: 'Container', name: 'Containerschiff', className: 'Containerschiff (Post-Panamax)', model: 'container', tier: 1,
+      sisters: ['MV Maersk Tampa', 'MV MSC Aurelia', 'MV Hamburg Express', 'MV CMA CGM Tage', 'MV Ever Fortune', 'MV ONE Hanoi'],
+      hull: { type: 'TR', L: 300, beam: 45, draft: 13, deckH: 10, nation: 'nt', sup: { x: -70, len: 20, w: 40, h: 34 }, funnels: [{ x: -82, r: 3.5, h: 12 }] },
+      hp: 30000, speedKn: 20, accel: 40, turnR: 950, rudderShift: 14, stealth: 1.5,
+      detect: det(12000), radar: RADAR(10000, 8000),
+      armor: { belt: 16, deck: 10, ends: 10, sup: 6, cit: 0, citLen: 0, tds: 0.1 },
+      ai: { prefRange: [9000, 12000], role: 'tr', v2: 'tr', value: 30 },
+   }),
+   LNG: ship({
+      key: 'LNG', name: 'Gastanker', className: 'Flüssiggastanker', model: 'lng', tier: 1,
+      sisters: ['LNG Al Dafna', 'LNG Arctic Voyager', 'LNG Gaslog Salem', 'LNG Maran Gas Delphi'],
+      hull: { type: 'TR', L: 290, beam: 46, draft: 11.5, deckH: 12, nation: 'nt', sup: { x: -115, len: 22, w: 36, h: 28 }, funnels: [{ x: -124, r: 3.5, h: 10 }] },
+      hp: 26000, speedKn: 19, accel: 40, turnR: 950, rudderShift: 14, stealth: 1.5,
+      detect: det(12000), radar: RADAR(10000, 8000),
+      armor: { belt: 16, deck: 10, ends: 10, sup: 6, cit: 0, citLen: 0, tds: 0.1 },
+      ai: { prefRange: [9000, 12000], role: 'tr', v2: 'tr', value: 34 },
    }),
 };
 
-// ---- historical-operation variants ----
-// Stat/name variants of the existing classes for the "Historische Operationen" (missions.js).
-// The procedural renderer builds every model from cfg.hull + turret layout, so a variant needs no
-// new geometry code: 'us' hulls use the British superstructure style, 'jp' the German one.
-function variant(base, o) {
-   const d = structuredClone(base);
-   delete d.boost;
-   for (const k of ['hull', 'main', 'sec', 'armor', 'detect', 'ai']) if (o[k]) d[k] = { ...d[k], ...o[k] };
-   if (o.hull && o.hull.nation) delete d.hull.color;
-   if (o.torp !== undefined) d.torp = o.torp && d.torp ? { ...d.torp, ...o.torp } : o.torp;
-   for (const k of ['key', 'name', 'className', 'hp', 'speedKn', 'accel', 'turnR', 'rudderShift', 'consumables', 'tier', 'desc']) if (o[k] !== undefined) d[k] = o[k];
-   if (o.sisters) d.sisters = o.sisters; else delete d.sisters;
-   d.playable = !!o.playable;
-   return ship(d);
-}
-const BB_CONS = (heal, extra = []) => [
-   C('damageControl', { charges: Infinity, dur: 15, cd: 80 }),
-   C('repair', { charges: 4, dur: 28, cd: 80, heal }),
-   ...extra,
-];
-// HMS Duke of York: King George V class with the Type 273/284 radar that found Scharnhorst at night
-SHIPS.DukeOfYork = variant(SHIPS.KGV, {
-   key: 'DukeOfYork', name: 'HMS Duke of York', className: 'King-George-V-Klasse', tier: 7,
-   desc: 'King-George-V-Klasse mit dem Radar, das die Scharnhorst in der Polarnacht fand.',
-   consumables: BB_CONS(0.006, [C('radar', { charges: 4, dur: 40, cd: 100, range: 12000 })]),
-});
-// USS Washington (North Carolina class): 9 x 406 mm in three triple turrets, SG radar
-SHIPS.Washington = variant(SHIPS.KGV, {
-   key: 'Washington', name: 'USS Washington', className: 'North-Carolina-Klasse', tier: 8,
-   desc: 'Neun 40,6-cm-Geschütze und SG-Radar: das Schiff, das die Kirishima bei Nacht zusammenschoss.',
-   hull: { L: 222, beam: 33, draft: 10, deckH: 13, nation: 'us', sup: { x: 0, len: 60, w: 18, h: 26 }, funnels: [{ x: 4, r: 5, h: 13 }, { x: -12, r: 5, h: 13 }] },
-   hp: 62000, speedKn: 28, turnR: 820,
-   detect: { surface: 15200, fire: 18900 },
-   armor: { belt: 305, deck: 140 },
-   main: { caliber: 406, turrets: [T(62, 3), T(44, 3), T(-60, 3, true)], reload: 28, range: 18900, tMax: 11, ap: { dmg: 13500, pen: 690 }, he: { dmg: 5700, pen: 68, fire: 0.36 } },
-   sec: { caliber: 127, guns: 20, range: 6000, reload: 4.5, he: { dmg: 1800, pen: 21, fire: 0.05 } },
-   consumables: BB_CONS(0.006, [C('radar', { charges: 3, dur: 40, cd: 110, range: 10000 })]),
-   ai: { prefRange: [10000, 15000] },
-});
-// IJN Kirishima (Kongo class fast battleship, ex battlecruiser): fast, thinly armoured
-SHIPS.Kirishima = variant(SHIPS.Hood, {
-   key: 'Kirishima', name: 'Kirishima', className: 'Kongō-Klasse', playable: true, tier: 5,
-   desc: 'Zum schnellen Schlachtschiff umgebauter Schlachtkreuzer: acht 35,6-cm-Rohre, 30 Knoten, dünne Haut.',
-   sisters: ['Kirishima', 'Hiei', 'Kongō', 'Haruna'],
-   hull: { L: 222, beam: 31, draft: 9.7, deckH: 13, nation: 'jp', sup: { x: 4, len: 62, w: 17, h: 32 }, funnels: [{ x: 6, r: 5, h: 15, rake: 0.04 }, { x: -10, r: 5, h: 15, rake: 0.04 }] },
-   hp: 55000, speedKn: 30, turnR: 900,
-   detect: { surface: 15400, fire: 18000 },
-   armor: { belt: 203, deck: 70, ends: 25 },
-   main: { caliber: 356, turrets: [T(78, 2), T(60, 2), T(-50, 2, true), T(-72, 2, true)], reload: 28, range: 17500, ap: { dmg: 10500, pen: 560 }, he: { dmg: 4600, pen: 58, fire: 0.3 } },
-   sec: { caliber: 152, guns: 14, range: 6200, reload: 7, he: { dmg: 1600, pen: 30, fire: 0.07 } },
-});
-// IJN Atago / Takao (Takao class heavy cruiser): 10 x 203 mm and Type 93 "Long Lance" torpedoes
-SHIPS.Takao = variant(SHIPS.Hipper, {
-   key: 'Takao', name: 'Atago', className: 'Takao-Klasse', playable: true, tier: 8,
-   desc: 'Zehn 20,3-cm-Geschütze, ein wuchtiger Brückenturm und sechzehn „Long Lance“-Torpedorohre.',
-   sisters: ['Atago', 'Takao', 'Maya', 'Chōkai'],
-   hull: { L: 204, beam: 20.7, draft: 6.3, nation: 'jp', sup: { x: 6, len: 44, w: 15, h: 24 }, funnels: [{ x: -6, r: 4.6, h: 13, rake: 0.3 }, { x: -17, r: 3.2, h: 12, rake: 0.04 }] },
-   hp: 39000, speedKn: 34,
-   armor: { belt: 102, deck: 35 },
-   main: { turrets: [T(70, 2), T(56, 2), T(42, 2), T(-46, 2, true), T(-60, 2, true)], reload: 12 },
-   torp: { launchers: [L(-12, 'port', 4), L(-12, 'stbd', 4), L(-28, 'port', 4), L(-28, 'stbd', 4)], range: 10000, speedKn: 58, dmg: 15000, reload: 110 },
-});
-// IJN Ayanami & co. (Fubuki class destroyer): 3 triple 610 mm tube mounts
-SHIPS.Fubuki = variant(SHIPS.Jervis, {
-   key: 'Fubuki', name: 'Ayanami', className: 'Fubuki-Klasse', playable: true, tier: 6,
-   desc: 'Der erste „Spezialtyp“-Zerstörer: geschlossene Zwillingstürme und neun 61-cm-Torpedorohre.',
-   sisters: ['Ayanami', 'Fubuki', 'Shikinami', 'Uranami', 'Shirayuki', 'Hatsuyuki', 'Murakumo'],
-   hull: { L: 118, beam: 10.4, draft: 3.2, nation: 'jp', sup: { x: 24, len: 14, w: 7, h: 10 },
-      funnels: [{ x: 11, r: 2.6, h: 8, rake: 0.2 }, { x: -4, r: 2.6, h: 8, rake: 0.2 }] },
-   hp: 14200, speedKn: 38,
-   detect: { surface: 7200, fire: 9200 },
-   main: { caliber: 127, turrets: [T(38, 2), T(-31, 2, true), T(-39, 2, true)], reload: 5.5, range: 11000, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } },
-   torp: { launchers: [L(3.5, 'both', 3), L(-12, 'both', 3), L(-21, 'both', 3)], range: 10000, speedKn: 58, dmg: 15000, reload: 100 },
-});
-// US destroyers of TF 64 (Walke, Benham, Preston, Gwin) -- one stand-in class
-SHIPS.Benham = variant(SHIPS.Jervis, {
-   key: 'Benham', name: 'USS Benham', className: 'Benham-Klasse', playable: true, tier: 6,
-   desc: 'Leichter Vorkriegszerstörer: vier 12,7-cm-Einzelgeschütze und zwei Vierlings-Rohrsätze.',
-   sisters: ['USS Benham', 'USS Walke', 'USS Preston', 'USS Gwin', 'USS Ellet', 'USS Lang'],
-   hull: { L: 104, beam: 10.8, nation: 'us' },
-   hp: 14500, speedKn: 36.5,
-   main: { caliber: 127, turrets: [T(34, 1), T(24, 1), T(-30, 1, true), T(-40, 1, true)], reload: 4.5, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } },
-   torp: { launchers: [L(-6, 'both', 4), L(-18, 'both', 4)] },
-});
-
-// ---- fleet expansion: more navies, more classes ----
-// Same conventions as the table above. hull.secMounts (optional, battleships) lists the visible
-// secondary turrets of the model: { x, guns, a (training of the starboard mount), k (size),
-// c: true = single centreline mount raised `up` metres }. Funnels may carry their own `rake`;
-// hull.sternCat puts the catapults on the quarterdeck instead of amidships.
-const DD_CONS = (smoke = 3, boost = 1.08) => [
-   C('damageControl', { charges: Infinity, dur: 10, cd: 40 }),
-   C('smoke', { charges: smoke, dur: 20, cd: 160, radius: 450, life: 60 }),
-   C('boost', { charges: 3, dur: 120, cd: 180, mult: boost }),
-];
-Object.assign(SHIPS, {
-   // ============ Kriegsmarine ============
-   Gneisenau: variant(SHIPS.Scharnhorst, {
-      key: 'Gneisenau', name: 'Gneisenau', className: 'Scharnhorst-Klasse (38-cm-Umbau)', playable: true, tier: 7,
-      desc: 'Die Scharnhorst-Klasse mit den geplanten 38-cm-Zwillingen: nur sechs Rohre, aber Bismarck-Kaliber – dazu Torpedos.',
-      sisters: ['Gneisenau'],
-      hp: 58200,
-      main: { caliber: 380, turrets: [T(72, 2), T(52, 2), T(-62, 2, true)], traverse: 5.6, reload: 26, range: 18600, tMax: 9.6, fallMax: 30,
-         dispH: 235, ap: { dmg: 11600, pen: 740 }, he: { dmg: 4400, pen: 63, fire: 0.34 } },
-      torp: { launchers: [L(-30, 'port', 3), L(-30, 'stbd', 3)], range: 6000, speedKn: 64, dmg: 13700, flood: 0.2, reload: 90 },   // two triple banks from 1942
-      ai: { prefRange: [10500, 15000], value: 58 },
-   }),
-   // ============ Royal Navy ============
-   Warspite: ship({
-      key: 'Warspite', name: 'HMS Warspite', className: 'Queen-Elizabeth-Klasse', playable: true, tier: 6,
-      desc: 'Die „Grand Old Lady“: langsam, aber erstaunlich wendig, mit acht sehr präzisen 38,1-cm-Geschützen.',
-      sisters: ['HMS Warspite', 'HMS Queen Elizabeth', 'HMS Valiant', 'HMS Barham', 'HMS Malaya'],
-      hull: { type: 'BB', L: 196, beam: 31.7, draft: 9.4, deckH: 12.5, nation: 'uk',
-         sup: { x: 4, len: 46, w: 18, h: 27 }, funnels: [{ x: -4, r: 5.6, h: 14 }] },
-      hp: 50200, speedKn: 24, accel: 24, turnR: 570, rudderShift: 12.4,
-      detect: { surface: 14000, fire: 16900, smokeFire: 11200, torp: 1300 },
-      armor: { belt: 330, deck: 76, ends: 25, sup: 19, cit: 0, citLen: 0.52, tds: 0.25 },
-      main: {
-         caliber: 381, turrets: [T(58, 2), T(42, 2), T(-44, 2, true), T(-60, 2, true)],
-         traverse: 3.6, reload: 30, range: 16900, tMax: 9.6, fallMax: 30, dispH: 205, vRatio: 0.6, sigma: 2.0,
-         ap: { dmg: 11400, pen: 680 }, he: { dmg: 5300, pen: 64, fire: 0.34 },
-      },
-      sec: { caliber: 152, guns: 8, range: 5000, reload: 8, tMax: 3.2, dispH: 140, sigma: 1.0, he: { dmg: 2100, pen: 25, fire: 0.09 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: null,
-      consumables: BB_CONS(0.0066),
-      ai: { prefRange: [9500, 13500], role: 'bb', value: 50 },
-   }),
-   // ============ US Navy ============
-   Iowa: ship({
-      key: 'Iowa', name: 'USS Iowa', className: 'Iowa-Klasse', playable: true, tier: 9,
-      desc: 'Das schnellste Schlachtschiff der Welt: 33 Knoten und neun 40,6-cm-Geschütze mit überschweren Granaten.',
-      sisters: ['USS Iowa', 'USS New Jersey', 'USS Missouri', 'USS Wisconsin'],
-      hull: { type: 'BB', L: 270, beam: 33, draft: 11, deckH: 14, nation: 'us', sternCat: true,
-         sup: { x: -3, len: 76, w: 19, h: 29 }, funnels: [{ x: 10, r: 5, h: 17 }, { x: -16, r: 5, h: 16 }],
-         secMounts: [{ x: 22, guns: 2, a: 0.7, k: 0.85 }, { x: 10, guns: 2, a: 1.2, k: 0.85, up: 3 }, { x: -3, guns: 2, a: Math.PI / 2, k: 0.85 },
-            { x: -16, guns: 2, a: 1.9, k: 0.85, up: 3 }, { x: -29, guns: 2, a: 2.4, k: 0.85 }] },
-      hp: 79700, speedKn: 33, accel: 28, turnR: 920, rudderShift: 16.4,
-      detect: { surface: 15300, fire: 19200, smokeFire: 13400, torp: 1300 },
-      armor: { belt: 307, deck: 152, ends: 32, sup: 19, cit: 0, citLen: 0.52, tds: 0.25, citH: 0.4 },
-      main: {
-         caliber: 406, turrets: [T(67, 3), T(45, 3), T(-62, 3, true)],
-         traverse: 4, reload: 30, range: 21800, tMax: 12, fallMax: 34, dispH: 255, vRatio: 0.6, sigma: 1.9,
-         ap: { dmg: 13500, pen: 780 }, he: { dmg: 5700, pen: 68, fire: 0.36 },
-      },
-      sec: { caliber: 127, guns: 20, range: 6000, reload: 4.5, tMax: 3.2, dispH: 130, sigma: 1.0, he: { dmg: 1800, pen: 21, fire: 0.05 } },
-      aa: { range: 5500, reload: 0.5 },
-      torp: null,
-      consumables: BB_CONS(0.005, [C('radar', { charges: 2, dur: 30, cd: 120, range: 9500 })]),
-      ai: { prefRange: [12000, 16500], role: 'bb', value: 68 },
-   }),
-   Cleveland: ship({
-      key: 'Cleveland', name: 'USS Cleveland', className: 'Cleveland-Klasse', playable: true, tier: 8,
-      desc: 'Zwölf schnell feuernde 15,2-cm-Rohre und Radar – die Granaten fliegen in hohem Bogen über Inseln hinweg.',
-      sisters: ['USS Cleveland', 'USS Columbia', 'USS Montpelier', 'USS Denver', 'USS Santa Fe', 'USS Birmingham'],
-      hull: { type: 'CL', L: 186, beam: 20.2, draft: 6.3, deckH: 9.5, nation: 'us', sternCat: true,
-         sup: { x: 2, len: 50, w: 13, h: 18 }, funnels: [{ x: 7, r: 3.4, h: 12 }, { x: -10, r: 3.4, h: 12 }] },
-      hp: 36900, speedKn: 32.5, accel: 16, turnR: 660, rudderShift: 7.9,
-      detect: { surface: 11200, fire: 14600, smokeFire: 6100, torp: 1300 },
-      armor: { belt: 127, deck: 51, ends: 16, sup: 13, cit: 0, citLen: 0.46, tds: 0.05 },
-      main: {
-         caliber: 152, turrets: [T(54, 3), T(42, 3), T(-42, 3, true), T(-54, 3, true)],
-         traverse: 7.2, reload: 6.5, range: 14600, tMax: 9.6, fallMax: 30, dispH: 135, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 3200, pen: 190 }, he: { dmg: 2200, pen: 30, fire: 0.12 },
-      },
-      sec: { caliber: 127, guns: 8, range: 5500, reload: 4.5, tMax: 3.2, dispH: 130, sigma: 1.0, he: { dmg: 1800, pen: 21, fire: 0.05 } },
-      aa: { range: 5500, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-         C('radar', { charges: 3, dur: 28, cd: 120, range: 9000 }),
-      ],
-      ai: { prefRange: [9000, 12500], role: 'cl', value: 45 },
-   }),
-   Fletcher: ship({
-      key: 'Fletcher', name: 'USS Fletcher', className: 'Fletcher-Klasse', playable: true, tier: 9,
-      desc: 'Der Alleskönner unter den Zerstörern: fünf schnell feuernde 12,7-cm-Geschütze und zehn starke Torpedos.',
-      sisters: ['USS Fletcher', 'USS Nicholas', 'USS O’Bannon', 'USS Johnston', 'USS Kidd', 'USS Heermann', 'USS Hoel', 'USS Radford'],
-      hull: { type: 'DD', L: 114.8, beam: 12, draft: 4.2, deckH: 6, nation: 'us',
-         sup: { x: 18, len: 14, w: 7.5, h: 10 }, funnels: [{ x: 10, r: 2.4, h: 8, rake: 0.05 }, { x: -3, r: 2.4, h: 8, rake: 0.05 }] },
-      hp: 17100, speedKn: 36.5, accel: 9, turnR: 560, rudderShift: 3.6,
-      detect: { surface: 7200, fire: 9300, smokeFire: 2600, torp: 1400 },
-      armor: { belt: 19, deck: 13, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 127, turrets: [T(36, 1), T(27, 1), T(-27, 1, true), T(-35.5, 1, true), T(-44, 1, true)],
-         traverse: 30, reload: 3.3, range: 11600, tMax: 8.2, fallMax: 26, dispH: 105, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.05 },
-      },
-      sec: null,
-      aa: { range: 5000, reload: 0.5 },
-      torp: { launchers: [L(3.5, 'both', 5), L(-10.5, 'both', 5)], range: 10500, speedKn: 66, dmg: 19000, flood: 0.3, reload: 106 },
-      consumables: DD_CONS(3),
-      ai: { prefRange: [6000, 9000], role: 'dd', value: 42 },
-   }),
-   // ============ Kaiserlich Japanische Marine ============
-   Yamato: ship({
-      key: 'Yamato', name: 'Yamato', className: 'Yamato-Klasse', playable: true, tier: 10,
-      desc: 'Das größte Schlachtschiff aller Zeiten: neun 46-cm-Geschütze, die fast jede Panzerung überwältigen.',
-      sisters: ['Yamato', 'Musashi'],
-      hull: { type: 'BB', L: 263, beam: 38.9, draft: 10.8, deckH: 15, nation: 'jp', sternCat: true,
-         sup: { x: -8, len: 72, w: 22, h: 31 }, funnels: [{ x: -15, r: 6.2, h: 17, rake: 0.32 }],
-         secMounts: [{ x: 19, c: true, guns: 3, up: 10, a: 0, k: 1.5 }, { x: -46, c: true, guns: 3, up: 7.5, a: Math.PI, k: 1.5 },
-            { x: -8, guns: 3, a: Math.PI / 2, k: 1.5 }, { x: 6, guns: 2, a: 1.1, k: 0.8, up: 3 }, { x: -24, guns: 2, a: 2.1, k: 0.8, up: 3 }] },
-      hp: 97200, speedKn: 27, accel: 30, turnR: 900, rudderShift: 18,
-      detect: { surface: 16600, fire: 20500, smokeFire: 14500, torp: 1300 },
-      armor: { belt: 410, deck: 200, ends: 32, sup: 19, cit: 0, citLen: 0.54, tds: 0.55, citH: 0.4 },
-      main: {
-         caliber: 460, turrets: [T(61, 3), T(37, 3), T(-64, 3, true)],
-         traverse: 3.3, reload: 30, range: 22800, tMax: 11.6, fallMax: 32, dispH: 270, vRatio: 0.6, sigma: 2.1,
-         ap: { dmg: 14800, pen: 900 }, he: { dmg: 7300, pen: 77, fire: 0.35 },
-      },
-      sec: { caliber: 155, guns: 12, range: 7600, reload: 7, tMax: 3.6, dispH: 140, sigma: 1.0, he: { dmg: 2200, pen: 26, fire: 0.1 } },
-      aa: { range: 5500, reload: 0.5 },
-      torp: null,
-      consumables: BB_CONS(0.005),
-      ai: { prefRange: [12500, 17500], role: 'bb', value: 75 },
-   }),
-   Shimakaze: ship({
-      key: 'Shimakaze', name: 'Shimakaze', className: 'Shimakaze-Klasse', playable: true, tier: 10,
-      desc: 'Einzelstück und Torpedoträger schlechthin: fünfzehn 61-cm-Rohre in drei Fünflingen bei 39 Knoten.',
-      sisters: ['Shimakaze'],
-      hull: { type: 'DD', L: 129.5, beam: 11.2, draft: 4.1, deckH: 6, nation: 'jp',
-         sup: { x: 28, len: 14, w: 7, h: 11 }, funnels: [{ x: 18, r: 2.6, h: 9, rake: 0.2 }, { x: 3, r: 2.6, h: 8.5, rake: 0.2 }] },
-      hp: 18600, speedKn: 39, accel: 10, turnR: 730, rudderShift: 5.2,
-      detect: { surface: 7400, fire: 9600, smokeFire: 2700, torp: 1400 },
-      armor: { belt: 19, deck: 13, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 127, turrets: [T(42, 2), T(-38, 2, true), T(-46.5, 2, true)],
-         traverse: 10, reload: 5.7, range: 11500, tMax: 6.6, fallMax: 20, dispH: 110, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 2200, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.08 },
-      },
-      sec: null,
-      aa: { range: 3500, reload: 0.5 },
-      torp: { launchers: [L(10.5, 'both', 5), L(-6, 'both', 5), L(-17, 'both', 5)], range: 12000, speedKn: 67, dmg: 21000, flood: 0.35, reload: 135 },
-      consumables: DD_CONS(3),
-      ai: { prefRange: [6500, 9500], role: 'dd', value: 45 },
-   }),
-   // ============ Marine nationale ============
-   Richelieu: ship({
-      key: 'Richelieu', name: 'Richelieu', className: 'Richelieu-Klasse', playable: true, tier: 8,
-      desc: 'Beide 38-cm-Vierlinge stehen auf dem Vorschiff: volle Feuerkraft im Angriff, nach achtern nur Mittelartillerie.',
-      sisters: ['Richelieu', 'Jean Bart'],
-      hull: { type: 'BB', L: 247.9, beam: 33, draft: 9.6, deckH: 14, nation: 'fr', sternCat: true,
-         sup: { x: -4, len: 66, w: 20, h: 29 }, funnels: [{ x: -19, r: 5.4, h: 16, rake: 0.42 }],
-         secMounts: [{ x: -66, c: true, guns: 3, up: 0.3, a: Math.PI, k: 1.45 }, { x: -52, guns: 3, a: 2.55, k: 1.45 },
-            { x: 14, guns: 2, a: 1.0, k: 0.8 }, { x: 0, guns: 2, a: Math.PI / 2, k: 0.8 }, { x: -14, guns: 2, a: 2.0, k: 0.8 }] },
-      hp: 64400, speedKn: 32, accel: 26, turnR: 850, rudderShift: 15.9,
-      detect: { surface: 15900, fire: 19400, smokeFire: 13200, torp: 1300 },
-      armor: { belt: 330, deck: 150, ends: 32, sup: 19, cit: 0, citLen: 0.5, tds: 0.4, citH: 0.38 },
-      main: {
-         caliber: 380, turrets: [T(65, 4, false, 148), T(39, 4, false, 148)],
-         traverse: 5, reload: 30, range: 19000, tMax: 9.6, fallMax: 30, dispH: 250, vRatio: 0.6, sigma: 1.8,
-         ap: { dmg: 11900, pen: 760 }, he: { dmg: 5400, pen: 63, fire: 0.36 },
-      },
-      sec: { caliber: 152, guns: 12, range: 7000, reload: 7.5, tMax: 3.5, dispH: 140, sigma: 1.0, he: { dmg: 2200, pen: 25, fire: 0.1 } },
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      consumables: BB_CONS(0.005, [C('boost', { charges: 3, dur: 90, cd: 150, mult: 1.1 })]),
-      ai: { prefRange: [10500, 15000], role: 'bb', value: 62 },
-   }),
-   Algerie: ship({
-      key: 'Algerie', name: 'Algérie', className: 'Algérie-Klasse', playable: true, tier: 7,
-      desc: 'Der wohl beste Vertragskreuzer: weit reichende 20,3-cm-Geschütze, solide Panzerung und Äußerste Kraft als Sonderausrüstung.',
-      sisters: ['Algérie'],
-      hull: { type: 'CA', L: 186.2, beam: 20, draft: 6.2, deckH: 9.5, nation: 'fr',
-         sup: { x: 8, len: 44, w: 13, h: 22 }, funnels: [{ x: 0, r: 4, h: 13, rake: 0.06 }] },
-      hp: 37100, speedKn: 31, accel: 17, turnR: 650, rudderShift: 8.6,
-      detect: { surface: 11900, fire: 14900, smokeFire: 7200, torp: 1300 },
-      armor: { belt: 110, deck: 40, ends: 25, sup: 13, cit: 40, citLen: 0.48, tds: 0.2 },
-      main: {
-         caliber: 203, turrets: [T(56, 2), T(43, 2), T(-44, 2, true), T(-57, 2, true)],
-         traverse: 6, reload: 12, range: 16300, tMax: 8.6, fallMax: 26, dispH: 152, vRatio: 0.5, sigma: 2.0,
-         ap: { dmg: 4800, pen: 330 }, he: { dmg: 2800, pen: 34, fire: 0.15 },
-      },
-      sec: { caliber: 100, guns: 12, range: 5000, reload: 4, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1400, pen: 17, fire: 0.05 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: { launchers: [L(-12, 'port', 3), L(-12, 'stbd', 3)], range: 9000, speedKn: 60, dmg: 14800, flood: 0.25, reload: 90 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('repair', { charges: 2, dur: 20, cd: 80, heal: 0.005 }),
-         C('boost', { charges: 3, dur: 120, cd: 180, mult: 1.1 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-      ],
-      ai: { prefRange: [9500, 13500], role: 'ca', value: 43 },
-   }),
-   LeFantasque: ship({
-      key: 'LeFantasque', name: 'Le Fantasque', className: 'Le-Fantasque-Klasse', playable: true, tier: 8,
-      desc: 'Großzerstörer mit 43 Knoten und fünf 13,8-cm-Geschützen – kein Nebel, Geschwindigkeit ist der Schutz.',
-      sisters: ['Le Fantasque', 'Le Terrible', 'Le Malin', 'Le Triomphant', 'L’Indomptable', 'L’Audacieux'],
-      hull: { type: 'DD', L: 132.4, beam: 12.4, draft: 4.5, deckH: 6.5, nation: 'fr',
-         sup: { x: 24, len: 14, w: 7.5, h: 11 }, funnels: [{ x: 14, r: 2.9, h: 9, rake: 0.08 }, { x: -10, r: 2.9, h: 9, rake: 0.08 }] },
-      hp: 19400, speedKn: 43, accel: 10, turnR: 740, rudderShift: 4.9,
-      detect: { surface: 8300, fire: 10700, smokeFire: 3100, torp: 1500 },
-      armor: { belt: 16, deck: 16, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 139, turrets: [T(44, 1), T(35, 1), T(-24, 1, true), T(-40, 1, true), T(-49, 1, true)],
-         traverse: 12, reload: 5.2, range: 12300, tMax: 6.4, fallMax: 20, dispH: 110, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 2800, pen: 200 }, he: { dmg: 2000, pen: 23, fire: 0.09 },
-      },
-      sec: null,
-      aa: { range: 3500, reload: 0.5 },
-      torp: { launchers: [L(6, 'port', 3), L(6, 'stbd', 3), L(-2.5, 'both', 3)], range: 9000, speedKn: 60, dmg: 14800, flood: 0.27, reload: 90 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 40 }),
-         C('boost', { charges: 4, dur: 120, cd: 150, mult: 1.12 }),
-         C('hydro', { charges: 2, dur: 100, cd: 120, range: 4000, torpRange: 2700 }),
-      ],
-      ai: { prefRange: [7000, 10000], role: 'dd', value: 40 },
-   }),
-   // ============ Regia Marina ============
-   Littorio: ship({
-      key: 'Littorio', name: 'Littorio', className: 'Littorio-Klasse', playable: true, tier: 8,
-      desc: 'Elegant und schnell: neun 38,1-cm-Geschütze mit enormer Mündungsgeschwindigkeit, aber weiter Streuung.',
-      sisters: ['Littorio', 'Vittorio Veneto', 'Roma'],
-      hull: { type: 'BB', L: 237.8, beam: 32.9, draft: 9.6, deckH: 13.5, nation: 'it', sternCat: true,
-         sup: { x: -4, len: 62, w: 19, h: 28 }, funnels: [{ x: -6, r: 4.6, h: 15 }, { x: -19, r: 4.6, h: 15 }],
-         secMounts: [{ x: 29, guns: 3, a: 0.6, k: 1.35 }, { x: -45, guns: 3, a: 2.55, k: 1.35 },
-            { x: 12, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: 3, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: -12, guns: 1, a: Math.PI / 2, k: 0.7 }, { x: -24, guns: 1, a: Math.PI / 2, k: 0.7 }] },
-      hp: 65400, speedKn: 30, accel: 26, turnR: 810, rudderShift: 14.8,
-      detect: { surface: 14900, fire: 18300, smokeFire: 12400, torp: 1300 },
-      armor: { belt: 350, deck: 100, ends: 32, sup: 19, cit: 0, citLen: 0.52, tds: 0.38, citH: 0.38 },
-      main: {
-         caliber: 381, turrets: [T(64, 3), T(42, 3), T(-62, 3, true)],
-         traverse: 5, reload: 30, range: 18800, tMax: 8.8, fallMax: 26, dispH: 275, vRatio: 0.6, sigma: 1.7,
-         ap: { dmg: 12000, pen: 800 }, he: { dmg: 5100, pen: 63, fire: 0.3 },
-      },
-      sec: { caliber: 152, guns: 12, range: 6600, reload: 9, tMax: 3.4, dispH: 140, sigma: 1.0, he: { dmg: 2100, pen: 25, fire: 0.07 } },
-      aa: { range: 4500, reload: 0.5 },
-      torp: null,
-      consumables: BB_CONS(0.005),
-      ai: { prefRange: [10500, 15000], role: 'bb', value: 60 },
-   }),
-   Zara: ship({
-      key: 'Zara', name: 'Zara', className: 'Zara-Klasse', playable: true, tier: 7,
-      desc: 'Der am stärksten gepanzerte Vertragskreuzer: 150 mm Gürtel, acht 20,3-cm-Geschütze, keine Torpedos.',
-      sisters: ['Zara', 'Fiume', 'Pola', 'Gorizia'],
-      hull: { type: 'CA', L: 182.8, beam: 20.6, draft: 6.6, deckH: 9.5, nation: 'it',
-         sup: { x: 8, len: 42, w: 13, h: 20 }, funnels: [{ x: 5, r: 3.8, h: 13 }, { x: -13, r: 3.1, h: 12 }] },
-      hp: 38300, speedKn: 32, accel: 17, turnR: 680, rudderShift: 8.5,
-      detect: { surface: 11700, fire: 14700, smokeFire: 7000, torp: 1300 },
-      armor: { belt: 150, deck: 70, ends: 25, sup: 13, cit: 0, citLen: 0.5, tds: 0.1 },
-      main: {
-         caliber: 203, turrets: [T(54, 2), T(41, 2), T(-42, 2, true), T(-55, 2, true)],
-         traverse: 7, reload: 12.5, range: 15400, tMax: 7.7, fallMax: 24, dispH: 165, vRatio: 0.5, sigma: 2.0,
-         ap: { dmg: 5000, pen: 350 }, he: { dmg: 2700, pen: 34, fire: 0.14 },
-      },
-      sec: { caliber: 100, guns: 12, range: 5000, reload: 4, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1400, pen: 17, fire: 0.05 } },
-      aa: { range: 4000, reload: 0.5 },
-      torp: null,
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('repair', { charges: 3, dur: 20, cd: 80, heal: 0.005 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-      ],
-      ai: { prefRange: [9500, 13000], role: 'ca', value: 44 },
-   }),
-   // ============ Sowjetische Marine ============
-   Kirov: ship({
-      key: 'Kirov', name: 'Kirow', className: 'Projekt 26', playable: true, tier: 6,
-      desc: 'Neun 18-cm-Geschütze mit flacher Flugbahn und großer Reichweite auf einem schnellen, dünnhäutigen Rumpf.',
-      sisters: ['Kirow', 'Woroschilow', 'Maxim Gorki', 'Molotow'],
-      hull: { type: 'CL', L: 191.3, beam: 17.7, draft: 6.2, deckH: 9, nation: 'su',
-         sup: { x: 12, len: 40, w: 11, h: 19 }, funnels: [{ x: 13, r: 3.4, h: 12, rake: 0.1 }, { x: -13, r: 3.4, h: 12, rake: 0.1 }] },
-      hp: 28800, speedKn: 35, accel: 16, turnR: 790, rudderShift: 8.2,
-      detect: { surface: 12600, fire: 15800, smokeFire: 7000, torp: 1300 },
-      armor: { belt: 50, deck: 50, ends: 16, sup: 10, cit: 0, citLen: 0.5, tds: 0.05 },
-      main: {
-         caliber: 180, turrets: [T(56, 3), T(44, 3), T(-50, 3, true)],
-         traverse: 5.2, reload: 12.5, range: 15500, tMax: 7.2, fallMax: 22, dispH: 140, vRatio: 0.48, sigma: 2.0,
-         ap: { dmg: 4100, pen: 300 }, he: { dmg: 2500, pen: 30, fire: 0.13 },
-      },
-      sec: { caliber: 100, guns: 6, range: 4500, reload: 4, tMax: 3, dispH: 130, sigma: 1.0, he: { dmg: 1400, pen: 17, fire: 0.05 } },
-      aa: { range: 4000, reload: 0.5 },
-      torp: { launchers: [L(0, 'port', 3), L(0, 'stbd', 3)], range: 4000, speedKn: 65, dmg: 14400, flood: 0.25, reload: 70 },
-      consumables: [
-         C('damageControl', { charges: Infinity, dur: 10, cd: 60 }),
-         C('hydro', { charges: 3, dur: 100, cd: 120, range: 5000, torpRange: 3500 }),
-         C('radar', { charges: 2, dur: 20, cd: 120, range: 9000 }),
-      ],
-      ai: { prefRange: [10000, 13500], role: 'cl', value: 38 },
-   }),
-   Gnevny: ship({
-      key: 'Gnevny', name: 'Gnewny', className: 'Projekt 7', playable: true, tier: 6,
-      desc: 'Artilleriezerstörer mit vier weit reichenden 13-cm-Geschützen; die Torpedos taugen nur für den Nahkampf.',
-      sisters: ['Gnewny', 'Grosny', 'Gremjaschtschi', 'Besposchtschadny', 'Bodry', 'Soobrasitelny', 'Stoiki'],
-      hull: { type: 'DD', L: 112.8, beam: 10.2, draft: 4, deckH: 5.8, nation: 'su',
-         sup: { x: 18, len: 13, w: 6.5, h: 10 }, funnels: [{ x: 4, r: 3, h: 9 }] },
-      hp: 13900, speedKn: 38, accel: 9, turnR: 570, rudderShift: 3.9,
-      detect: { surface: 7500, fire: 9700, smokeFire: 2700, torp: 1400 },
-      armor: { belt: 13, deck: 13, ends: 13, sup: 10, cit: 0, citLen: 0, tds: 0 },
-      main: {
-         caliber: 130, turrets: [T(35, 1), T(27, 1), T(-31, 1, true), T(-39, 1, true)],
-         traverse: 10, reload: 5, range: 11700, tMax: 5.7, fallMax: 18, dispH: 100, vRatio: 0.45, sigma: 2.0,
-         ap: { dmg: 2500, pen: 180 }, he: { dmg: 1900, pen: 22, fire: 0.08 },
-      },
-      sec: null,
-      aa: { range: 3000, reload: 0.5 },
-      torp: { launchers: [L(-4, 'both', 3), L(-13.5, 'both', 3)], range: 5000, speedKn: 60, dmg: 14400, flood: 0.25, reload: 70 },
-      consumables: DD_CONS(2),
-      ai: { prefRange: [6500, 9500], role: 'dd', value: 32 },
-   }),
-});
-
-// ---- submarines (hull type SS, class "U-Boot") ----
-// A boat is a normal ship with a `sub` block (submarine.js runs the depth states, the battery,
-// sonar, depth charges and ramming). Torpedo launchers sit on the centreline: side 'bow' fires
-// ahead, 'stern' astern, each inside SUB_TUBE_ARC. Speeds are WoWs-like, not historical: a
-// real 17-kn boat could not take part in a 30-kn battle.
-//    diveT      s per depth step (surface <-> periscope depth <-> deep)
-//    battery    s a full charge lasts at periscope depth / deep, s to recharge on the surface
-//    periSpeed / deepSpeed   fraction of the surface speed
-//    periDetect m: periscope + wake at full speed (0.6x when creeping)
-//    torpBloom  m: detectability for SUB_BLOOM_T s after a torpedo salvo from periscope depth
-//    hydrophone m: range of the bearing lines while the boat is deep
-const SUB_CONS = () => [C('damageControl', { charges: Infinity, dur: 10, cd: 50 })];
-const SUB = (o = {}) => ({ diveT: 6, battery: { peri: 420, deep: 210, charge: 75 }, periSpeed: 0.7, deepSpeed: 0.5,
-   periDetect: 1800, torpBloom: 4500, hydrophone: 6000, ...o });
-const deckGun = (x, caliber, o = {}) => ({
-   caliber, turrets: [T(x, 1, false, 150)],
-   traverse: 14, reload: 6.5, range: 7500, tMax: 6.5, fallMax: 16, dispH: 120, vRatio: 0.5, sigma: 1.7,
-   ap: { dmg: 1500, pen: 90 }, he: { dmg: 1200, pen: 17, fire: 0.05 }, ...o,
-});
-const SUB_ARMOR = { belt: 19, deck: 8, ends: 10, sup: 8, cit: 0, citLen: 0, tds: 0 };
-Object.assign(SHIPS, {
-   U96: ship({
-      key: 'U96', name: 'U 96', className: 'Typ VII C', playable: true, tier: 6,
-      desc: 'Das Arbeitspferd der Atlantikschlacht: klein, wendig, schnell unter Wasser. Vier Bugrohre und ein Heckrohr.',
-      sisters: ['U 96', 'U 47', 'U 99', 'U 100', 'U 552', 'U 331', 'U 81'],
-      hull: { type: 'SS', L: 67.1, beam: 6.2, draft: 4.7, deckH: 3, nation: 'de', sup: { x: 2, len: 7, w: 2.6, h: 5 }, funnels: [] },
-      hp: 9200, speedKn: 23, accel: 8, turnR: 360, rudderShift: 3.6,
-      detect: { surface: 5600, fire: 7200, smokeFire: 2000, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(11, 88),
-      sec: null, aa: { range: 2000, reload: 0.6 },
-      torp: { launchers: [L(29, 'bow', 4), L(-30, 'stern', 1)], range: 7500, speedKn: 60, dmg: 12500, flood: 0.25, reload: 50 },
-      sub: SUB({ diveT: 5.5 }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [2500, 5000], role: 'ss', value: 30 },
-   }),
-   U505: ship({
-      key: 'U505', name: 'U 505', className: 'Typ IX C', playable: true, tier: 8,
-      desc: 'Großes Fernkampfboot: sechs Rohre, starke Batterie und ein 10,5-cm-Geschütz – dafür taucht es träger.',
-      sisters: ['U 505', 'U 107', 'U 123', 'U 156', 'U 172', 'U 515'],
-      hull: { type: 'SS', L: 76.8, beam: 6.8, draft: 4.7, deckH: 3.2, nation: 'de', sup: { x: 3, len: 8, w: 2.8, h: 5.2 }, funnels: [] },
-      hp: 11500, speedKn: 24, accel: 9, turnR: 420, rudderShift: 4,
-      detect: { surface: 5900, fire: 7500, smokeFire: 2000, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(13, 105, { range: 8200, ap: { dmg: 1800, pen: 110 }, he: { dmg: 1500, pen: 17, fire: 0.06 } }),
-      sec: null, aa: { range: 2000, reload: 0.6 },
-      torp: { launchers: [L(33, 'bow', 4), L(-35, 'stern', 2)], range: 8500, speedKn: 62, dmg: 13500, flood: 0.25, reload: 55 },
-      sub: SUB({ diveT: 7, battery: { peri: 480, deep: 240, charge: 85 } }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [2800, 5500], role: 'ss', value: 36 },
-   }),
-   Triton: ship({
-      key: 'Triton', name: 'HMS Triton', className: 'T-Klasse', playable: true, tier: 6,
-      desc: 'Britisches Hochseeboot mit der stärksten Bugsalve seiner Zeit: sechs innere und vier äußere Rohre nach vorn.',
-      sisters: ['HMS Triton', 'HMS Thunderbolt', 'HMS Triumph', 'HMS Torbay', 'HMS Truant', 'HMS Tigris'],
-      hull: { type: 'SS', L: 84, beam: 8.1, draft: 4.4, deckH: 3.2, nation: 'uk', sup: { x: 4, len: 9, w: 3, h: 5.4 }, funnels: [] },
-      hp: 10500, speedKn: 21.5, accel: 9, turnR: 430, rudderShift: 4.2,
-      detect: { surface: 5800, fire: 7400, smokeFire: 2000, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(15, 102),
-      sec: null, aa: { range: 2000, reload: 0.6 },
-      torp: { launchers: [L(37, 'bow', 6), L(33, 'bow', 4)], range: 6500, speedKn: 58, dmg: 11500, flood: 0.25, reload: 72 },
-      sub: SUB({ diveT: 6.5 }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [2500, 4500], role: 'ss', value: 32 },
-   }),
-   Gato: ship({
-      key: 'Gato', name: 'USS Gato', className: 'Gato-Klasse', playable: true, tier: 8,
-      desc: 'Flottenboot des Pazifikkriegs: sechs Bug- und vier Heckrohre, große Reichweite, robuste Bauweise.',
-      sisters: ['USS Gato', 'USS Wahoo', 'USS Barb', 'USS Albacore', 'USS Cavalla', 'USS Flasher', 'USS Tang'],
-      hull: { type: 'SS', L: 95, beam: 8.3, draft: 5.2, deckH: 3.4, nation: 'us', sup: { x: 4, len: 10, w: 3, h: 5.6 }, funnels: [] },
-      hp: 13000, speedKn: 25, accel: 9, turnR: 470, rudderShift: 4.4,
-      detect: { surface: 6100, fire: 7700, smokeFire: 2100, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(-14, 127, { turrets: [T(-14, 1, true, 150)], range: 8500, reload: 7, ap: { dmg: 2100, pen: 150 }, he: { dmg: 1800, pen: 21, fire: 0.07 } }),
-      sec: null, aa: { range: 2500, reload: 0.5 },
-      torp: { launchers: [L(42, 'bow', 6), L(-43, 'stern', 4)], range: 8000, speedKn: 62, dmg: 13000, flood: 0.25, reload: 62 },
-      sub: SUB({ diveT: 7, battery: { peri: 460, deep: 230, charge: 80 } }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [2800, 5500], role: 'ss', value: 38 },
-   }),
-   I19: ship({
-      key: 'I19', name: 'I-19', className: 'Typ B1', playable: true, tier: 7,
-      desc: 'Riesiger U-Kreuzer mit sechs Bugrohren für die sauerstoffgetriebenen Typ-95-Torpedos – groß, schnell über Wasser, träge beim Tauchen.',
-      sisters: ['I-19', 'I-15', 'I-17', 'I-25', 'I-26', 'I-27', 'I-36'],
-      hull: { type: 'SS', L: 108.7, beam: 9.3, draft: 5.1, deckH: 3.6, nation: 'jp', sup: { x: 6, len: 12, w: 3.4, h: 5.8 }, funnels: [] },
-      // balance (round 7): a tier-7 boat had tier-8 reach and punch; long-range salvos measured
-      // 2-3x those of the S-13, so range, speed, warhead, reload and hull came down
-      hp: 12000, speedKn: 26, accel: 10, turnR: 520, rudderShift: 4.8,
-      detect: { surface: 6500, fire: 8000, smokeFire: 2200, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(-20, 140, { turrets: [T(-20, 1, true, 150)], range: 8000, reload: 9, ap: { dmg: 2400, pen: 170 }, he: { dmg: 2000, pen: 23, fire: 0.08 } }),
-      sec: null, aa: { range: 2000, reload: 0.6 },
-      torp: { launchers: [L(49, 'bow', 6)], range: 8000, speedKn: 60, dmg: 12500, flood: 0.25, reload: 76 },
-      sub: SUB({ diveT: 8.5, periDetect: 2200 }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [3000, 6500], role: 'ss', value: 36 },
-   }),
-   S13: ship({
-      key: 'S13', name: 'S-13', className: 'Serie IX-bis', playable: true, tier: 7,
-      desc: 'Sowjetisches Mittelboot nach deutschem Entwurf: vier Bug- und zwei Heckrohre, ein kräftiges 10-cm-Geschütz.',
-      sisters: ['S-13', 'S-7', 'S-31', 'S-33', 'S-51', 'S-56', 'S-101'],
-      hull: { type: 'SS', L: 77.8, beam: 6.4, draft: 4, deckH: 3.1, nation: 'su', sup: { x: 2, len: 9, w: 2.8, h: 5.2 }, funnels: [] },
-      hp: 10200, speedKn: 24, accel: 8.5, turnR: 400, rudderShift: 3.9,
-      detect: { surface: 5800, fire: 7500, smokeFire: 2000, torp: 1300 },
-      armor: { ...SUB_ARMOR },
-      main: deckGun(12, 100, { range: 8000, ap: { dmg: 1800, pen: 110 }, he: { dmg: 1400, pen: 17, fire: 0.06 } }),
-      sec: null, aa: { range: 2000, reload: 0.6 },
-      torp: { launchers: [L(33, 'bow', 4), L(-35, 'stern', 2)], range: 7000, speedKn: 60, dmg: 13000, flood: 0.25, reload: 55 },
-      sub: SUB({ diveT: 6 }),
-      consumables: SUB_CONS(),
-      ai: { prefRange: [2500, 5000], role: 'ss', value: 32 },
-   }),
-});
-
-// ---- aircraft carriers (hull type CV, class "Flugzeugträger") ----
-// A carrier is a normal ship with an `air` block (air.js runs the hangar, the squadrons, the
-// attack runs and the flak). The guns are dual-purpose side mounts on the deck edge: each sweeps
-// its own beam (arcC +-90 deg), so a carrier only ever fights with one side.
-//    tb / db / ft   torpedo bombers / dive bombers / fighters:
-//       hangar  planes aboard at the start (and the restock ceiling)
-//       squad   planes launched as one squadron;  flight  planes per attack run
-//       hp      per plane;  speed  m/s cruise;  restock  s per replacement plane
-//       weapon  tb: aerial torpedo (speedKn, range, dmg, flood);  db: one bomb per plane
-//               (dmg, pen, fire, ap: armour-piercing deck bomb);  ft: dps per plane, ammo s
-//    service   s a landed plane needs before it is ready again
-const CV_CONS = (heal = 0.005) => [
-   C('damageControl', { charges: Infinity, dur: 15, cd: 70 }),
-   C('repair', { charges: 3, dur: 24, cd: 90, heal }),
-];
-// side mount: x from midships, sy = +1 starboard / -1 port
-const DP = (x, sy, guns, beam) => ({ off: { x, y: sy * beam * 0.48 }, guns, arcC: sy * Math.PI / 2, arcW: 80 * DEG });
-const dpGuns = (caliber, layout, beam, o = {}) => ({
-   caliber, turrets: layout.map(([x, sy, g]) => DP(x, sy, g, beam)),
-   traverse: 12, reload: 5, range: 8500, tMax: 5.6, fallMax: 20, dispH: 130, vRatio: 0.55, sigma: 1.6,
-   he: { dmg: 1800, pen: 21, fire: 0.05 }, ...o,
-});
-const AIR = (tb, db, ft, o = {}) => ({
-   tb: { squad: 6, flight: 3, hp: 1250, speed: 150, restock: 42, ...tb, weapon: { speedKn: 40, range: 3200, dmg: 6200, flood: 0.3, ...tb.weapon } },
-   db: { squad: 6, flight: 3, hp: 1150, speed: 168, restock: 40, ...db, weapon: { dmg: 4300, pen: 60, fire: 0.3, ap: false, ...db.weapon } },
-   ft: { squad: 4, flight: 4, hp: 1400, speed: 195, restock: 34, dps: 115, ammo: 16, ...ft },
-   service: 18, fuel: 240, ...o,
-});
-const CV_DETECT = (surface) => ({ surface, fire: surface + 2500, smokeFire: 6500, torp: 1300 });
-Object.assign(SHIPS, {
-   GrafZeppelin: ship({
-      key: 'GrafZeppelin', name: 'Graf Zeppelin', className: 'Graf-Zeppelin-Klasse', playable: true, tier: 7,
-      desc: 'Der nie vollendete deutsche Träger: Katapultstart, Kasemattgeschütze wie ein Kreuzer und Stukas mit panzerbrechenden Bomben.',
-      sisters: ['Graf Zeppelin', 'Peter Strasser'],
-      hull: { type: 'CV', L: 262.5, beam: 31.5, draft: 8.5, deckH: 13, nation: 'de',
-         sup: { x: 13, len: 30, w: 8, h: 22 }, funnels: [{ x: 10, r: 5, h: 14 }] },
-      hp: 58000, speedKn: 33.8, accel: 26, turnR: 920, rudderShift: 13,
-      detect: CV_DETECT(13800),
-      armor: { belt: 100, deck: 40, ends: 30, sup: 16, cit: 60, citLen: 0.5, tds: 0.32, turtle: 0.4 },
-      main: dpGuns(150, [[72, 1, 2], [66, -1, 2], [60, 1, 2], [54, -1, 2], [-54, -1, 2], [-60, 1, 2], [-66, -1, 2], [-72, 1, 2]], 31.5,
-         { reload: 7.5, range: 10500, tMax: 6, traverse: 9, ap: { dmg: 3100, pen: 190 }, he: { dmg: 2000, pen: 38, fire: 0.08 } }),
-      sec: null,
-      aa: { range: 5200, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'Fi 167', hangar: 10, weapon: { dmg: 6000, speedKn: 38 } },
-         { name: 'Ju 87 C', hangar: 13, speed: 160, weapon: { dmg: 4600, pen: 160, fire: 0.1, ap: true } },
-         { name: 'Bf 109 T', hangar: 8, speed: 205, dps: 125 }, { service: 16 }),
-      consumables: CV_CONS(0.005),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
-   }),
-   Akagi: ship({
-      key: 'Akagi', name: 'Akagi', className: 'Akagi', playable: true, tier: 7,
-      desc: 'Umgebauter Schlachtkreuzer und Flaggschiff des Angriffs auf Pearl Harbor: große Hangars, schnelle Torpedoflieger, schwache Flak.',
-      sisters: ['Akagi', 'Kaga'],
-      hull: { type: 'CV', L: 261, beam: 31.3, draft: 8.7, deckH: 13, nation: 'jp', islandPort: true,
-         sup: { x: 20, len: 18, w: 6, h: 18 }, funnels: [{ x: 4, r: 5, h: 10 }] },
-      hp: 60000, speedKn: 31, accel: 26, turnR: 960, rudderShift: 13.5,
-      detect: CV_DETECT(14200),
-      armor: { belt: 152, deck: 79, ends: 30, sup: 16, cit: 60, citLen: 0.5, tds: 0.3, turtle: 0.4 },
-      main: dpGuns(200, [[-40, 1, 1], [-47, -1, 1], [-54, 1, 1], [-61, -1, 1], [-68, 1, 1], [-75, -1, 1]], 31.3,
-         { reload: 11, range: 11500, tMax: 7, traverse: 7, ap: { dmg: 4600, pen: 300 }, he: { dmg: 2700, pen: 50, fire: 0.14 } }),
-      sec: null,
-      aa: { range: 4500, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'B5N2', hangar: 14, speed: 156, weapon: { dmg: 6600, speedKn: 42, range: 3500 } },
-         { name: 'D3A1', hangar: 12, speed: 165, weapon: { dmg: 3900, pen: 55, fire: 0.32 } },
-         { name: 'A6M2', hangar: 9, speed: 200, hp: 1250, dps: 125 }),
-      consumables: CV_CONS(0.005),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
-   }),
-   Shokaku: ship({
-      key: 'Shokaku', name: 'Shōkaku', className: 'Shōkaku-Klasse', playable: true, tier: 8,
-      desc: 'Der beste japanische Träger des Krieges: schnell, gut geschützt, mit großer Luftgruppe und weitreichenden Torpedobombern.',
-      sisters: ['Shōkaku', 'Zuikaku'],
-      hull: { type: 'CV', L: 257.5, beam: 29, draft: 8.9, deckH: 13, nation: 'jp',
-         sup: { x: 30, len: 16, w: 6, h: 18 }, funnels: [{ x: 4, r: 5, h: 10 }] },
-      hp: 62000, speedKn: 34.2, accel: 25, turnR: 940, rudderShift: 12.5,
-      detect: CV_DETECT(14000),
-      armor: { belt: 165, deck: 65, ends: 30, sup: 16, cit: 65, citLen: 0.5, tds: 0.34, turtle: 0.4 },
-      main: dpGuns(127, [[80, 1, 2], [75, -1, 2], [70, 1, 2], [65, -1, 2], [-60, 1, 2], [-66, -1, 2], [-72, 1, 2], [-78, -1, 2]], 29,
-         { reload: 4.5, range: 9000, tMax: 5.8, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
-      sec: null,
-      aa: { range: 5200, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'B6N1 Tenzan', hangar: 15, speed: 162, hp: 1450, weapon: { dmg: 7000, speedKn: 44, range: 3800 } },
-         { name: 'D4Y1 Suisei', hangar: 14, speed: 180, hp: 1250, weapon: { dmg: 4400, pen: 60, fire: 0.34 } },
-         { name: 'A6M5', hangar: 10, speed: 210, hp: 1450, dps: 135 }),
-      consumables: CV_CONS(0.0055),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 62 },
-   }),
-   ArkRoyal: ship({
-      key: 'ArkRoyal', name: 'HMS Ark Royal', className: 'Ark Royal', playable: true, tier: 6,
-      desc: 'Ihre Swordfish trafen die Bismarck am Ruder: langsame Doppeldecker, die sich kaum abschießen lassen, und eine dichte Flak.',
-      hull: { type: 'CV', L: 240, beam: 28.9, draft: 8.5, deckH: 13, nation: 'uk', deckLen: 1.0,
-         sup: { x: 10, len: 30, w: 7, h: 20 }, funnels: [{ x: 6, r: 5, h: 12 }] },
-      hp: 52000, speedKn: 30.75, accel: 24, turnR: 860, rudderShift: 12,
-      detect: CV_DETECT(13200),
-      armor: { belt: 114, deck: 89, ends: 25, sup: 16, cit: 60, citLen: 0.48, tds: 0.3, turtle: 0.4 },
-      main: dpGuns(114, [[72, 1, 2], [67, -1, 2], [62, 1, 2], [57, -1, 2], [-58, 1, 2], [-63, -1, 2], [-68, 1, 2], [-73, -1, 2]], 28.9,
-         { reload: 4.2, range: 8200, tMax: 5.5, he: { dmg: 1500, pen: 19, fire: 0.05 } }),
-      sec: null,
-      aa: { range: 5000, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'Swordfish', hangar: 15, speed: 122, hp: 1600, weapon: { dmg: 5600, speedKn: 36, range: 2800 } },
-         { name: 'Skua', hangar: 9, speed: 160, hp: 1100, weapon: { dmg: 3600, pen: 50, fire: 0.25 } },
-         { name: 'Fulmar', hangar: 8, speed: 185, hp: 1500, dps: 110 }, { service: 16 }),
-      consumables: CV_CONS(0.005),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 50 },
-   }),
-   Illustrious: ship({
-      key: 'Illustrious', name: 'HMS Illustrious', className: 'Illustrious-Klasse', playable: true, tier: 7,
-      desc: 'Der Träger mit dem gepanzerten Flugdeck: kleinere Luftgruppe, aber zäh wie ein Kreuzer. Ihre Albacores schlugen bei Matapan zu.',
-      sisters: ['HMS Illustrious', 'HMS Victorious', 'HMS Formidable'],
-      hull: { type: 'CV', L: 230, beam: 29.2, draft: 8.6, deckH: 13, nation: 'uk',
-         sup: { x: 10, len: 28, w: 7, h: 20 }, funnels: [{ x: 6, r: 5, h: 12 }] },
-      hp: 58000, speedKn: 30.5, accel: 24, turnR: 860, rudderShift: 12,
-      detect: CV_DETECT(13400),
-      armor: { belt: 114, deck: 76, ends: 25, sup: 30, cit: 76, citLen: 0.52, tds: 0.32, turtle: 0.5 },
-      main: dpGuns(114, [[70, 1, 2], [65, -1, 2], [60, 1, 2], [55, -1, 2], [-56, 1, 2], [-61, -1, 2], [-66, 1, 2], [-71, -1, 2]], 29.2,
-         { reload: 4.2, range: 8200, tMax: 5.5, he: { dmg: 1500, pen: 19, fire: 0.05 } }),
-      sec: null,
-      aa: { range: 5200, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'Albacore', hangar: 12, speed: 135, hp: 1550, weapon: { dmg: 6000, speedKn: 38, range: 3000 } },
-         { name: 'Barracuda', hangar: 10, speed: 165, hp: 1300, weapon: { dmg: 4000, pen: 55, fire: 0.28 } },
-         { name: 'Martlet', hangar: 8, speed: 195, hp: 1450, dps: 120 }),
-      consumables: CV_CONS(0.0055),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
-   }),
-   Enterprise: ship({
-      key: 'Enterprise', name: 'USS Enterprise', className: 'Yorktown-Klasse', playable: true, tier: 7,
-      desc: 'Die „Big E“: bei Midway versenkten ihre Dauntless zwei japanische Träger in Minuten. Starke Sturzkampfbomber, robuste Flak.',
-      sisters: ['USS Enterprise', 'USS Yorktown', 'USS Hornet'],
-      hull: { type: 'CV', L: 251.4, beam: 26.2, draft: 7.9, deckH: 12, nation: 'us',
-         sup: { x: 12, len: 30, w: 7, h: 22 }, funnels: [{ x: 8, r: 5, h: 14 }] },
-      hp: 57000, speedKn: 32.5, accel: 24, turnR: 900, rudderShift: 12.5,
-      detect: CV_DETECT(13600),
-      armor: { belt: 102, deck: 30, ends: 25, sup: 16, cit: 60, citLen: 0.5, tds: 0.3, turtle: 0.4 },
-      main: dpGuns(127, [[72, 1, 1], [67, -1, 1], [62, 1, 1], [57, -1, 1], [-57, -1, 1], [-62, 1, 1], [-67, -1, 1], [-72, 1, 1]], 26.2,
-         { reload: 4, range: 8800, tMax: 5.7, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
-      sec: null,
-      aa: { range: 5200, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'TBD Devastator', hangar: 12, speed: 140, hp: 1300, weapon: { dmg: 5800, speedKn: 35, range: 2800 } },
-         { name: 'SBD Dauntless', hangar: 15, speed: 170, hp: 1300, weapon: { dmg: 4600, pen: 70, fire: 0.33 } },
-         { name: 'F4F Wildcat', hangar: 10, speed: 195, hp: 1500, dps: 120 }),
-      consumables: CV_CONS(0.005),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 56 },
-   }),
-   Essex: ship({
-      key: 'Essex', name: 'USS Essex', className: 'Essex-Klasse', playable: true, tier: 8,
-      desc: 'Rückgrat der Fast Carrier Task Force: die größte Luftgruppe, schnelle Hellcats und eine Flak, die den Himmel verdunkelt.',
-      sisters: ['USS Essex', 'USS Intrepid', 'USS Lexington', 'USS Yorktown', 'USS Bunker Hill', 'USS Franklin', 'USS Hornet'],
-      hull: { type: 'CV', L: 266, beam: 28.3, draft: 8.7, deckH: 13, nation: 'us',
-         sup: { x: 12, len: 32, w: 7, h: 24 }, funnels: [{ x: 6, r: 5, h: 15 }] },
-      hp: 66000, speedKn: 33, accel: 25, turnR: 940, rudderShift: 12.5,
-      detect: CV_DETECT(14200),
-      armor: { belt: 102, deck: 64, ends: 25, sup: 16, cit: 64, citLen: 0.5, tds: 0.34, turtle: 0.45 },
-      main: dpGuns(127, [[60, -1, 1], [45, 1, 2], [40, -1, 1], [-25, 1, 2], [-40, -1, 1], [-55, -1, 1]], 28.3,
-         { reload: 3.6, range: 9000, tMax: 5.8, he: { dmg: 1800, pen: 21, fire: 0.05 } }),
-      sec: null,
-      aa: { range: 5800, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'TBF Avenger', hangar: 14, speed: 158, hp: 1700, weapon: { dmg: 6600, speedKn: 40, range: 3400 } },
-         { name: 'SB2C Helldiver', hangar: 15, speed: 178, hp: 1500, weapon: { dmg: 5000, pen: 80, fire: 0.34 } },
-         { name: 'F6F Hellcat', hangar: 12, speed: 215, hp: 1700, dps: 140 }),
-      consumables: CV_CONS(0.0055),
-      ai: { prefRange: [10000, 14000], role: 'cv', value: 64 },
-   }),
-   Bearn: ship({
-      key: 'Bearn', name: 'Béarn', className: 'Béarn', playable: true, tier: 5,
-      desc: 'Frankreichs einziger Träger, auf dem Rumpf eines Normandie-Schlachtschiffs gebaut: langsam, aber mit kräftigen 155-mm-Kasematten.',
-      hull: { type: 'CV', L: 182.6, beam: 27.1, draft: 9.3, deckH: 12, nation: 'fr',
-         sup: { x: 4, len: 26, w: 6, h: 18 }, funnels: [{ x: 2, r: 5, h: 12 }] },
-      hp: 44000, speedKn: 21.5, accel: 22, turnR: 760, rudderShift: 12,
-      detect: CV_DETECT(12600),
-      armor: { belt: 83, deck: 25, ends: 25, sup: 16, cit: 70, citLen: 0.5, tds: 0.3, turtle: 0.4 },
-      main: dpGuns(155, [[50, 1, 1], [44, -1, 1], [38, 1, 1], [32, -1, 1], [-38, 1, 1], [-44, -1, 1], [-50, 1, 1], [-56, -1, 1]], 27.1,
-         { reload: 7, range: 9500, tMax: 6, traverse: 9, ap: { dmg: 3200, pen: 200 }, he: { dmg: 2100, pen: 39, fire: 0.08 } }),
-      sec: null,
-      aa: { range: 4000, reload: 0.5 },
-      torp: null,
-      air: AIR({ name: 'Levasseur PL.7', hangar: 10, speed: 120, hp: 1150, weapon: { dmg: 5400, speedKn: 35, range: 2600 } },
-         { name: 'Vought V-156F', hangar: 10, speed: 150, hp: 1050, weapon: { dmg: 3400, pen: 50, fire: 0.25 } },
-         { name: 'Dewoitine D.373', hangar: 6, speed: 170, hp: 1100, dps: 95 }, { service: 20 }),
-      consumables: CV_CONS(0.005),
-      ai: { prefRange: [9000, 13000], role: 'cv', value: 44 },
-   }),
-});
-// Midway (missions.js): the other two Kido Butai carriers, op-only
-SHIPS.Hiryu = variant(SHIPS.Shokaku, {
-   key: 'Hiryu', name: 'Hiryū', className: 'Hiryū', tier: 7,
-   desc: 'Leichter Flottenträger der 2. Trägerdivision.',
-   sisters: ['Hiryū', 'Sōryū'],
-   hull: { L: 227.4, beam: 22.3, islandPort: true, sup: { x: 2, len: 14, w: 5, h: 16 } },
-   hp: 52000, speedKn: 34.3,
-   armor: { belt: 90, deck: 25 },
-});
-SHIPS.Hiryu.main.turrets = [[70, 1, 2], [65, -1, 2], [60, 1, 2], [-55, -1, 2], [-60, 1, 2], [-65, -1, 2]].map(([x, sy, g]) => DP(x, sy, g, 22.3));
-SHIPS.Hiryu.main.guns = 12;
-// June 1942: the same plane types as Akagi (the Tenzan / Suisei of the Shōkaku came later)
-SHIPS.Hiryu.air = { ...SHIPS.Akagi.air, tb: { ...SHIPS.Akagi.air.tb, hangar: 9 }, db: { ...SHIPS.Akagi.air.db, hangar: 9 }, ft: { ...SHIPS.Akagi.air.ft, hangar: 7 } };
 export const isCarrier = (cfgOrKey) => (typeof cfgOrKey === 'string' ? SHIPS[cfgOrKey] : cfgOrKey)?.hull?.type === 'CV';
-// Player-selectable classes, in port order (grouped by nation there). The four original ships
-// stay in front; op-only ships (Washington, Duke of York) are not listed.
-export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst', 'Gneisenau',
-   'Warspite', 'Hood', 'Rodney', 'KGV', 'Norfolk', 'Fiji', 'Jervis',
-   'Iowa', 'Cleveland', 'Benham', 'Fletcher',
-   'Kirishima', 'Yamato', 'Takao', 'Fubuki', 'Shimakaze',
-   'Richelieu', 'Algerie', 'LeFantasque',
-   'Littorio', 'Zara',
-   'Kirov', 'Gnevny',
-   'U96', 'U505', 'Triton', 'Gato', 'I19', 'S13',
-   'GrafZeppelin', 'ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Akagi', 'Shokaku', 'Bearn'];
-// Submarines for random battles, by bloc (missions.js swaps at most one destroyer slot per side).
-export const BOT_SUBS = { axis: ['U96', 'U505', 'I19'], allies: ['Triton', 'Gato', 'S13'] };
-// Carriers for random battles, by bloc (missions.js swaps at most one light-cruiser slot per side,
-// always on both sides at once; never in co-op).
-export const BOT_CVS = { axis: ['GrafZeppelin', 'Akagi', 'Shokaku'], allies: ['ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Bearn'] };
-
-// Random battles (missions.js spawnTeam): every slot of the standard Axis / Allied line-ups draws
-// from a pool of comparable classes. The pools are index-aligned, so both teams roll the same
-// weight class for a slot (a Yamato on one side meets an Iowa on the other).
+// Player-selectable classes in port order: the west bloc. PLAYABLE_EAST joins it in PvP skirmishes.
+export const PLAYABLE = ['Braunschweig', 'Sachsen', 'Burke', 'Ticonderoga', 'Daring', 'Ford', 'U212', 'Virginia'];
+export const PLAYABLE_EAST = ['BuyanM', 'Gorschkow', 'Slawa', 'PjotrWeliki', 'Kusnezow', 'Kilo', 'Typ022', 'Typ054A', 'Typ052D', 'Typ055', 'Shandong', 'Yuan', 'Mowdsch', 'Ghadir'];
+for (const k of PLAYABLE) SHIPS[k].playable = true;
+export const NEUTRAL_SHIPS = ['Tanker', 'Container', 'LNG'];
+// Skirmish line-ups (missions.js spawnTeam): [slot pool, x, y] relative to the team anchor, facing +x.
+// Every slot draws one class from its pool (seeded), the pools of both blocs are index-aligned by weight.
 export const BOT_POOLS = {
-   axis: {
-      Bismarck: ['Bismarck', 'Bismarck', 'Littorio', 'Yamato'],
-      Scharnhorst: ['Scharnhorst', 'Gneisenau', 'Kirishima'],
-      Hipper: ['Hipper', 'Hipper', 'Takao', 'Zara'],
-      Nuernberg: ['Nuernberg', 'Nuernberg', 'Nuernberg'],
-      Z23: ['Z23', 'Z23', 'Fubuki', 'Shimakaze', 'Z23', 'Fubuki'],
-   },
-   allies: {
-      KGV: ['KGV', 'KGV', 'Richelieu', 'Iowa'],
-      Rodney: ['Rodney', 'Hood', 'Warspite'],
-      Norfolk: ['Norfolk', 'Norfolk', 'Cleveland', 'Algerie'],
-      Fiji: ['Fiji', 'Fiji', 'Kirov'],
-      Jervis: ['Jervis', 'Jervis', 'Benham', 'Fletcher', 'LeFantasque', 'Gnevny'],
-   },
+   west: [[['Ticonderoga'], 0, 0], [['Burke', 'Daring'], 900, -1900], [['Sachsen', 'Burke'], 900, 1900], [['Sachsen', 'Daring'], -600, -3600],
+      [['Braunschweig'], 2200, -900], [['Braunschweig'], 2200, 900]],
+   east: [[['Slawa', 'Typ055'], 0, 0], [['Typ052D', 'Gorschkow'], 900, -1900], [['Gorschkow', 'Typ054A'], 900, 1900], [['Typ054A', 'Mowdsch'], -600, -3600],
+      [['BuyanM', 'Typ022'], 2200, -900], [['Typ022', 'BuyanM'], 2200, 900]],
 };
-// Slot counterparts when the player sails for the other bloc (teams swap sides).
-export const BOT_MIRROR = { Bismarck: 'KGV', Scharnhorst: 'Rodney', Hipper: 'Norfolk', Nuernberg: 'Fiji', Z23: 'Jervis',
-   KGV: 'Bismarck', Rodney: 'Scharnhorst', Norfolk: 'Hipper', Fiji: 'Nuernberg', Jervis: 'Z23' };
+export const BOT_SUBS = { west: ['U212', 'Virginia'], east: ['Kilo', 'Yuan'] };
+export const BOT_CVS = { west: ['Ford'], east: ['Kusnezow', 'Shandong'] };
+export const BOT_MIRROR = {};        // legacy export (WW2 slot mirroring), unused in V2
 
 export const DIFFICULTY = {
    easy: { key: 'easy', label: 'Leicht', botHP: 0.8, botDmg: 0.7, aimErr: 0.022, lead: 0.62, reaction: 2.6, dodge: 0.25, smarts: 0.5, rewardMult: 0.8, vsPlayer: 1.5 },
@@ -1149,20 +639,14 @@ export const DIFFICULTY = {
    hard: { key: 'hard', label: 'Schwer', botHP: 1.15, botDmg: 1.2, aimErr: 0.007, lead: 0.93, reaction: 0.8, dodge: 0.85, smarts: 1, rewardMult: 1.3, vsPlayer: 1 },
 };
 
-export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 60 };
+export const TUNE = { maxShells: 900, maxEffects: 500, maxEvents: 256, maxLog: 60, maxMissiles: 260 };
 
-// ---- anti-aircraft fire (air.js) ----
-// Every ship's flak, derived from class, era (tier) and navy unless cfg.aa.dps overrides it.
-// Three nested bands as in the real ships: long-range heavy guns (out to aa.range), mid-range
-// 37-40 mm (60 %), short-range 20 mm (35 %, at most 1.5 km). A plane is shot at by every band it
-// is inside; dps is damage per second spread over the squadron (air.js applies it to the lead
-// plane, so a squadron loses planes one by one).
-const AA_BASE = { BB: 70, CA: 70, CL: 85, DD: 30, CV: 60, SS: 5, TR: 0 };
-const AA_SCALE = 0.42;    // tuned so a lone battleship downs ~1 plane of a 6-plane torpedo strike
-const AA_NATION = { us: 1.3, uk: 1.05, jp: 0.95, de: 1, it: 0.9, fr: 0.9, su: 0.85 };
+// ---- gun anti-aircraft fire (air.js) ----
+// The barrels and CIWS of a ship against aircraft that come close (cfg.aa = { range, dps });
+// the long arm against aircraft are the SAMs (missile.js). Three nested bands as in the WW2 base.
 export function aaProfile(c) {
    const range = c.aa?.range || 0;
-   const dps = c.aa?.dps ?? (AA_BASE[c.hull.type] ?? 30) * AA_SCALE * (0.6 + 0.08 * ((c.tier || 6) - 4)) * (AA_NATION[c.hull.nation] ?? 1);
+   const dps = c.aa?.dps ?? 0;
    if (!range || !(dps > 0)) return { range: 0, dps: 0, bands: [] };
    return {
       range, dps,
@@ -1175,25 +659,27 @@ export function aaProfile(c) {
 }
 
 // Per-class display stats for the ship picker (menu3d.js). Ratings are 0..100 relative to the
-// playable line-up so the menu can draw bars without knowing the raw numbers.
+// roster so the menu can draw bars without knowing the raw numbers.
 // cfgIn: optional modified copy (career modules/skills, progress3d.applyLoadout).
 export function shipStats(key, cfgIn) {
    const c = cfgIn || SHIPS[key];
    if (!c) return null;
-   const m = c.main, t = c.torp;
+   const m = c.main, t = c.torp, w = c.weapons;
    const layout = {};
    for (const tr of m.turrets) layout[tr.guns] = (layout[tr.guns] || 0) + 1;
    const salvo = m.guns * (m.ap || m.he).dmg;
    const rate = (x, lo, hi) => Math.round(Math.max(0, Math.min(1, (x - lo) / (hi - lo))) * 100);
    const a = c.air, aa = aaProfile(c);
-   // a carrier's punch is its strike: one torpedo run plus one bombing run
-   const strike = a ? a.tb.flight * a.tb.weapon.dmg + a.db.flight * a.db.weapon.dmg : 0;
+   const strike = a ? a.tb.flight * a.tb.weapon.per * a.tb.weapon.dmg + a.db.flight * a.db.weapon.dmg : 0;
+   const ssmPunch = w.ssm.reduce((s, x) => s + x.n * MISSILES[x.type].dmg / MISSILES[x.type].evade, 0);
+   const samPower = w.sam.reduce((s, x) => s + x.ch * MISSILES[x.type].pk * (MISSILES[x.type].cls === 'area' ? 1.6 : 1), 0) + (w.ciws ? w.ciws.n * 0.6 : 0);
+   const missileText = (x) => x.n + '× ' + MISSILES[x.type].name;
    return {
       key, name: c.name, className: c.className, type: c.hull.type, typeName: CLASS_NAMES[c.hull.type],
       tier: c.tier || 0, tierRoman: TIER_ROMAN[c.tier] || '', desc: c.desc || '',
-      nation: c.hull.nation, nationName: NATION_NAMES[c.hull.nation] || '',
+      nation: c.hull.nation, nationName: NATION_NAMES[c.hull.nation] || '', bloc: c.bloc, model: c.model,
       hp: c.hp, speedKn: c.speedKn, lengthM: c.hull.L, beamM: c.hull.beam,
-      main: Object.entries(layout).map(([g, n]) => n + '×' + g).join(' + ') + ' · ' + m.caliber + ' mm',
+      main: m.guns ? Object.entries(layout).map(([g, n]) => n + '×' + g).join(' + ') + ' · ' + m.caliber + ' mm' : '–',
       mainGuns: m.guns, caliber: m.caliber, reload: m.reload, rangeKm: +(m.range / 1000).toFixed(1),
       traverse180: Math.round(180 / m.traverse), apDmg: m.ap ? m.ap.dmg : 0, heDmg: m.he ? m.he.dmg : 0,
       secRangeKm: c.sec ? +(c.sec.range / 1000).toFixed(1) : 0,
@@ -1202,15 +688,19 @@ export function shipStats(key, cfgIn) {
       consumables: c.consumables.map(k => CONSUMABLES[k.key].name),
       air: a ? Object.fromEntries(['tb', 'db', 'ft'].map(k => [k, { name: a[k].name, hangar: a[k].hangar, squad: a[k].squad, speed: a[k].speed }])) : null,
       aaKm: +(aa.range / 1000).toFixed(1), aaDps: Math.round(aa.dps),
+      // V2: missile fit as display strings and numbers
+      stealth: c.stealth, radarKm: c.radar ? +(c.radar.range / 1000).toFixed(1) : 0, cells: w.cells,
+      ssm: w.ssm.map(missileText), cruise: w.cruise ? missileText(w.cruise) : '', sam: w.sam.map(x => missileText(x) + ' (' + x.ch + ' Kanäle)'),
+      ciws: w.ciws ? w.ciws.n + '× ' + CIWS[w.ciws.type].name : '', helo: c.helo ? c.helo.name : '',
+      ssmRangeKm: w.ssm.length ? +(Math.max(...w.ssm.map(x => MISSILES[x.type].range)) / 1000).toFixed(1) : 0,
+      samRangeKm: w.sam.length ? +(Math.max(...w.sam.map(x => MISSILES[x.type].range)) / 1000).toFixed(1) : 0,
       ratings: {
-         // boats: one deck gun and a pressure hull would rate 0 on the surface-ship scales
-         firepower: a ? rate(strike, 5000, 40000)
-            : Math.max(c.hull.type === 'SS' ? 6 : 0, Math.round((rate(salvo * 60 / m.reload, 20000, 280000) + rate(salvo, 5000, 95000)) / 2)),
-         survivability: c.hull.type === 'SS' ? rate(c.hp, 4000, 60000) : rate(c.hp * (1 + c.armor.belt / 400), 15000, 110000),
-         mobility: rate(c.speedKn * 1000 / c.turnR, 25, 60),
-         concealment: rate(-c.detect.surface, -16500, -7000),
-         torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 100000) : a ? rate(a.tb.flight * a.tb.weapon.dmg, 0, 30000) : 0,
-         antiAir: rate(aa.dps, 0, 110),
+         firepower: a ? rate(strike, 5000, 40000) : Math.max(c.hull.type === 'SS' ? 30 : 0, rate(ssmPunch + salvo * 60 / m.reload * 0.3, 0, 110000)),
+         survivability: rate(c.hp, 0, 45000),
+         mobility: rate(c.speedKn * 1000 / c.turnR, 25, 110),
+         concealment: rate(-c.detect.surface * c.stealth, -11000, -1500),
+         torpedoes: t ? rate(t.tubes * t.dmg * 60 / t.reload, 0, 60000) : a ? rate(a.tb.flight * a.tb.weapon.per * a.tb.weapon.dmg, 0, 30000) : w.asw ? 15 : 0,
+         antiAir: rate(samPower, 0, 9),
       },
    };
 }

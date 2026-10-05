@@ -8,36 +8,12 @@ export const PROFILE_KEY = 'warshipsv2.profile.v1';
 const LEGACY_KEY = 'warshipsv2.progress.v1';     // menu3d mission records (held xp/credits before)
 
 // ---------------------------------------------------------------- ship unlocks (tech tree)
-// Bismarck (start ship, forced in "Letztes Gefecht") and Hipper stay free. Every other ship is
-// researched with XP, bought with credits and may need its predecessor in the tree.
-// A ship without a row here (op-only ships such as Washington / Duke of York) is never locked.
-// Rows: [ship, XP, credits, predecessor | null]. Nürnberg and Z 23 keep their old XP-only price,
-// so profiles saved before the fleet expansion behave exactly as they did.
+// V2 test build: every playable (west) ship is free from the start, no grind. The machinery stays:
+// a row with a price locks that ship again. A ship without a row is never locked.
+// Rows: [ship, XP, credits, predecessor | null].
 export const TECH_TREE = [
-   // Kriegsmarine
-   ['Bismarck', 0, 0, null], ['Hipper', 0, 0, null], ['Nuernberg', 7500, 0, null], ['Z23', 11000, 0, null],
-   ['Scharnhorst', 9000, 140000, null], ['Gneisenau', 10500, 150000, 'Scharnhorst'],
-   // Royal Navy
-   ['Norfolk', 5500, 80000, null], ['Fiji', 8500, 130000, 'Norfolk'], ['Jervis', 8000, 120000, null],
-   ['Warspite', 6500, 90000, null], ['Hood', 9500, 140000, 'Warspite'], ['Rodney', 10000, 150000, 'Warspite'], ['KGV', 11500, 160000, 'Rodney'],
-   // US Navy
-   ['Benham', 5500, 80000, null], ['Fletcher', 24000, 350000, 'Benham'], ['Cleveland', 14000, 220000, null], ['Iowa', 26000, 380000, 'Cleveland'],
-   // Kaiserliche Marine
-   ['Kirishima', 4500, 60000, null], ['Yamato', 38000, 550000, 'Kirishima'], ['Takao', 14500, 220000, null],
-   ['Fubuki', 5500, 80000, null], ['Shimakaze', 34000, 500000, 'Fubuki'],
-   // Marine nationale
-   ['Algerie', 9000, 130000, null], ['Richelieu', 16000, 240000, 'Algerie'], ['LeFantasque', 13000, 200000, null],
-   // Regia Marina
-   ['Zara', 9000, 130000, null], ['Littorio', 15500, 230000, 'Zara'],
-   // Sowjetische Marine
-   ['Gnevny', 5500, 80000, null], ['Kirov', 6500, 90000, null],
-   // U-Boote
-   ['U96', 7000, 100000, null], ['U505', 15000, 230000, 'U96'], ['Triton', 7000, 100000, null],
-   ['Gato', 15000, 230000, null], ['I19', 11000, 170000, null], ['S13', 11000, 170000, null],
-   // Flugzeugträger
-   ['GrafZeppelin', 16000, 240000, null], ['ArkRoyal', 9000, 130000, null], ['Illustrious', 14000, 210000, 'ArkRoyal'],
-   ['Enterprise', 15000, 220000, null], ['Essex', 27000, 400000, 'Enterprise'],
-   ['Akagi', 15000, 220000, null], ['Shokaku', 22000, 320000, 'Akagi'], ['Bearn', 6000, 90000, null],
+   ['Braunschweig', 0, 0, null], ['Sachsen', 0, 0, null], ['Burke', 0, 0, null], ['Ticonderoga', 0, 0, null],
+   ['Daring', 0, 0, null], ['Ford', 0, 0, null], ['U212', 0, 0, null], ['Virginia', 0, 0, null],
 ];
 export const UNLOCK_XP = Object.fromEntries(TECH_TREE.map(r => [r[0], r[1]]));
 export const UNLOCK_CREDITS = Object.fromEntries(TECH_TREE.map(r => [r[0], r[2]]));
@@ -72,7 +48,7 @@ export const SKILLS = [
       desc: 'Mittelartillerie feuert nur auf das Strg+Klick-Ziel, dafür bis −55 % Streuung', fx: { manualSec: 1 } },
 ];
 // Secondary dispersion cut of the top skill "Einzelzielfeuer der Mittelartillerie" (key manualSec) by hull class.
-export const MANUAL_SEC_DISP = { BB: 0.55, CA: 0.35, CL: 0.30, DD: 0.15 };
+export const MANUAL_SEC_DISP = { CG: 0.35, DD: 0.3, FF: 0.3, CO: 0.15 };
 // Captain level L needs CAPTAIN_XP[L] lifetime XP and grants L skill points (max 11 of 24 total cost).
 export const CAPTAIN_XP = [0, 1500, 4000, 7500, 12000, 17500, 24000, 32000, 41000, 52000, 65000, 80000];
 
