@@ -330,8 +330,26 @@ test('east/countdown: air defence, drone, launcher; guard boats; out of missiles
    kill(w, S.radarId); kill(w, S.sam[1]);
    assert.equal(obj(w, 'ad').state, 'done');
    assert.equal(L.targetable, false);
-   step(w, T.recon + 1);
-   assert.equal(L.targetable, true);
+   // act 2: the drone finds the command bunker, the launcher fires at the group
+   const B = siteById(w, S.bunkerId);
+   assert.equal(B.targetable, false);
+   step(w, T.drone + 1);
+   assert.equal(B.targetable, true);
+   assert.ok(radioed(w, 'zielt auf Ihren Verband'));
+   let b = w.blasts.find(x => x.id === S.strikeId);
+   assert.ok(b && b.state === 'armed' && Math.abs(b.t0 - w.time - T.fuse) < 2, 'the strike is on its way');
+   assert.ok(dist(b, w.player.pos) < 200, 'aimed at the flagship');
+   assert.match(obj(w, 'launcher').text, /Gefahrenzone/);
+   // the bunker falls before the detonation: no blast, and the drone goes for the launcher
+   step(w, 10);
+   assert.ok(radioed(w, 'Führungsbunker der Insel erfasst'));
+   kill(w, S.bunkerId);
+   assert.ok(!w.blasts.some(x => x.id === b.id) && !S.strikeId, 'strike prevented');
+   assert.ok(radioed(w, 'Zieldaten verloren'));
+   assert.match(obj(w, 'launcher').text, /Startrampe/);
+   step(w, T.fuse);
+   assert.ok(!w.events.some(e => e.type === 'blast' && e.blastId === b.id));
+   assert.equal(L.targetable, true, 'launcher found ' + T.drone2 + ' s after the strike');
    assert.ok(radioed(w, 'Drohne hat die Rampe'));
    assert.equal(L.hp, S.lhp);
    if (w.phase === 'playing') {
@@ -340,6 +358,45 @@ test('east/countdown: air defence, drone, launcher; guard boats; out of missiles
       assert.equal(obj(w, 'launcher').state, 'done');
       assert.equal(obj(w, 'early').state, 'done');
    }
+   // the strike is not prevented: who stays is sunk, who leaves at full speed is outside the zone
+   for (const run of [false, true]) {
+      w = mk('countdown'); S = w._script;
+      step(w, 1);
+      for (const id of S.screen.concat(S.boats)) sink(w, w.shipById(id));
+      kill(w, S.sam[0]); kill(w, S.radarId); kill(w, S.sam[1]);
+      w.player.setTelegraph(0);
+      step(w, T.drone + 1);
+      b = w.blasts.find(x => x.id === S.strikeId);
+      assert.ok(b && b.state === 'armed');
+      const bots = S.own.map(id => w.shipById(id)).filter(s => !s.isPlayer);
+      assert.ok(bots.some(s => dist(s.pos, b) < b.r.shock), 'escorts start inside the zone');
+      if (run) w.player.setTelegraph(4);
+      step(w, T.fuse + 1);
+      const e = w.events.find(x => x.type === 'blast' && x.blastId === b.id);
+      assert.ok(e, 'detonation');
+      for (const s of bots) assert.ok(s.alive && dist(s.pos, b) > b.r.shock, s.name + ' left the zone');
+      if (!run) { assert.equal(w.phase, 'lost'); continue; }
+      assert.equal(w.phase, 'playing');
+      assert.ok(dist(w.player.pos, b) > b.r.shock && w.player.hp === w.player.maxHP, 'the flagship outran the blast');
+      assert.equal(e.hit.ships, 0);
+      assert.ok(radioed(w, 'Einschlag in 30 Sekunden') && radioed(w, 'Einschlag in 10 Sekunden') && radioed(w, 'Detonation achteraus'));
+      assert.equal(siteById(w, S.launcherId).targetable, false);
+      step(w, T.drone2 + 1);
+      assert.equal(siteById(w, S.launcherId).targetable, true);
+      // the bunker still stands: the launcher fires again
+      step(w, T.again - T.drone2);
+      assert.ok(S.strikeId && S.struck === 2, 'second strike');
+   }
+   // without the air defence down the strike still comes, at the latest after strikeAt
+   w = mk('countdown'); S = w._script;
+   w.player.setTelegraph(0);
+   step(w, T.strikeAt - 1);
+   assert.ok(!S.strikeId);
+   step(w, 2);
+   assert.ok(S.strikeId && siteById(w, S.bunkerId).targetable);
+   // a submarine run has neither bunker nor strike
+   w = mk('countdown', { ship: 'Virginia' });
+   assert.ok(w._script.bunkerId == null && !w.sites.some(s => s.kind === 'bunker'));
    // the screen is optional
    w = mk('countdown'); S = w._script;
    step(w, 1);

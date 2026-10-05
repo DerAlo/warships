@@ -45,9 +45,15 @@ export const EAST_TUNE = {
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
    countdown: {
-      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1 },
-      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3 },
-      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4 },
+      // surface run, three acts: air defence -> drone (`drone` s) finds the command bunker and the launcher
+      // fires at the group (`fuse` s to the detonation, at the latest `strikeAt` s into the mission, again
+      // every `again` s while the bunker stands) -> `drone2` s later the drone has the launcher
+      easy: { ally: 0.6, time: 720, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1,
+         drone: 50, fuse: 100, drone2: 65, again: 0, strikeAt: 330, bunkHp: 7000 },
+      normal: { ally: 0.5, time: 690, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3,
+         drone: 60, fuse: 85, drone2: 80, again: 170, strikeAt: 300, bunkHp: 9000 },
+      hard: { ally: 0.4, time: 660, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4,
+         drone: 60, fuse: 75, drone2: 80, again: 140, strikeAt: 270, bunkHp: 10000 },
       // the clock of a submarine run (the German boat is the slower one)
       ship: { U212: (t, k) => ({ subTime: t.subTime + 60 + (k === 'normal' ? 15 : 0) }), Virginia: (t, k) => ({ subTime: t.subTime - (k === 'normal' ? 15 : 0) }) },
    },
@@ -132,6 +138,55 @@ export function eastMissions(H) {
    }
    const ownLost = (w) => w.roster.some(s => s.side === 'player' && s.type !== 'TR' && !s.alive && !s.escaped);
    const release = (s, hunt) => { if (!s || !s.ai) return; s.ai.passive = false; s.ai.anchored = false; delete s.ai.patrol; if (hunt != null) { s.ai.huntId = hunt; s.ai.press = true; } };
+
+   // Countdown, surface run: the launcher's strike at the group. An armed blast with a label is the
+   // danger zone on the map; it is centred on the flagship's position at the launch, so every ship can
+   // leave it (`fuse` s), and it is gone when the command bunker falls before the detonation.
+   const STRIKE_R = { destroyed: 1400, heavy: 2800, shock: 4400 };
+   function strike(w, S) {
+      const T = tune(w, 'countdown'), site = (id) => w.sites.find(s => s.id === id && s.alive);
+      if (S.strikeId) {
+         const left = S.strikeT0 - w.time;
+         for (const k of [30, 10]) if (left <= k && S.strikeSaid > k) { S.strikeSaid = k; radio(w, 'Luftlage', `Einschlag in ${k} Sekunden${k === 10 ? '!' : '.'}`, 'warn'); }
+         const b = w.blasts.find(x => x.id === S.strikeId);
+         if (b) evacuate(w, S, b);
+         return;
+      }
+      const B = site(S.bunkerId), flag = w.player && w.player.alive ? w.player : S.own.map(id => live(w, id)).find(Boolean);
+      if (w.time < S.strikeAt || !B || !flag || !site(S.launcherId) || S.shown && !T.again) return;
+      const first = !S.struck;
+      const b = addBlast(w, { x: flag.pos.x, y: flag.pos.y, r: STRIKE_R, delay: T.fuse, label: 'Gegenschlag der Rampe' });
+      S.strikeId = b.id; S.strikeT0 = b.t0; S.strikeSaid = 99; S.struck = (S.struck || 0) + 1; S.strikeAt = Infinity;
+      radio(w, 'Luftlage', `Start von der Insel – der Flugkörper zielt auf Ihren Verband! Einschlag in ${T.fuse} Sekunden. Verlassen Sie die Gefahrenzone auf der Karte mit Höchstfahrt.`, 'warn');
+      objText(w, 'launcher', 'Gegenschlag: Verlassen Sie die Gefahrenzone – oder zerstören Sie vor dem Einschlag den Führungsbunker');
+      if (first) {
+         B.detected = B.targetable = true;
+         later(S, w.time + 7, () => { if (S.strikeId && site(S.bunkerId)) radio(w, 'Lagezentrum', (S.adDone ? 'Die Drohne' : 'Die Funkaufklärung') + ' hat den Führungsbunker der Insel erfasst. Fällt er vor dem Einschlag, verliert der Flugkörper seine Zieldaten.'); });
+      }
+      evacuate(w, S, b);
+   }
+   // the allied bots leave the zone on the shortest way (and do not follow the flagship back into it);
+   // strikeOver lets them close up again
+   function evacuate(w, S, b) {
+      for (const id of S.own) {
+         const s = live(w, id), d = s && dist(s.pos, b);
+         if (!s || human(s) || !s.ai || s.ai.evac || d > b.r.shock + 800) continue;
+         const k = (b.r.shock + 2500) / Math.max(d, 1);
+         s.ai.route = [P(b.x + (s.pos.x - b.x) * k, b.y + (s.pos.y - b.y) * k)]; s.ai.routeIdx = 0; s.ai.evac = true;
+      }
+   }
+   function strikeOver(w, S, why) {
+      const T = tune(w, 'countdown');
+      S.strikeId = null;
+      for (const id of S.own) { const s = live(w, id); if (s && s.ai && s.ai.evac) { delete s.ai.route; delete s.ai.evac; s.ai.routeIdx = 0; } }
+      objText(w, 'launcher', 'Zerstören Sie die Startrampe, bevor der Countdown abläuft');
+      if (w.phase !== 'playing' || S.shown) return;
+      if (T.again && w.sites.some(s => s.id === S.bunkerId && s.alive)) S.strikeAt = w.time + T.again;
+      if (S.adDone) {
+         S.reconAt = w.time + T.drone2;
+         later(S, w.time + 6, () => radio(w, 'Lagezentrum', why + '. Die Drohne ist auf dem Weg dorthin – Zieldaten in etwa einer Minute.'));
+      }
+   }
 
    return [
       // --------------------------------------------------------------------- 6. Barentssee
@@ -481,14 +536,16 @@ export function eastMissions(H) {
          briefing: 'Ein abtrünniger Kommandeur hat sich mit einer mobilen Startrampe auf einer Felseninsel verschanzt und droht ' +
             'mit dem Start. Korvetten, eine Fregatte und Flugabwehrstellungen decken die Insel. Die Rampe steht in einem ' +
             'Felsstollen: Schalten Sie Radar und Flugabwehr aus, dann klärt eine Drohne das Ziel auf und Ihre ' +
-            'Marschflugkörper können die Rampe zerstören, bevor der Countdown abläuft. Ein U-Boot kann stattdessen einen ' +
-            'Kommandotrupp am Einsatzpunkt absetzen. Die Insel ist unbewohnt.',
+            'Marschflugkörper können die Rampe zerstören, bevor der Countdown abläuft. Rechnen Sie damit, dass die Rampe ' +
+            'vorher auf Ihren Verband feuert: Die Gefahrenzone erscheint auf der Karte – laufen Sie heraus. Ein U-Boot ' +
+            'kann stattdessen einen Kommandotrupp am Einsatzpunkt absetzen. Die Insel ist unbewohnt.',
          debrief: 'Die Startrampe ist zerstört, der Start wurde verhindert. Der Kommandeur hat sich ergeben.',
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ticonderoga', 'Virginia', 'U212'],
          recommendedShip: 'Ticonderoga', arena: 22000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'countdown');
-            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime : T.time;
+            S.surface = SHIPS[shipKey].hull.type !== 'SS';
+            w.timeLeft = S.surface ? T.time : T.subTime;
             const C = P(9000, 0), R = 2400;
             islands(w, [{ c: C, r: R, height: 320, seed: 71, lobes: 6, rough: 0.55, name: 'Felseninsel', peaks: [{ x: 300, y: 200, h: 420, r: 900 }] }]);
             const g = fleet(w, shipKey, [['Ticonderoga', 0, 0], ['Burke', -1600, -2400], ['Burke', -1600, 2400], ['Daring', 1600, 2600]],
@@ -507,6 +564,8 @@ export function eastMissions(H) {
             S.sam = [addSite(w, 'sam', 'enemy', at(Math.PI), { name: 'Flugabwehr West', sam }).id, addSite(w, 'sam', 'enemy', at(-1.2), { name: 'Flugabwehr Süd', sam }).id];
             S.radarId = addSite(w, 'radar', 'enemy', at(2.5), { name: 'Radarstation' }).id;
             addSite(w, 'battery', 'enemy', at(1.3), { name: 'Küstenbatterie', delay: 30 });
+            // surface run: the bunker that feeds the launcher its target data, unknown until the drone is up
+            if (S.surface) { S.bunkerId = addSite(w, 'bunker', 'enemy', at(0.4), { name: 'Führungsbunker', hp: T.bunkHp, hidden: true }).id; S.strikeAt = T.strikeAt; }
             const dir = Math.atan2(rampe.y - C.y, rampe.x - C.x);
             addTaskPoint(w, { x: rampe.x + Math.cos(dir) * 120, y: rampe.y + Math.sin(dir) * 120, kind: 'sabotage', label: 'Startrampe', workTime: T.work, siteId: rampe.id });
             const scr = [add(w, 'Gorschkow', 'enemy', P(3800, 1500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(3800, 4000), P(3800, -1500)] } })];
@@ -534,6 +593,10 @@ export function eastMissions(H) {
                if (b.id === S.warnId) radio(ww, 'Flottenkommando', 'Detonation im geräumten Sperrgebiet, weit draußen über See. Keine Schiffe, keine Personen im Gebiet. ' +
                   `Das war die Warnung – der nächste Start erfolgt in ${mmss(ww.timeLeft)}.`, 'warn');
                else if (b.id === S.finalId) ww.end(false, 'Der Countdown ist abgelaufen – die Rampe hat gestartet.');
+               else if (b.id === S.strikeId) {
+                  radio(ww, 'Luftlage', b.hit.ships ? 'Detonation im Verband! Schadensmeldungen laufen ein.' : 'Detonation achteraus – kein eigenes Schiff in der Gefahrenzone.', 'warn');
+                  strikeOver(ww, S, 'Die Rampe ist zum Nachladen an den Stolleneingang gefahren');
+               }
             };
             w._script.onTaskDone = (ww) => radio(ww, 'Kommandotrupp', 'Ladungen gezündet, Rampe zerstört. Wir kommen zurück zum Boot.');
             w._script.onTeamLost = (ww) => {
@@ -542,7 +605,8 @@ export function eastMissions(H) {
                if (can) radio(ww, 'Flottenkommando', 'Der Kommandotrupp ist aufgeklärt worden und bricht ab. Die Rampe muss anders fallen.', 'warn');
                else ww.end(false, 'Der Kommandotrupp wurde entdeckt – die Rampe ist nicht mehr zu erreichen.');
             };
-            later(S, 5, () => radio(w, 'Flottenkommando', `Der Countdown läuft: ${mmss(w.timeLeft)}. Erst Radar und Flugabwehr – dann kann die Drohne die Rampe im Stollen aufklären.`));
+            later(S, 5, () => radio(w, 'Flottenkommando', `Der Countdown läuft: ${mmss(w.timeLeft)}. Erst Radar und Flugabwehr – dann kann die Drohne die Rampe im Stollen aufklären.` +
+               (S.surface ? ' Rechnen Sie mit einem Gegenschlag der Rampe auf Ihren Verband.' : '')));
             later(S, 22, () => radio(w, 'Luftlage', 'Start von der Insel erkannt. Flugbahn führt in das geräumte Sperrgebiet im Norden – kein Schiff, kein Land in der Nähe.', 'warn'));
             later(S, 34, () => { S.warnId = addBlast(w, { x: S.test.x, y: S.test.y, r: { destroyed: 700, heavy: 1700, shock: 3200 }, delay: 8, label: 'Detonation im Sperrgebiet' }).id; });
          },
@@ -559,6 +623,7 @@ export function eastMissions(H) {
                   || w.missiles.some(m => m.alive && m.kind === 'cruise' && m.side === 'player');
                if (!means) { S.spent = true; w.end(false, 'Keine Marschflugkörper mehr an Bord – die Rampe ist nicht mehr zu erreichen.'); return; }
             }
+            if (S.surface) strike(w, S);
             if (!S.shown) { const L = w.sites.find(s => s.id === S.launcherId); if (L && L.alive) L.hp = L.maxHp; }   // safe in the tunnel
             // the launch at the end of the countdown: the detonation falls together with the timer
             if (!S.finalId && w.timeLeft <= 4) {
@@ -587,10 +652,29 @@ export function eastMissions(H) {
                for (const x of w.sites) if (x.kind === 'sam' && x.side === 'enemy') for (const y of x.cfg.weapons.sam) y.ch = Math.min(y.ch, 1);
                radio(w, 'Lagezentrum', 'Das Inselradar ist aus. Die Flugabwehr feuert nur noch mit eigenem Feuerleitradar.');
             }
+            if (site.id === S.bunkerId) {
+               // without the bunker the launcher has no target data: a missile in the air goes astray
+               if (S.strikeId) {
+                  w.blasts = w.blasts.filter(b => b.id !== S.strikeId);
+                  radio(w, 'Luftlage', 'Führungsbunker zerstört – der Flugkörper hat seine Zieldaten verloren und stürzt weit vor dem Verband ins Meer.');
+                  strikeOver(w, S, 'Ohne Führungsbunker muss die Rampe zum Zielen an den Stolleneingang');
+               } else radio(w, 'Lagezentrum', 'Der Führungsbunker ist zerstört. Die Rampe kann Ihren Verband nicht mehr erfassen.');
+               return;
+            }
             if (n + r >= 3 && !S.adDone) {
-               S.adDone = true; S.reconAt = w.time + tune(w, 'countdown').recon;
+               const T = tune(w, 'countdown');
+               S.adDone = true;
                setObj(w, 'ad', 'done');
-               radio(w, 'Lagezentrum', 'Radar und Flugabwehr der Insel schweigen. Die Aufklärungsdrohne ist unterwegs – Zieldaten für die Rampe in etwa einer Minute.');
+               if (!S.surface) {
+                  S.reconAt = w.time + T.recon;
+                  radio(w, 'Lagezentrum', 'Radar und Flugabwehr der Insel schweigen. Die Aufklärungsdrohne ist unterwegs – Zieldaten für die Rampe in etwa einer Minute.');
+               } else if (S.struck && !S.strikeId) {
+                  S.reconAt = w.time + T.drone2;
+                  radio(w, 'Lagezentrum', 'Radar und Flugabwehr der Insel schweigen. Die Aufklärungsdrohne ist unterwegs zum Stolleneingang – Zieldaten für die Rampe in etwa einer Minute.');
+               } else {
+                  if (!S.struck) S.strikeAt = Math.min(S.strikeAt, w.time + T.drone);
+                  radio(w, 'Lagezentrum', 'Radar und Flugabwehr der Insel schweigen. Die Aufklärungsdrohne ist unterwegs. Die Rampe steht noch tief im Stollen.');
+               }
             }
          },
          onSink(w, ship, killer, S) {
