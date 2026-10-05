@@ -4,6 +4,8 @@
 import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
+import { pacificMissions } from './missions_pacific.js';
+import { westMissions } from './missions_west.js';
 import { canLaunch, launchSquadron } from './air.js';
 
 // ---------------------------------------------------------------- names
@@ -1063,10 +1065,13 @@ function rheinCheck(w) {
 
 // second batch (missions_extra.js): three battles are listed with the battles, four ops after the ops
 {
-   const extra = extraMissions({ P, add, objective, setObj, objText, later, radio, zone, inZone, islands, combatants, spawnTeam, teamHPFrac, SHIPS });
+   const H = { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, combatants, spawnTeam, teamHPFrac, SHIPS };
+   const extra = extraMissions(H);
    const firstOp = DEFS.findIndex(d => d.group === 'ops');
    DEFS.splice(firstOp < 0 ? DEFS.length : firstOp, 0, ...extra.filter(d => d.group !== 'ops'));
    DEFS.push(...extra.filter(d => d.group === 'ops'));
+   // third batch (missions_west.js, missions_pacific.js): all historical operations
+   DEFS.push(...westMissions(H), ...pacificMissions(H));
 }
 
 // ---------------------------------------------------------------- public API
