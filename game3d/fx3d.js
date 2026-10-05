@@ -497,9 +497,15 @@ void main() {
       foam = (wash * 0.75 + churn * 0.7 + arm * 0.45 + centre * 0.45) * vB.y;
       aer = band * (1.0 - u) * vB.y;           // aerated, lighter water under the foam
    } else {
+      // torpedo track: a dense bubble line right behind the fish that frays into streaks and
+      // leaves a pale aerated ribbon, so a spread can be read (and dodged) from far off
       float core = 1.0 - smoothstep(0.15, 1.0, as);
-      foam = core * (1.0 - u) * smoothstep(0.25, 0.65, n + 0.25 * (1.0 - u)) * vB.y;
-      aer = core * (1.0 - u) * vB.y * 0.6;
+      float line = (1.0 - smoothstep(0.0, 0.45, as)) * pow(1.0 - u, 1.5);
+      float fresh = 1.0 - smoothstep(0.0, 0.3, u);
+      float nb = texture2D(uNoise, tc / vec2(2.6, 7.0) + 0.61).r * 0.6 + n * 0.4;   // bubble-sized break-up
+      float thr = 0.1 + 0.75 * u;
+      foam = (core * smoothstep(thr, thr + 0.22, nb) * (1.0 - u) + line * fresh * 0.8) * vB.y;
+      aer = core * (1.0 - u) * vB.y * 1.1;
    }
    foam = 1.0 - exp(-1.5 * foam);          // soft saturation: overlapping terms no longer merge into a flat white slab
    float a = max(foam, aer * 0.22);
@@ -598,7 +604,7 @@ class Wakes {
             sp /= tk;
             const u = Math.min(1, age / life);
             // Kelvin spread, capped: past ~12 s the arms have faded and a huge fan only folds over itself in turns
-            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.0 + Math.min(age, 8) * 0.45;
+            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.3 + Math.min(age, 8) * 0.5;
             const nx = -dz, nz = dx;
             for (let s = -1; s <= 1; s += 2) {
                P[v * 3] = x + nx * hw * s; P[v * 3 + 1] = 0; P[v * 3 + 2] = z + nz * hw * s;
@@ -1088,6 +1094,25 @@ export class FX {
          p.r = 20; p.g = 9; p.b = 2.5; p.r1 = 5; p.g1 = 1.2; p.b1 = 0.2; p.fin = 0; p.fout = 0.5; p.shape = 3;
          G.emit();
       }
+      if (GFX.effects >= 2 && cal >= 100) {
+         // the blast also vents sideways at the muzzle: a short hot disc across the bore
+         const sl = Math.hypot(dx, dz) || 1, px = -dz / sl, pz = dx / sl;
+         p = G.t();
+         p.x = x + dx * len * 0.12; p.y = y + dy * len * 0.12; p.z = z + dz * len * 0.12;
+         p.axX = px; p.axY = 0; p.axZ = pz; p.h = len * 0.9; p.life = 0.07 + 0.03 * k; p.s0 = 2 + cal * 0.012; p.s1 = p.s0 * 2.2;
+         p.r = 5; p.g = 2.4; p.b = 0.8; p.r1 = 1.2; p.g1 = 0.3; p.b1 = 0.05; p.a = 0.8; p.fin = 0; p.fout = 0.4; p.shape = 0;
+         G.emit();
+         // burning powder flakes that carry on a little further than the sparks
+         for (let i = 0; i < 2 + 3 * k; i++) {
+            p = G.t();
+            const sp = rr(90, 230);
+            p.x = x + dx * len * 0.4; p.y = y + dy * len * 0.4; p.z = z + dz * len * 0.4;
+            p.vx = (dx + rr(-0.12, 0.12)) * sp; p.vy = (dy + rr(-0.05, 0.12)) * sp; p.vz = (dz + rr(-0.12, 0.12)) * sp;
+            p.drag = 3.2; p.grav = 6; p.life = rr(0.45, 0.9); p.s0 = 0.5 + k * 0.4; p.s1 = 0.2; p.stretch = 0.035;
+            p.r = 14; p.g = 5; p.b = 1; p.r1 = 3; p.g1 = 0.5; p.b1 = 0.05; p.fin = 0; p.fout = 0.6; p.shape = 3;
+            G.emit();
+         }
+      }
       // blast smoke rolling out of the muzzle
       const nS = Math.round(2 + 5 * k);
       for (let i = 0; i < nS; i++) {
@@ -1122,10 +1147,12 @@ export class FX {
       const k = clamp(cal / 380, 0.2, 1.8);
       // column height ~ caliber: 380 mm ~65 m, 203 mm ~38 m, 127 mm ~27 m
       const H = (8 + cal * 0.15) * (big ? 1.35 : 1);
-      const W = 3 + cal * 0.03;
+      const W = 3.4 + cal * 0.034;
       const y0 = this.ocean.heightAt(x, z, null);
       const fc = this.uFoamCol.value;
-      const lum = this.night ? 0.35 : 1;
+      // over-bright and only partly lit: columns must read white even under an overcast sky
+      const lum = this.night ? 0.4 : 1.35;
+      const fine = GFX.effects >= 2;
       const nC = cal >= 250 ? 4 : cal >= 150 ? 3 : 2;
       for (let i = 0; i < nC; i++) {
          const p = P.t();
@@ -1134,8 +1161,19 @@ export class FX {
          p.x = x + (core ? 0 : rr(-0.45, 0.45) * W); p.y = y0 - 1; p.z = z + (core ? 0 : rr(-0.45, 0.45) * W);
          p.life = rr(2.4, 3.4) * (0.7 + k * 0.3); p.s0 = W * 0.5; p.s1 = W * (core ? 0.8 : rr(0.95, 1.3)); p.grow = 4;
          p.aspect = H / p.s1 * (core ? 1.1 : rr(0.55, 0.9));
-         p.r = p.g = p.b = lum; p.a = 1; p.fin = 0.02; p.fout = 0.3; p.shape = 2; p.lit = 1;
+         p.r = p.g = p.b = lum; p.a = 1; p.fin = 0.02; p.fout = 0.3; p.shape = 2; p.lit = 0.8;
          P.emit();
+      }
+      if (fine) {
+         // squat, dense crown around the foot of the column
+         for (let i = 0; i < 2; i++) {
+            const p = P.t();
+            p.x = x + rr(-0.3, 0.3) * W; p.y = y0 - 1; p.z = z + rr(-0.3, 0.3) * W;
+            p.life = rr(1.5, 2.1) * (0.7 + k * 0.3); p.s0 = W * 0.9; p.s1 = W * rr(1.9, 2.4); p.grow = 5;
+            p.aspect = H * rr(0.28, 0.4) / p.s1;
+            p.r = p.g = p.b = lum; p.a = 0.95; p.fin = 0.02; p.fout = 0.4; p.shape = 2; p.lit = 0.8;
+            P.emit();
+         }
       }
       // spray thrown up and out, then falling back
       const nSp = Math.round(7 + 10 * k);
@@ -1148,7 +1186,7 @@ export class FX {
          p.vx = Math.cos(a) * vu * out; p.vy = vu; p.vz = Math.sin(a) * vu * out;
          p.drag = 0.35; p.grav = 11; p.life = rr(1.6, 2.6) * (0.7 + 0.3 * k);
          p.s0 = W * 0.35; p.s1 = W * rr(0.9, 1.5); p.grow = 2; p.stretch = 0.05;
-         p.r = p.g = p.b = 0.95 * lum; p.a = 0.8; p.fin = 0.02; p.fout = 0.45; p.shape = 1; p.lit = 1; p.rot = rr(0, TAU); p.wind = 0.4;
+         p.r = p.g = p.b = 0.95 * lum; p.a = 0.85; p.fin = 0.02; p.fout = 0.45; p.shape = 1; p.lit = 0.85; p.rot = rr(0, TAU); p.wind = 0.4;
          P.emit();
       }
       // base mist
@@ -1157,21 +1195,42 @@ export class FX {
          p.x = x + rr(-1, 1) * W; p.y = y0 + W * 0.3; p.z = z + rr(-1, 1) * W;
          p.vx = rr(-2, 2); p.vy = rr(0.5, 2); p.vz = rr(-2, 2); p.drag = 0.8;
          p.life = rr(3, 5); p.s0 = W; p.s1 = W * 3.5; p.grow = 2;
-         p.r = p.g = p.b = 0.9 * lum; p.a = 0.45; p.fin = 0.08; p.fout = 0.3; p.shape = 1; p.lit = 1; p.wind = 1; p.rot = rr(0, TAU);
+         p.r = p.g = p.b = 0.9 * lum; p.a = 0.45; p.fin = 0.08; p.fout = 0.3; p.shape = 1; p.lit = 0.9; p.wind = 1; p.rot = rr(0, TAU);
          P.emit();
       }
-      this.decals.add(0, x, z, rr(0, TAU), W * 1.5, W * 5.5, 7 + k * 3, 0.9, 3);
+      this.decals.add(0, x, z, rr(0, TAU), W * 1.5, W * 6.5, 7 + k * 3, 1, 3);
+      // heavy shells also send a fast pressure ripple out over the water
+      if (fine && cal >= 250) this.decals.add(1, x, z, 0, W * 1.2, W * 10, 1.5, 0.55, 3);
       void fc;
    }
 
-   _explosion(x, y, z, cal, citadel = false, scale = 1) {
+   // ap: an armour-piercing hit is a hard white flash and a spray of sparks, not a fireball
+   _explosion(x, y, z, cal, citadel = false, scale = 1, ap = false) {
       const G = this.glow, P = this.puff;
       const k = clamp(cal / 380, 0.3, 1.6) * scale * (citadel ? 1.6 : 1);
+      const fine = GFX.effects >= 2;
+      if (citadel) ap = false;
       let p = G.t();
       p.x = x; p.y = y; p.z = z; p.life = 0.22 + 0.1 * k; p.s0 = 8 * k + 4; p.s1 = 22 * k + 6; p.grow = 3;
       p.r = 50; p.g = 22; p.b = 7; p.r1 = 8; p.g1 = 2; p.b1 = 0.3; p.fin = 0; p.fout = 0.15; p.shape = 0;
+      if (ap) { p.life *= 0.6; p.s1 *= 0.7; p.r = 34; p.g = 30; p.b = 26; p.r1 = 6; p.g1 = 3; p.b1 = 1; }
       G.emit();
-      for (let i = 0; i < 2 + 3 * k; i++) {
+      if (fine) {
+         // white-hot core that is gone almost at once
+         p = G.t();
+         p.x = x; p.y = y; p.z = z; p.life = 0.09 + 0.03 * k; p.s0 = 3 * k + 2; p.s1 = 9 * k + 3; p.grow = 2;
+         p.r = 60; p.g = 52; p.b = 40; p.r1 = 20; p.g1 = 10; p.b1 = 3; p.fin = 0; p.fout = 0.4; p.shape = 0;
+         G.emit();
+         if (citadel) {
+            // magazine fire venting upwards, and the blast ripple on the sea around the hull
+            p = G.t();
+            p.x = x; p.y = y; p.z = z; p.axX = rr(-0.08, 0.08); p.axY = 1; p.axZ = rr(-0.08, 0.08); p.h = 60 * k; p.life = 0.5; p.s0 = 7 * k; p.s1 = 16 * k; p.grow = 2;
+            p.r = 22; p.g = 9; p.b = 2; p.r1 = 4; p.g1 = 0.8; p.b1 = 0.1; p.fin = 0.02; p.fout = 0.5; p.shape = 3;
+            G.emit();
+            if (y < 30) this.decals.add(1, x, z, 0, 20 * k, 130 * k, 1.6, 0.6, 3);
+         }
+      }
+      for (let i = 0; i < (ap ? 1 : 2 + 3 * k); i++) {
          p = G.t();
          p.x = x + rr(-3, 3) * k; p.y = y + rr(0, 4) * k; p.z = z + rr(-3, 3) * k;
          p.vx = rr(-8, 8) * k; p.vy = rr(4, 16) * k; p.vz = rr(-8, 8) * k; p.drag = 2.2;
@@ -1187,9 +1246,22 @@ export class FX {
          p.vx = Math.cos(a) * Math.cos(el) * sp; p.vy = Math.sin(el) * sp; p.vz = Math.sin(a) * Math.cos(el) * sp;
          p.grav = 9.8; p.drag = 0.6; p.life = rr(0.5, 1.3); p.s0 = 0.7; p.s1 = 0.35; p.stretch = 0.06;
          p.r = 18; p.g = 8; p.b = 2; p.r1 = 5; p.g1 = 1; p.b1 = 0.15; p.fin = 0; p.fout = 0.6; p.shape = 3;
+         if (ap) { p.g = 14; p.b = 9; p.g1 = 2.5; p.b1 = 0.6; p.life *= 0.75; }
          G.emit();
       }
-      for (let i = 0; i < 2 + 3 * k; i++) {
+      if (fine && !ap) {
+         // glowing debris lobbed high, falling back slowly enough to follow
+         for (let i = 0; i < 3 + 4 * k; i++) {
+            p = G.t();
+            const a = rr(0, TAU), sp = rr(18, 55) * Math.sqrt(k);
+            p.x = x; p.y = y; p.z = z;
+            p.vx = Math.cos(a) * sp * 0.6; p.vy = sp * rr(0.7, 1.3); p.vz = Math.sin(a) * sp * 0.6;
+            p.grav = 9.8; p.drag = 0.25; p.life = rr(1.4, 2.6); p.s0 = 1.1; p.s1 = 0.5; p.stretch = 0.09;
+            p.r = 12; p.g = 4; p.b = 0.7; p.r1 = 2.5; p.g1 = 0.35; p.b1 = 0.03; p.fin = 0; p.fout = 0.5; p.shape = 3;
+            G.emit();
+         }
+      }
+      for (let i = 0; i < (ap ? 1 : 2 + 3 * k); i++) {
          p = P.t();
          p.x = x + rr(-2, 2) * k; p.y = y + rr(1, 5) * k; p.z = z + rr(-2, 2) * k;
          p.vx = rr(-4, 4); p.vy = rr(4, 10); p.vz = rr(-4, 4); p.drag = 0.6; p.grav = -0.8;
@@ -1475,7 +1547,7 @@ export class FX {
             const ly = r.S.deckAt(im.along) * (side ? 0.55 : 1) + 1;
             this.shipsRef.worldPoint(r, im.along, ly, im.across, _p);
             if (im.torp) this._torpHit(_p.x, _p.z, cit || im.big);
-            else this._explosion(_p.x, _p.y, _p.z, im.cal * (im.ammo === 'AP' ? 0.8 : 1), cit || (im.big && im.cal >= 300));
+            else this._explosion(_p.x, _p.y, _p.z, im.cal * (im.ammo === 'AP' ? 0.8 : 1), cit || (im.big && im.cal >= 300), 1, im.ammo === 'AP');
          } else {
             // effect said "explosion" but we found no hull: burst at deck height
             if (im.torp) this._torpHit(im.x, im.z, im.big);
