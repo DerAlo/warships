@@ -28,9 +28,10 @@
 //   (BroadcastChannel, test only) just the knock applies.
 import { NET_VERSION, makeLocalTransport } from './transport.js';
 import { coopSlots, coopRoles } from './coop.js';
+import { teamShips, defaultShip, EAST_TEAM } from './setup.js';
 import { pvpMissions, pvpSlots, TEAM_MAX } from './pvp.js';
 import { MISSIONS, getMission } from '../missions.js';
-import { PLAYABLE, SHIPS } from '../config.js';
+import { SHIPS } from '../config.js';
 import { isUnlocked } from '../progress3d.js';
 
 export { NET_VERSION };
@@ -63,11 +64,13 @@ export const modeMissions = (mode) => mode === 'pvp' ? pvpMissions() : coopMissi
 export const modeSlots = (mode, missionId) => mode === 'pvp' ? pvpSlots(missionId) : coopSlots(missionId);
 const MIN_PLAYERS = { coop: 1, pvp: 2 };
 // every playable ship, carriers included (their squadrons are part of the snapshot, CONTRACT.md)
-export const allowedShips = (missionId) => getMission(missionId)?.playableShips || PLAYABLE;
+// team (PvP): 1 = west bloc, 2 = east bloc with its own ships (setup.teamShips); co-op: 0
+export const allowedShips = (missionId, team = 0) => teamShips(missionId, team);
 // the player's own choice for a mission: allowed there and unlocked in the local career profile
-export const ownShips = (missionId, profile) => allowedShips(missionId).filter(k => SHIPS[k] && isUnlocked(profile, k));
-export function pickShip(missionId, profile, preferred) {
-   const own = ownShips(missionId, profile), rec = getMission(missionId)?.recommendedShip;
+// (the east bloc has no career: all of its ships are open)
+export const ownShips = (missionId, profile, team = 0) => allowedShips(missionId, team).filter(k => SHIPS[k] && (team === EAST_TEAM || isUnlocked(profile, k)));
+export function pickShip(missionId, profile, preferred, team = 0) {
+   const own = ownShips(missionId, profile, team), rec = team === EAST_TEAM ? defaultShip(missionId, team) : getMission(missionId)?.recommendedShip;
    return own.includes(preferred) ? preferred : own.includes(rec) ? rec : own[0] || null;
 }
 
@@ -325,8 +328,7 @@ export class Lobby {
          const wasFixed = coopRoles(r.mission, r.difficulty).length > 0;
          r.mission = o.mission;
          r.max = Math.max(r.players.length, Math.min(r.max, slots(r.mission)));
-         const allowed = allowedShips(r.mission);
-         for (const p of r.players) { p.ready = false; if (wasFixed || !allowed.includes(p.ship)) p.ship = null; }
+         for (const p of r.players) { p.ready = false; if (wasFixed || !allowedShips(r.mission, p.team).includes(p.ship)) p.ship = r.mode === 'pvp' ? defaultShip(r.mission, p.team) : null; }
          this._fixOwnShip();
       }
       if (o.difficulty && DIFFICULTIES.includes(o.difficulty)) r.difficulty = o.difficulty;
@@ -354,7 +356,15 @@ export class Lobby {
       const p = this.isHost && this.room.players.find(x => x.id === id);
       if (!p || !this._teamOk(p, team, true)) return;
       p.team = team; p.ready = p.id === this.selfId ? p.ready : false;
+      this._fitShip(p);
       this._sync();
+   }
+   // host: a captain who changed sides gets a ship of that side's bloc
+   _fitShip(p) {
+      const r = this.room;
+      if (!r || r.mode !== 'pvp' || allowedShips(r.mission, p.team).includes(p.ship)) return;
+      p.ship = defaultShip(r.mission, p.team); p.ready = false;
+      if (p.id === this.selfId) this._ship = p.ship;
    }
    // host: even out the teams (the latest to join move), at most one apart
    balanceTeams() {
@@ -365,7 +375,7 @@ export class Lobby {
          if (Math.abs(a - b) <= 1) break;
          const from = a > b ? 1 : 2, p = [...r.players].reverse().find(x => x.team === from && x.id !== this.selfId);
          if (!p) break;
-         p.team = 3 - from; p.ready = false;
+         p.team = 3 - from; p.ready = false; this._fitShip(p);
       }
       this._say(null, 'Teams ausgeglichen.');
       this._sync();
@@ -585,8 +595,8 @@ export class Lobby {
          if (p) { this.rt.send('room', this._state(), from); return; }
          const why = this._banned.has(from) ? 'banned' : !this._approved.has(from) ? 'gone' : r.state !== 'lobby' ? 'running' : r.players.length >= r.max ? 'full' : null;
          if (why) { this.rt.send('room', { t: 'deny', why }, from); return; }
-         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: allowedShips(r.mission).includes(m.ship) ? m.ship : null, ready: false, at: Date.now(),
-            team: r.mode === 'pvp' ? this._freeTeam() : 0 };
+         p = { id: from, name: cleanName(m.name) || 'Kapitän', ship: null, ready: false, at: Date.now(), team: r.mode === 'pvp' ? this._freeTeam() : 0 };
+         p.ship = allowedShips(r.mission, p.team).includes(m.ship) ? m.ship : r.mode === 'pvp' ? defaultShip(r.mission, p.team) : null;
          r.players.push(p);
          this._say(null, `${p.name} ist beigetreten.`);
          this._sync();
@@ -594,9 +604,10 @@ export class Lobby {
       else if (m.t === 'set') {
          if (r.state !== 'lobby' && ('ship' in m || 'ready' in m)) return;
          if (typeof m.name === 'string' && cleanName(m.name)) p.name = cleanName(m.name);
-         if ('ship' in m) { p.ship = allowedShips(r.mission).includes(m.ship) ? m.ship : null; if (!p.ship) p.ready = false; }
+         if ('team' in m && this._teamOk(p, m.team, false)) { p.team = m.team; this._fitShip(p); }
+         if ('ship' in m && allowedShips(r.mission, p.team).includes(m.ship)) p.ship = m.ship;
+         else if ('ship' in m && r.mode !== 'pvp') { p.ship = null; p.ready = false; }
          if ('ready' in m) p.ready = !!m.ready && !!p.ship;
-         if ('team' in m && this._teamOk(p, m.team, false)) p.team = m.team;
          this._sync();
       } else if (m.t === 'bye') {
          this._unseat(from, p);
@@ -674,13 +685,13 @@ export class Lobby {
    // my ship is no longer valid for the mission: fall back to an own ship that is
    _fixOwnShip() {
       if (coopRoles(this.room.mission, this.room.difficulty).length) return;   // prescribed: the host assigns
-      const me = this.me, ship = pickShip(this.room.mission, this.getProfile(), this._ship);
+      const me = this.me, ship = pickShip(this.room.mission, this.getProfile(), this._ship, me?.team || 0);
       if (!me || !ship || me.ship === ship) return;
       if (this.isHost) me.ship = ship; else this.rt?.send('room', { t: 'set', ship }, this.room.hostId);
    }
    setShip(ship) {
       const r = this.room;
-      if (!r || r.state !== 'lobby' || coopRoles(r.mission, r.difficulty).length || !ownShips(r.mission, this.getProfile()).includes(ship)) return;
+      if (!r || r.state !== 'lobby' || coopRoles(r.mission, r.difficulty).length || !ownShips(r.mission, this.getProfile(), this.me?.team || 0).includes(ship)) return;
       this._ship = ship;
       if (this.isHost) { this.me.ship = ship; this._sync(); } else this.rt.send('room', { t: 'set', ship }, r.hostId);
    }

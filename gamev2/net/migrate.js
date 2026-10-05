@@ -13,6 +13,7 @@ import { makeStats } from '../state.js';
 import { WORLD } from '../config.js';
 import { AIR, AIR_TYPES, releaseSquadron, sqIdFloor } from '../air.js';
 import { localSide, SQ_STATES } from './codec.js';
+import { packV2, restoreV2 } from './v2.js';
 
 export const MIG_EVERY = 60;         // sim steps between two full states (1 s)
 const MAX_DEPTH = 4, MAX_LIST = 64;
@@ -22,7 +23,9 @@ const SIDE_CODE = { player: 1, enemy: 2 };
 const SHIP_KEYS = ['pos', 'heading', 'speed', 'omega', 'telegraph', 'rudderCmd', 'rudder', 'heel', 'grounded', 'maxHP', 'hp', 'sinkT',
    'dmgMult', 'healPool', 'ammo', 'lockTarget', 'secTarget', 'secLostT', 'lastMainFire', 'lastTorpFire', 'lastHitT', 'lastAttackerId',
    '_smokeT', 'ramT', 'pingT', 'dmgDealt', 'dmgTaken', 'kills', 'shotsFired', 'hits', 'human', 'maxSpeedKn', 'fires', 'floods',
-   'modules', 'depth', 'depthF', 'depthTarget', 'depthM', 'battery', 'batteryLock', 'asw', 'sonarSeen', 'sec', 'ai', 'air', 'aaFocus'];
+   'modules', 'depth', 'depthF', 'depthTarget', 'depthM', 'battery', 'batteryLock', 'asw', 'sonarSeen', 'sec', 'ai', 'air', 'aaFocus',
+   // V2: sensors, magazines, air-defence state, launch timers, helicopter and team
+   'radarOn', 'mag', 'samDoctrine', 'samPriority', 'ssmSel', 'lastSsmFire', 'samCh', 'ciwsTgt', 'rk', 'ltt', 'heloOut', 'heloT', 'teamOut', 'teamsLeft', '_decoyN'];
 const SCRIPT_SKIP = new Set(['def', 'timers', 'onSink']);
 // what the newest snapshot knows better than the full state (a ship it carried)
 const FRESH = new Set(['pos', 'heading', 'speed', 'omega', 'rudder', 'heel', 'hp', 'sinkT', 'depthF', 'depth', 'telegraph', 'rudderCmd', 'grounded']);
@@ -110,6 +113,7 @@ export function packWorld(world, o = {}) {
          Math.round(t.traveled), Math.round(t.range), Math.round(t.dmg), r3(t.flood || 0), SIDE_CODE[t.side] || 0, r3(t.detect || 0), t.air ? 1 : 0]),
       sq: world.squadrons.filter(q => q.n > 0 && q.state !== 'land').map(packSquad),
       pl: o.pl || [],
+      v2: packV2(world),
    };
 }
 
@@ -321,7 +325,7 @@ export function restoreWorld(world, m, o) {
    // launched after the full state: built from what the replica knows and the launcher's data
    for (const q of mine.values()) {
       const owner = byId.get(q.ownerId), tc = torpCfg(owner, !!q.air);
-      if (!tc) continue;
+      if (!tc || q.asw) continue;
       const t = { id: q.id, pos: { x: q.pos.x, y: q.pos.y }, start: { x: q.pos.x, y: q.pos.y }, heading: q.heading, dir: q.heading, speed: tc.speed, speedKn: tc.speedKn,
          side: owner.side, owner: owner.side, ownerId: owner.id, dmg: tc.dmg * owner.dmgMult, flood: tc.flood, range: q.range, detect: tc.detect,
          traveled: q.traveled, age: 0, alive: true, spotted: owner.side === 'player' };
@@ -330,6 +334,8 @@ export function restoreWorld(world, m, o) {
    }
    world.torpedoes = torps;
    const squads = restoreSquads(world, m, o, dtm);
+   // missiles, helicopters, teams, task points, blasts, decoys, the land sites' state (v2.js)
+   restoreV2(world, m.v2, flip, dtm, o.mids);
    const shells = world.shells.length;
    world.shells = [];
    if (world.depthCharges) for (const d of world.depthCharges) d.alive = false;

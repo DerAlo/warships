@@ -13,11 +13,12 @@
 // Nothing here touches the DOM, so the node tests drive it directly.
 import { World } from '../state.js';
 import { calcRewards } from '../progress3d.js';
-import { makeCommand, applyCommand, applyAirControl, execAction } from './command.js';
+import { makeCommand, applyCommand, applyAirControl, execAction, cleanAction } from './command.js';
 import { squadById, squadVisibleTo, releaseSquadron } from '../air.js';
 import { encodeShips, encodeOwn, visibleTo } from './codec.js';
 import { mirrorEvent, mirrorLog, mirrorReason } from './pvp.js';
 import { MIG_EVERY, packWorld, packScript, scriptSig } from './migrate.js';
+import { encodeV2, encodeOwnV2, slowV2, v2EventFor } from './v2.js';
 
 export const SNAP_EVERY = 3;        // sim steps between snapshots (20 Hz)
 const STATE_EVERY = 15;             // slow state (score, caps, timer, weather): 4 Hz
@@ -30,12 +31,15 @@ const SIDE_CODE = { player: 1, enemy: 2 };
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const r1 = (v) => Math.round(v * 10) / 10;
 const r3 = (v) => Math.round(v * 1000) / 1000;
-// a torpedo as the clients get it: ['T', id, ownerId, x, y, heading, tick, run?, air?]
-// (run: the distance it has already run, when it is announced late; air: dropped by a plane)
+// a torpedo as the clients get it: ['T', id, ownerId, x, y, heading, tick, run?, kind?, speed?, range?, side?, dmg?]
+// (run: the distance it has already run, when it is announced late; kind 1: dropped by a plane,
+// 2: a homing ASW torpedo, which brings its speed, range and side: its owner may have no tubes)
 function torpItem(t, tick, run) {
    const it = ['T', t.id, t.ownerId, r1(t.pos.x), r1(t.pos.y), Math.round(t.heading * 1e4) / 1e4, tick];
-   if (run !== undefined || t.air) it.push(run ? r1(run) : 0);
-   if (t.air) it.push(1);
+   const k = t.asw ? 2 : t.air ? 1 : 0;
+   if (run !== undefined || k) it.push(run ? r1(run) : 0);
+   if (k) it.push(k);
+   if (k === 2) it.push(r3(t.speed), Math.round(t.range), SIDE_CODE[t.side] || 0, Math.round(t.dmg || 0));
    return it;
 }
 // a squadron a recorded item is about (PvP: shown to a team only while it sees that squadron)
@@ -60,7 +64,7 @@ export function makeHost(world, o) {
    const pvp = !!o.pvp;
    const byId = world._byId;
    // a stream per team: the host's team sails as World side 'player'; co-op has only that one
-   const teams = (pvp ? ['player', 'enemy'] : ['player']).map((side, i) => ({ side, bit: 1 << i, ids: [], seq: 0, objSig: '' }));
+   const teams = (pvp ? ['player', 'enemy'] : ['player']).map((side, i) => ({ side, bit: 1 << i, ids: [], seq: 0, objSig: '', known: { sig: {}, sites: new Set() } }));
    const teamOf = (side) => pvp && side === 'enemy' ? teams[1] : teams[0];
    const clients = new Map();
    for (const c of o.clients) {
@@ -79,8 +83,10 @@ export function makeHost(world, o) {
    const spawned = (o.spawned || []).slice();   // 'n' items of every ship that entered after the start (for a rejoin)
    // host migration
    const self = o.self || { id: '', slot: 0 };
+   let rejected = 0;
    let succId = null, migAt = -1e9, migSig = '', migBytes = 0, migCount = 0;
-   const buf = new ArrayBuffer(8192), dv = new DataView(buf), u8 = new Uint8Array(buf);
+   let snapBytes = 0, snapCount = 0, snapPeak = 0, slowBytes = 0;
+   const buf = new ArrayBuffer(32768), dv = new DataView(buf), u8 = new Uint8Array(buf);
    const P = World.prototype;
 
    // ---------------------------------------------------------------- recording
@@ -179,9 +185,11 @@ export function makeHost(world, o) {
          if (rt.n > 0) { rt.n--; if (!s.alive || s.fireMain(world, rt) > 0) rt.n = 0; }
          const q = c.queue;
          for (let i = 0; i < q.length; i++) {
-            const a = q[i];
-            const r = execAction(s, world, a);
+            // checked before it reaches the sim: a malformed or foreign order counts as taken, and does nothing
+            const a = cleanAction(s, world, q[i]);
+            const r = a ? execAction(s, world, a) : 0;
             c.nextAct++;
+            if (!a) { rejected++; continue; }
             // the client's turrets were ready a moment before the host's are (traverse / reload lag)
             if (a[0] === 'f' && !r && s.alive && fin(a[1]) && fin(a[2])) { rt.x = a[1]; rt.y = a[2]; rt.n = RETRY_TICKS; }
          }
@@ -245,6 +253,7 @@ export function makeHost(world, o) {
          }
          case 'e': {
             const d = it[2] || {};
+            if (!isSq(ref)) { const v = v2EventFor(world, it, S); if (v !== undefined) return v; }
             if (it[1] === 'spotted' || it[1] === 'unspotted') {
                // 'Sie wurden entdeckt!' is the captain's own; 'X entdeckt' goes to the team that saw X
                const s = byId.get(d.dstId), own = /^(Sie wurden|Nicht mehr)/.test(d.text || '');
@@ -286,12 +295,15 @@ export function makeHost(world, o) {
    function snapshot() {
       for (const team of teams) {
          if (!team.ids.length) continue;
-         const end = encodeShips(dv, world, pvp ? team.side : null);
+         // ships and squadrons as before; missiles, helicopters and ASW torpedoes always as that side sees them
+         const end = encodeV2(dv, encodeShips(dv, world, pvp ? team.side : null), world, team.side);
          for (const id of team.ids) {
             const c = clients.get(id);
             dv.setUint32(5, c.nextAct >>> 0, true);
             dv.setUint16(9, c.lastSeq & 0xffff, true);
-            o.send('snap', u8.slice(0, encodeOwn(dv, end, c.ship, world)), c.id);
+            const len = encodeOwn(dv, encodeOwnV2(dv, end, c.ship, world), c.ship, world);
+            if (o.measure) { snapBytes += len; snapCount++; if (len > snapPeak) snapPeak = len; }
+            o.send('snap', u8.slice(0, len), c.id);
          }
       }
    }
@@ -325,6 +337,9 @@ export function makeHost(world, o) {
             if (sig !== team.objSig) { team.objSig = sig; tm.obj = obj; tm.zn = mis.zones; }
          }
          o.send('sync', tm, team.ids);
+         // the modern mode's slow state: only the parts that changed since this team got them
+         const v2 = slowV2(world, team.side, team.known);
+         if (v2) { if (o.measure) slowBytes += JSON.stringify(v2).length; o.send('sync', v2, team.ids); }
       }
       if (slow) for (const c of clients.values()) if (!c.gone) o.send('sync', { k: 'me', stats: c.ship.stats }, c.id);
    }
@@ -388,7 +403,7 @@ export function makeHost(world, o) {
          k: 'resync', b: team.seq, t: world.tick, kc: killsOf(team.side), ro: roster(),
          obj: teamObjectives(team.side), zn: mis ? mis.zones : null, tp: torps,
          sm: world.smokeClouds.map(m => [r1(m.c.x), r1(m.c.y), r1(m.r), m.maxR || 0, r3(m.life), m.side, m.ownerId]),
-         me: s.stats, tg: [s.telegraph, s.rudderCmd],
+         me: s.stats, tg: [s.telegraph, s.rudderCmd], v2: slowV2(world, team.side, null, true),
       }, id);
       s.human = true;
       if (ended) sendEnd(world.tick, c);
@@ -485,6 +500,8 @@ export function makeHost(world, o) {
       get clientIds() { return ids; },
       get successor() { return succId; },
       migStats() { return { bytes: migBytes, count: migCount }; },
+      // o.measure: snapshot bytes per client message (avg = bytes / count), the largest one, slow V2 state bytes
+      snapStats() { return { bytes: snapBytes, count: snapCount, peak: snapPeak, slow: slowBytes, rejected }; },
       // this host leaves a running match: the successor gets the newest full state at once
       handoff() { if (!ended && !stopped && world.phase === 'playing') { migAt = -1e9; migrate(world.tick); } },
       get ended() { return ended; },

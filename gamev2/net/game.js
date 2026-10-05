@@ -106,7 +106,7 @@ export function createNetGame(session, hooks) {
 
    // ---------------------------------------------------------------- host
    function hostStart() {
-      const mission = session.mission, list = [players[0]], lo = [cleanLoadout(hooks.loadout?.(validClass(mission, players[0].ship)))];
+      const mission = session.mission, list = [players[0]], lo = [cleanLoadout(hooks.loadout?.(validClass(mission, players[0].ship, pvp ? players[0].team | 0 : 0)))];
       for (let i = 1; i < players.length; i++) {
          const p = players[i];
          if (!hello.has(p.id)) continue;
@@ -114,7 +114,7 @@ export function createNetGame(session, hooks) {
       }
       const start = {
          k: 'start', v: NET_VERSION, mission, difficulty: pvp ? 'normal' : session.difficulty, seed: session.seed >>> 0,
-         classes: list.map(p => validClass(mission, p.ship)), loadouts: lo, names: list.map(p => String(p.name || '').slice(0, 32)), self: 0,
+         classes: list.map(p => validClass(mission, p.ship, pvp ? (p.team | 0) || 1 : 0)), loadouts: lo, names: list.map(p => String(p.name || '').slice(0, 32)), self: 0,
       };
       // PvP: both fleets at the same strength, whatever the lobby's difficulty said
       if (pvp) start.teams = list.map(p => (p.team | 0) || 1);
@@ -223,7 +223,7 @@ export function createNetGame(session, hooks) {
       const m = mig, oldHost = hostId, since = orphan;
       try {
          const h = replica.handover();
-         const lossInfo = restoreWorld(world, m, { flip: flipNow, tick: h.tick, seen: h.seen, torps: h.torps, me: world.player });
+         const lossInfo = restoreWorld(world, m, { flip: flipNow, tick: h.tick, seen: h.seen, torps: h.torps, mids: h.mids, me: world.player });
          h.own();
          world.player.human = false; world.player.isPlayer = true;
          const humans = world.net.humans, pl = Array.isArray(m.pl) ? m.pl : [];

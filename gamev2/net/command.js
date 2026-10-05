@@ -45,6 +45,8 @@ import { launchSSM, launchCruise, fireRockets, setDoctrine, setPriorityTarget, s
 import { setRadar } from '../sensors.js';
 import { sendHelo, recallHelo, fireAswTorpedo } from '../helo.js';
 import { launchTeam } from '../seal.js';
+import { DOCTRINES } from '../missile.js';
+import { siteById } from '../sites.js';
 
 export function makeCommand() { return { telegraph: 0, rudder: 0, aim: null, lock: null, air: null }; }
 
@@ -86,6 +88,41 @@ export function applyAirControl(ship, world, a) {
 }
 
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+
+// The host's gate for an action from the network: returns a clean copy (only the fields the kind
+// has, coordinates inside the map, ids that the order may address) or null. A captain can only
+// ever order his own ship (host.js applies the action to it); what an order points at is checked
+// here: a missile goes at a ship or site of the other side, a squadron order at an own squadron
+// (execAction), a priority target is a missile or squadron of the other side.
+const ACT_KINDS = 'ftcasxdgFLPHRWBmbMqDprkKohS';
+export function cleanAction(ship, world, a) {
+   if (!ship || !Array.isArray(a) || a.length < 1 || a.length > 5) return null;
+   const k = a[0];
+   if (typeof k !== 'string' || k.length !== 1 || !ACT_KINDS.includes(k)) return null;
+   const A = (world.arena || 1e4) * 2, xy = () => (fin(a[1]) && fin(a[2]) ? [k, clamp(a[1], -A, A), clamp(a[2], -A, A)] : null);
+   switch (k) {
+      case 'f': case 'M': case 'k': case 'o': return xy();
+      case 't': case 'b': return fin(a[1]) && Math.abs(a[1]) < 100 ? [k, a[1]] : null;
+      case 'c': case 'a': case 's': case 'L': return typeof a[1] === 'string' && a[1].length <= 24 ? [k, a[1]] : null;
+      case 'x': return a[1] == null || fin(a[1]) ? [k, a[1] == null ? null : a[1]] : null;
+      case 'd': case 'F': case 'P': case 'H': case 'R': case 'B': return fin(a[1]) ? [k, a[1]] : null;
+      case 'W': return fin(a[1]) && fin(a[2]) && fin(a[3]) ? [k, a[1], clamp(a[2], -A, A), clamp(a[3], -A, A)] : null;
+      case 'g': case 'S': return [k];
+      case 'm': { const T = fin(a[1]) ? world.shipById(a[1]) : null; return T && T.alive && T.side !== ship.side ? [k, a[1]] : null; }
+      case 'K': { const T = fin(a[1]) ? siteById(world, a[1]) : null; return T && T.alive && T.side !== ship.side ? [k, a[1]] : null; }
+      case 'q': return Number.isInteger(a[1]) && a[1] >= 0 && a[1] < 16 && ship.cfg.weapons && Array.isArray(ship.cfg.weapons.ssm) ? [k, a[1]] : null;
+      case 'D': return DOCTRINES.includes(a[1]) ? [k, a[1]] : null;
+      case 'p': {
+         if (a[1] == null) return [k, null];
+         if (!fin(a[1])) return null;
+         const m = world.missiles.find(x => x.id === a[1]), q = m ? null : squadById(world, a[1]);
+         return (m && m.side !== ship.side) || (q && q.side !== ship.side) ? [k, a[1]] : null;
+      }
+      case 'r': return [k, a[1] ? 1 : 0];
+      case 'h': return a.length === 1 ? [k] : fin(a[1]) && fin(a[2]) ? xy() : [k, 0];
+   }
+   return null;
+}
 
 // One-shot part. Returns what the sim call returned (guns / torpedoes fired, or a boolean), 0 for
 // anything malformed: the host runs this on data from the network.

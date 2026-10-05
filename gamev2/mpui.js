@@ -486,7 +486,7 @@ class MpUI {
          this._renderTop();
          return;
       }
-      const own = ownShips(r.mission, this.profile()), mine = lb.me?.ship;
+      const own = ownShips(r.mission, this.profile(), r.mode === 'pvp' ? lb.me?.team || 0 : 0), mine = lb.me?.ship;
       $('[data-scount]').textContent = `${own.length} verfügbar`;
       $('[data-ships]').innerHTML = own.length ? own.map(k => {
          const st = SHIP_STATS[k];

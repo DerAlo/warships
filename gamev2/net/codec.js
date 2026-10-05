@@ -15,6 +15,7 @@
 // of the other team swaps 'player' and 'enemy'.
 import { DEEP_M, periDepthM } from '../submarine.js';
 import { AIR_TYPES, squadVisibleTo } from '../air.js';
+import { makeV2Snap, decodeV2 } from './v2.js';
 
 export const SIM_DT = 1 / 60;
 export const MAX_SHIPS = 64, MAX_TURRETS = 8, MAX_SQUADS = 64;
@@ -127,6 +128,8 @@ export function makeSnap() {
       qx: new Float32Array(Q), qy: new Float32Array(Q), qh: new Float32Array(Q), qw: new Float32Array(Q),
       qalt: new Float32Array(Q), qsp: new Float32Array(Q), qaim: new Float32Array(Q), qfire: new Float32Array(Q),
       qc: new Uint8Array(Q), qcx: new Float32Array(Q), qcy: new Float32Array(Q),
+      // missiles, helicopters, ASW torpedoes (v2.js)
+      v2: makeV2Snap(),
    };
 }
 
@@ -175,7 +178,10 @@ export function decodeSnap(dv, s) {
          o += SQ_BYTES;
          if (c) { s.qcx[i] = dv.getInt16(o, true); s.qcy[i] = dv.getInt16(o + 2, true); o += 4; }
       }
-      s.nq = nq; s.own = o;
+      s.nq = nq;
+      o = decodeV2(dv, o, s.v2);
+      if (o < 0) return false;
+      s.own = o;
       return true;
    } catch (e) { return false; }
 }

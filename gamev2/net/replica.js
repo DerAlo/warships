@@ -17,6 +17,7 @@
 import { WORLD, TUNE } from '../config.js';
 import { flightTime, horizDist, apexHeight, fallAngle, arcAlt } from '../combat.js';
 import { execAction, AIR_ACTS } from './command.js';
+import { makeV2Client, decodeOwnV2, V2_ACTS, V2_CONS } from './v2.js';
 import { AIR, AIR_TYPES } from '../air.js';
 import {
    SIM_DT, MAX_TURRETS, F_ALIVE, F_SINKING, F_DETECTED, F_SMOKE, F_BLOOM, F_GROUNDED,
@@ -33,7 +34,9 @@ const SIDES = [null, 'player', 'enemy'];
 const TAU = Math.PI * 2;
 const KN = WORLD.KN_TO_MS;
 // events the client already raised itself when it predicted the action
-const PREDICTED = { ammo: 1, consumable: 1, subInfo: 1, dcDrop: 1, depth: 1, aaFocus: 1 };
+const PREDICTED = { ammo: 1, consumable: 1, subInfo: 1, dcDrop: 1, depth: 1, aaFocus: 1, doctrine: 1, radar: 1 };
+// the classic own-ship detail lies behind the V2 one (u16 length first)
+const ownAt = (dv, o) => { try { return o + 2 + dv.getUint16(o, true); } catch (e) { return dv.byteLength; } };
 const HIT_SHAKE = { citadel: 1.4, pen: 0.5, overpen: 0.5, ricochet: 0.5, shatter: 0.5, he: 0.5, sec: 0.5, torp: 1.6, dc: 1, ram: 1.2 };
 
 const angD = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; else if (d < -Math.PI) d += TAU; return d; };
@@ -92,6 +95,10 @@ export function makeReplica(world, o) {
       if (world.shells.length < TUNE.maxShells) world.shells.push(s);
    };
    world.addTorpedo = () => { /* torpedoes appear when the host has launched them */ };
+   // missiles, helicopters, sites, teams, blasts, decoys, the sensor picture (v2.js)
+   const v2 = makeV2Client(world, { sideOf, me: () => me, torp: (id) => torpByHost.get(id) });
+   // an order whose result only the host can make (a missile, a helicopter, a team, decoys)
+   const hostOnly = (a) => V2_ACTS[a[0]] ? (a[0] !== 'g' || !!(me.cfg.weapons && me.cfg.weapons.asw)) : a[0] === 'c' && !!V2_CONS[a[1]];
 
    function act(a) {
       if (!me || !me.alive || ended || lost) return 0;
@@ -99,6 +106,12 @@ export function makeReplica(world, o) {
       if (AIR_ACTS[a[0]]) {
          if (!me.air) return 0;
          if (a[0] === 'W') { a[2] = Math.round(a[2]); a[3] = Math.round(a[3]); }
+         unacked.push(a); actsNew = true;
+         return 1;
+      }
+      // V2 launches: not predicted either (the missile comes with the snapshot, the magazine with the own detail)
+      if (hostOnly(a)) {
+         if (typeof a[1] === 'number' && typeof a[2] === 'number') { a[1] = Math.round(a[1]); a[2] = Math.round(a[2]); }
          unacked.push(a); actsNew = true;
          return 1;
       }
@@ -172,7 +185,7 @@ export function makeReplica(world, o) {
       }
       ack = s.ack;
       // own-ship detail: applied from the newest snapshot, but never over an action still in flight
-      if (me && s.ack >= actBase + unacked.length) decodeOwn(dv, s.own, me, world, lead);
+      if (me && s.ack >= actBase + unacked.length) { decodeOwnV2(dv, s.own, me, world, lead); decodeOwn(dv, ownAt(dv, s.own), me, world, lead); }
    }
 
    function onEvt(d) {
@@ -189,6 +202,7 @@ export function makeReplica(world, o) {
       else if (m.k === 'abort') hostLost('abort');
       else if (m.k === 'more') { if (Array.isArray(m.n)) for (const it of m.n) if (Array.isArray(it) && it[0] === 'n') spawnShip(it); }
       else if (m.k === 'resync') applyResync(m);
+      else if (m.k === 'v2') v2.slow(m);
    }
 
    // Back in a running match: the world was built from `start`; this is what happened since.
@@ -217,6 +231,7 @@ export function makeReplica(world, o) {
       }
       if (Array.isArray(m.sm)) for (const k of m.sm) if (Array.isArray(k)) applyItem(['k', ...k]);
       if (m.me && typeof m.me === 'object') Object.assign(world.stats, m.me);
+      if (m.v2) v2.slow(m.v2);
       if (me && Array.isArray(m.tg)) {
          if (fin(m.tg[0])) me.telegraph = ctl.telegraph = m.tg[0];
          if (fin(m.tg[1])) me.rudderCmd = ctl.rudder = m.tg[1];
@@ -331,19 +346,23 @@ export function makeReplica(world, o) {
       return w ? { speed: w.speedKn * 2.6, speedKn: w.speedKn, range: w.range, detect: AIR.tbDetect } : null;
    }
 
-   // it: ['T', id, ownerId, x, y, heading, tick, run?, air?]  (PvP: a torpedo first seen on its
-   // way, at where it is now; run = the distance it has already run; air: dropped by a plane)
+   // it: ['T', id, ownerId, x, y, heading, tick, run?, kind?, speed?, range?, side?, dmg?]  (PvP: a torpedo
+   // first seen on its way, at where it is now; run = the distance it has already run; kind 1: dropped
+   // by a plane, 2: a homing ASW torpedo with its own speed / range / side, moved by the snapshots)
    function spawnTorp(it) {
-      const owner = byId.get(it[2]);
-      const tc = torpCfg(owner, it[8] === 1);
-      if (!tc) return;
+      const owner = byId.get(it[2]), asw = it[8] === 2 && fin(it[9]) && fin(it[10]);
+      const tc = asw ? { speed: it[9], speedKn: it[9] / KN, range: it[10], detect: 900 } : torpCfg(owner, it[8] === 1);
+      if (!tc || torpByHost.has(it[1])) return;
+      const side = asw && SIDES[it[11]] ? sideOf(SIDES[it[11]]) : owner ? owner.side : null;
+      if (!side) return;
       const t = {
          id: it[1], pos: { x: it[3], y: it[4] }, start: { x: it[3], y: it[4] }, heading: it[5], dir: it[5],
-         speed: tc.speed, speedKn: tc.speedKn, side: owner.side, owner: owner.side, ownerId: owner.id, dmg: 0, flood: 0,
-         range: tc.range - (fin(it[7]) ? it[7] : 0), detect: tc.detect, traveled: 0, age: 0, alive: true, spotted: owner.side === 'player', visibleToOpp: false,
+         speed: tc.speed, speedKn: tc.speedKn, side, owner: side, ownerId: it[2], dmg: 0, flood: 0,
+         range: tc.range - (fin(it[7]) ? it[7] : 0), detect: tc.detect, traveled: 0, age: 0, alive: true, spotted: side === 'player', visibleToOpp: false,
          t0: (it[6] - 1) * SIM_DT, cx: Math.cos(it[5]), cy: Math.sin(it[5]), full: tc.range,
       };
       if (it[8] === 1) t.air = true;
+      if (asw) { t.asw = true; t.dmg = fin(it[12]) ? it[12] : 0; }
       world.torpedoes.push(t);
       torpByHost.set(t.id, t);
    }
@@ -367,7 +386,7 @@ export function makeReplica(world, o) {
       switch (it[0]) {
          case 'e': {
             const d = it[2] || {};
-            if (me && d.srcId === me.id && PREDICTED[it[1]] && !d.forced) break;
+            if (me && d.srcId === me.id && PREDICTED[it[1]] && !d.forced && !(it[1] === 'consumable' && V2_CONS[d.key]) && !(it[1] === 'dcDrop' && hostOnly(['g']))) break;
             world.pushEvent(it[1], d);
             if (me) {
                if (d.dstId === me.id && d.srcId != null && HIT_SHAKE[it[1]]) world.shakeAdd(HIT_SHAKE[it[1]]);
@@ -500,12 +519,12 @@ export function makeReplica(world, o) {
       let i = n - 1;
       while (i > 0 && snaps[i].t > rt) i--;
       const A = snaps[i];
-      if (A.t > rt) { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); }       // before the oldest snapshot
-      else if (i < n - 1) { const B = snaps[i + 1], k = (rt - A.t) / (B.t - A.t); applyShips(A, B, k, A, dt); applySquads(A, B, k, A, dt); }
+      if (A.t > rt) { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); v2.apply(A, A, 0, A); }       // before the oldest snapshot
+      else if (i < n - 1) { const B = snaps[i + 1], k = (rt - A.t) / (B.t - A.t); applyShips(A, B, k, A, dt); applySquads(A, B, k, A, dt); v2.apply(A, B, k, A); }
       else if (n > 1) {                                                  // past the newest: run on a little
          const Q = snaps[n - 2], k = 1 + Math.min(rt - A.t, EXTRAPOLATE) / (A.t - Q.t);
-         applyShips(Q, A, k, A, dt); applySquads(Q, A, k, A, dt);
-      } else { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); }
+         applyShips(Q, A, k, A, dt); applySquads(Q, A, k, A, dt); v2.apply(Q, A, k, A);
+      } else { applyShips(A, A, 0, A, dt); applySquads(A, A, 0, A, dt); v2.apply(A, A, 0, A); }
    }
 
    // The own ship's read-outs between two own-detail updates.
@@ -566,7 +585,8 @@ export function makeReplica(world, o) {
          if (!t.alive) { dead = true; continue; }
          const age = Math.max(0, rt - t.t0);
          t.age = age; t.traveled = t.speed * age;
-         t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled;
+         // a homing torpedo is where the snapshots put it (v2.js)
+         if (!t.asw) { t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled; }
          if (t.traveled >= t.range) { t.alive = false; dead = true; torpByHost.delete(t.id); }
       }
       if (dead) world.torpedoes = T.filter(t => t.alive);
@@ -716,6 +736,7 @@ export function makeReplica(world, o) {
       shellByHost.clear();
       world.torpedoes = []; torpByHost.clear();
       world.squadrons = []; sqByHost.clear(); world.bombs.length = 0; ctl.air = null;
+      v2.reset();
       lost = false;
    }
 
@@ -738,7 +759,7 @@ export function makeReplica(world, o) {
       if (N) for (let i = 0; i < N.n; i++) seen.add(N.id[i]);
       for (const t of world.torpedoes) {
          t.traveled = t.speed * Math.max(0, rt - t.t0);
-         t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled;
+         if (!t.asw) { t.pos.x = t.start.x + t.cx * t.traveled; t.pos.y = t.start.y + t.cy * t.traveled; }
          if (t.full) { t.traveled += t.full - t.range; t.range = t.full; }
       }
       for (const k of ['update', 'addShell', 'addTorpedo']) delete world[k];
@@ -748,8 +769,10 @@ export function makeReplica(world, o) {
       const dv = lastDv, off = lastOwn;
       return {
          tick, seen, torps: world.torpedoes.slice(),
+         // the missiles the newest snapshot carried (restoreV2 drops the ones that are gone since the full state)
+         mids: N ? new Set(N.v2.mid.subarray(0, N.v2.nm)) : null,
          arrived: arrived.map(it => { const c = it.slice(); c[3] = sideOf(it[3]); return c; }),
-         own() { if (dv && me) decodeOwn(dv, off, me, world, 0); },
+         own() { if (dv && me) { decodeOwnV2(dv, off, me, world, 0); decodeOwn(dv, ownAt(dv, off), me, world, 0); } },
       };
    }
 
