@@ -460,7 +460,8 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
 .m3r-teams table { width:100%; border-collapse:collapse; font:12px var(--font); }
 .m3r-teams td { padding:4px; border-bottom:1px solid var(--rule); white-space:nowrap; }
 .m3r-teams tr:first-child td { font-size:9.5px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-3); border-bottom-color:var(--ink-2); }
-.m3r-teams td.n { overflow:hidden; text-overflow:ellipsis; max-width:130px; }
+.m3r-teams > div { min-width:0; }
+.m3r-teams td.n { overflow:hidden; text-overflow:ellipsis; max-width:104px; }
 .m3r-teams td.d { text-align:right; font-variant-numeric:tabular-nums; }
 .m3r-teams tr.dead td { color:var(--ink-3); } .m3r-teams tr.dead td.n { text-decoration:line-through; }
 .m3r-teams tr.me td { font-weight:700; background:rgba(241,194,50,.3); }
@@ -856,9 +857,9 @@ export class Menu3D {
       const tile = (v, l, hl) => `<div class="m3r-st ${hl ? 'hl' : ''}"><b>${v}</b><span>${l}</span></div>`;
       const acc = st.shotsFired ? Math.round((st.hits || 0) / st.shotsFired * 100) + ' %' : '—';
       const tiles = [
-         tile(fmtInt(st.dmg), 'Schaden', true), tile(st.kills || 0, 'Versenkt', true), tile(st.citadels || 0, 'Zitadelltreffer'),
-         tile(st.fires || 0, 'Brände gelegt'), tile(st.floods || 0, 'Wassereinbrüche'), tile(`${st.hits || 0} / ${st.shotsFired || 0}`, 'Treffer / Schüsse'),
-         tile(acc, 'Trefferquote'), tile(st.torpHits || 0, 'Torpedotreffer'), tile(fmtInt(st.spottingDmg), 'Schaden an gemeldeten Zielen'),
+         tile(fmtInt(st.dmg), 'Schaden', true), tile(st.kills || 0, 'Versenkt', true), tile(`${st.ssmHits || 0} / ${st.ssmFired || 0}`, 'Flugkörper Treffer / Starts'),
+         tile(st.missilesDown || 0, 'Flugkörper abgewehrt'), tile(st.sitesDown || 0, 'Landstellungen zerstört'), tile(`${st.hits || 0} / ${st.shotsFired || 0}`, 'Geschütz Treffer / Schüsse'),
+         tile(acc, 'Trefferquote Geschütz'), tile(st.torpHits || 0, 'Torpedotreffer'), tile(fmtInt(st.spottingDmg), 'Schaden an gemeldeten Zielen'),
          tile(fmtInt(st.tanked), 'Erhaltener Schaden'), tile(fmtInt(st.potential), 'Unter Feuer (Schaden)'), tile(fmtInt(st.healed), 'Repariert'),
       ].join('');
       const rib = extra.ribbons ? RIBBON_ORDER.filter(k => extra.ribbons.get(k)).map(k => `<div>${esc(extra.ribbonNames?.[k] || k)}<b>×${extra.ribbons.get(k)}</b></div>`).join('') : '';
@@ -877,7 +878,7 @@ export class Menu3D {
       const pvRow = (r) => `<tr class="${r[4] ? '' : 'dead'} ${r[0] === p?.captain ? 'me' : ''}"><td class="${r[1] === pv.my ? 'm3-ally' : 'm3-enemy'}">T${r[1]}</td><td class="n">${esc(r[0])}</td>
          <td class="d">${fmtInt(r[2])}</td><td class="d">${r[3]}</td><td class="d">${r[4] ? 'schwimmt' : 'versenkt'}</td></tr>`;
       const pvBox = pv ? `<div class="m3-h" data-pvp-win="${pv.win}"><span>Kapitäne · Team ${pv.win} gewinnt</span></div>
-         <table data-pvp>${head}${[...pv.pl].sort((x, y) => (x[1] === pv.my ? 0 : 1) - (y[1] === pv.my ? 0 : 1) || y[2] - x[2]).map(pvRow).join('')}</table>` : '';
+         <div class="m3r-teams" style="grid-template-columns:1fr"><table data-pvp>${head}${[...pv.pl].sort((x, y) => (x[1] === pv.my ? 0 : 1) - (y[1] === pv.my ? 0 : 1) || y[2] - x[2]).map(pvRow).join('')}</table></div>` : '';
       this.resRoot.className = 'm3r ' + (win ? 'win' : 'lose');
       this.resRoot.innerHTML = `
          <div class="m3r-sheet">
