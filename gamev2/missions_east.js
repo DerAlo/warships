@@ -67,6 +67,8 @@ export function eastMissions(H) {
       return o ? { ...t, ...(typeof o === 'function' ? o(t, w.difficultyKey) : o) } : t;
    };
    const human = (s) => !!(s && (s.isPlayer || s.human));
+   // co-op: human captains beyond the first (world.net is set after setup, so ask at the event, not in setup)
+   const extraCaptains = (w) => Math.max(0, (w.net && w.net.humans ? w.net.humans.length : 1) - 1);
    const live = (w, id) => { const s = w.shipById(id); return s && s.alive ? s : null; };
    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const hash = (w, salt) => {
@@ -136,6 +138,14 @@ export function eastMissions(H) {
       }
       return free;
    }
+   // The time limit is part of the order: the objective names it (lim) and the radio counts down the
+   // last two minutes (clock, from update), so a mission never just stops.
+   const lim = (w) => ` (Zeitlimit ${mmss((defs.find(d => d.id === w.mission.id) || {}).timeLimit || 0)})`;
+   function clock(w, S, from, text) {
+      for (const k of [120, 60]) if (w.timeLeft <= k && (S.clockSaid || 999) > k) { S.clockSaid = k; radio(w, from, text(k === 120 ? 'zwei Minuten' : 'eine Minute'), 'warn'); }
+   }
+   // why the escorts hold their fire (coordinate): said once, shortly after the start
+   const holdLine = (w, S, t, from, text) => later(S, t, () => radio(w, from, text));
    const ownLost = (w) => w.roster.some(s => s.side === 'player' && s.type !== 'TR' && !s.alive && !s.escaped);
    const release = (s, hunt) => { if (!s || !s.ai) return; s.ai.passive = false; s.ai.anchored = false; delete s.ai.patrol; if (hunt != null) { s.ai.huntId = hunt; s.ai.press = true; } };
 
@@ -188,7 +198,7 @@ export function eastMissions(H) {
       }
    }
 
-   return [
+   const defs = [
       // --------------------------------------------------------------------- 6. Barentssee
       {
          id: 'barents', group: 'ops', name: 'Barentssee', subtitle: 'Operation 6 · Trägerverband unter Beschuss',
@@ -228,6 +238,7 @@ export function eastMissions(H) {
             S.phase = 0;
             const raid = (type) => { const f = w.sites.find(x => x.id === S.fieldId), F = live(w, S.fordId); if (f && f.alive && F) launchSquadron(w, f, type, { kind: 'strike', targetId: F.id }); };
             later(S, 5, () => radio(w, 'Flottenkommando', 'Gegnerischer Verband 26 km östlich. Feuer nur zur Abwehr – halten Sie den Schirm um die Ford.'));
+            holdLine(w, S, 14, 'Verbandsführer', 'Die Geleitschiffe halten ihre Seezielflugkörper zurück, bis das Flaggschiff den Gegenschlag eröffnet – dann feuert der Verband mit.');
             later(S, T.salvoAt - 40, () => { radio(w, 'Aufklärung', 'Startvorbereitungen beim Gegner erkannt. Bomber vom Küstenflugplatz gestartet.', 'warn'); raid('tb'); });
             later(S, T.salvoAt, () => {
                radio(w, 'Luftlage', 'Flugkörperalarm. Große Salve aus Ost, Ziel Träger. Alle Einheiten Abwehr frei.', 'warn');
@@ -244,7 +255,7 @@ export function eastMissions(H) {
             if (S.phase === 1 && !busy && w.time - S.salvoT > 12 && !w.missiles.some(m => m.alive && m.kind === 'ssm' && m.side === 'enemy')) {
                S.phase = 2;
                setObj(w, 'salvo', 'done');
-               objective(w, 'strike', 'Gegenschlag: Schalten Sie den Schlachtkreuzer Pjotr Weliki aus');
+               objective(w, 'strike', 'Gegenschlag: Schalten Sie den Schlachtkreuzer Pjotr Weliki aus, bevor sich sein Verband absetzt' + lim(w));
                radio(w, 'Flottenkommando', 'Salve überstanden. Feuerfreigabe erteilt – der Verband feuert mit Ihnen, sobald Sie den Gegenschlag eröffnen.');
                // the enemy group closes to missile range of the carrier and fights there
                const F0 = live(w, S.fordId), pj0 = w.shipById(S.pjId);
@@ -256,6 +267,7 @@ export function eastMissions(H) {
                }
             }
             coordinate(w, S, { hold: S.phase < 2, deck: w.time >= T.salvoAt - 40 && S.phase < 2 ? false : true });
+            clock(w, S, 'Aufklärung', (t) => `Der gegnerische Verband bereitet das Absetzen vor – noch ${t} für den Gegenschlag auf den Schlachtkreuzer.`);
             const F = w.shipById(S.fordId);
             if (F && F.alive && F.hp < F.maxHP * 0.6) setObj(w, 'deck', 'failed');
          },
@@ -309,7 +321,7 @@ export function eastMissions(H) {
                S.boats.push(add(w, 'Typ022', 'enemy', P(12500 + k * 900, a * (3000 + k * 1200)), Math.PI, { telegraph: 0, ai: { anchored: true } }).id);
             }
             objective(w, 'radar', 'Blenden Sie das Radar: Radarstation Mittelriff zerstören');
-            objective(w, 'bat', 'Schalten Sie die Küstenbatterien aus (0/2)');
+            objective(w, 'bat', 'Schalten Sie die Küstenbatterien aus (0/2)' + lim(w));
             objective(w, 'sam', 'Zerstören Sie beide Flugabwehrstellungen (0/2)', { optional: true });
             objective(w, 'screen', 'Verlieren Sie kein eigenes Schiff', { optional: true });
             S.blind = false; S.out = false;
@@ -322,9 +334,13 @@ export function eastMissions(H) {
                if (n) radio(w, 'Lagezentrum', 'Schnellboote laufen hinter dem Mittelriff aus. Rechnen Sie mit Flugkörpern aus Ost.', 'warn');
             };
             later(S, 5, () => radio(w, 'Lagezentrum', 'Die Riffe liegen 22 km voraus. Erst das Radar – solange es sendet, kommt kaum ein Marschflugkörper durch.'));
+            holdLine(w, S, 14, 'Verbandsführer', 'Der Verband wartet auf Ihre Feuereröffnung: Die Geleitschiffe schießen erst, wenn das Flaggschiff feuert, und stellen das Feuer zwei Minuten nach Ihrem letzten Schuss wieder ein.');
             later(S, T.boatsAt, () => S.boatsOut());
          },
-         update(w, dt, S) { coordinate(w, S, {}); },
+         update(w, dt, S) {
+            coordinate(w, S, {});
+            clock(w, S, 'Flottenkommando', (t) => S.relief ? `Noch ${t}: Der Entsatzverband muss abgewehrt sein, sonst hält er die Riffe.` : `Noch ${t}: Radar und Batterien müssen fallen, sonst bleiben die Seewege gesperrt.`);
+         },
          onSiteDestroyed(w, site, by, S) {
             const dead = (list) => list.filter(id => !w.sites.find(s => s.id === id).alive).length;
             if (site.id === S.radarId) {
@@ -334,7 +350,7 @@ export function eastMissions(H) {
                radio(w, 'Lagezentrum', 'Radar ist aus. Die Flugabwehr feuert nur noch mit eigenem Feuerleitradar – jetzt die Batterien.');
                S.boatsOut();
             }
-            objText(w, 'bat', `Schalten Sie die Küstenbatterien aus (${dead(S.bat)}/2)`);
+            objText(w, 'bat', `Schalten Sie die Küstenbatterien aus (${dead(S.bat)}/2)` + lim(w));
             objText(w, 'sam', `Zerstören Sie beide Flugabwehrstellungen (${dead(S.sam)}/2)`);
             if (dead(S.sam) >= 2) setObj(w, 'sam', 'done');
             if (dead(S.bat) >= 2) {
@@ -344,9 +360,11 @@ export function eastMissions(H) {
             // radar and batteries are out: a relief group comes in from the east
             if (S.blind && dead(S.bat) >= 2 && !S.relief) {
                const T = tune(w, 'reefs'), own = S.own.map(id => live(w, id)).filter(Boolean);
-               S.relief = T.relief.map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
-                  { minDist: 14000, telegraph: 4, hpMult: T.reliefHp * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
-               objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')');
+               // co-op: a half-strength frigate joins the relief group per further human captain (two at most:
+               // measured with three, four captains ran out of time)
+               S.relief = T.relief.concat(Array(Math.min(2, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
+                  { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : 0.5) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
+               objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
             }
          },
@@ -354,7 +372,7 @@ export function eastMissions(H) {
             if (ship.side === 'player') { setObj(w, 'screen', 'failed'); return; }
             if (!S.relief || !S.relief.includes(ship.id)) return;
             const n = S.relief.filter(id => !live(w, id)).length;
-            objText(w, 'relief', 'Wehren Sie den Entsatzverband ab (' + n + '/' + S.relief.length + ')');
+            objText(w, 'relief', 'Wehren Sie den Entsatzverband ab (' + n + '/' + S.relief.length + ')' + lim(w));
             if (n < S.relief.length) return;
             setObj(w, 'relief', 'done');
             if (!ownLost(w)) setObj(w, 'screen', 'done');
@@ -395,7 +413,7 @@ export function eastMissions(H) {
             addSite(w, 'radar', 'enemy', P(17000, 1500), { name: 'Küstenradar' });
             S.fieldId = field.id;
             if (T.sub) S.subId = add(w, 'Yuan', 'enemy', P(-2500, 2500), -Math.PI / 2, { depth: 1, telegraph: 1, ai: { huntId: ships[0].id } }).id;
-            objective(w, 'conv', 'Bringen Sie mindestens zwei Versorgungsschiffe in den Zielraum (0/2)');
+            objective(w, 'conv', 'Bringen Sie mindestens zwei Versorgungsschiffe in den Zielraum (0/2)' + lim(w));
             objective(w, 'all', 'Bringen Sie alle drei Schiffe durch', { optional: true });
             if (T.sub) objective(w, 'sub', 'Versenken Sie das U-Boot auf der Route', { optional: true });
             const wave = (list, from, text) => {
@@ -412,6 +430,7 @@ export function eastMissions(H) {
          },
          update(w, dt, S) {
             const left = S.conv.map(id => live(w, id)).filter(Boolean);
+            clock(w, S, 'Konvoiführer', (t) => `Noch ${t}, dann schließt sich die Blockade vor dem Zielraum. Bleiben Sie dicht bei uns, damit wir Fahrt halten.`);
             // the freighters only run while a human captain is close to the leading ship
             const lead = left[0];
             const near = !lead || w.ships.some(s => s.alive && s.side === 'player' && human(s) && dist(s.pos, lead.pos) < (S.held ? 5000 : 7000));
@@ -425,7 +444,7 @@ export function eastMissions(H) {
                if (!inZone(f, S.goal)) continue;
                w.removeShip(f, 'arrived');
                S.arrived++;
-               objText(w, 'conv', `Bringen Sie mindestens zwei Versorgungsschiffe in den Zielraum (${Math.min(2, S.arrived)}/2)`);
+               objText(w, 'conv', `Bringen Sie mindestens zwei Versorgungsschiffe in den Zielraum (${Math.min(2, S.arrived)}/2)` + lim(w));
                radio(w, f.name, 'Zielraum erreicht. Danke für das Geleit.');
             }
             if (S.arrived + S.lost >= 3 || (S.arrived >= 2 && S.lost >= 1)) {
@@ -479,6 +498,7 @@ export function eastMissions(H) {
             objective(w, 'deck', 'Halten Sie die Ford über 70 % Rumpfstärke', { optional: true });
             S.hot = false; S.found = false; S.hotAt = T.auto;
             later(S, 5, () => radio(w, 'Flottenkommando', 'Funk- und Radarstille im Verband. Jäger und Hubschrauber klären nach Osten auf.'));
+            holdLine(w, S, 14, 'Verbandsführer', 'Der Verband hält Feuerdisziplin: Die Geleitschiffe schießen erst, wenn das Flaggschiff den Angriff eröffnet – ein früher Schuss würde unsere Position verraten.');
             later(S, 70, () => {
                if (S.found) return;
                const n = S.area.y < -6000 ? 'Südost' : S.area.y > 6000 ? 'Nordost' : 'Ost';
@@ -490,10 +510,11 @@ export function eastMissions(H) {
             const T = tune(w, 'philsea'), sd = w.shipById(S.sdId);
             if (!sd) return;
             coordinate(w, S, {});
+            clock(w, S, 'Aufklärung', (t) => `Noch ${t}, dann ist der Verband der Shandong außer Reichweite.`);
             if (!S.found && S.foes.some(id => { const s = live(w, id); return s && s.detected; })) {
                S.found = true;
                setObj(w, 'find', 'done');
-               objective(w, 'strike', 'Setzen Sie den Flugbetrieb der Shandong außer Gefecht');
+               objective(w, 'strike', 'Setzen Sie den Flugbetrieb der Shandong außer Gefecht, bevor ihr Verband abläuft' + lim(w));
                for (const id of S.own) { const s = live(w, id); if (s && !human(s) && s.ai && s.id !== S.fordId) { delete s.ai.escortId; s.ai.huntId = S.sdId; s.ai.press = true; } }   // the escorts close in on the carrier
                if (!S.hot) {
                   setObj(w, 'first', 'done');
@@ -607,6 +628,7 @@ export function eastMissions(H) {
             };
             later(S, 5, () => radio(w, 'Flottenkommando', `Der Countdown läuft: ${mmss(w.timeLeft)}. Erst Radar und Flugabwehr – dann kann die Drohne die Rampe im Stollen aufklären.` +
                (S.surface ? ' Rechnen Sie mit einem Gegenschlag der Rampe auf Ihren Verband.' : '')));
+            if (S.surface) holdLine(w, S, 14, 'Verbandsführer', 'Die Geleitschiffe warten auf Ihre Freigabe: Sie eröffnen das Feuer erst, wenn das Flaggschiff schießt.');
             later(S, 22, () => radio(w, 'Luftlage', 'Start von der Insel erkannt. Flugbahn führt in das geräumte Sperrgebiet im Norden – kein Schiff, kein Land in der Nähe.', 'warn'));
             later(S, 34, () => { S.warnId = addBlast(w, { x: S.test.x, y: S.test.y, r: { destroyed: 700, heavy: 1700, shock: 3200 }, delay: 8, label: 'Detonation im Sperrgebiet' }).id; });
          },
@@ -686,4 +708,5 @@ export function eastMissions(H) {
          timeout(w, S) { if (!S.finalId || w.blasts.every(b => b.id !== S.finalId)) w.end(false, 'Der Countdown ist abgelaufen – die Rampe hat gestartet.'); },
       },
    ];
+   return defs;
 }

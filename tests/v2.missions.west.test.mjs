@@ -385,6 +385,14 @@ test('blacksea: sinking the cruiser wins, the battery is optional, the clock los
    assert.equal(opStars(w), 1, 'one optional objective is open');
    const t = play('blacksea', 'normal', 5, 'passive');
    assert.match(t.result.reason, /Zeit ist abgelaufen/);
+   // the limit is stated in the objective and counted down on the radio, the hold-fire is explained once
+   const said = (part) => t.events.filter(e => e.type === 'objective' && e.text.includes(part)).length;
+   assert.match(obj(t, 'cruiser').text, /Zeitlimit 11:00/);
+   assert.equal(said('noch zwei Minuten'), 1);
+   assert.equal(said('noch eine Minute'), 1);
+   const w0 = new World('normal', { mission: 'blacksea', ship: 'Sachsen', seed: 5 });
+   fast(w0, 30);
+   assert.equal(w0.events.filter(e => e.type === 'objective' && e.text.includes('halten die Seezielflugkörper zurück')).length, 1);
 });
 
 test('giuk: boats are reported one by one, each outside torpedo range, with a datum on the map', () => {

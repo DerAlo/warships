@@ -444,7 +444,7 @@ export function westMissions(H) {
             S.radar = addSite(w, 'radar', 'enemy', P(14800, 13600), { name: 'Radarstation Kap' });
             S.tick = 0; S.called = -99; S.calls = 0; S.best = 0; S.seen = new Set(); S.free = false;
             S.needSalvo = by(w, 6, 8, 8);
-            objective(w, 'cruiser', 'Versenken Sie den Lenkwaffenkreuzer');
+            objective(w, 'cruiser', 'Versenken Sie den Lenkwaffenkreuzer, bevor Verstärkung die Zufahrt schließt (Zeitlimit 11:00)');
             objective(w, 'salvo', `Koordinierte Salve: ${S.needSalvo} Flugkörper von mindestens zwei Schiffen gleichzeitig im Anflug auf den Kreuzer`, { optional: true });
             objective(w, 'battery', 'Schalten Sie die Küstenbatterie aus', { optional: true });
             w.score = { kind: 'count', player: 0, enemy: 0, target: 1 };
@@ -475,6 +475,11 @@ export function westMissions(H) {
             }
             if ((S.tick -= dt) > 0) return;
             S.tick = 0.5;
+            // the limit is part of the order: the radio counts down the last two minutes
+            for (const k of [120, 60]) if (w.timeLeft <= k && (S.clockSaid || 999) > k) {
+               S.clockSaid = k;
+               radio(w, 'Operationszentrale', `Gegnerische Verstärkung läuft an – noch ${k === 120 ? 'zwei Minuten' : 'eine Minute'}, um den Kreuzer zu versenken.`, 'warn');
+            }
             // hold fire between the calls (released for good when the flagship has no missile left)
             const lead = w.player;
             if (!S.free && (!lead.alive || !(lead.cfg.weapons.ssm || []).some(x => lead.mag[x.type] > 0))) {

@@ -430,6 +430,37 @@ test('east/countdown: a submarine puts the team ashore and the charges destroy t
    }
 });
 
+// ------------------------------------------------------------------------- hold-fire line, time limit
+test('east: the escorts\' hold-fire is explained once; the time limit is stated and counted down', () => {
+   const said = (w, part) => w.events.filter(e => e.type === 'objective' && e.text.includes(part)).length;
+   const lines = { barents: 'halten ihre Seezielflugkörper zurück', reefs: 'wartet auf Ihre Feuereröffnung', philsea: 'hält Feuerdisziplin', countdown: 'warten auf Ihre Freigabe' };
+   for (const id in lines) {
+      const w = mk(id);
+      step(w, 12);
+      assert.equal(said(w, lines[id]), 0, id + ': not in the first seconds');
+      step(w, 50);
+      assert.equal(said(w, lines[id]), 1, id + ': hold-fire line once');
+   }
+   // a submarine has no escorts to wait for
+   const sub = mk('countdown', { ship: 'U212' });
+   step(sub, 30);
+   assert.equal(said(sub, lines.countdown), 0);
+   const mmss = (t) => Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+   for (const id of ['barents', 'reefs', 'strait', 'philsea']) {
+      const w = mk(id), S = w._script, limit = 'Zeitlimit ' + mmss(def(id).timeLimit);
+      if (id === 'barents') until(w, 400, () => !!obj(w, 'strike'));
+      else step(w, 1);
+      if (id === 'philsea') { w.shipById(S.foes[0]).detected = true; step(w, 0.1); }
+      if (w.phase !== 'playing') continue;
+      assert.ok(w.mission.objectives.some(o => !o.optional && o.state !== 'done' && o.text.includes(limit)), id + ': an open objective names the limit');
+      w.timeLeft = 120.5; step(w, 2);
+      assert.equal(said(w, 'zwei Minuten'), 1, id);
+      w.timeLeft = 60.5; step(w, 5);
+      assert.equal(said(w, 'zwei Minuten'), 1, id);
+      assert.equal(said(w, 'eine Minute'), 1, id);
+   }
+});
+
 // ------------------------------------------------------------------------------------ balance table
 test('east: balance table (EAST_BALANCE=<runs>, optional ONLY, SHIP, DIFFS, MODES)', { skip: !process.env.EAST_BALANCE }, () => {
    const runs = +process.env.EAST_BALANCE || 30;
