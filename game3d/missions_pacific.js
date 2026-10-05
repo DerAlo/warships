@@ -42,9 +42,9 @@ export function pacificMissions(H) {
             const S = w._script, key = w.difficulty.key;
             S.maxLoss = 3;
             S.jd = w.difficulty.botDmg * 0.34;          // Japanese gunnery: armour-piercing shells, poor spotting
-            S.breakAt = key === 'easy' ? 0.8 : key === 'hard' ? 0.66 : 0.74;   // a cruiser this battered turns away
+            S.breakAt = key === 'easy' ? 0.8 : key === 'hard' ? 0.72 : 0.74;   // a cruiser this battered turns away
             S.aggro = 1.6;                               // they close to finish the carriers instead of sniping from the horizon
-            const cveHP = key === 'easy' ? 0.44 : key === 'hard' ? 0.3 : 0.35;
+            const cveHP = key === 'easy' ? 0.44 : key === 'hard' ? 0.34 : 0.35;
             const anchor = P(-2000, -2500), route = [P(5500, 5000), P(2500, 10500), P(-5000, 14500)];
             S.cves = [['USS Fanshaw Bay', 0, 0], ['USS White Plains', 1100, 700], ['USS St. Lo', -300, 1300], ['USS Kalinin Bay', -1100, -500], ['USS Gambier Bay', 500, -1200]]
                .map(([name, dx, dy]) => add(w, 'Enterprise', 'player', P(anchor.x + dx, anchor.y + dy), 0.78,
