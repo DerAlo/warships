@@ -65,6 +65,7 @@ const state = S => S.ev(() => {
       decoys: w.decoys.length, jam: !!p.jamming, mag: { ...p.mag }, map: window.__ctl().mapOpen, alive: p.alive };
 });
 // a slow headless frame can delay a launch past a fixed wait, so wait for the magazine instead
+const ready = S => S.waitFor(() => document.querySelector('#weapons .wslot[data-w=ssm]')?.classList.contains('loaded'), 15000);
 const launched = (S, n) => S.waitFor(n => window.__world().player.mag.harpoon <= n, 4000, n);
 // screen position of a hostile land position on the open tactical map
 const sitePoint = S => S.ev(async () => {
@@ -114,7 +115,7 @@ if (ONLY.includes('desktop')) {
 
    await S.key('Digit2');
    check(T + '2 selects the anti-ship missile', (await state(S)).mode === 'ssm');
-   await S.key('Space'); await launched(S, 7);
+   await ready(S); await S.key('Space'); await launched(S, 7);
    s = await state(S);
    check(T + 'Space launches it (missile in the world, magazine 8 -> 7)', s.own.includes('ssm') && s.mag.harpoon === 7, { own: s.own, mag: s.mag });
    await S.shot('desktop-1-ssm');
@@ -198,7 +199,7 @@ async function touchRun(tag, w, h) {
 
    await S.tap('#weapons .wslot[data-w=ssm]');
    check(T + 'tap on the missile slot selects it', (await state(S)).mode === 'ssm');
-   await S.tap('#tu-fire'); await launched(S, 7);
+   await ready(S); await S.tap('#tu-fire'); await launched(S, 7);
    s = await state(S);
    check(T + 'fire button launches (8 -> 7)', s.own.includes('ssm') && s.mag.harpoon === 7, s.mag);
    await S.tap('#mx-radar');
@@ -267,11 +268,13 @@ if (ONLY.includes('ships')) {
       check(T + 'weapon bar matches the loadout', want.every(x => got.includes(x)) && (want.length > 0 || true), L.slots);
       check(T + 'nothing overlaps', !L.hits.length && !L.out.length, { hits: L.hits, out: L.out });
       const before = await state(S);
-      for (const k of keys) await S.key(k);
+      // select and fire in one slow headless frame would drop the launch, so let the selection land first
+      for (const k of keys) { if (ship === 'Braunschweig' && k === 'Space') await ready(S); await S.key(k); await S.wait(250); }
+      if (ship === 'Braunschweig') await S.waitFor(() => window.__world().missiles.some(m => m.kind === 'ssm'), 4000).catch(() => {});
       await S.wait(400);
       const s = await state(S);
       if (ship === 'Boghammar') check(T + '4 + Space fires a rocket salvo', s.own.filter(k => k === 'rocket').length >= 6 && s.mode === 'rockets', s.own.length);
-      if (ship === 'Braunschweig') check(T + '2 + Space launches', s.own.includes('ssm'), s.own);
+      if (ship === 'Braunschweig') check(T + '2 + Space launches', s.own.includes('ssm'), { own: s.own, mode: s.mode, mag: s.mag, msgs: await S.ev(() => [...document.querySelectorAll('#hud *')].filter(e => !e.children.length && e.textContent.trim().length > 8 && e.offsetParent).map(e => e.textContent.trim()).slice(0, 30)) });
       if (ship === 'U212') check(T + '2 is refused (no missiles), 5 selects torpedoes', s.mode === 'torp' && !s.own.length, { mode: s.mode });
       if (ship === 'Ford') check(T + 'R and V work on the carrier', s.radar !== before.radar && s.doc !== before.doc, { radar: s.radar, doc: s.doc });
       await S.shot('ship-' + ship);

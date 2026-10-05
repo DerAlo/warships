@@ -883,12 +883,14 @@ function applyControls(dt) {
    if (net) { cmd.air = airui.netCtl; net.control(cmd); }   // air: the flight a net client flies (airui.js)
    turretCache = computeTurrets(p);
 
+   // a press in a frame without a sim step would be gone by the next one (endFrame clears it)
+   const click = input.mouse.clicked || firePending; firePending = false;
    if (airui.flying) return;            // squadron view: the ship holds fire
    if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
    // Ctrl held = secondary target picking, never a salvo
-   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked) && !input.down('CTRL')) fireGuns();
-   if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
+   if (ctl.mode === 'guns' && (input.mouse.down || click) && !input.down('CTRL')) fireGuns();
+   if (ctl.mode === 'torp' && click) { input.mouse.clicked = false; fireTorps(); }
    if (simv.oldSecondaries) autoSecondaries();
 }
 
@@ -1573,6 +1575,7 @@ function tickPhoto() {
 // ------------------------------------------------------------------ main loop
 let lastT = performance.now() / 1000;
 let miniT = 0;
+let firePending = false;   // fire press waiting for the next sim step
 
 function frame() {
    requestAnimationFrame(frame);
@@ -1611,6 +1614,7 @@ function frame() {
             acc -= SIM_DT; steps++;
          }
          if (steps === 15) acc = 0;
+         if (!live) firePending = steps === 0 && (firePending || input.mouse.clicked);
          if (P) {
             processEvents(dt);
             updateIntel();
