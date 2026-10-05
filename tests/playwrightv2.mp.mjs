@@ -169,8 +169,10 @@ if (ONLY.includes('pvp')) {
    check(T + 'each page sees itself as the "player" side', a.side === 'player' && b.side === 'player');
    await shot(A, 'pvp-2-start'); await shot(B, 'pvp-2-start');
    // both fire an anti-ship missile through the keys
-   for (const P of [A, B]) { await P.bringToFront(); await P.keyboard.press('Digit2'); await sleep(P, 150); await P.keyboard.press('Space'); }
-   check(T + 'both missiles reach the host world', await wait(A, ([x, y]) => { const w = window.__world(); return [x, y].every(id => w.missiles.some(m => m.ownerId === id)); }, [a.me, b.me], 10000));
+   for (const P of [A, B]) { await P.bringToFront(); await P.keyboard.press('Digit2'); await wait(P, () => window.__weaponSel() === 'ssm', null, 4000); await sleep(P, 150); await P.keyboard.press('Space'); }
+   check(T + 'both missiles reach the host world', await wait(A, ([x, y]) => { const w = window.__world(); return [x, y].every(id => w.missiles.some(m => m.ownerId === id)); }, [a.me, b.me], 10000),
+      { host: await A.evaluate(() => ({ sel: window.__weaponSel(), own: window.__world().missiles.map(m => m.ownerId), mag: window.__world().player.mag })),
+        guest: await B.evaluate(() => ({ sel: window.__weaponSel(), mag: window.__world().player.mag, focus: document.hasFocus() })), ids: [a.me, b.me] });
    check(T + 'the guest sees both launches', await wait(B, () => window.__world().missiles.filter(m => m.kind === 'ssm').length >= 1, null, 8000));
    // damage on the guest's ship, from the host's ship
    const hp0 = await B.evaluate(() => window.__world().player.hp);
