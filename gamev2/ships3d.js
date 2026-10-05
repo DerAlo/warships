@@ -10,6 +10,9 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { patchAtmosphere, GeoBuilder, clamp, lerp, smoothstep, lin, shade, mulberry32 } from './gfxcommon3d.js';
 import { GFX } from './gfxquality.js';
+// Today's warships (cfg.model = 'burke', 'slava', ...) are built by ships3d_modern.js; see the
+// contract at the top of that file. Ships without a known cfg.model take the WW2 path below.
+import { isModernModel, buildModernHull, buildGunGeo, buildSpinnerGeo } from './ships3d_modern.js';
 
 const LEGACY_DIMS = {
    DD: { L: 118, beam: 11.5, type: 'DD' }, LC: { L: 175, beam: 17.5, type: 'CL' },
@@ -63,8 +66,11 @@ const HULL_PARAMS = {
 };
 
 function makeHullShape(d) {
-   const P = HULL_PARAMS[d.type] || HULL_PARAMS.CA;
+   // d.P: explicit hull form (modern models); adds fcU / fcH (where the forecastle break sits and
+   // how high it is) and qd = [u, drop] (quarterdeck lowered by drop * D aft of u)
+   const P = d.P || HULL_PARAMS[d.type] || HULL_PARAMS.CA;
    const { L, B, T, D } = d;
+   const fcU = P.fcU ?? 0.2, fcH = P.fcH ?? 0.38;
    const hb = B / 2;
    const wl = (u) => u >= 0 ? Math.pow(Math.max(0, 1 - Math.pow(u, P.pb)), 0.62)
       : P.tr + (1 - P.tr) * Math.sqrt(Math.max(0, 1 - Math.pow(-u, 3.2)));
@@ -72,7 +78,8 @@ function makeHullShape(d) {
       : Math.min(1, (P.tr + 0.08) + (0.92 - P.tr) * Math.sqrt(Math.max(0, 1 - Math.pow(-u, 3.6))));
    const deckY = (u) => {
       let y = D + (u > 0 ? D * P.sheer * u * u : D * 0.08 * u * u);
-      if (P.fc) y += D * 0.38 * smoothstep(0.2, 0.28, u);   // raised forecastle
+      if (P.fc) y += D * fcH * smoothstep(fcU, fcU + 0.08, u);   // raised forecastle
+      if (P.qd) y -= D * P.qd[1] * (1 - smoothstep(P.qd[0] - 0.04, P.qd[0], u));
       return y;
    };
    const keel = (u) => -T * (u > 0 ? 1 - 0.92 * smoothstep(0.84, 1.0, u) : 1 - 0.8 * smoothstep(0.72, 1.0, -u));
@@ -956,7 +963,7 @@ varying vec3 vLocal;
 varying vec3 vLN;
 uniform vec2 uBoot;
 uniform float uDeck;
-uniform vec4 uPaint;   // x scheme, y half length, z seed
+uniform vec4 uPaint;   // x scheme, y half length, z seed, w 0 = WW2 ship, 1 = modern warship, 2 = modern merchant
 float sHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float sNoise(vec2 p) {
    vec2 i = floor(p), f = fract(p);
@@ -989,6 +996,13 @@ vec3 shipPaint(vec3 c, vec3 p, float hullSide) {
       return mix(vec3(0.04, 0.058, 0.094), c, max(1.0 - hullSide, smoothstep(-aw, aw, p.y - uDeck * 0.985)));
    }
    float sd = uPaint.z;
+   if (sc > 4.5) {
+      // PLA Navy fast attack craft: angular blue / dark blue / white splinters
+      float a = splinter(p.xy, 6.5, 0.9, sd, 0.5), b2 = splinter(p.xy, 4.6, -1.4, sd + 3.7, 0.5), c2 = splinter(p.xz, 8.0, 0.5, sd + 8.1, 0.6);
+      c = mix(c, vec3(0.045, 0.12, 0.26), a * (1.0 - b2));
+      c = mix(c, vec3(0.012, 0.03, 0.075), b2 * c2);
+      return mix(c, vec3(0.62, 0.66, 0.7), (1.0 - a) * (1.0 - c2) * b2);
+   }
    float A = splinter(p.xy, 31.0, 1.25, sd, 0.5), B = splinter(p.xy, 23.0, -0.8, sd + 3.7, 0.45), C = splinter(p.xy, 43.0, -1.9, sd + 8.1, 0.55);
    if (sc < 3.5) {
       c = mix(c, c * vec3(0.5, 0.58, 0.7), (1.0 - A) * C);
@@ -997,14 +1011,16 @@ vec3 shipPaint(vec3 c, vec3 p, float hullSide) {
    return mix(c, c * 0.42, A * C);
 }
 `;
-function makeShipMaterial(d, nation, seed) {
+// modern: null for WW2 ships, else { camo (paint scheme, 0 = plain grey), merchant }
+function makeShipMaterial(d, nation, seed, modern = null) {
    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18, envMapIntensity: 0.85, alphaHash: true });
    const uBoot = { value: new THREE.Vector2(-0.9, 0.55) };
    const uDeck = { value: d.D || 8 };
    let scheme = PAINT[nation] || 0;
    if (scheme === 1 && d.type !== 'BB' && d.type !== 'CA') scheme = 0;
    if (d.type === 'SS' || d.type === 'TR' || (d.type === 'CV' && scheme !== 2)) scheme = 0;
-   const uPaint = { value: new THREE.Vector4(scheme, d.L / 2, seed, 0) };
+   if (modern) { scheme = modern.camo || 0; uBoot.value.set(Math.max(-0.9, -d.T * 0.5), Math.min(0.55, d.D * 0.25)); }
+   const uPaint = { value: new THREE.Vector4(scheme, d.L / 2, seed, modern ? (modern.merchant ? 2 : 1) : 0) };
    // plate tones, blotches and rust only from "Hoch" up (a define: lower tiers compile the cheaper shader)
    mat.defines = { ...mat.defines, SHIP_DETAIL: GFX.detail };
    patchAtmosphere(mat, {
@@ -1064,7 +1080,7 @@ function makeShipMaterial(d, nation, seed) {
             #endif
             vec2 pc = vec2(fract(vLocal.x / 3.2) - 0.5, (y - uDeck * 0.62) / 3.2) * 3.2;
             float ph = 1.0 - smoothstep(0.22, 0.22 + max(fx, 0.02) * 1.5, length(pc));
-            ph *= near * step(abs(vLocal.x), 70.0) * step(4.0, uDeck);
+            ph *= near * step(abs(vLocal.x), 70.0) * step(4.0, uDeck) * step(uPaint.w, 0.5);
             c = mix(c, vec3(0.012), ph * 0.85);
             diffuseColor.rgb = c;
          } else if (vBand > 2.5) {
@@ -1078,7 +1094,9 @@ function makeShipMaterial(d, nation, seed) {
             float wr = step(0.45, sHash(vec2(lvl, sign(vLN.x + vLN.z * 1.7) + 9.0)));
             float wy = smoothstep(0.5, 0.5 + fy, ly) * (1.0 - smoothstep(0.74, 0.74 + fy, ly));
             float wxm = 1.0 - smoothstep(0.26, 0.26 + fh, abs(fract(hc / 1.6) - 0.5));
-            float win = wy * wxm * wr;
+            // modern warships have closed slab sides: no window rows, fainter deck lines
+            float win = wy * wxm * wr * (1.0 - step(0.5, uPaint.w) * step(uPaint.w, 1.5));
+            line *= 1.0 - 0.6 * step(0.5, uPaint.w);
             float far = clamp(max(fy, fh) * 3.0 - 0.15, 0.0, 1.0);
             float ao = 1.0 - 0.14 * (1.0 - smoothstep(0.0, 0.35, ly));
             float s0 = (1.0 - 0.3 * line - 0.8 * win) * ao;
@@ -1095,7 +1113,8 @@ function makeShipMaterial(d, nation, seed) {
             float gap = smoothstep(0.0, 0.1, fract(pz)) * smoothstep(1.0, 0.9, fract(pz));
             float fw = fwidth(pz);
             gap = mix(gap, 0.9, clamp(fw * 2.0, 0.0, 1.0));
-            diffuseColor.rgb *= tone * (0.62 + 0.38 * gap);
+            // planks on WW2 decks; modern decks are plain non-skid paint
+            diffuseColor.rgb *= uPaint.w > 0.5 ? 0.95 : tone * (0.62 + 0.38 * gap);
             if (uPaint.x > 3.5) {
                // Italian air-recognition stripes on the forecastle
                float dg = (vLocal.x + vLocal.z) / 7.0, aw = fwidth(dg);
@@ -1136,6 +1155,8 @@ function shipDepthMaterial() {
    return _depthMat;
 }
 
+const MODERN_TOOLS = { makeHullShape, loftHull, wire, ribbon };
+
 // ---------------- the manager ----------------
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
 
@@ -1159,7 +1180,71 @@ export class ShipModels {
       return g;
    }
 
+   // Modern warship (cfg.model): one merged hull mesh from ships3d_modern.js, trainable gun
+   // mounts in the same turret-record shape as below, rotating radars, named anchors.
+   _buildModern(ship) {
+      const cfg = ship.cfg, det = GFX.detail;
+      const key = `m|${cfg.model}|${cfg.hull?.L}|${cfg.hull?.beam}|${det}|${cfg.hull?.nation}|${cfg.hull?.pennant}|${cfg.hull?.modelColor}|${cfg.hull?.deckH}|${cfg.hull?.sup?.h}`;
+      const hullGeo = this._geo(key, () => { const m = buildModernHull(ship, det, MODERN_TOOLS); m.geo.userData.modern = m; return m.geo; });
+      const m = hullGeo.userData.modern, d = m.d, sc = m.scale;
+      const seedStr = String(ship.cls || cfg.model);
+      const mat = makeShipMaterial(d, cfg.hull?.nation, seedStr.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 97, 7), { camo: m.camo, merchant: m.merchant });
+      const root = new THREE.Group(), body = new THREE.Group();
+      root.add(body);
+      const hull = new THREE.Mesh(hullGeo, mat);
+      hull.castShadow = true; hull.receiveShadow = true;
+      if (det >= 2) hull.customDepthMaterial = shipDepthMaterial();
+      body.add(hull);
+      const colKey = m.pal.sup.map(v => v.toFixed(3)).join(',');
+      const trs = m.guns.map((g, i) => {
+         const gg = this._geo(`mg|${g.style}|${colKey}`, () => { const o = buildGunGeo(g.style, m.pal.sup); o.house.userData = o; o.geo = o.house; return o; });
+         const brl = this._geo(`mgb|${g.style}|${colKey}`, () => gg.barrel);
+         const yaw = new THREE.Group();
+         yaw.position.set(g.x, g.y, g.z);
+         yaw.scale.setScalar(sc);
+         yaw.rotation.y = g.aft ? -Math.PI : 0;
+         const hm = new THREE.Mesh(gg.house, mat); hm.castShadow = true; hm.receiveShadow = true;
+         yaw.add(hm);
+         const pitch = new THREE.Group();
+         pitch.position.set(gg.pivot[0], gg.pivot[1], 0);
+         const bm = new THREE.Mesh(brl, mat); bm.castShadow = true; bm.receiveShadow = true;
+         pitch.add(bm);
+         yaw.add(pitch);
+         body.add(yaw);
+         return { idx: i, yaw, pitch, cal: gg.cal, guns: gg.guns, tip: gg.tip, offs: gg.offs, lastReload: null, elev: 0.05 };
+      });
+      const spinners = m.spinners.map((sp) => {
+         const g = this._geo(`msp|${sp.type}|${sp.size}|${colKey}`, () => buildSpinnerGeo(sp.type, sp.size, m.pal.mast));
+         const obj = new THREE.Mesh(g, mat);
+         obj.position.set(sp.x, sp.y, sp.z);
+         obj.scale.setScalar(sc);
+         obj.castShadow = det >= 2;
+         body.add(obj);
+         return { obj, rate: sp.rate };
+      });
+      this.group.add(root);
+      const seed = (typeof ship.id === 'number' ? ship.id : String(ship.id).split('').reduce((a, c) => a * 31 + c.charCodeAt(0), 7)) >>> 0;
+      const rnd = mulberry32(seed + 17);
+      return {
+         ship, d, S: m.S, root, body, hull, mat, turrets: trs, smoke: m.smoke, modern: cfg.model, anchors: m.anchors, spinners,
+         heave: 0, pitch: 0, roll: 0, heel: 0, lastHeading: ship.heading || 0,
+         opacity: ship.spotted === false ? 0 : 1, deadT: 0, sinkStarted: false,
+         sinkRoll: (rnd() < 0.5 ? -1 : 1) * (0.25 + rnd() * 0.35), sinkPitch: (rnd() < 0.5 ? -1 : 1) * (0.06 + rnd() * 0.16),
+         lastAmmo: ship.ammo, gone: false, rnd,
+         fireSpots: Array.from({ length: 8 }, () => ({ x: (rnd() - 0.5) * d.L * 0.75, z: (rnd() - 0.5) * d.B * 0.5 })),
+      };
+   }
+
+   // world position of a named anchor of a modern ship record (see ships3d_modern.js);
+   // returns null when the record has no such anchor
+   anchorWorld(r, name, i = 0, out = new THREE.Vector3()) {
+      const a = r.anchors?.[name]?.[i];
+      if (!a) return null;
+      return r.body.localToWorld(out.set(a.x, a.y, a.z));
+   }
+
    _build(ship) {
+      if (isModernModel(ship.cfg?.model)) return this._buildModern(ship);
       const d = shipDims(ship);
       const tint = hullTint(ship);
       const S = makeHullShape(d);
@@ -1363,6 +1448,9 @@ export class ShipModels {
       // wrecks char quickly: a sinking hull in parade paint looks untouched
       const burnt = 1 - 0.62 * smoothstep(0, 0.3, sinkT);
       if (r.mat.color.r !== burnt) r.mat.color.setScalar(burnt);
+
+      // ---- rotating radars (modern ships; they stop when the ship is dead) ----
+      if (r.spinners && alive) for (const sp of r.spinners) sp.obj.rotation.y -= sp.rate * dt;
 
       // ---- turrets ----
       const ammoChanged = s.ammo !== r.lastAmmo;
