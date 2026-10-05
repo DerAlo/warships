@@ -396,7 +396,7 @@ function resolveOpts(opts) {
    o.mission = m.id;
    if (!o.ship && sel.mission === o.mission) o.ship = sel.ship;
    // an unknown ship key would silently fall back inside the sim; pick the mission's own choice instead
-   if (!o.ship || !SHIPS[o.ship]) o.ship = m.recommendedShip || m.playableShips?.[0] || 'Bismarck';
+   if (!o.ship || !SHIPS[o.ship]) o.ship = m.recommendedShip || m.playableShips?.[0] || 'Sachsen';
    if (opts.seed != null) o.seed = opts.seed;
    return o;
 }
