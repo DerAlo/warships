@@ -9,6 +9,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import {
    patchAtmosphere, makeNoise2D, fbm, ridged, mulberry32, clamp, smoothstep, lerp, lin, GeoBuilder, disposeTree,
 } from './gfxcommon3d.js';
+import { GFX } from './gfxquality.js';
 
 const DEEP = -60;
 
@@ -17,6 +18,7 @@ const PAL = {
    grass: lin(0x5d7a36), grassDry: lin(0x8c8a4c), forest: lin(0x3b5626),
    rock: lin(0x77716a), rockDark: lin(0x4d4943), rockWarm: lin(0x8a7963), snow: lin(0xe9edf0),
    under: lin(0x857656),
+   grassLight: lin(0x93a552), moss: lin(0x3a5228), earth: lin(0x6e5a3f),
 };
 
 function hashSeed(x, y, i) {
@@ -164,6 +166,7 @@ function gridH(g, x, z) {
 // ---------------- materials ----------------
 const TERRAIN_FRAG_PARS = /* glsl */`
 varying float vSunVis;
+varying float vSlope;
 float tHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float tNoise(vec2 p) {
    vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -172,10 +175,13 @@ float tNoise(vec2 p) {
 `;
 function terrainMaterial() {
    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0, envMapIntensity: 0.75 });
+   // "high" and up: rock strata on steep faces and a fine mottling of the turf (a few noise taps
+   // per pixel; the low levels run the plain three-octave tint only)
+   const fine = GFX.detail >= 2;
    patchAtmosphere(mat, {
-      key: 'terrain',
-      vertexPars: 'attribute float aSunVis;\nvarying float vSunVis;\n',
-      vertexMain: 'vSunVis = aSunVis;',
+      key: fine ? 'terrainFine' : 'terrain',
+      vertexPars: 'attribute float aSunVis;\nvarying float vSunVis;\nvarying float vSlope;\n',
+      vertexMain: 'vSunVis = aSunVis; vSlope = 1.0 - normal.y;',
       fragmentPars: TERRAIN_FRAG_PARS,
       fragmentReplace: [
          ['#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(
@@ -185,9 +191,14 @@ function terrainMaterial() {
             {
                vec3 wp = vAtmWP;
                float dn = tNoise(wp.xz * 0.11) * 0.55 + tNoise(wp.xz * 0.45) * 0.3 + tNoise(wp.xz * 1.7) * 0.15;
-               float strata = tNoise(vec2((wp.x + wp.z) * 0.05, wp.y * 0.55));
-               diffuseColor.rgb *= 0.8 + 0.4 * dn;
-               diffuseColor.rgb *= mix(1.0, 0.8 + 0.4 * strata, clamp((1.0 - vNormal.y) * 0.0 + 0.0, 0.0, 1.0));
+               diffuseColor.rgb *= 0.8 + 0.4 * dn;${fine ? `
+               float steep = smoothstep(0.22, 0.55, vSlope);
+               float strata = tNoise(vec2((wp.x + wp.z) * 0.035, wp.y * 0.5)) * 0.65 + tNoise(vec2((wp.x - wp.z) * 0.11, wp.y * 1.7)) * 0.35;
+               diffuseColor.rgb *= mix(1.0, 0.68 + 0.64 * strata, steep);
+               float turf = tNoise(wp.xz * 0.9) - 0.5;
+               float patchy = clamp(tNoise(wp.xz * 0.028 + 7.0) * 1.8 - 0.6, 0.0, 1.0);
+               diffuseColor.rgb *= 1.0 + turf * 0.16 * (1.0 - steep);
+               diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.14, 1.05, 0.8), patchy * 0.3 * (1.0 - steep));` : ''}
             }`],
       ],
    });
@@ -355,6 +366,9 @@ export class Terrain {
       const pos = new Float32Array(N * 3), col = new Float32Array(N * 3), sv = new Float32Array(N);
       const Hp = f.Hp;
       const rnd = mulberry32(f.seed + 5);
+      // denser woods and more shore rocks from "high" up; the low levels keep their instance budget
+      const treeK = GFX.detail >= 3 ? 1.8 : GFX.detail >= 2 ? 1.35 : 1;
+      const rockP = GFX.detail >= 2 ? 0.08 : 0.05;
       for (let j = 0; j < n; j++) {
          for (let i = 0; i < n; i++) {
             const k = j * n + i, q = k * 3;
@@ -362,6 +376,7 @@ export class Terrain {
             pos[q] = x; pos[q + 1] = h; pos[q + 2] = z;
             const ny = nrm[q + 1], slope = 1 - ny;
             const nv = noise(x * 0.012, z * 0.012), nv2 = noise2(x * 0.05, z * 0.05);
+            const nv3 = noise2(x * 0.0037 + 31, z * 0.0037 + 17);   // meadow / moor zones a few hundred metres across
             let c;
             if (f.kind === 'reef') {
                c = h < -0.2 ? PAL.under : mixc(PAL.sand, PAL.rockDark, smoothstep(0.1, 0.6, nv2 + slope));
@@ -369,31 +384,42 @@ export class Terrain {
             } else if (h < 0.7 + nv * 0.35) {
                c = h < -0.5 ? PAL.under : PAL.wet;
                c = mixc(c, PAL.rockDark, smoothstep(0.35, 0.7, slope));
-            } else if (h < 3.2 + nv * 1.8 && slope < 0.3) {
-               c = mixc(PAL.sand, PAL.sandDry, smoothstep(1, 3, h));
+            } else if (h < 4.2 + nv * 2.2 && slope < 0.3) {
+               c = mixc(PAL.sand, PAL.sandDry, smoothstep(1, 3.5, h));
+               c = mixc(c, PAL.wet, smoothstep(1.6, 0.7, h) * 0.55);   // damp strip above the swash
             } else {
                const hN = h / Hp;
                const dry = smoothstep(-0.2, 0.6, nv2);
                let veg = mixc(PAL.grass, PAL.grassDry, dry * 0.7);
                const forestN = smoothstep(-0.05, 0.3, nv);
+               // sunlit meadows, mossy hollows, and thinner, yellower turf towards the tops
+               veg = mixc(veg, PAL.grassLight, smoothstep(0.0, 0.4, nv3) * 0.75);
+               veg = mixc(veg, PAL.moss, smoothstep(-0.05, -0.4, nv3) * 0.7);
+               veg = mixc(veg, PAL.grassDry, smoothstep(0.4, 0.8, hN) * 0.5);
                veg = mixc(veg, PAL.forest, forestN * 0.92 * (1 - smoothstep(0.55, 0.85, hN)));   // strong: carries the forest read beyond TREE_LOD
-               const rockK = Math.max(smoothstep(0.34, 0.58, slope + nv2 * 0.08), smoothstep(0.72, 0.95, hN + nv * 0.12));
-               const rockC = mixc(PAL.rockWarm, PAL.rock, smoothstep(-0.3, 0.3, nv2));
-               c = mixc(veg, rockC, rockK);
+               const rockK = Math.max(smoothstep(0.3, 0.54, slope + nv2 * 0.08), smoothstep(0.72, 0.95, hN + nv * 0.12));
+               let rockC = mixc(PAL.rockWarm, PAL.rock, smoothstep(-0.3, 0.3, nv2));
+               // bedding: lighter and darker bands by height, bent a little by the noise
+               const bed = 0.86 + 0.28 * (0.5 + 0.5 * Math.sin(h * 0.33 + nv * 4 + nv2 * 1.5));
+               rockC = [rockC[0] * bed, rockC[1] * bed, rockC[2] * bed];
+               // bare earth where the turf gives way to rock
+               c = mixc(veg, PAL.earth, smoothstep(0.03, 0.35, rockK) * (1 - rockK) * 0.75);
+               c = mixc(c, rockC, rockK);
                c = mixc(c, PAL.rockDark, smoothstep(0.62, 0.85, slope) * 0.6);
                if (h > 260 + nv * 50) c = mixc(c, PAL.snow, smoothstep(260, 320, h + nv * 50) * (1 - smoothstep(0.45, 0.7, slope)));
                // coastal sand transitions into grass
-               c = mixc(PAL.sandDry, c, smoothstep(2.5, 6, h + nv * 2));
+               c = mixc(PAL.sandDry, c, smoothstep(3.2, 7.5, h + nv * 2));
                // forest clumps on gentle, green, not-too-high ground
                if (f.kind === 'island' && ((i + j * 3) % 2 === 0) && slope < 0.42 && h > 5 && hN < 0.82 && h < 300) {
                   const dens = forestN * (1 - rockK);
                   // coarse grids on big islands get several clumps per cell, or WoWs-scale forests turn to scattered dots
-                  for (let p = Math.min(3, dens * 0.55 * (step / 7) * (step / 7)); p > 0; p -= 1) {
+                  for (let p = Math.min(3 * treeK, dens * 0.55 * treeK * (step / 7) * (step / 7)); p > 0; p -= 1) {
                      if (rnd() >= p) break;
                      const jx = x + (rnd() - 0.5) * step * 1.6, jz = z + (rnd() - 0.5) * step * 1.6;
                      const jh = gridH(g, jx, jz);
                      if (jh < 4) continue;   // jitter must not wade into the surf
-                     const rec = { x: jx, y: jh - 1.2, z: jz, s: 0.7 + rnd() * 0.6, r: rnd() * Math.PI * 2, vis: vis[k] };
+                     // a few tall trees among many small ones reads as a wood rather than a plantation
+                     const rec = { x: jx, y: jh - 1.2, z: jz, s: treeK > 1 ? 0.62 + rnd() * 0.5 + rnd() * rnd() * 0.75 : 0.7 + rnd() * 0.6, r: rnd() * Math.PI * 2, vis: vis[k] };
                      (hN > 0.35 || rnd() < 0.35 ? trees.con : trees.broad).push(rec);
                   }
                }
@@ -406,7 +432,7 @@ export class Terrain {
             sv[k] = vis[k];
             // rocks on reefs where the bank breaks the surface, and at cliff feet
             if (f.kind === 'reef' && h > -2.4 && rnd() < 0.06) rocks.push({ x, y: h - 0.5, z, s: 1.5 + rnd() * 4, r: rnd() * 6 });
-            else if (f.kind === 'island' && h > -1 && h < 2.5 && slope > 0.35 && rnd() < 0.05) rocks.push({ x, y: h - 0.6, z, s: 2 + rnd() * 5, r: rnd() * 6 });
+            else if (f.kind === 'island' && h > -1 && h < 2.5 && slope > 0.35 && rnd() < rockP) rocks.push({ x, y: h - 0.6, z, s: 2 + rnd() * 5, r: rnd() * 6 });
          }
       }
       // index over every st-th grid vertex; LOD levels share one set of vertex attributes
@@ -485,7 +511,9 @@ export class Terrain {
    }
 
    _instances(trees, rocks) {
-      const MAXT = 14000;   // affordable now that only buckets within TREE_LOD[0] draw every tree
+      // affordable now that only buckets within TREE_LOD[0] draw every tree
+      const MAXT = GFX.detail >= 3 ? 26000 : GFX.detail >= 2 ? 19000 : 14000;
+      const MAXR = GFX.detail >= 3 ? 2600 : GFX.detail >= 2 ? 1900 : 1500;
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
       const c = new THREE.Color();
       // list entries carry an origin offset (ox, oz) so bucketed forests can sit under a LOD at their centroid
@@ -549,7 +577,7 @@ export class Terrain {
          this.lods.push(lod);
          this.group.add(lod);
       }
-      const rk = mk(this.rockGeo, this.rockMat, thin(rocks, Math.min(1500, rocks.length)), 0, 0, 1);
+      const rk = mk(this.rockGeo, this.rockMat, thin(rocks, Math.min(MAXR, rocks.length)), 0, 0, 1);
       if (rk) this.group.add(rk);
    }
 

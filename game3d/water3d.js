@@ -302,7 +302,7 @@ void main() {
    crestFoam += smoothstep(0.62, 0.95, crest) * smoothstep(0.5, 0.75, ft) * uSea * 0.8;
    float band = sin(depth * 1.6 - mod(uWTime * 1.7, 6.2831853) + ft * 4.0) * 0.5 + 0.5;
    // surf bands only close to the waterline, lace thins out over wide flats (reefs stay turquoise)
-   float shoreFoam = smoothstep(2.2, 0.2, depth) * smoothstep(0.55, 0.95, band * ft + 0.2) * 0.8 + smoothstep(0.5, 0.02, depth) * (0.35 + 0.5 * ft);
+   float shoreFoam = smoothstep(3.2, 0.2, depth) * smoothstep(0.5, 0.92, band * ft + 0.2) * 0.9 + smoothstep(0.8, 0.02, depth) * (0.45 + 0.5 * ft);
    float foam = clamp((crestFoam + shoreFoam) * (1.0 - smoothstep(1500.0, 6000.0, dist) * 0.8), 0.0, 1.0);
    vec3 foamCol = vec3(0.86, 0.9, 0.93) * (uSunColor * uSunI * (0.2 + 0.6 * sunUp) * uSunUp + uSkyAmb * 1.6);
    col = mix(col, foamCol, foam);
