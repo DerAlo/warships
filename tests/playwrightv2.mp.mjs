@@ -285,6 +285,61 @@ if (ONLY.includes('phase2')) {
    }
 }
 
+// ====================================================================== host migration
+if (ONLY.includes('migrate')) {
+   const T = 'migrate: ', ctx = await newContext(), e1 = errors.length;
+   await ctx.addInitScript(() => { window.__netMeasure = true; });
+   const A = await mkPage(ctx, 'A', 'Anna'); await host(A, { name: 'V2 Wechsel', mission: 'standard', ship: 'Sachsen' });
+   const B = await mkPage(ctx, 'B', 'Bert');
+   await join(B, 'V2 Wechsel');
+   check(T + 'game starts', await startMatch(A, B));
+   const idB = await B.evaluate(() => window.__world().player.id), idA = await A.evaluate(() => window.__world().player.id);
+   const peerB = await B.evaluate(() => window.__mp.lobby.selfId);
+   check(T + 'the host names B as successor', await wait(A, (b) => window.__net().successor === b, peerB, 10000));
+   // a busy scene: many missiles in the air (ours and hostile ones), so the full state is large
+   await A.evaluate(async () => {
+      const w = window.__world(), M = await import('./gamev2/missile.js'), St = await import('./gamev2/sites.js');
+      const p = w.player; for (const k of Object.keys(p.mag)) p.mag[k] = 99;
+      for (let i = 0; i < 14; i++) { p.lastSsmFire = -99; M.launchSSM(w, p, { bearing: -0.4 + i * 0.06 }); }
+      const site = St.addSite(w, 'battery', 'enemy', { x: p.pos.x + 9000, y: p.pos.y - 7000 });
+      for (let i = 0; i < 14; i++) { site.lastSsmFire = -99; M.launchSSM(w, site, { bearing: Math.atan2(p.pos.y - site.pos.y, p.pos.x - site.pos.x) + (i - 7) * 0.02 }); }
+   });
+   await sleep(A, 4500);
+   const busy = await A.evaluate(() => ({ missiles: window.__world().missiles.filter(m => m.alive).length, mig: window.__net().mig, seconds: window.__net().seconds }));
+   const kB = busy.mig.bytes / Math.max(1, busy.mig.count) / 1000;
+   console.log(`   busy scene: ${busy.missiles} missiles, full state ${kB.toFixed(1)} kB avg (${busy.mig.count} sent)`);
+   check(T + 'full state is sent about once a second', busy.mig.count >= 3, busy.mig);
+   check(T + 'full state of a busy scene is sane (sent in pieces of 9 kB at most, so below the 16 kB transport limit)', kB < 40, +kB.toFixed(1));
+   await shot(B, 'migrate-1-before');
+   const before = await A.evaluate(() => ({ t: window.__world().time, hp: window.__world().ships.filter(s => s.side === 'enemy').map(s => [s.id, Math.round(s.hp)]) }));
+   const t0 = Date.now();
+   await A.close({ runBeforeUnload: true });
+   const took = await wait(B, () => window.__net()?.isHost === true, null, 20000);
+   console.log(`   B is host after ${Date.now() - t0} ms`);
+   check(T + 'B took over as host', took, await B.evaluate(() => { const n = window.__net(); return { isHost: n.isHost, lost: n.lost, mig: n.migrated }; }));
+   check(T + 'the match was not lost on B', await B.evaluate(() => !window.__net().lost && window.__phase() === 'playing'));
+   const info = await B.evaluate(() => window.__net().migrated);
+   console.log('   ' + JSON.stringify(info));
+   const tB = await B.evaluate(() => window.__world().time);
+   check(T + 'the world runs on under B', await wait(B, (t) => window.__world().time > t + 3, tB, 15000));
+   const after = await B.evaluate(() => ({ missiles: window.__world().missiles.filter(m => m.alive).length, ships: window.__world().ships.filter(s => s.alive).length, bots: window.__world().ships.filter(s => s.alive && !s.human && !s.isPlayer && s.ai).length }));
+   check(T + 'missiles and ships carried over (at least half of the missiles)', after.missiles >= Math.floor(busy.missiles * 0.5) && after.ships > 3 && after.bots > 2, { before: busy.missiles, after });
+   const mp = await B.evaluate(async () => { const w = window.__world(); return { enemyHp: w.ships.filter(s => s.side === 'enemy').map(s => [s.id, Math.round(s.hp)]) }; });
+   const kept = before.hp.filter(([id, hp]) => { const q = mp.enemyHp.find(x => x[0] === id); return q && q[1] <= hp + 1; }).length;
+   check(T + 'enemy damage kept (no enemy healed)', kept === before.hp.length, { kept, of: before.hp.length });
+   await B.bringToFront();
+   const tel0 = await B.evaluate(() => window.__ctl().telegraph);
+   await B.keyboard.press(tel0 > 0 ? 'KeyS' : 'KeyW'); await sleep(B, 200);
+   const tel1 = await B.evaluate(() => window.__ctl().telegraph);
+   check(T + 'B steers its own ship on its own world', tel1 !== tel0 && await wait(B, (t) => window.__world().player.telegraph === t, tel1, 5000), [tel0, tel1]);
+   const fire = await B.evaluate(() => window.__world().missiles.length);
+   await B.keyboard.press('Digit2'); await sleep(B, 200); await B.keyboard.press('Space');
+   check(T + 'B can fire a missile as host', await wait(B, (n) => window.__world().missiles.some(m => m.ownerId === window.__world().player.id && m.t < 3), fire, 6000));
+   await shot(B, 'migrate-2-after');
+   check(T + 'no console errors', errors.length === e1, errors.slice(e1, e1 + 3));
+   await closeAll(ctx);
+}
+
 check('no request or WebSocket tried to leave localhost', external.length === 0, external.slice(0, 5));
 const bad = results.filter(r => !r.ok).length;
 console.log(`${results.length - bad}/${results.length} checks passed, console errors: ${errors.length}`);

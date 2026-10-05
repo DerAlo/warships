@@ -296,6 +296,22 @@ export function createNetGame(session, hooks) {
       if (hooks.measure) stat.in += size(d);
       if (!mig || !(d.t < mig.t)) mig = d;
    });
+   let migAsm = null;
+   tp.on('migc', (d, from) => {
+      if (isHost || from !== hostId || !d || d.k !== 'migc' || typeof d.s !== 'string') return;
+      if (!(d.n > 0 && d.n <= 64 && d.i >= 0 && d.i < d.n)) return;
+      if (hooks.measure) stat.in += size(d);
+      if (!migAsm || d.t > migAsm.t) migAsm = { t: d.t, n: d.n, got: 0, parts: new Array(d.n) };
+      else if (d.t < migAsm.t || d.n !== migAsm.n) return;
+      if (migAsm.parts[d.i] === undefined) { migAsm.parts[d.i] = d.s; migAsm.got++; }
+      if (migAsm.got < migAsm.n) return;
+      const txt = migAsm.parts.join('');
+      migAsm = null;
+      let m;
+      try { m = JSON.parse(txt); } catch { return; }
+      if (!m || m.k !== 'mig' || !Array.isArray(m.sh)) return;
+      if (!mig || !(m.t < mig.t)) mig = m;
+   });
    tp.onPeerLeave((id) => {
       if (isHost) { hello.delete(id); gone.add(id); if (host) host.drop(id); return; }
       if (id !== hostId) return;
@@ -358,7 +374,7 @@ export function createNetGame(session, hooks) {
       else { send('sync', { k: 'bye' }, hostId); res = { aborted: true, reason: TEXT.quit, victory: null }; }
       done = true;
       if (host) host.stop();
-      for (const ch of ['cmd', 'snap', 'evt', 'sync', 'mig']) tp.on(ch, () => {});
+      for (const ch of ['cmd', 'snap', 'evt', 'sync', 'mig', 'migc']) tp.on(ch, () => {});
       tp.onPeerLeave(() => {}); tp.onPeerJoin(() => {});
       session.onEnd?.(res);
    }
