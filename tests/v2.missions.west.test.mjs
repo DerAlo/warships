@@ -132,7 +132,9 @@ for (const id of IDS) {
          for (const e of w.ships) {
             if (e.side !== 'enemy') continue;
             const d = hyp(e.pos, w.player.pos);
-            assert.ok(d > reach(e) * 1.02, `${tag}: ${e.name} starts ${Math.round(d)} m from the player, reach ${reach(e)}`);
+            // a boat that starts submerged and unseen is out of reach as long as nobody can detect it
+            if (w.player.depth >= 1) assert.ok(d > 2500, `${tag}: ${e.name} starts ${Math.round(d)} m from the submerged boat`);
+            else assert.ok(d > reach(e) * 1.02, `${tag}: ${e.name} starts ${Math.round(d)} m from the player, reach ${reach(e)}`);
          }
          for (const s of w.sites) {
             if (s.side !== 'enemy') continue;
@@ -260,4 +262,64 @@ test('redsea: two container ships lost = defeat', () => {
    S.convoy[2].takeDamage(1e9, null, 'he');
    fast(w, 1);
    assert.equal(w.phase, 'lost');
+});
+
+// ---------------------------------------------------------------- 3. Ostsee – Pipeline
+test('pipeline: the scripted captain goes in, the team works, is recovered and the boat leaves unseen', () => {
+   const w = new World('easy', { mission: 'pipeline', ship: 'U212', seed: 1037 });
+   const S = w._script, step = SCRIPTED.pipeline(w);
+   assert.equal(w.player.depth, 2, 'starts deep');
+   assert.equal(w.taskPoints.length, 1);
+   let reachedAt = 0;
+   for (let i = 0; i < 720 / DT && w.phase === 'playing'; i++) { step(w); w.update(DT); if (!reachedAt && obj(w, 'reach').state === 'done') reachedAt = w.time; }
+   assert.equal(w.phase, 'won', w.result?.reason);
+   const types = w.teams.map(t => t.state);
+   assert.deepEqual(types, ['recovered']);
+   assert.ok(reachedAt > 60 && reachedAt < 300, 'reach objective: ' + reachedAt);
+   for (const id of ['reach', 'device', 'exit', 'clean', 'ghost']) assert.equal(obj(w, id).state, 'done', id);
+   assert.ok(S.peak < 50);
+   assert.equal(opStars(w), 2);
+});
+test('pipeline: a boat that is seen raises the alarm until the operation is blown', () => {
+   const w = new World('normal', { mission: 'pipeline', ship: 'U212', seed: 2 });
+   const S = w._script, c = S.patrols[1];
+   fast(w, 3);
+   assert.equal(S.alarm, 0, 'deep and far away: no alarm');
+   orderDepth(w.player, 0, w);
+   c.pos.x = w.player.pos.x + 500; c.pos.y = w.player.pos.y;       // a corvette right next to the surfaced boat
+   c.ai = { passive: true, anchored: true };
+   fast(w, 8);
+   assert.ok(S.alarm > 20, 'alarm rises: ' + S.alarm);
+   fast(w, 30);
+   assert.equal(w.phase, 'lost');
+   assert.match(w.result.reason, /aufgeklärt|versenkt/);
+   assert.equal(obj(w, 'ghost').state, 'failed');
+});
+test('pipeline: time window, lost team and a sinking', () => {
+   const a = new World('hard', { mission: 'pipeline', ship: 'Virginia', seed: 3 });
+   a.player.setTelegraph(0);
+   fast(a, a._script.deadline + 2);
+   assert.equal(a.phase, 'lost');
+   assert.match(a.result.reason, /Zeitfenster/);
+   assert.ok(a.time < a._script.deadline + 2);
+   const b = new World('normal', { mission: 'pipeline', ship: 'U212', seed: 3 });
+   b._script.patrols[0].takeDamage(1e9, b.player, 'torp');
+   fast(b, 1);
+   assert.equal(obj(b, 'clean').state, 'failed');
+   assert.ok(b._script.alarm >= 40, 'a sinking alarms the group');
+   assert.equal(b.phase, 'playing');
+   b._script.onTeamLost(b, {}, 'spotted');
+   assert.equal(b.phase, 'lost');
+});
+test('pipeline: the patrols keep to their loops (seeded phase)', () => {
+   const w = new World('normal', { mission: 'pipeline', ship: 'U212', seed: 9 }), v = new World('normal', { mission: 'pipeline', ship: 'U212', seed: 10 });
+   const S = w._script, eta0 = S.def.eta(w, S);
+   assert.ok(eta0 > 100 && eta0 < 300, 'first pass of the pipeline patrol: ' + eta0);
+   assert.notEqual(Math.round(S.patrols[0].pos.y), Math.round(v._script.patrols[0].pos.y), 'the phase depends on the seed');
+   w.player.setTelegraph(0);
+   let near = Infinity, at = 0;
+   for (let t = 0; t < 400; t++) { fast(w, 1); const d = hyp(S.patrols[0].pos, S.task); if (d < near) { near = d; at = w.time; } }
+   assert.ok(near < 450, 'Alfa passes over the task point: ' + near);
+   assert.ok(Math.abs(at - eta0) < 40, `as announced: ${at} vs ${eta0}`);
+   assert.ok(S.kilo.alive && S.kilo.ai.routeIdx != null);
 });

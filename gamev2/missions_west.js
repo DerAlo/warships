@@ -17,6 +17,7 @@ export function westMissions(H) {
    const by = (w, e, n, h) => (w.difficultyKey === 'easy' ? e : w.difficultyKey === 'hard' ? h : n);
    const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const objState = (w, id) => (w.mission.objectives.find(o => o.id === id) || {}).state;
+   const clock = (t) => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
    // a merchant that has reached the goal zone leaves the battle
    const arrive = (w, ship) => { w.removeShip(ship, 'arrived'); };
 
@@ -223,6 +224,183 @@ export function westMissions(H) {
          timeout(w, S) {
             if (S.arrived >= S.need) { setObj(w, 'convoy', 'done'); w.end(true, 'Das Geleit ist durch die Meerenge – ein Nachzügler blieb zurück.'); }
             else w.end(false, 'Die Zeit ist abgelaufen – das Geleit hat die Meerenge nicht passiert.');
+         },
+      },
+      // ========================================================= 3. Ostsee – Pipeline
+      // Stealth: no fight is needed. The alarm level (0..100) rises while a boat of the player side is
+      // seen (periscope, surfaced) or held by an enemy sonar, and falls slowly otherwise; at 100 the
+      // operation is blown. The patrols run fixed loops whose phase depends on the seed.
+      {
+         id: 'pipeline', group: 'ops', name: 'Ostsee – Pipeline', subtitle: 'Verdeckte Operation · Kommandotrupp, Patrouillen, Zeitfenster',
+         briefing: 'An einem Pipeline-Abschnitt wurde ein Sprengsatz mit Zeitzünder entdeckt. Korvetten und ein U-Boot patrouillieren im Gebiet – Sie dürfen nicht aufgeklärt werden. ' +
+            'Laufen Sie getaucht an, gehen Sie nahe am Einsatzpunkt auf Sehrohrtiefe, nehmen Sie Fahrt heraus und setzen Sie den Kommandotrupp aus. ' +
+            'Warten Sie in der Nähe, nehmen Sie den Trupp wieder auf und laufen Sie nach Nordwesten ab. ' +
+            'Tief und langsam sind Sie kaum zu orten; eine Korvette in der Nähe des Trupps bedeutet seinen Verlust. Ein Gefecht ist nicht vorgesehen.',
+         debrief: 'Der Sprengsatz ist geborgen, niemand hat das Boot bemerkt. Ein U-Boot gewinnt nicht durch Waffen, sondern durch Geduld: ' +
+            'tief und langsam an den Patrouillen vorbei, auftauchen nur, wenn der Weg frei ist.',
+         fleet: { own: '1 U-Boot mit Kommandotrupp', foe: '2–3 Korvetten, 1 U-Boot auf Patrouille' },
+         env: { time: 'night', weather: 'fog' }, type: 'stealth', playableShips: ['U212', 'Virginia'], recommendedShip: 'U212',
+         arena: 10000, timeLimit: 12 * 60, stars: 3,
+         setup(w, shipKey) {
+            const S = w._script;
+            const rnd = (salt) => { const x = Math.sin((w.seed % 100000) * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x); };
+            islands(w, [
+               { c: P(8200, -7200), r: 1500, height: 90, seed: 91, lobes: 5, elong: 1.8, rot: 0.6, rough: 0.4, name: 'Südostküste' },
+               { c: P(-8300, -8200), r: 1100, height: 70, seed: 95, lobes: 4, rough: 0.4 },
+            ]);
+            add(w, shipKey, 'player', P(-5500, -2500), 0.3, { isPlayer: true, depth: 2 });
+            const T = P(1500, 1000);
+            S.task = addTaskPoint(w, { x: T.x, y: T.y, kind: 'recover', label: 'Pipeline-Abschnitt 7', workTime: 35 });
+            S.area = zone(w, T.x, T.y, 2600, 'Einsatzraum');
+            S.exit = zone(w, -4500, 5200, 1400, 'Ablaufpunkt');
+            S.alarm = 0; S.peak = 0; S.tick = 0; S.stage = 0; S.sunk = 0; S.warned = false; S.nearT = -99;
+            S.deadline = by(w, 480, 440, 410);
+            // a patrol runs a closed loop of waypoints; f (0..1) = where on the loop it starts
+            const patrol = (name, pts, f, kn) => {
+               const len = pts.map((a, i) => hyp(a, pts[(i + 1) % pts.length]));
+               let d = f * len.reduce((x, y) => x + y, 0), i = 0;
+               while (d > len[i]) { d -= len[i]; i++; }
+               const a = pts[i], b = pts[(i + 1) % pts.length], g = d / len[i];
+               return add(w, 'BuyanM', 'enemy', P(a.x + (b.x - a.x) * g, a.y + (b.y - a.y) * g), Math.atan2(b.y - a.y, b.x - a.x),
+                  { name, telegraph: 4, speedKn: kn, ai: { patrol: pts, patrolIdx: i + 1 } });
+            };
+            const kn = by(w, 12, 14, 16);
+            // Alfa: racetrack whose western leg runs over the task point (north to south), Bravo: picket
+            // line across the approach, Charlie (hard): in front of the way out
+            S.loop = [P(T.x, T.y + 2600), P(T.x, T.y - 2600), P(T.x + 1600, T.y - 2600), P(T.x + 1600, T.y + 2600)];
+            S.patrols = [
+               // Alfa first passes the task point 130..260 s into the mission
+               patrol('Korvette Alfa', S.loop, (((2600 - (130 + rnd(1) * 130) * kn * 2.6) % 13600) + 13600) % 13600 / 13600, kn),
+               patrol('Korvette Bravo', [P(-1900, -5600), P(-1900, 2400), P(-2600, 2400), P(-2600, -5600)], rnd(2) * 0.45, kn),
+            ];
+            if (w.difficultyKey !== 'easy') S.patrols.push(patrol('Korvette Charlie', [P(-7800, 2600), P(-1500, 7600), P(-2000, 8200), P(-8300, 3200)], rnd(3), kn));
+            // the submarine circles between the task point and the way out (a route that the script restarts)
+            // (easy: north of the task point; otherwise across the way out)
+            const loop = w.difficultyKey === 'easy' ? [P(-1500, 5800), P(1800, 6300), P(-600, 3000)]
+               : [P(-700, 3300), P(-3300, 1700), P(-2500, 5200)];
+            const k0 = Math.floor(rnd(4) * 3);
+            S.kiloLoop = loop;
+            S.kilo = add(w, 'Kilo', 'enemy', loop[k0], 0, { depth: 1, speedKn: by(w, 6, 7, 9), ai: { route: [loop[(k0 + 1) % 3], loop[(k0 + 2) % 3], loop[k0]] } });
+            objective(w, 'reach', 'Erreichen Sie unentdeckt den Einsatzraum');
+            objective(w, 'device', `Setzen Sie den Trupp aus – der Sprengsatz muss bis ${clock(S.deadline)} geborgen sein`);
+            objective(w, 'exit', 'Nehmen Sie den Trupp wieder auf und erreichen Sie den Ablaufpunkt');
+            objective(w, 'clean', 'Versenken Sie kein Schiff', { optional: true });
+            objective(w, 'ghost', 'Alarmstufe bleibt unter 50 %', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: 100 };
+            radio(w, 'Flottenkommando', 'Sie haben Freigabe. Tief und langsam anlaufen. Zeitzünder läuft – der Trupp muss bis ' + clock(S.deadline) + ' fertig sein.');
+            later(S, 50, () => radio(w, 'Sonar', 'Schraubengeräusche voraus: eine Korvette läuft quer zu unserem Kurs Streife. Abstand halten oder langsam unter ihr durch.'));
+            later(S, S.deadline - 120, () => { if (S.task.state !== 'done') radio(w, 'Flottenkommando', 'Noch zwei Minuten bis zum Ablauf des Zeitzünders.', 'warn'); });
+            S.onTaskDone = () => {
+               setObj(w, 'device', 'done');
+               radio(w, 'Kommandotrupp', 'Sprengsatz entschärft und geborgen. Wir kommen zurück – bleiben Sie auf Sehrohrtiefe und ohne Fahrt.');
+            };
+            S.onTeamRecovered = () => { S.recovered = true; radio(w, 'Wachoffizier', 'Trupp ist an Bord. Tauchen und nach Nordwesten ablaufen.'); };
+            S.onTeamLost = (ww, team, reason) => {
+               if (w.phase === 'playing') w.end(false, reason === 'stranded' ? 'Der Trupp konnte nicht wieder aufgenommen werden.' : 'Der Kommandotrupp wurde entdeckt – die Operation ist gescheitert.');
+            };
+         },
+         update(w, dt, S) {
+            if ((S.tick -= dt) > 0) return;
+            const step = 0.5; S.tick = step;
+            const subs = w.ships.filter(s => s.alive && s.side === 'player');
+            // co-op: the boats of the other captains (placed after setup) start deep as well
+            if (!S.init) { S.init = true; for (const s of subs) if (s.sub && w.time < 2) s.depthTarget = s.depthF = s.depth = 2; }
+            // the submarine patrol restarts its loop
+            const k = S.kilo;
+            if (k.alive && k.ai.route && k.ai.routeIdx >= k.ai.route.length - 1 && hyp(k.pos, k.ai.route[k.ai.route.length - 1]) < 800) k.ai.routeIdx = 0;
+            // alarm level
+            let seen = 0;
+            for (const s of subs) seen = Math.max(seen, s.detected ? 2 : w.time - s.pingT < 1.2 ? 1 : 0);
+            S.alarm = Math.max(0, Math.min(100, S.alarm + step * (seen === 2 ? by(w, 8, 11, 14) : seen === 1 ? by(w, 3, 3.3, 5.5) : -1.5)));
+            S.peak = Math.max(S.peak, S.alarm);
+            w.score.player = Math.round(S.alarm);
+            if (seen && !S.warned) { S.warned = true; radio(w, 'Sonar', seen === 2 ? 'Wir sind gesehen worden! Sofort tief gehen.' : 'Aktives Sonar erfasst uns. Fahrt herausnehmen, Abstand gewinnen.', 'warn'); }
+            if (!seen && S.alarm < 5) S.warned = false;
+            if (S.peak >= 50 && objState(w, 'ghost') === 'active') { setObj(w, 'ghost', 'failed'); radio(w, 'Sonar', 'Die Patrouillen suchen nach uns. Noch haben sie keine sichere Ortung.', 'warn'); }
+            if (S.alarm >= 100) { w.end(false, 'Das Boot wurde aufgeklärt – die Operation ist gescheitert.'); return; }
+            const a = ` (Alarmstufe ${Math.round(S.alarm)} %)`;
+            const left = S.deadline - w.time;
+            if (S.task.state !== 'done' && left <= 0) { w.end(false, 'Das Zeitfenster ist verstrichen – der Sprengsatz wurde nicht rechtzeitig geborgen.'); return; }
+            // objective chain
+            if (S.stage === 0) {
+               objText(w, 'reach', 'Erreichen Sie unentdeckt den Einsatzraum' + a);
+               if (subs.some(s => inZone(s, S.area))) {
+                  S.stage = 1; setObj(w, 'reach', 'done');
+                  radio(w, 'Wachoffizier', 'Einsatzraum erreicht. Auf Sehrohrtiefe gehen, Fahrt heraus, Trupp aussetzen – je näher am Punkt, desto kürzer der Weg.');
+                  const eta = this.eta(w, S);
+                  if (eta < 900) radio(w, 'Sonar', `Korvette Alfa läuft die Pipeline ab und passiert den Einsatzpunkt in etwa ${eta < 45 ? 'einer halben Minute' : Math.max(1, Math.round(eta / 60)) + (Math.round(eta / 60) > 1 ? ' Minuten' : ' Minute')}.`);
+               }
+            } else if (S.task.state !== 'done') {
+               objText(w, 'device', `Setzen Sie den Trupp aus – Sprengsatz bergen, noch ${clock(Math.max(0, left))}` + a);
+            } else {
+               objText(w, 'exit', (S.recovered ? 'Erreichen Sie den Ablaufpunkt' : 'Nehmen Sie den Trupp wieder auf') + a);
+               if (S.recovered && subs.length && subs.every(s => inZone(s, S.exit))) {
+                  setObj(w, 'exit', 'done');
+                  if (!S.sunk) setObj(w, 'clean', 'done');
+                  if (S.peak < 50) setObj(w, 'ghost', 'done');
+                  w.end(true, S.peak < 50 && !S.sunk ? 'Auftrag ausgeführt – niemand hat das Boot bemerkt.' : 'Auftrag ausgeführt. Der Gegner weiß allerdings, dass jemand hier war.');
+                  return;
+               }
+            }
+            // a corvette closing on the team: one warning
+            const team = w.teams.find(t => t.side === 'player' && (t.state === 'out' || t.state === 'working' || t.state === 'returning'));
+            if (team && w.time - S.nearT > 60 && S.patrols.some(c => c.alive && hyp(c.pos, team) < 1700)) {
+               S.nearT = w.time;
+               radio(w, 'Sonar', 'Korvette nähert sich dem Trupp. Abstand unter einer Seemeile.', 'warn');
+            }
+         },
+         onSink(w, ship, killer, S) {
+            if (ship.side !== 'enemy') return;
+            S.sunk++; S.alarm = Math.min(99, S.alarm + 45);
+            setObj(w, 'clean', 'failed');
+            radio(w, 'Flottenkommando', 'Eine Versenkung war nicht vorgesehen. Der Verband ist jetzt alarmiert – bringen Sie den Auftrag zu Ende.', 'warn');
+         },
+         timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – das Boot hat den Ablaufpunkt nicht erreicht.'); },
+         // seconds until the pipeline patrol next passes the task point (Infinity when it is gone)
+         eta(w, S) {
+            const c = S.patrols[0], T = S.task, L = S.loop;
+            if (!c.alive) return Infinity;
+            const v = Math.max(5, Math.abs(c.speed)), i = (c.ai.patrolIdx || 0) % 4;
+            if (i === 1 && c.pos.y > T.y) return (c.pos.y - T.y) / v;
+            let d = hyp(c.pos, L[i]);
+            for (let k = i; k !== 0; k = (k + 1) % 4) d += hyp(L[k], L[(k + 1) % 4]);
+            return (d + hyp(L[0], T)) / v;
+         },
+         // Scripted captain for tests and the balance table: what a careful player does.
+         // h = { steerTo, orderDepth, launchTeam, teamStatus, hyp }; returns the per-step function.
+         testRoute(w, h) {
+            const S = w._script, p = w.player, T = S.task;
+            const wait = { x: T.x - 700, y: T.y - 80 };
+            let phase = 0, last = Infinity;
+            const surf = () => w.ships.filter(s => s.alive && s.side === 'enemy' && s.depth === 0);
+            const nearest = (list, q) => list.reduce((m, s) => Math.min(m, h.hyp(s.pos, q)), Infinity);
+            return () => {
+               if (!p.alive) return;
+               const dS = nearest(surf(), p.pos), dK = S.kilo.alive ? h.hyp(S.kilo.pos, p.pos) : Infinity;
+               const quiet = dS < 1500 || dK < 2300;
+               const closing = dS < 1050 && dS < last;              // a corvette comes close: stop and let it pass
+               last = dS;
+               if (phase === 0) {                                   // approach deep
+                  h.orderDepth(p, 2, w);
+                  const d = h.hyp(p.pos, wait);
+                  h.steerTo(p, wait, closing ? 0 : d < 500 ? 1 : quiet ? 2 : 4);
+                  if (d < 160) phase = 1;
+               } else if (phase === 1) {                            // wait deep until the pipeline patrol has passed
+                  p.setTelegraph(0); p.setRudder(0);
+                  const need = 2 * h.hyp(p.pos, T) / 9 + T.workTime + 40;      // out, work, back, margin
+                  if (S.def.eta(w, S) > need && dS > 1000 && dK > 1500) { h.orderDepth(p, 1, w); if (p.depth <= 1 && h.launchTeam(w, p)) phase = 2; }
+                  else h.orderDepth(p, 2, w);
+               } else if (phase === 2) {                            // hold; dive under a patrol that comes close
+                  p.setTelegraph(0); p.setRudder(0);
+                  const team = w.teams.find(t => t.ownerId === p.id && t.state === 'returning');
+                  const pickup = team && h.hyp(team, p.pos) < 350;      // come up for the team even with the submarine near
+                  h.orderDepth(p, dS < 1150 || (dK < 1500 && !pickup) ? 2 : 1, w);
+                  if (S.recovered) phase = 3;
+               } else {                                             // leave deep
+                  h.orderDepth(p, 2, w);
+                  h.steerTo(p, S.exit, closing ? 0 : quiet ? 2 : 4);
+               }
+            };
          },
       },
    ];
