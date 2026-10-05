@@ -497,15 +497,20 @@ void main() {
       foam = (wash * 0.75 + churn * 0.7 + arm * 0.45 + centre * 0.45) * vB.y;
       aer = band * (1.0 - u) * vB.y;           // aerated, lighter water under the foam
    } else {
+      float core = 1.0 - smoothstep(0.15, 1.0, as);
+#ifdef TORP_FINE
       // torpedo track: a dense bubble line right behind the fish that frays into streaks and
       // leaves a pale aerated ribbon, so a spread can be read (and dodged) from far off
-      float core = 1.0 - smoothstep(0.15, 1.0, as);
       float line = (1.0 - smoothstep(0.0, 0.45, as)) * pow(1.0 - u, 1.5);
       float fresh = 1.0 - smoothstep(0.0, 0.3, u);
       float nb = texture2D(uNoise, tc / vec2(2.6, 7.0) + 0.61).r * 0.6 + n * 0.4;   // bubble-sized break-up
       float thr = 0.1 + 0.75 * u;
       foam = (core * smoothstep(thr, thr + 0.22, nb) * (1.0 - u) + line * fresh * 0.8) * vB.y;
       aer = core * (1.0 - u) * vB.y * 1.1;
+#else
+      foam = core * (1.0 - u) * smoothstep(0.25, 0.65, n + 0.25 * (1.0 - u)) * vB.y;
+      aer = core * (1.0 - u) * vB.y * 0.6;
+#endif
    }
    foam = 1.0 - exp(-1.5 * foam);          // soft saturation: overlapping terms no longer merge into a flat white slab
    float a = max(foam, aer * 0.22);
@@ -539,6 +544,7 @@ class Wakes {
          vertexShader: WAKE_VERT, fragmentShader: WAKE_FRAG,
          transparent: true, depthWrite: false, side: THREE.DoubleSide,   // strips fold over in tight turns; culling punched holes
       });
+      this.fine = null;
       this.mesh = new THREE.Mesh(g, this.material);
       this.mesh.frustumCulled = false;
       this.mesh.renderOrder = 11;
@@ -576,6 +582,9 @@ class Wakes {
 
    update(time) {
       const P = this.pos, A = this.aA, B = this.aB, I = this.idx;
+      // wider torpedo tracks with the extra noise tap are a "high" extra; follows a live tier switch
+      const fine = GFX.effects >= 2;
+      if (fine !== this.fine) { this.fine = fine; this.material.defines = fine ? { TORP_FINE: 1 } : {}; this.material.needsUpdate = true; }
       let v = 0, ic = 0;
       for (const [key, t] of this.trails) {
          if (!t.fed) t.live = false;
@@ -604,7 +613,7 @@ class Wakes {
             sp /= tk;
             const u = Math.min(1, age / life);
             // Kelvin spread, capped: past ~12 s the arms have faded and a huge fan only folds over itself in turns
-            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : 1.3 + Math.min(age, 8) * 0.5;
+            const hw = t.kind === 0 ? t.beam * 0.75 + Math.min(age, 12) * Math.max(sp, 2) * 0.3 : fine ? 1.3 + Math.min(age, 8) * 0.5 : 1.0 + Math.min(age, 8) * 0.45;
             const nx = -dz, nz = dx;
             for (let s = -1; s <= 1; s += 2) {
                P[v * 3] = x + nx * hw * s; P[v * 3 + 1] = 0; P[v * 3 + 2] = z + nz * hw * s;
@@ -1147,12 +1156,13 @@ export class FX {
       const k = clamp(cal / 380, 0.2, 1.8);
       // column height ~ caliber: 380 mm ~65 m, 203 mm ~38 m, 127 mm ~27 m
       const H = (8 + cal * 0.15) * (big ? 1.35 : 1);
-      const W = 3.4 + cal * 0.034;
+      const fine = GFX.effects >= 2;
+      // "high" and up: a little wider (more fill); the low levels keep the old footprint
+      const W = fine ? 3.4 + cal * 0.034 : 3 + cal * 0.03;
       const y0 = this.ocean.heightAt(x, z, null);
       const fc = this.uFoamCol.value;
       // over-bright and only partly lit: columns must read white even under an overcast sky
       const lum = this.night ? 0.4 : 1.35;
-      const fine = GFX.effects >= 2;
       const nC = cal >= 250 ? 4 : cal >= 150 ? 3 : 2;
       for (let i = 0; i < nC; i++) {
          const p = P.t();
@@ -1186,7 +1196,7 @@ export class FX {
          p.vx = Math.cos(a) * vu * out; p.vy = vu; p.vz = Math.sin(a) * vu * out;
          p.drag = 0.35; p.grav = 11; p.life = rr(1.6, 2.6) * (0.7 + 0.3 * k);
          p.s0 = W * 0.35; p.s1 = W * rr(0.9, 1.5); p.grow = 2; p.stretch = 0.05;
-         p.r = p.g = p.b = 0.95 * lum; p.a = 0.85; p.fin = 0.02; p.fout = 0.45; p.shape = 1; p.lit = 0.85; p.rot = rr(0, TAU); p.wind = 0.4;
+         p.r = p.g = p.b = 0.95 * lum; p.a = fine ? 0.85 : 0.8; p.fin = 0.02; p.fout = 0.45; p.shape = 1; p.lit = 0.85; p.rot = rr(0, TAU); p.wind = 0.4;
          P.emit();
       }
       // base mist
@@ -1198,7 +1208,7 @@ export class FX {
          p.r = p.g = p.b = 0.9 * lum; p.a = 0.45; p.fin = 0.08; p.fout = 0.3; p.shape = 1; p.lit = 0.9; p.wind = 1; p.rot = rr(0, TAU);
          P.emit();
       }
-      this.decals.add(0, x, z, rr(0, TAU), W * 1.5, W * 6.5, 7 + k * 3, 1, 3);
+      this.decals.add(0, x, z, rr(0, TAU), W * 1.5, W * (fine ? 6.5 : 5.5), 7 + k * 3, fine ? 1 : 0.9, 3);
       // heavy shells also send a fast pressure ripple out over the water
       if (fine && cal >= 250) this.decals.add(1, x, z, 0, W * 1.2, W * 10, 1.5, 0.55, 3);
       void fc;
@@ -1426,7 +1436,9 @@ export class FX {
          const cr = (ap ? 1.5 : 6.5) * ci, cg = (ap ? 2.6 : 2.1) * ci, cb = (ap ? 6 : 0.35) * ci;
          const fade = clamp(dist / 120, 0.25, 1);   // don't blind a close camera
          if (spd > 1) {
-            const len = clamp(spd * 0.11, 16, 110) * (0.6 + 0.4 * ck) + dist * 0.006 * this._zk;
+            // long streaks from "high" up; below that the old length (less additive fill)
+            const len = trail ? clamp(spd * 0.11, 16, 110) * (0.6 + 0.4 * ck) + dist * 0.006 * this._zk
+               : clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004 * this._zk;
             const ax = st.vx / spd, ay = st.vy / spd, az = st.vz / spd;
             // the bright core is ~1/7 of the quad; the rest is the soft halo
             T.add(st.x, st.y, st.z, ax, ay, az, len, w * 7, cr, cg, cb, 0.95 * fade);
