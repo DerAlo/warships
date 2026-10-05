@@ -1,4 +1,4 @@
-// game3d/net/relay.js — everything that runs over the public MQTT brokers (mqtt.js):
+// gamev2/net/relay.js — everything that runs over the public MQTT brokers (mqtt.js):
 //
 //   Bus               one connection per broker, shared by the lobby and the game room
 //   makeBusLobby()    the game list and the knock: plain JSON, readable by anybody

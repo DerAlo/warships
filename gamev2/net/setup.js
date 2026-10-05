@@ -1,9 +1,9 @@
-// game3d/net/setup.js — builds the World of a net game. Host and clients run the same code with
+// gamev2/net/setup.js — builds the World of a net game. Host and clients run the same code with
 // the same `start` data (seed, mission, difficulty, ship class + loadout per slot), so islands,
 // roster and ship ids come out identical on every peer.
 import { World, makeStats } from '../state.js';
 import { Ship } from '../ship.js';
-import { SHIPS, PLAYABLE } from '../config.js';
+import { SHIPS, PLAYABLE, PLAYABLE_EAST } from '../config.js';
 import { getMission } from '../missions.js';
 import { applyLoadout } from '../progress3d.js';
 import { PVP_WIN, PVP_LOSS } from './pvp.js';
@@ -23,12 +23,30 @@ export function replaceableBots(world, side = 'player') {
    return world.bots.filter(b => b.side === side && b.alive && b.type !== 'TR' && !(b.ai && (b.ai.passive || b.ai.route)) && !held.has(b));
 }
 
+// PvP: lobby team 1 sails the west bloc (PLAYABLE), team 2 the east bloc (PLAYABLE_EAST), each
+// with its own nations. Co-op (team 0) is the west bloc. The mission builds the other bloc as the
+// enemy of whatever the host sails (missions.js), so this holds whichever team the host is in.
+export const EAST_TEAM = 2;
+export function teamShips(missionId, team = 0) {
+   if (team === EAST_TEAM) return PLAYABLE_EAST.filter(k => SHIPS[k]);
+   return getMission(missionId)?.playableShips || PLAYABLE;
+}
+// the ship a captain gets when he has none that fits: the mission's choice, east: the same tier
+export function defaultShip(missionId, team = 0) {
+   const def = getMission(missionId) || getMission('standard'), allowed = teamShips(def.id, team);
+   const rec = def.recommendedShip && SHIPS[def.recommendedShip] ? def.recommendedShip : null;
+   if (rec && allowed.includes(rec)) return rec;
+   if (team !== EAST_TEAM) return allowed[0];
+   const tier = rec ? SHIPS[rec].tier : 0, type = rec ? SHIPS[rec].type : '';
+   let best = allowed[0], bd = Infinity;
+   for (const k of allowed) { const d = Math.abs((SHIPS[k].tier || 0) - tier) + (SHIPS[k].type === type ? 0 : 0.5); if (d < bd) { bd = d; best = k; } }
+   return best;
+}
 // The host cannot trust the ship a client claims: unknown or not allowed -> the mission's choice.
-export function validClass(missionId, cls) {
+export function validClass(missionId, cls, team = 0) {
    const def = getMission(missionId) || getMission('standard');
-   const allowed = def.playableShips || PLAYABLE;
-   if (typeof cls === 'string' && SHIPS[cls] && allowed.includes(cls)) return cls;
-   return def.recommendedShip || allowed[0];
+   if (typeof cls === 'string' && SHIPS[cls] && teamShips(def.id, team).includes(cls)) return cls;
+   return defaultShip(def.id, team);
 }
 
 // Career loadouts arrive over the network too: keep only the shape applyLoadout() reads.
@@ -54,6 +72,14 @@ export function historicShips(world) {
       .sort((a, b) => RANK[a[0].type] - RANK[b[0].type] || a[1] - b[1]).map(x => x[0]);
 }
 
+function takeNearest(list, cls) {
+   if (!list.length) return undefined;
+   const tier = SHIPS[cls]?.tier || 0, type = SHIPS[cls]?.type;
+   let bi = 0, bd = Infinity;
+   list.forEach((b, i) => { const d = Math.abs((b.cfg.tier || SHIPS[b.cls]?.tier || 0) - tier) + (b.type === type ? 0 : 0.5); if (d < bd) { bd = d; bi = i; } });
+   return list.splice(bi, 1)[0];
+}
+
 // o: { mission, difficulty, seed, classes[], loadouts[], names[], self, teams? }  (index = slot, 0 = host).
 // Slot 0 is the World's own player ship; every other human replaces an allied bot (spawn order).
 // PvP (teams given, one lobby team number per slot): a human of the host's team replaces an
@@ -76,7 +102,8 @@ export function buildNetWorld(o) {
    for (let i = 1; i < o.classes.length; i++) {
       const cls = o.classes[i], lo = o.loadouts[i], side = sideOf(i);
       const cfg = lo ? applyLoadout(SHIPS[cls], lo) : SHIPS[cls];
-      const old = bots[side].shift();
+      // PvP: the captain takes the place of the bot nearest to his ship's tier, so both fleets keep their weight
+      const old = pvp ? takeNearest(bots[side], cls) : bots[side].shift();
       let ship;
       // historical: the very ship the mission script knows. Missions cut the damage of allied bots
       // so they do not fight the player's battle for him; a captain fights at full strength.
@@ -124,6 +151,10 @@ export function flipSides(w) {
    for (const s of new Set([...w.ships, ...w.roster, ...w.bots])) s.side = sw(s.side);
    for (const c of w.caps) { c.owner = sw(c.owner); c.capper = sw(c.capper); }
    if (w.score) { const p = w.score.player; w.score.player = w.score.enemy; w.score.enemy = p; }
+   // V2: land sites, task points and whatever is already under way
+   for (const list of [w.sites, w.taskPoints, w.teams, w.helos, w.missiles, w.decoys]) {
+      if (list) for (const x of list) { x.side = sw(x.side); if (x.team === 'player' || x.team === 'enemy') x.team = sw(x.team); }
+   }
 }
 
 // Human captains a mission can take in co-op (host included): the host's ship plus one per

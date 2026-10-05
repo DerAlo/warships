@@ -1,4 +1,4 @@
-# Multiplayer contract (branch `feat/3d-multiplayer`)
+# Multiplayer contract (modern mode, `gamev2/net`)
 
 Serverless multiplayer for the 3D mode. No own server and no account anywhere: the players find
 each other over public, registration-free MQTT brokers; game data flows directly between the
@@ -23,7 +23,7 @@ Two work areas meet at the interfaces below. Do not change an interface without 
   match goes on (see "Host migration"); only without a successor it ends for everybody with a
   clear message.
 
-## Transport (`game3d/net/transport.js`)
+## Transport (`gamev2/net/transport.js`)
 
 Documented in the file header. `makeMemoryHub()` is for node tests, `makeLocalTransport()`
 (BroadcastChannel) for browser tests and two tabs on one machine. The real transport is
@@ -99,7 +99,7 @@ Host migration adds (all optional for the game, absent on old lobbies):
 - `onEnd(result)` of the old host after a hand-over carries `handover: true` (and
   `aborted: true`): the lobby leaves the room but keeps the seat for a rejoin.
 
-## Co-op rules (`game3d/net/coop.js`, owned by the netcode side)
+## Co-op rules (`gamev2/net/coop.js`, owned by the netcode side)
 
 ```js
 coopSlots(missionId)               // max human players incl. host (0 = mission not playable in co-op)
@@ -134,7 +134,7 @@ in the air on average): 30.5 kB/s download per client (without carriers 24.1, be
 26.9), 1.6 kB/s upload, host upload 48.1 kB/s. Browser (local transport, 3 captains, 3 flights):
 21.5 kB/s per client, host upload 33.1 kB/s.
 
-## PvP rules (`game3d/net/pvp.js`)
+## PvP rules (`gamev2/net/pvp.js`)
 
 ```js
 PVP_MAX = 4, TEAM_MAX = 3          // captains per match / per team
@@ -166,7 +166,7 @@ torpedoes follow the torpedo rule above. Measured (node test, 2v2, 3 clients, 90
 the relay (browser test, 2v2, 42 s, ships mostly unspotted): 7.6 kB/s per client, 23 kB/s host
 upload, about 325 bytes per snapshot for either team.
 
-## Game side behaviour (`game3d/net/game.js`)
+## Game side behaviour (`gamev2/net/game.js`)
 
 - `startNetGame(session)` returns at once; the match starts after the handshake below.
 - `session.onEnd(result)` is called exactly once per peer: after the results screen ("Zur Lobby"),
@@ -370,3 +370,107 @@ foeId, ai]` with `order` = 0 | `[kind 0 strike / 1 patrol, targetId, x, y, scout
   test.mosquitto.org and broker.emqx.io — one reachable broker shared by both players is enough;
   for the direct route additionally public Nostr relays and the STUN servers of Trystero's
   defaults. There is no TURN server.
+
+## Modern mode (V2) additions: `gamev2/net/v2.js`
+
+Everything above is the netcode the modern mode inherited. This part is what it adds. Tests:
+`tests/v2.net.test.mjs` (room helper `tests/v2.netutil.mjs`, in-memory hub only).
+
+### Separation from the WW2 game
+
+`NET_VERSION` is 2xx (now 201); the WW2 game counts 1, 2, ... A peer with another number is
+refused (`refuse why:'version'`, text `TEXT.version`). Names on the wire and in storage are the
+modern mode's own: discovery topic `ksv2/1`, relay `ksv2-relay:`, peer ids `ksv2-net-`, rooms
+`ksv2-room:`, storage `warshipsv2.net.*`, test hook `__ksv2Rtc`. A unit test fails when a file in
+`gamev2/net` contains one of the WW2 names.
+
+### Rosters
+
+Co-op: every captain sails a west ship (`PLAYABLE`, or the mission's `playableShips`), unlocked in
+his career. PvP: lobby team 1 is the west bloc, lobby team 2 (`EAST_TEAM`) the east bloc
+(`PLAYABLE_EAST`, no career unlock). `setup.teamShips(mission, team)`, `defaultShip`,
+`validClass(mission, cls, team)`; the lobby mirrors it (`allowedShips / ownShips / pickShip` take the
+team; the host re-fits a ship when a captain changes team). In PvP a human replaces the bot of the
+nearest tier of his side, so both sides stay as strong as the mission built them.
+
+### Snapshot (`snap`, 20 Hz): the V2 block
+
+Behind the squadrons, before the own-ship detail. Always filtered for the receiver's side, in
+co-op too: own missiles, every missile its side tracks (`m.detected`), SAMs and rockets of a
+launcher it sees, air-to-air missiles of a squadron it sees; helicopters of the own side and the
+ones seen.
+
+| part | bytes | content |
+|---|---|---|
+| missiles | u16 n, n x 16 (+4) | u24 id, u8 type (`M_TYPES`), u8 f1 (kind `M_KINDS` 0..7, host side enemy 8, seeker 16, detected 32, seduced 64, aim point follows 128), u8 f2 (target kind `M_TKS` 0..7, engaged by 0..3 << 3, seeker on a decoy 32, ref is the seeker's lock 64), i16 x/2, i16 y/2, u8 heading, u8 altitude (sqrt scale), u8 speed/4, u24 ref (lock or target id, 0 = none); own side only: i16 tx/2, i16 ty/2 |
+| helicopters | u8 n, n x 14 | u16 id, u16 owner, u8 bits (host side enemy 1, state `HELO_STATES` << 1, point mode 8, tracked by the other side 16), i16 x/2, i16 y/2, u8 heading, u8 altitude, u8 speed, u8 fuel, u8 torpedoes |
+| ASW torpedoes | u8 n, n x 8 | u24 id, i16 x/2, i16 y/2, u8 heading: the homing torpedoes among the torpedoes the client knows (launched as a `T` item of kind 2) |
+
+Limits `MAX_M` 320, `MAX_H` 32, `MAX_A` 64; a count above them or a short buffer: the snapshot is dropped.
+
+Own V2 detail (u16 length first, then the classic own detail): radar / jammer, SAM doctrine,
+selected anti-ship missile, priority target, time since the last launch, magazine per missile type,
+SAM channels (target, missile, ready), CIWS targets, rocket and ASW tube timers, helicopter
+(ready in, id when out), teams left / team out, seeker warning.
+
+### Slow state (`sync k:'v2'`, 4 Hz, per team, only the parts that changed; all of it in `resync.v2`)
+
+| key | rows |
+|---|---|
+| `sh` | ships: `[id, bits]`, radar 1, jammer 2, targetable (fire-control track) 4, ESM bearing 8 + `x, y, err, brg, by`. Own side all; other side the detected ones and those only ESM hears |
+| `sn` | sites new to this team: `[id, kind, side, x, y, name, r, maxHp]` |
+| `si` | sites: `[id, hp fraction, bits (alive 1, radar 2, detected 4, targetable 8), esm...]`; other side: only seen, heard or destroyed ones |
+| `tp` | task points of the own side: `[id, x, y, kind, label, workTime, side, siteId, state, teamId]` |
+| `tm` | special-forces teams of the own side: `[id, side, owner, task, x, y, state, men, work left, reason]` |
+| `bl` | scripted blasts: `[id, x, y, rDestroyed, rHeavy, rShock, t0, done, label]` |
+| `dc` | decoy clouds: `[id, side, ship, x, y, t0]`, own side or beside a ship that is seen |
+
+### Events
+
+All new events travel as `e` items like the old ones. In PvP `v2EventFor` decides first:
+`vampire` only to the threatened side; `intercept`, helicopter, team, doctrine, ASW and seduction
+events only to the side whose platform it is; launches (`ssmLaunch`, `cruiseLaunch`, `samLaunch`,
+`aamLaunch`, `rockets`, `decoy`) to the own side and to a side that sees the launcher. Everything
+else (hits, `siteHit`, `siteDestroyed`, `blast`) falls through to the general rules.
+
+### Actions (client -> host, inside the command message as before)
+
+`m id` missile at a tracked ship, `b bearing`, `M x y`, `q index` select type, `D doctrine`,
+`p id|null` priority target, `r 0|1` radar, `k x y` / `K siteId` cruise missile, `o x y` rockets,
+`c 'decoy'|'helo'` consumables, `h` recall / `h 0` screen / `h x y` send the helicopter, `S` put the
+team ashore, `g` ASW torpedo (or depth charges). `command.cleanAction(ship, world, a)` is the host's
+gate: unknown kinds, wrong arity or types, coordinates outside the map (clamped), a target that is
+not a living ship / site / missile / squadron of the other side: dropped and counted
+(`host.snapStats().rejected`). An action only ever applies to the sender's ship.
+The client does not predict what only the host can make (a missile, a helicopter, a team, decoys):
+`replica.act()` sends the order and returns 1; the result arrives with the snapshot. Doctrine and
+radar are predicted.
+
+### Host migration and rejoin
+
+`migrate.packWorld` adds `v2` (`v2.packV2`): missiles, helicopters, teams, task points, blasts,
+decoys as full rows, the sites' state; the ships' V2 fields ride in `SHIP_KEYS`. `restoreV2` puts
+them back; missiles that the successor's newest snapshot no longer carried are dropped. A returning
+captain gets the whole slow state in `resync.v2` and the missiles with the next snapshot.
+
+### What the HUD and the renderer read on a client
+
+The replica's World has the same arrays as the host's, filled from the wire:
+
+- `world.missiles[]`: `id, side ('player' = own team), team, kind, type, x, y, px, py, alt, heading,
+  speed, tk, target, tx, ty (own side only, else the current position), seekerOn, lock, lockDecoy,
+  seduced, detected, eng, alive, net: true`. Not there: `ownerId` (null), `sqId`, `dmg`, `range`, `t`.
+- `world.helos[]`: `id, side, ownerId, pos, alt, prev, heading, speed, state, mode, fuel, fuelMax,
+  torps, alive, name, nation, net: true`. Not there: `goal`, the sonar timers.
+- `world.sites[]`: real site objects (`addSite`) with `hp, alive, radarOn, detected, targetable,
+  esmSeen`; a site of the other side exists only once the team has seen or heard it. Not there:
+  magazines and SAM channels.
+- `world.taskPoints[]`, `world.teams[]` (own side), `world.blasts[]` (`state 'armed' | 'done'`, `age`),
+  `world.decoys[]` (`id, side, shipId, x, y, t0`).
+- `world.torpedoes[]`: homing ASW torpedoes carry `asw: true` and follow the snapshots.
+- every ship: `radarOn, jamming, targetable, esmSeen, heloOut, teamOut`; a ship that only ESM hears
+  has `esmSeen` and no valid position.
+- the own ship (`world.player`): `mag`, `samDoctrine`, `ssmSel`, `samPriority`, `lastSsmFire`, `samCh`,
+  `ciwsTgt`, `rk.readyT`, `ltt { n, readyT }`, `heloT`, `heloOut`, `teamsLeft`, `teamOut`, `seekerWarn`:
+  `ssmBlock`, `cruiseBlock`, `heloStatus`, `teamStatus`, `aswStatus`, `samStatus` work on it as on the
+  host. Other ships' magazines and SAM channels are not sent.

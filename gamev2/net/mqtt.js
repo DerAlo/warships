@@ -1,4 +1,4 @@
-// game3d/net/mqtt.js — a minimal MQTT 3.1.1 client over WebSocket (QoS 0 only: connect,
+// gamev2/net/mqtt.js — a minimal MQTT 3.1.1 client over WebSocket (QoS 0 only: connect,
 // subscribe, publish, ping) and a small bus that talks to several public brokers at once.
 //
 // Why: every browser that can open a web page can open a WebSocket, so public MQTT brokers are a

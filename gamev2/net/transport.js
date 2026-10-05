@@ -1,5 +1,5 @@
-// game3d/net/transport.js — the Transport contract shared by the netcode (session/replica) and
-// the matchmaking layer, plus two serverless test transports. See game3d/net/CONTRACT.md.
+// gamev2/net/transport.js — the Transport contract shared by the netcode (session/replica) and
+// the matchmaking layer, plus two serverless test transports. See gamev2/net/CONTRACT.md.
 //
 // A Transport connects the local peer to the other peers of ONE room (star topology in practice:
 // clients talk to the host, the host talks to everybody).
@@ -22,7 +22,9 @@
 // The real transport also offers link(id) -> { via: 'direct'|'relay', rtt }, onRoute(fn) and
 // stats(); callers must treat them as optional.
 
-export const NET_VERSION = 2;          // 2: squadrons in the snapshot, air commands (carriers in net games)
+// 2xx: the modern mode (gamev2). Never the number of a WW2 build (game3d: 1, 2, ...), so the two
+// refuse each other even if they ever met on one room.
+export const NET_VERSION = 201;        // 201: missiles, helicopters, sites, teams, blasts, sensor picture
 
 class BaseTransport {
    constructor(selfId, hostId) {
