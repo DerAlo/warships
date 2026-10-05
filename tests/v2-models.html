@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>V2 Modell-Vorschau</title>
+<style>html, body { margin: 0; height: 100%; background: #000; overflow: hidden; } canvas { width: 100%; height: 100%; display: block; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// V2 model preview: the real gamev2 Renderer3D on a static fake world with ONE fixture ship
+// (tests/v2.modelfixtures.mjs) or a handful of aircraft. Driven by tests/playwrightv2.models.mjs:
+//   __lab.show(key, detail)  -> builds the ship through the real builder, returns its stats
+//   __lab.air(detail)        -> a line-up of every aircraft model
+//   __lab.view(kind)         -> 'side' | 'quarter' | 'top' | 'aft'
+// Query: ?model=burke&detail=3&view=quarter for looking around by hand.
+import * as THREE from '../vendor/three/three.module.min.js';
+import { Renderer3D } from '../gamev2/render3d.js';
+import { GFX } from '../gamev2/gfxquality.js';
+import { FIXTURES, mkModernShip, mkWW2Ship, recStats } from './v2.modelfixtures.mjs';
+
+const q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c');
+const R = new Renderer3D(canvas);
+const fit = () => R.resize(innerWidth, innerHeight);
+addEventListener('resize', fit); fit();
+
+const mkWorld = (ships, planes = []) => {
+   const world = {
+      arena: 12000, time: 0, phase: 'playing', player: ships[0] || null, ships, bots: ships.slice(1),
+      env: { time: 'day', weather: 'clear', seaState: 0.12, visibility: 1 }, obstacles: [],
+      shells: [], torpedoes: [], smokeClouds: [], effects: [], events: [], caps: [], planes, squadrons: planes,
+      isSpotted: () => true, inSmoke: () => false, shipById: (id) => ships.find(s => s.id === id) || null,
+   };
+   ships.forEach(s => { s.world = world; });
+   return world;
+};
+const lab = window.__lab = { R, world: mkWorld([]), frames: 0, L: 100, errors: [] };
+lab.show = (key, detail) => {
+   GFX.detail = detail;
+   R.ships.geoCache?.clear?.();
+   const ship = FIXTURES[key] ? mkModernShip(key) : mkWW2Ship(key);
+   ship.isPlayer = true;
+   lab.world = mkWorld([ship]);
+   R.buildWorld(lab.world);
+   R.render(lab.world, 0.016, null);
+   const rec = R.ships.recs.get(ship);
+   if (!rec) return { error: 'no record' };
+   lab.L = rec.d.L; lab.ship = ship; lab.frames = 0;
+   const st = recStats(rec);
+   return { tris: st.tris, meshes: st.meshes, bad: st.bad, size: st.size, anchors: Object.keys(rec.anchors || {}), spinners: (rec.spinners || []).length, turrets: rec.turrets.length };
+};
+lab.view = (kind) => {
+   const L = lab.L, y = Math.max(2, L * 0.05);
+   const V = {
+      side: { pos: [0, L * 0.07 + 2, L * 0.7 + 8], look: [0, y, 0], fov: 40 },
+      quarter: { pos: [L * 0.5 + 6, L * 0.24 + 4, L * 0.4 + 6], look: [L * 0.02, y * 0.6, 0], fov: 40 },
+      aft: { pos: [-L * 0.62 - 8, L * 0.26 + 4, -L * 0.48 - 8], look: [-L * 0.03, y * 0.6, 0], fov: 40 },
+      top: { pos: [0, L * 1.1 + 15, 0.01], look: [0, 0, 0], fov: 40 },
+   };
+   R.debugView = V[kind] || V.side;
+   lab.frames = 0;
+};
+// the frame's own numbers (ocean, sky and shadow passes included)
+lab.frameInfo = () => ({ calls: R.renderer.info.render.calls, tris: R.renderer.info.render.triangles });
+lab.air = (detail, list) => {
+   GFX.detail = detail;
+   lab.world = mkWorld([], list);
+   R.buildWorld(lab.world);
+   lab.frames = 0;
+};
+lab.THREE = THREE;
+lab.view('side');
+if (q.get('model')) { lab.show(q.get('model'), Number(q.get('detail') ?? 3)); lab.view(q.get('view') || 'quarter'); }
+let last = performance.now();
+function frame() {
+   requestAnimationFrame(frame);
+   const now = performance.now();
+   const dt = Math.min(0.1, (now - last) / 1000); last = now;
+   lab.world.time += dt;
+   R.render(lab.world, dt, null);
+   lab.frames++;
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
