@@ -68,7 +68,7 @@ async function host(A, { name, mode = 'coop', mission, ship }) {
    await A.selectOption('[data-f="mission"]', mission);
    await A.click('.mp-modal [data-ok]');
    await A.waitForSelector('.mp-player');
-   if (ship) await A.click(`[data-ship="${ship}"]`);
+   if (ship) await A.click(`.mp [data-ship="${ship}"]`);
 }
 async function join(B, name) {
    const ok = await wait(B, (n) => [...document.querySelectorAll('.mp-game')].some(g => g.textContent.includes(n)), name);
@@ -141,6 +141,54 @@ if (ONLY.includes('coop')) {
    check(T + `ran ${RUN_S} s of game time`, ok60, { host: a2.t, guest: b2.t });
    check(T + 'guest world tracks host time', Math.abs(a2.t - b2.t) < 3, { a: a2.t, b: b2.t });
    await shot(A, 'coop-4-mid'); await shot(B, 'coop-4-mid');
+   check(T + 'no console errors on either page', errors.length === 0, errors.slice(0, 3));
+   await closeAll(ctx);
+}
+
+// ====================================================================== PvP
+if (ONLY.includes('pvp')) {
+   const T = 'pvp: ', ctx = await newContext();
+   const A = await mkPage(ctx, 'A', 'Anna'); await host(A, { name: 'V2 PvP Test', mode: 'pvp', mission: 'standard' });
+   const B = await mkPage(ctx, 'B', 'Bert');
+   check(T + 'B finds the game and is in the room', await join(B, 'V2 PvP Test'));
+   if (await B.locator('[data-join-team="2"]').count()) await B.click('[data-join-team="2"]');   // no button when the lobby already placed the guest there
+   check(T + 'guest moves to team 2', await wait(B, () => document.querySelector('.mp-player.me')?.previousElementSibling?.dataset.teamHead === '2'
+      || [...document.querySelectorAll('[data-team-head]')].find(h => h.dataset.teamHead === '2')?.textContent.includes('dein Team')));
+   const east = await B.evaluate(() => [...document.querySelectorAll('.mp [data-ship]')].map(e => ({ k: e.dataset.ship, t: e.textContent })));
+   const EAST = ['Typ022', 'Typ054A', 'Typ052D', 'Typ055'];
+   check(T + 'team 2 sees the east roster (no west ships, text complete)', east.length >= 4 && EAST.some(k => east.some(e => e.k === k)) && !east.some(e => ['Burke', 'Sachsen'].includes(e.k)) && !east.some(e => /undefined|NaN/.test(e.t)), east.map(e => e.k));
+   const pick = (east.find(e => e.k === 'Typ054A') || east[0]).k;
+   await B.click(`.mp [data-ship="${pick}"]`);
+   check(T + 'guest picks an east ship', await wait(B, (k) => document.querySelector(`.mp [data-ship="${k}"]`)?.classList.contains('sel'), pick));
+   check(T + 'host sees the guest on team 2 with that ship', await wait(A, () => { const p = [...document.querySelectorAll('.mp-player')].find(e => e.textContent.includes('Bert')); const h = [...document.querySelectorAll('[data-team-head]')]; return !!p && h.length === 2 && !/kein Schiff/.test(p.textContent) && !!(h[1].compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING); }));
+   await shot(A, 'pvp-1-lobby'); await shot(B, 'pvp-1-lobby');
+   check(T + 'game starts', await startMatch(A, B));
+   await sleep(A, 3000);
+   const a = await snap(A), b = await snap(B);
+   check(T + 'same mission, both own ships differ, guest is east class', a.mission === b.mission && a.me !== b.me && a.ships === b.ships && ['Typ022', 'Typ054A', 'Typ052D', 'Typ055'].includes(b.cls), { a: [a.me, a.cls], b: [b.me, b.cls] });
+   check(T + 'each page sees itself as the "player" side', a.side === 'player' && b.side === 'player');
+   await shot(A, 'pvp-2-start'); await shot(B, 'pvp-2-start');
+   // both fire an anti-ship missile through the keys
+   for (const P of [A, B]) { await P.bringToFront(); await P.keyboard.press('Digit2'); await sleep(P, 150); await P.keyboard.press('Space'); }
+   check(T + 'both missiles reach the host world', await wait(A, ([x, y]) => { const w = window.__world(); return [x, y].every(id => w.missiles.some(m => m.ownerId === id)); }, [a.me, b.me], 10000));
+   check(T + 'the guest sees both launches', await wait(B, () => window.__world().missiles.filter(m => m.kind === 'ssm').length >= 1, null, 8000));
+   // damage on the guest's ship, from the host's ship
+   const hp0 = await B.evaluate(() => window.__world().player.hp);
+   await A.evaluate((id) => { const w = window.__world(), t = w.ships.find(s => s.id === id), me = w.player; t.takeDamage(t.maxHP * 0.3, me, 'ssm'); }, b.me);
+   check(T + 'damage replicates to the guest', await wait(B, (h) => window.__world().player.hp < h - 1, hp0, 6000), { hp0, hp: await B.evaluate(() => window.__world().player.hp) });
+   const hpHost = await A.evaluate((id) => window.__world().ships.find(s => s.id === id).hp, b.me);
+   check(T + 'host view of the guest ship is damaged', hpHost < hp0);
+   await shot(B, 'pvp-3-mid'); await shot(A, 'pvp-3-mid');
+   // kill: the host sinks the guest ship; its team is out, the host's team wins
+   await A.evaluate((id) => { const w = window.__world(), t = w.ships.find(s => s.id === id); t.takeDamage(t.maxHP * 5, w.player, 'ssm'); }, b.me);
+   check(T + 'the kill replicates (guest ship dead on the guest)', await wait(B, () => !window.__world().player.alive, null, 8000));
+   const res = (P) => wait(P, () => { const r = document.querySelector('.m3r'); return !!r && r.offsetParent !== null; }, null, 20000);
+   const [rA, rB] = [await res(A), await res(B)];
+   check(T + 'result screen on both pages', rA && rB, { rA, rB });
+   const outcome = (P) => P.evaluate(() => document.querySelector('.m3r-title')?.textContent.trim());
+   const oa = await outcome(A), ob = await outcome(B);
+   check(T + 'opposite outcomes (host SIEG, guest NIEDERLAGE)', oa === 'SIEG' && ob === 'NIEDERLAGE', { oa, ob });
+   await shot(A, 'pvp-4-result'); await shot(B, 'pvp-4-result');
    check(T + 'no console errors on either page', errors.length === 0, errors.slice(0, 3));
    await closeAll(ctx);
 }
