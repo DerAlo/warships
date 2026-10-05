@@ -325,7 +325,7 @@ export function drawSubUnder(g, ui, W, H, t) {
          g.fillText(L.label, ox + dx * 1.08, oy + dy * 1.08 - 8);
       }
       g.fillStyle = 'rgba(170,220,245,0.85)'; g.font = FONT(13, 600);
-      g.fillText('GETAUCHT · Horchgerät: nur Peilungen · ' + (touch() ? '▲ Auf' : 'G') + ' = auf Sehrohrtiefe', W / 2, H * 0.16);
+      g.fillText('GETAUCHT · Horchgerät: nur Peilungen · ' + (touch() ? '▲ Auf' : 'G') + ' = auf Sehrohrtiefe', W / 2, touch() && H <= 480 ? 140 : H * 0.16);   // phone: below the objectives band and the alerts
       g.restore();
    }
    if (u.nContacts > 0) {
