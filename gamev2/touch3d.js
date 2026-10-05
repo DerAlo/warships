@@ -176,10 +176,18 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    /* phone: the orders get their own band in the middle (the left column has no room for four long lines and
       would clip them); the radio banner is narrowed so it never runs into the columns beside it */
    #tu-hud-o { position: absolute; top: calc(8px + env(safe-area-inset-top, 0px)); left: calc(284px + env(safe-area-inset-left, 0px)); width: 330px; pointer-events: none; }
-   body.touch #tu-hud-o > #objectives { position: static; width: 410px; zoom: var(--tu-hud); }
+   body.touch #tu-hud-o > #objectives { position: static; width: 358px; zoom: var(--tu-hud); }   /* ends left of the target card */
    body.touch:has(#mx-threat:not(.hidden)) #tu-hud-o { display: none; }   /* an incoming salvo takes the band */
-   body.touch #msgs { width: 310px; max-width: 310px; }
-   body.touch .msg, body.touch .msg.radio { max-width: 310px; font-size: 12px; }
+   /* notices stack under the minimap (TouchUi._arrange), clear of the reticle, the target marker and the ship
+      labels: the newest three, the oldest clipped first. They stay readable while a finger aims. */
+   body.touch #tu-hud-r > #msgs { zoom: 1; width: auto; max-width: 286px; max-height: 96px; align-items: flex-end; justify-content: flex-end; overflow: hidden; }
+   body.touch #tu-hud-r > #msgs:empty { display: none; }
+   body.touch #msgs .msg:nth-last-child(n+4) { display: none; }
+   body.touch .msg, body.touch .msg.radio { max-width: 286px; font-size: 12px; }
+   body.touch #tu-hud-r > * { transition: opacity .25s; }
+   body.touch.tu-aim #tu-hud-r { opacity: 1; }
+   body.touch.tu-aim #tu-hud-r > :not(#msgs) { opacity: .3; }
+   body.touch #ops-panel .ops-plate { min-height: 58px; box-sizing: border-box; }   /* a 40 px tap target at this zoom */
    body.touch #objectives { transition: opacity .6s; }
    body.touch #objectives:not(.tu-fresh) { opacity: 0; }
    body.touch #scorebox { width: 250px; padding: 4px 10px 5px; grid-template-columns: auto 1fr; grid-template-areas: "timer score" "caps caps"; }
@@ -480,7 +488,10 @@ export class TouchUi {
       const compact = this.mq.compact.matches, narrow = this.mq.narrow.matches;
       const put = (col, ids) => { for (const id of ids) { const e = id && $(id); if (e) col.appendChild(e); } };
       put(l, ['scorebox', 'ship-card', ...LATE_PLATES, !compact && 'objectives', 'roster-ally', narrow && 'cons']);
-      put(r, ['minimap-wrap', !compact && 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
+      put(r, ['minimap-wrap', compact && 'msgs', !compact && 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
+      // phone: the notices leave the middle of the screen; anywhere else they go back to their place in the HUD
+      const msgs = $('msgs');
+      if (!compact && msgs && msgs.parentNode !== hud) hud.insertBefore(msgs, $('torp-alert'));
       put(t, [compact && 'lock-panel']);
       put(o, [compact && 'objectives']);      // phone: the target card under the system buttons, clear of the fire cluster
       put(b, [!compact && 'tally', 'tu-tsch', !narrow && 'cons', LATE_BOTTOM, 'weapons']);

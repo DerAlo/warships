@@ -501,6 +501,11 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
    .m3r-body { grid-template-columns:minmax(0,1fr); grid-auto-rows:max-content; overflow-y:auto; padding:6px 10px 4px; }
    .m3r-box { overflow:visible; min-height:auto; } .m3r-box + .m3r-box { border-left:0; border-top:1px solid var(--rule); margin-top:8px; padding-top:10px; }
    .m3r-foot { padding:8px 10px 10px; gap:8px 18px; } .m3r-earn b { font-size:22px; }
+   /* an operation's objectives, clasp and debrief open the report there; the figures and tables follow below */
+   .m3r-box.m3r-brief { order:-1; display:flex; flex-direction:column; border-top:0; margin-top:0; padding-top:6px; }
+   .m3r-box.m3r-brief > .m3-h { margin-top:0 !important; }
+   .m3r-box.m3r-brief > .m3r-teams, .m3r-box.m3r-brief > [data-pvp-win] { order:1; margin-top:14px !important; }
+   .m3r-body:has(> .m3r-brief) > .m3r-box:first-child { border-top:1px solid var(--rule); margin-top:8px; padding-top:10px; }
 }
 body.touch .m3r-btn { min-height:44px; }
 `;
@@ -894,7 +899,7 @@ export class Menu3D {
          <div class="m3r-body">
             <div class="m3r-box"><div class="m3-h"><span>Eigene Leistung</span></div><div class="m3r-grid">${tiles}</div>
                ${rib ? `<div class="m3r-rib">${rib}</div>` : ''}${rwBox}</div>
-            <div class="m3r-box">${pvBox}<div class="m3r-teams" ${pv ? 'style="margin-top:14px"' : ''}>
+            <div class="m3r-box${objs ? ' m3r-brief' : ''}">${pvBox}<div class="m3r-teams" ${pv ? 'style="margin-top:14px"' : ''}>
                <div><div class="m3-h"><span class="m3-ally">${pv ? 'Eigenes Team' : 'Eigener Verband'}</span></div><table>${head}${allies.map(row).join('')}</table></div>
                <div><div class="m3-h"><span class="m3-enemy">Gegner</span></div><table>${head}${enemies.map(row).join('')}</table></div>
             </div>
