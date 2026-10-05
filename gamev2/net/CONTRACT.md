@@ -182,7 +182,10 @@ upload, about 325 bytes per snapshot for either team.
 - Every message stays far below 16 kB (snapshot of a 7v7 about 0.6 kB, plus 21 bytes per flight
   in the air, at most 64 flights; event batches split at 60 items), except `mig`: about 11–13 kB
   in a 7v7 with carriers (measured 12.1 kB, 10.8 kB without carriers). Neither route limits the size (Trystero
-  splits data-channel messages into 16 kB chunks, the brokers take far more).
+  splits data-channel messages into 16 kB chunks, the brokers take far more). A busy scene (27+ missiles
+  measured 14.9 kB) would reach that limit, so a `mig` over 9000 characters goes out as reliable `migc`
+  pieces `{k:'migc', t, i, n, s}` (s = slice of the JSON text); the successor reassembles only the newest
+  tick and treats the result exactly like a `mig`.
 
 ## Host migration
 

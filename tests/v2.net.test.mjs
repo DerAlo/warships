@@ -573,3 +573,24 @@ test('v2 net: host migration mid-salvo; the successor flies the missiles on, the
    assert.deepEqual(room.lost, [[], [], []]);
    console.log('# v2 migration: full state ' + full.toFixed(0) + ' B avg with ' + before.length + ' missiles in the air (' + ms.count + ' sent)');
 });
+
+test('v2 net: a busy scene stays under the transport limit (chunked full state) and the successor still takes over', () => {
+   const sizes = { mig: 0, migc: 0 };
+   const room = makeRoom({ tap: (i, ch, d) => { if (ch === 'mig' || ch === 'migc') sizes[ch] = Math.max(sizes[ch], JSON.stringify(d).length); } });
+   assert.ok(ready(room));
+   const [gh, ga] = room.games, hw = gh.world, h0 = human(room, 0), h1 = human(room, 1);
+   room.run(2);
+   for (const s of [h0, h1]) for (const k of Object.keys(s.mag || {})) if (typeof s.mag[k] === 'number') s.mag[k] = Math.max(s.mag[k], 60);
+   let n = 0;
+   for (let i = 0; i < 70; i++) { const s = i % 2 ? h1 : h0; s.lastSsmFire = -99; if (launchSSM(hw, s, { bearing: 0.05 * (i % 9) - 0.2 })) n++; }
+   assert.ok(n >= 40, 'launched ' + n);
+   room.run(1.6);
+   const before = hw.missiles.filter(m => m.side === 'player').map(m => m.id);
+   assert.ok(before.length >= 30, 'busy: ' + before.length);
+   gh.quit();
+   assert.ok(room.run(3, () => ga.isHost), 'anna took over');
+   assert.ok(sizes.migc > 0, 'the state went out in pieces');
+   assert.ok(sizes.mig < 12000 && sizes.migc < 12000, 'every message small: ' + sizes.mig + ' / ' + sizes.migc);
+   const kept = before.filter(id => ga.world.missiles.some(m => m.id === id)).length;
+   assert.ok(kept >= before.length - 3, 'missiles kept: ' + kept + ' of ' + before.length);
+});

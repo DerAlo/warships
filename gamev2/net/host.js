@@ -18,6 +18,7 @@ import { squadById, squadVisibleTo, releaseSquadron } from '../air.js';
 import { encodeShips, encodeOwn, visibleTo } from './codec.js';
 import { mirrorEvent, mirrorLog, mirrorReason } from './pvp.js';
 import { MIG_EVERY, packWorld, packScript, scriptSig } from './migrate.js';
+const MIG_CHUNK = 9000;   // characters of a full-state message per piece (transport limit about 16 kB)
 import { encodeV2, encodeOwnV2, slowV2, v2EventFor } from './v2.js';
 
 export const SNAP_EVERY = 3;        // sim steps between snapshots (20 Hz)
@@ -457,8 +458,12 @@ export function makeHost(world, o) {
       const pl = [[self.id, self.slot, 0]];
       for (const c of clients.values()) pl.push([c.id, c.ship.slot, c.gone || c.back ? 1 : 0]);
       const m = { k: 'mig', ...packWorld(world, { pl, scr }) };
-      if (o.measure) { migBytes += JSON.stringify(m).length; migCount++; }
-      o.send('mig', m, sid);
+      const s = JSON.stringify(m);
+      if (o.measure) { migBytes += s.length; migCount++; }
+      if (s.length <= MIG_CHUNK) { o.send('mig', m, sid); return; }
+      // a busy scene (many missiles) would pass the transport limit: reliable pieces, reassembled by the successor
+      const n = Math.ceil(s.length / MIG_CHUNK);
+      for (let i = 0; i < n; i++) o.send('migc', { k: 'migc', t: tick, i, n, s: s.slice(i * MIG_CHUNK, (i + 1) * MIG_CHUNK) }, sid);
    }
 
    world.update = (dt) => {
