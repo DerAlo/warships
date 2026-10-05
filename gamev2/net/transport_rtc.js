@@ -1,4 +1,4 @@
-// game3d/net/transport_rtc.js — the direct route of a game room: WebRTC data channels between the
+// gamev2/net/transport_rtc.js — the direct route of a game room: WebRTC data channels between the
 // browsers, no own server. The peers of a room find each other through public Nostr relays
 // (registration-free: every page load makes a throw-away key pair); those only carry the
 // encrypted WebRTC session descriptions, game data then flows between the browsers (DTLS).

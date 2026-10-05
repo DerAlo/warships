@@ -1,4 +1,4 @@
-// game3d/net/migrate.js — host migration: the full state a successor needs to carry on a running
+// gamev2/net/migrate.js — host migration: the full state a successor needs to carry on a running
 // match when the host is gone (CONTRACT.md "Host migration"). The host sends it to the one client
 // it names as successor about once a second (channel `mig`, latest wins). When the host leaves,
 // that client turns its replica World into the authoritative one (game.js promote()).

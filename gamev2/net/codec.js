@@ -1,4 +1,4 @@
-// game3d/net/codec.js — the binary ship snapshot (channel `snap`, host -> client).
+// gamev2/net/codec.js — the binary ship snapshot (channel `snap`, host -> client).
 //
 // One message = the state of every ship afloat or sinking (the same bytes for all clients of a
 // team; PvP: only what that team can see, see encodeShips) followed by the receiving client's

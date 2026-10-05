@@ -1,4 +1,4 @@
-// game3d/net/game.js — one net match from the lobby's hand-over (session, see CONTRACT.md) to
+// gamev2/net/game.js — one net match from the lobby's hand-over (session, see CONTRACT.md) to
 // session.onEnd(). Ties transport, World (setup.js), host recorder (host.js) and client replica
 // (replica.js) together. No DOM in here: main3d.js drives it in the browser, the node tests
 // drive it directly.

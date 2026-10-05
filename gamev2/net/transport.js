@@ -1,5 +1,5 @@
-// game3d/net/transport.js — the Transport contract shared by the netcode (session/replica) and
-// the matchmaking layer, plus two serverless test transports. See game3d/net/CONTRACT.md.
+// gamev2/net/transport.js — the Transport contract shared by the netcode (session/replica) and
+// the matchmaking layer, plus two serverless test transports. See gamev2/net/CONTRACT.md.
 //
 // A Transport connects the local peer to the other peers of ONE room (star topology in practice:
 // clients talk to the host, the host talks to everybody).

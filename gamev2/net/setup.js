@@ -1,4 +1,4 @@
-// game3d/net/setup.js — builds the World of a net game. Host and clients run the same code with
+// gamev2/net/setup.js — builds the World of a net game. Host and clients run the same code with
 // the same `start` data (seed, mission, difficulty, ship class + loadout per slot), so islands,
 // roster and ship ids come out identical on every peer.
 import { World, makeStats } from '../state.js';

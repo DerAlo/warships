@@ -1,4 +1,4 @@
-// game3d/net/command.js — the one command structure that steers a human-controlled ship.
+// gamev2/net/command.js — the one command structure that steers a human-controlled ship.
 //
 // main3d.js fills a command from the local input and applies it to world.player; in a net game
 // the client sends the very same data on the `cmd` channel and the host applies it to that

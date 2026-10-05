@@ -1,4 +1,4 @@
-// game3d/net/lobby.js — matchmaking logic without any UI (the screen is game3d/mpui.js):
+// gamev2/net/lobby.js — matchmaking logic without any UI (the screen is gamev2/mpui.js):
 // game list discovery, hosting, joining with an optional password, the room (players, ships,
 // ready, chat, kick) and the hand-over to the game (`session`, see CONTRACT.md).
 //

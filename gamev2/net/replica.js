@@ -1,4 +1,4 @@
-// game3d/net/replica.js — the client side of a net game. The client's World is built from the
+// gamev2/net/replica.js — the client side of a net game. The client's World is built from the
 // same start data as the host's (setup.js) but never simulates ships and never decides damage:
 // world.update() is replaced by step() below, which
 //   - keeps a render clock ~100 ms behind the host (more when the connection jitters) and

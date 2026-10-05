@@ -1,4 +1,4 @@
-// game3d/net/host.js — the authoritative side of a net game. The host's World runs as in
+// gamev2/net/host.js — the authoritative side of a net game. The host's World runs as in
 // singleplayer; this module hangs onto it and
 //   - applies every remote captain's latest command to that captain's ship before each sim step
 //   - records what happens (events, effects, shell / torpedo spawns and removals, smoke, log lines,

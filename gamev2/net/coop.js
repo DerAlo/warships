@@ -1,4 +1,4 @@
-// game3d/net/coop.js — which missions can be played in co-op and with how many humans.
+// gamev2/net/coop.js — which missions can be played in co-op and with how many humans.
 // Owned by the netcode side (see CONTRACT.md); matchmaking only calls these.
 import { missionSlots, missionRoles, NO_COOP } from './setup.js';
 

@@ -1,4 +1,4 @@
-// game3d/net/pvp.js — PvP: two teams of humans, the free places of both filled with bots.
+// gamev2/net/pvp.js — PvP: two teams of humans, the free places of both filled with bots.
 // Owned by the netcode side (see CONTRACT.md); matchmaking only calls pvpMissions / pvpSlots.
 //
 // The host's World is the same as in co-op: its own team sails as side 'player', the other team

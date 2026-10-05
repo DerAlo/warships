@@ -460,6 +460,8 @@ export function makeV2Client(world, o) {
             if (fin(r[7])) { s.maxHp = s.maxHP = s.hp = r[7]; }
          } catch (e) { /* a kind this build does not know */ }
       }
+      // a site of the other side that is not in the list is neither seen nor heard any more
+      if (Array.isArray(m.si)) for (const s of world.sites) if (s.side !== 'player' && s.alive) { s.detected = false; s.targetable = false; s.esmSeen = null; }
       if (Array.isArray(m.si)) for (const r of m.si) {
          const s = Array.isArray(r) ? siteById(world, r[0]) : null;
          if (!s) continue;
