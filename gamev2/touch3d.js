@@ -19,7 +19,6 @@ const TELE_STEPS = [4, 3, 2, 1, 0, -1];
 const TELE_TXT = { 4: 'Voll', 3: '3/4', 2: '1/2', 1: '1/4', 0: 'Stopp', '-1': 'Zurück' };
 const RUD_TXT = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'halb Stb', 2: 'hart Stb' };
 const AIR_TYPES = [['1', 'tb', 'Torpedo&shy;bomber'], ['2', 'db', 'Sturz&shy;bomber'], ['3', 'ft', 'Jäger']];
-const W_KEY = { HE: '1', AP: '2', TORP: '3' };
 // keep in step with the media queries of CSS below
 const MQ_COMPACT = '(max-height: 480px)';                        // phone held sideways
 const MQ_NARROW = '(max-height: 480px) and (max-width: 899px)';  // ... and a short one: consumables go left
@@ -27,6 +26,7 @@ const MQ_UPRIGHT = '(orientation: portrait) and (max-width: 600px)';
 const MORE_OPEN = 5;             // s the phone's "more" fold stays open
 const OBJ_SHOW = 8;              // s the phone shows the objectives after a change
 const LATE_PLATES =['sub-panel', 'asw-panel', 'air-panel', 'aa-panel'];   // built by subui / airui on demand
+const LATE_BOTTOM = 'mx-sys';                                            // built by missileui on the first start
 
 const CSS = `
 body.touch { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
@@ -103,13 +103,17 @@ body.touch #hp-text { grid-area: text; margin-top: 0; font-size: 12px; gap: 4px;
 body.touch #silhouette, body.touch #ship-type { display: none; }
 /* bottom stack */
 #tu-hud-b { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; justify-items: center; align-items: end; gap: 8px;
-   grid-template-columns: 84px auto 84px; grid-template-areas: ". tally ." "tsch cons ." ". weapons ."; pointer-events: none; }
+   grid-template-columns: 84px auto 84px; grid-template-areas: ". tally ." "tsch cons ." ". sys ." ". weapons ."; pointer-events: none; }
+body.touch #mx-sys { grid-area: sys; pointer-events: auto; touch-action: none; }
+body.touch #mx-sys > div[data-key] { min-width: 44px; justify-content: center; flex-direction: column; gap: 1px; align-items: flex-start; }
+body.touch.tu-squad #mx-sys { display: none; }
 #tu-tsch { grid-area: tsch; width: 84px; height: 84px; }
 body.touch #tally { grid-area: tally; max-width: 360px; max-height: 80px; overflow: hidden; }
 body.touch #cons { grid-area: cons; pointer-events: auto; touch-action: none; }
 body.touch #weapons { grid-area: weapons; pointer-events: auto; touch-action: none; }
 body.touch .tu-press { filter: brightness(1.6); }
-body.touch .wslot { width: 96px; padding-left: 30px; }
+body.touch .wslot { width: 112px; padding-left: 30px; }
+body.touch .wslot .wname { padding-right: 14px; font-size: 11px; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.touch .wslot .wbar { left: 30px; }
 body.touch .wslot .wicon { left: 5px; }
 body.touch.tu-cv #weapons, body.touch.tu-cv #tu-tsch, body.touch.tu-squad #weapons, body.touch.tu-squad #cons, body.touch.tu-squad #tu-tsch { display: none; }
@@ -174,7 +178,11 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    body.touch #scorebox { width: 250px; padding: 4px 10px 5px; grid-template-columns: auto 1fr; grid-template-areas: "timer score" "caps caps"; }
    body.touch .score-row { margin-top: 0; }
    body.touch #caps-row { margin-top: 4px; }
-   #tu-hud-b { left: calc(276px + env(safe-area-inset-left, 0px)); transform: none; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); grid-template-columns: auto; grid-template-areas: "weapons"; }
+   #tu-hud-b { left: calc(304px + env(safe-area-inset-left, 0px)); transform: none; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); grid-template-columns: auto; grid-template-areas: "sys" "weapons"; justify-items: start; gap: 5px; }
+   body.touch #mx-sys { display: grid; grid-template-columns: repeat(3, auto); }
+   body.touch #mx-sys #mx-layers { grid-column: 1 / -1; grid-row: 1; min-height: 22px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+   body.touch #mx-sys #mx-layers .mx-l { display: none; }
+   body.touch.tu-chart #mx-sys { display: none; }   /* the chart needs the room */
    #tu-tsch { display: none; }   /* the turret schematic would sit on the reticle: the ready count there has to do */
    body.touch .wslot { width: 52px; padding: 0; }
    body.touch .wslot .wname, body.touch .wslot .wstat { display: none; }
@@ -187,14 +195,14 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    body.touch.tu-cv #tu-hud-b { left: calc(484px + env(safe-area-inset-left, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (max-height: 480px) and (min-width: 900px) {
-   #tu-hud-b { grid-template-columns: auto auto; grid-template-areas: "cons weapons"; }
+   #tu-hud-b { grid-template-columns: auto auto; grid-template-areas: "sys sys" "cons weapons"; }
 }
 /* tablet held upright: the system buttons move under the minimap, the bottom stack above the rudder */
 @media (orientation: portrait) and (min-width: 601px) {
    .tu-sys { left: auto; right: calc(8px + var(--sr)); transform: none; top: calc(16px + 220px * var(--tu-map) + var(--st)); }
    body.touch #tu-hud-r > #minimap-wrap { margin-bottom: calc(64px / var(--tu-map)); }
    #tu-hud-l { bottom: calc(470px + env(safe-area-inset-bottom, 0px)); }
-   #tu-hud-b { bottom: calc(170px + env(safe-area-inset-bottom, 0px)); grid-template-columns: auto; grid-template-areas: "tally" "tsch" "cons" "weapons"; }
+   #tu-hud-b { bottom: calc(170px + env(safe-area-inset-bottom, 0px)); grid-template-columns: auto; grid-template-areas: "tally" "tsch" "cons" "sys" "weapons"; }
    #tu-bar { bottom: calc(170px + var(--sb)); }
    body.touch.tu-cv #tu-hud-b { bottom: calc(228px + env(safe-area-inset-bottom, 0px)); }
 }
@@ -297,7 +305,7 @@ export class TouchUi {
       const ctx = {
          sec: btn('tu-sec', '', 'Sek.<br>Ziel', col),
          asw: btn('tu-asw', '', 'Wasser&shy;bomben', col),
-         aa: btn('tu-aa', '', 'Flak<br><span>aus</span>', col),
+         aa: btn('tu-aa', '', 'Flak<br><span>aus</span>', col),   // carriers: AA sector
          dive: btn('tu-dive', '', '▼<br>Tiefer', col),
          up: btn('tu-up', '', '▲<br>Auf', col),
          launch: btn('tu-launch', '', 'Start', col),
@@ -378,8 +386,10 @@ export class TouchUi {
             s.classList.add('tu-press'); setTimeout(() => s.classList.remove('tu-press'), 120);
          });
       };
-      plates(document.getElementById('weapons'), '.wslot', s => W_KEY[s.dataset.w]);
+      plates(document.getElementById('weapons'), '.wslot', s => s.dataset.key);
       plates(document.getElementById('cons'), '.cslot', s => s.dataset.slot);
+      // radar, air-defence doctrine and priority target: the plates of missileui.js (built on the first start)
+      plates(document.getElementById('hud'), '#mx-sys [data-key]', s => s.dataset.key);
       // no synthetic mouse events, double-tap zoom or long-press menu from the controls
       root.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
       root.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -463,8 +473,8 @@ export class TouchUi {
       put(l, ['scorebox', 'ship-card', ...LATE_PLATES, 'objectives', 'roster-ally', narrow && 'cons']);
       put(r, ['minimap-wrap', !compact && 'lock-panel', compact && 'tally', 'roster-enemy', 'killfeed']);
       put(t, [compact && 'lock-panel']);      // phone: the target card under the system buttons, clear of the fire cluster
-      put(b, [!compact && 'tally', 'tu-tsch', !narrow && 'cons', 'weapons']);
-      this.late = LATE_PLATES.filter(id => !$(id));
+      put(b, [!compact && 'tally', 'tu-tsch', !narrow && 'cons', LATE_BOTTOM, 'weapons']);
+      this.late = [...LATE_PLATES, LATE_BOTTOM].filter(id => !$(id));
    }
 
    _spread() {
@@ -564,6 +574,7 @@ export class TouchUi {
       setCls(obj, 'tu-fresh', this.objT < OBJ_SHOW);
       setCls(body, 'tu-cv', s.cv && !s.squad);
       setCls(body, 'tu-squad', s.squad);
+      setCls(body, 'tu-chart', s.map);
       setCls(d.tele, 'squad', s.squad);
       if (!s.squad) {
          // the squadron view closed under a held finger: its held keys must not step the ship's helm
@@ -602,7 +613,7 @@ export class TouchUi {
          setCls(b, 'hidden', !s.cv || s.squad || s.net);
          setCls(b, 'on', b.dataset.t === s.airSel);
       }
-      setText(d.fire, s.squad ? (s.sqType === 'ft' ? 'Patrouille' : 'Angriff') : 'Feuer');
+      setText(d.fire, s.squad ? (s.sqType === 'ft' ? 'Patrouille' : 'Angriff') : s.mode === 'cruise' ? (s.map ? 'Ziel' : 'Karte') : s.mode === 'ssm' || s.mode === 'rockets' ? 'Start' : 'Feuer');
    }
 }
 
@@ -612,13 +623,16 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Ruderleiste</span><span class="d">Ruder Backbord ↔ Steuerbord, bleibt stehen</span></div>
    <div><span class="k">Wischen</span><span class="d">Peilung (seitlich) und Entfernung (hoch/runter)</span></div>
    <div><span class="k">Zwei Finger</span><span class="d">Auseinander/zusammen: Zoom bis ins Fernglas</span></div>
-   <div><span class="k">Feuer</span><span class="d">Salve · Staffel: halten = Anflug, loslassen = Abwurf</span></div>
-   <div><span class="k">Glas · Ziel · Frei</span><span class="d">Fernglas an/aus · Ziel erfassen · freie Kamera</span></div>
+   <div><span class="k">Feuer / Start</span><span class="d">Gewählte Waffe auslösen · Staffel: halten = Anflug, loslassen = Abwurf</span></div>
+   <div><span class="k">Glas · Ziel · Frei</span><span class="d">Optik an/aus · Ziel erfassen · freie Kamera</span></div>
    <div><span class="k">Zielhilfe</span><span class="d">Erfasstes Ziel: das Fadenkreuz folgt dem Vorhalt, Wischen korrigiert (nicht im PvP, im Pausenmenü abschaltbar)</span></div>
-   <div><span class="k">Waffenleiste</span><span class="d">HE / AP / Torpedos antippen (Torpedos nochmals: Fächer)</span></div>
-   <div><span class="k">Runde Felder</span><span class="d">Verbrauchsgüter (Leckwehr, Reparatur …)</span></div>
+   <div><span class="k">Waffenleiste</span><span class="d">Geschütz, Seezielflugkörper, Marschflugkörper, Raketen, Torpedos antippen · nochmals: Flugkörpertyp bzw. Torpedofächer</span></div>
+   <div><span class="k">Seezielflugkörper</span><span class="d">Ziel erfassen oder anvisieren, dann Start · ohne Ziel: Peilungsschuss in Blickrichtung</span></div>
+   <div><span class="k">Marschflugkörper</span><span class="d">Antippen öffnet die Lagekarte · Punkt oder Landstellung auf der Karte antippen</span></div>
+   <div><span class="k">Radar · Luftabwehr · Vorrang</span><span class="d">Felder über der Waffenleiste antippen: Radar an/aus (EMCON) · Doktrin wechseln · anfliegenden Flugkörper in Blickrichtung zum Vorrangziel machen</span></div>
+   <div><span class="k">Runde Felder</span><span class="d">Schadensabwehr, Notreparatur, Täuschkörper, Störsender</span></div>
    <div><span class="k">Träger</span><span class="d">Flugzeugtyp, Start/Übernehmen · Staffel: Leiste links = Kurs, Hebel = Tempo, Schiff, Rückruf</span></div>
-   <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · Zerstörer: Wasserbomben</span></div>
+   <div><span class="k">U-Boot</span><span class="d">▼ Tiefer / ▲ Auf · U-Jagd-Schiffe: Wasserbomben</span></div>
    <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Flak und Sek.-Ziel aus</span></div>
    <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
 </div>`;

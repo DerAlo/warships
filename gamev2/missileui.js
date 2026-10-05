@@ -70,10 +70,11 @@ const CSS = `
 #mx-threat .vr .st.eng { color: var(--ok); } #mx-threat .vr .st.sed { color: var(--hud-dim); }
 #mx-threat .vm { color: var(--hud-dim); font-size: 11px; margin-top: 2px; }
 body.touch #mx-sys { font-size: 10.5px; }
-body.touch #mx-sys > div { padding: 3px 7px; min-height: 30px; }
+body.touch #mx-sys > div { padding: 3px 7px; min-height: 40px; }
 body.touch #mx-sys .mx-k { display: none; }
-body.touch #mx-threat { top: 58px; left: 50%; transform: translateX(-50%); min-width: 0; padding: 4px 8px 5px; font-size: 11px; }
+body.touch #mx-threat { top: 66px; left: 50%; transform: translateX(-50%); min-width: 0; padding: 4px 8px 5px; font-size: 11px; }
 body.touch #mx-threat .vr:nth-child(n+4), body.touch #mx-threat .vm { display: none; }
+@media (max-height: 480px) { body.touch #mx-threat { top: 8px; } }   /* phone: the system buttons sit to the right there */
 `;
 
 function el(tag, id, cls, html) {
@@ -130,7 +131,8 @@ export class MissileUi {
          + '<div id="mx-prio" data-key="T" title="Vorrangziel der Luftabwehr (T): der anfliegende Flugkörper in Blickrichtung"><i class="mx-k">T</i><span class="mx-l">Vorrang</span><b>—</b></div>');
       const thr = el('div', 'mx-threat', 'panel hidden', '<div class="vt"><span>VAMPIRE</span><span class="vn"></span></div><div class="vl"></div><div class="vm"></div>');
       const bc = document.getElementById('bottom-center'), weapons = document.getElementById('weapons'), hudRoot = document.getElementById('hud');
-      if (bc) bc.insertBefore(sys, weapons || null); else hudRoot?.appendChild(sys);
+      // (touch3d.js regroups the plates: the row follows the weapon bar wherever that sits)
+      if (weapons?.parentNode) weapons.parentNode.insertBefore(sys, weapons); else (bc || hudRoot)?.appendChild(sys);
       hudRoot?.appendChild(thr);
       const q = (r, s) => r.querySelector(s);
       this.dom = {
@@ -424,7 +426,7 @@ export class MissileUi {
          list.push({ id: 'cruise', key: '3', icon: 'CRUISE', name: cfg?.name || 'Marsch-FK', count: String(n), sel, ready: !b0, none: n <= 0,
             frac: n > 0 ? clamp01((world.time - (p.lastSsmFire ?? -99)) / 1.1) : 0, stat: b0 ? BLOCK_TEXT[b0].toLowerCase() : sel ? 'Ziel: Karte' : 'bereit',
             tip: 'Marschflugkörper (3) · öffnet die Lagekarte: Punkt oder Landstellung ' + (isTouch() ? 'antippen' : 'anklicken') });
-         if (sel) { map.mode = 'cruise'; map.range = cfg.range; u.aimInfo = u.aimInfo || (ctl.mapOpen ? '' : cfg.name + ': Ziel auf der Lagekarte wählen (3)'); }
+         if (sel) { map.mode = 'cruise'; map.range = cfg.range; u.aimInfo = u.aimInfo || (ctl.mapOpen ? '' : cfg.name + ': Ziel auf der Lagekarte wählen' + (isTouch() ? '' : ' (3)')); }
       }
       const rk = rocketState(p);
       if (rk) {
@@ -624,7 +626,7 @@ export function drawMissileHud(g, ui, W, H, t) {
       }
    }
    // --- what the fire key will do with the selected guided weapon
-   if (u.aimInfo && !ui.mapOpen) {
+   if (u.aimInfo && !ui.mapOpen && !(isTouch() && H <= 480)) {   // phone: the reticle label and the launch report carry it
       g.font = FONT(13, '600'); g.textBaseline = 'top';
       const tw = g.measureText(u.aimInfo).width + 16, y = cy + 104;
       g.fillStyle = 'rgba(10,12,13,0.62)'; g.fillRect(cx - tw / 2, y - 3, tw, 21);

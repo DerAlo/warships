@@ -157,7 +157,7 @@ function touchState() {
       alive: !!p.alive, kn: Math.round(displayKn(p) || 0), tele: ctl.telegraph, rudder: ctl.rudder,
       map: ctl.mapOpen, help: ctl.help, bino: !!cam3.bino, free: !!cam3.freeLook, lock: ctl.lockId != null,
       cv: !!p.air, sub: !!p.sub, deep: !!p.sub && p.depth === 2, depthTarget: p.depthTarget ?? 0,
-      sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw, aa: !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net,
+      sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw, aa: !!p.air && !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net, mode: ctl.mode,
       squad: !!airui.flying, sqType: sq?.type || null, sqHome: !!sq && (sq.state === 'return' || sq.state === 'land'),
       airSel: p.air?.sel || null, sqActive: !!(p.air && world && activeSquad(world, p, p.air.sel)),
    };
