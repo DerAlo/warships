@@ -9,6 +9,7 @@ import { WORLD } from './config.js';
 import { drawSubMap } from './subui.js';
 import { T, rgba, FONT, MONO } from './theme.js';
 import { drawAirMap } from './airui.js';
+import { drawMissileMap } from './missileui.js';
 
 const TAU = Math.PI * 2;
 const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
@@ -287,6 +288,8 @@ function paintMapInner(g, world, x0, y0, size, opts) {
 
    // squadrons the team can see (airui.js)
    if (world.squadrons?.length) drawAirMap(g, world, p, mx, my, big, opts.airCtl ?? null);
+   // missiles, decoy clouds, land positions, ESM bearings, map targeting (missileui.js)
+   drawMissileMap(g, world, p, mx, my, sc, big, opts);
 
    // aim point
    if (opts.aimPoint && p?.alive) {

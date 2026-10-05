@@ -857,6 +857,67 @@ function subLoop(sr, r) {
    return norm(x, 0.8);
 }
 
+// ---------------------------------------------------------------- modern mode (missiles)
+// rocket motor lighting off and tearing away: crack, roar sweeping up, long hiss fading out
+function mslLaunch(sr, r) {
+   const n = Math.floor(2.6 * sr), out = new Float32Array(n);
+   const roar = white(n, r);
+   svf(roar, sr, BP, t => 420 + 2300 * Math.min(1, t / 0.35) * Math.exp(-t / 1.1), 0.7); shape(roar, sr, ar(0.03, 0.75));
+   lay(out, sr, roar, 1);
+   const low = brown(n, r);
+   svf(low, sr, LP, 170, 0.7); shape(low, sr, ar(0.02, 0.5));
+   lay(out, sr, low, 0.8);
+   lay(out, sr, sweep(Math.floor(0.4 * sr), sr, 190, 70, 0.05, ar(0.002, 0.07)), 0.7);
+   const hiss = white(n, r);
+   svf(hiss, sr, BP, expo(5200, 1700, 0.6), 0.5); shape(hiss, sr, ar(0.12, 0.9));
+   lay(out, sr, hiss, 0.4, 0.08);
+   return fade(norm(drive(out, 1.4), 0.85), sr, 0.001, 0.3);
+}
+// rotary cannon: about 70 rounds a second melt into one tearing burr
+function ciwsBurr(sr, r) {
+   const dur = 0.95, n = Math.floor(dur * sr), out = new Float32Array(n), f = 72;
+   const w = white(n, r);
+   for (let i = 0; i < n; i++) { const ph = (i / sr * f) % 1; w[i] *= Math.exp(-ph * 7); }
+   svf(w, sr, BP, 1500, 0.6);
+   lay(out, sr, w, 1);
+   const s = saw(n, sr, f, null);
+   svf(s, sr, LP, 520, 0.8);
+   lay(out, sr, s, 0.75);
+   const b = brown(n, r);
+   svf(b, sr, LP, 140, 0.7);
+   lay(out, sr, b, 0.3);
+   shape(out, sr, t => (t < 0.02 ? t / 0.02 : t > dur - 0.12 ? Math.max(0, (dur - t) / 0.12) : 1));
+   return norm(drive(out, 1.6), 0.8);
+}
+// missile warning: two rising electronic notes, clear but soft-edged
+function vampireTone(sr, r) {
+   const n = Math.floor(0.86 * sr), out = new Float32Array(n);
+   for (const at of [0, 0.4]) {
+      const m = Math.floor(0.34 * sr), env = t => Math.min(1, t / 0.012) * Math.min(1, (0.34 - t) / 0.06);
+      const a = sweep(m, sr, 590, 880, 0.16, env), b = sweep(m, sr, 1180, 1760, 0.16, env);
+      mix(a, b, 0.22);
+      mix(out, a, 1, Math.floor(at * sr));
+   }
+   const hz = white(n, r);
+   svf(hz, sr, BP, 2400, 2); shape(hz, sr, t => 0.02);
+   mix(out, hz, 1);
+   return fade(norm(out, 0.6), sr, 0.002, 0.03);
+}
+// decoy mortars: two dull thumps, then the cloud fizzing open
+function decoyPop(sr, r) {
+   const n = Math.floor(1.3 * sr), out = new Float32Array(n);
+   for (const at of [0, 0.13]) {
+      lay(out, sr, sweep(Math.floor(0.3 * sr), sr, 210, 75, 0.04, ar(0.002, 0.06)), 0.9, at);
+      const c = white(Math.floor(0.12 * sr), r);
+      svf(c, sr, BP, 1700, 0.7); shape(c, sr, ar(0.001, 0.02));
+      lay(out, sr, c, 0.5, at);
+   }
+   const fz = white(n, r);
+   svf(fz, sr, BP, expo(6500, 3000, 0.4), 0.6); shape(fz, sr, t => (t < 0.3 ? 0 : Math.min(1, (t - 0.3) / 0.08) * Math.exp(-(t - 0.3) / 0.3)));
+   lay(out, sr, fz, 0.3);
+   return fade(norm(out, 0.8), sr, 0.001, 0.2);
+}
+
 // ---------------------------------------------------------------- registry
 // div 2 = rendered at half the sample rate (dark material: tails, rumbles, loops).
 const R = {};
@@ -911,6 +972,7 @@ def('consHydro', 1, (sr, r) => {
 });
 def('klaxon', 1, klaxon); def('ballast', 1, ballastVent); def('surfacing', 1, surfacing);
 def('sonar', 1, (sr, r) => sonar(sr, r)); def('depthCharge', 2, depthCharge);
+def('mslLaunch', 1, mslLaunch); def('ciws', 1, ciwsBurr); def('vampire', 1, vampireTone); def('decoyPop', 1, decoyPop);
 def('loopSea', 2, stereo(seaLoop)); def('loopWind', 2, stereo(windLoop)); def('loopRain', 1, stereo(rainLoop));
 def('loopWash', 2, stereo(washLoop)); def('loopEngine', 2, engineLoop); def('loopFire', 1, fireLoop); def('loopSub', 2, subLoop);
 

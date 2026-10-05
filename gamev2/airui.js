@@ -178,7 +178,7 @@ export class AirUi {
       const run = act || ((a) => execAction(p, world, a));
       this.netCtl = null;
       if (!p) return false;
-      if (inp.tapped('4')) {
+      if (p.air && inp.tapped('4')) {   // AA sector: carriers only, 4 is the rocket launcher elsewhere
          if (!p.alive || !p.aa?.range || !run(['F', nextAaFocus(p.aaFocus)])) this.audio.denied?.();
          else this.audio.uiClick?.();
       }

@@ -6,6 +6,7 @@ import { paintMap, drawClassIcon, COL, gridStep, arenaOf } from './minimap3d.js'
 import { drawSubUnder, drawPeriscope } from './subui.js';
 import { T, rgba, FONT, MONO } from './theme.js';
 import { drawAir } from './airui.js';
+import { drawQuality, drawMissileHud, tacticalMapRect, mapTargetHint } from './missileui.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -59,6 +60,7 @@ export class Overlay3D {
       if (ui.sub) drawSubUnder(g, ui, this.W, this.H, this.t);
       this._markers(ui);
       if (ui.air) drawAir(g, ui, this.W, this.H, this.t);   // squadron markers, attack-run aim (airui.js)
+      drawMissileHud(g, ui, this.W, this.H, this.t);        // vampires, ESM bearings, land positions (missileui.js)
       if (ui.air?.flying) return;                            // squadron view: no ship reticle
       if (ui.torpFan && ui.alive) this._torpFan(ui);
       if (ui.scopeT > 0.01) { if (ui.sub?.peri) drawPeriscope(g, ui, this.W, this.H); else this._binoculars(ui); }
@@ -192,7 +194,7 @@ export class Overlay3D {
       if (ui.mode === 'guns') {
          g.fillText((out ? ui.gunRange : ui.range) > 0 ? ui.flight.toFixed(1).replace('.', ',') + ' s' : '', tx, ty + 15);
          if (ui.pxPerKn > 0) g.fillText('Strich ≈ ' + Math.max(0.1, sp / ui.pxPerKn).toFixed(sp / ui.pxPerKn < 3 ? 1 : 0).replace('.', ',') + ' kn', tx, ty + 29);
-      } else if (ui.torpInfo) {
+      } else if (ui.mode === 'torp' && ui.torpInfo) {
          g.fillText('Torp. ' + km(ui.torpInfo.range), tx, ty + 15);
       }
       // left side: ammo + loaded guns
@@ -200,9 +202,18 @@ export class Overlay3D {
       if (ui.mode === 'guns') {
          g.font = F_LBL;
          g.fillStyle = ui.ammo === 'HE' ? T.he : T.ap;
-         g.fillText(ui.ammo === 'HE' ? 'SPRENG' : 'PANZER', cx - 40, ty);
+         g.fillText(ui.ammo === 'HE' ? 'GESCHÜTZ' : 'PANZER', cx - 40, ty);
          g.font = F_READ; g.fillStyle = dim;
          g.fillText(r.anyReady ? `${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? r.left.toFixed(1).replace('.', ',') + ' s' : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Winkel' : '—', cx - 40, ty + 15);
+      } else if (ui.mode !== 'torp') {
+         // guided weapon (missileui.js): name and state of the selected slot
+         const w = (ui.weapons || []).find(x => x.sel);
+         if (w) {
+            g.font = F_LBL; g.fillStyle = w.ready ? T.gold : T.bad;
+            g.fillText(w.name.toUpperCase(), cx - 40, ty);
+            g.font = F_READ; g.fillStyle = dim;
+            g.fillText(w.count + ' · ' + w.stat, cx - 40, ty + 15);
+         }
       } else {
          g.font = F_LBL; g.fillStyle = T.torp;
          g.fillText('TORPEDO', cx - 40, ty);
@@ -223,7 +234,7 @@ export class Overlay3D {
       if (ui.mode === 'guns') {
          const slot = this._tschSlot();
          if (slot) this._turretSchematic(ui, slot.x, slot.y);
-         else if (!isTouch()) this._turretSchematic(ui, Math.max(cx - 300, 400), this.H - 50);
+         else if (!isTouch()) this._turretSchematic(ui, Math.max(cx - 64 * (ui.weapons?.length || 3) - 108, 400), this.H - 50);
       }
    }
 
@@ -317,6 +328,7 @@ export class Overlay3D {
          g.globalAlpha = 1;
          g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
          drawClassIcon(g, m.type, x, y, 13, col, { lineWidth: 1.4 });
+         if (!m.ally && m.level) drawQuality(g, x - 15, y, m.level);   // contact quality (missileui.js)
          if (nameY != null) {
             g.font = m.locked ? F_NAME_B : F_NAME;
             g.fillStyle = m.ally ? NAME_ALLY : NAME_ENEMY;
@@ -530,15 +542,16 @@ export class Overlay3D {
       g.fillStyle = rgba(T['map-ink'], 0.9);
       g.fillRect(0, 0, W, H);
       // keep clear of the top bar (score) and the bottom panels
-      const size = Math.max(200, Math.min(W - 80, H - 92 - 150));
-      const x0 = Math.round((W - size) / 2), y0 = 92;
+      const { x0, y0, size } = tacticalMapRect(W, H);   // shared with the map cursor (missileui.js)
       paintMap(g, ui.world, x0, y0, size, { ...ui.mapOpts, big: true });
       // title + legend under the map: the HTML score box covers the strip above it
       g.textBaseline = 'top';
       g.fillStyle = T.hud; g.font = FONT(15, 'bold'); g.textAlign = 'left';
-      g.fillText('LAGEKARTE', x0, y0 + size + 7);
+      const hint = mapTargetHint(ui);
+      if (hint) g.font = FONT(size < 420 ? 11 : 13, 'bold');
+      g.fillText(hint || 'LAGEKARTE', x0, y0 + size + 7);
       g.font = FONT(12); g.fillStyle = T['hud-dim']; g.textAlign = 'right';
-      g.fillText((isTouch() ? 'Karte – schließen' : 'M – schließen') + '  ·  gestrichelt: Sichtweite  ·  Kreis: Hauptbatterie  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
+      if (!hint) g.fillText((isTouch() ? 'Karte – schließen' : 'M – schließen') + '  ·  gestrichelt: Sichtweite  ·  Kreis: Geschütz  ·  Raster ' + gridStep(arenaOf(ui.world)) / 1000 + ' km', x0 + size, y0 + size + 9);
       g.restore();
    }
 }

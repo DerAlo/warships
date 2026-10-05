@@ -359,6 +359,40 @@ export class Audio {
       this._one(this._world, 6, 'sink', Math.max(0.3, D.gain) * 0.9, { cutoff: Math.max(900, D.cutoff), pan: this._pan(pos), send: D.send, when: D.delay });
    }
 
+   // ---- modern mode: missiles and their defences ----
+   // A missile leaves its launcher. kind: 'ssm' | 'cruise' | 'sam' | 'aam' | 'rocket'; own = fired by the player.
+   missileLaunch(kind = 'ssm', dist = 0, pos = null, own = false) {
+      if (!this.ctx || dist > 14000) return;
+      const D = this._dist(dist);
+      const rate = (kind === 'sam' || kind === 'aam' ? 1.3 : kind === 'rocket' ? 1.55 : kind === 'cruise' ? 0.86 : 1) * this._rnd(0.95, 1.05);
+      this._one(this._world, own ? 6 : 3, 'mslLaunch', D.gain * (own ? 0.8 : 0.6) * (kind === 'rocket' ? 0.6 : 1),
+         { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate });
+   }
+   // close-in gun burst (the caller repeats it while the gun fires)
+   ciws(dist = 0, pos = null) {
+      if (!this.ctx || dist > 9000) return;
+      const D = this._dist(dist);
+      this._one(this._world, 4, 'ciws', D.gain * 0.5, { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate: this._rnd(0.97, 1.04) });
+   }
+   // a missile is shot down / a warhead goes off
+   intercept(dist = 0, pos = null) {
+      if (!this.ctx) return;
+      const D = this._dist(dist);
+      this._one(this._world, 3, 'he', D.gain * 0.6, { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate: this._rnd(1.25, 1.45) });
+   }
+   missileHit(dist = 0, pos = null, heavy = false) {
+      if (!this.ctx) return;
+      const D = this._dist(dist);
+      this._one(this._world, 6, 'explosionBig', Math.max(0.12, D.gain), { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay, rate: this._rnd(0.8, 0.9) * (heavy ? 0.85 : 1) });
+   }
+   decoys(dist = 0, pos = null) {
+      if (!this.ctx || dist > 6000) return;
+      const D = this._dist(dist);
+      this._one(this._world, 4, 'decoyPop', D.gain * 0.7, { cutoff: D.cutoff, pan: this._pan(pos), send: D.send, when: D.delay });
+   }
+   // "Vampire": a missile is tracked coming in (repeated by the caller while it closes)
+   vampire(urgent = false) { this._uiPlay('vampire', urgent ? 0.5 : 0.36, urgent ? 1.12 : 1, 8); }
+
    // ---- torpedoes ----
    // own launch: compressed air out of the tube, then the fish hits the water; n tubes ripple
    torpLaunch(n = 1) {

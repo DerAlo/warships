@@ -206,7 +206,7 @@
    .wslot { width: 128px; height: 48px; position: relative; padding: 6px 8px 0 36px; opacity: .7; border-right: 1px solid rgba(255,255,255,.07); }
    .wslot:last-child { border-right: 0; }
    .wslot.sel { opacity: 1; background: linear-gradient(0deg, color-mix(in srgb, var(--gold) 18%, transparent), transparent 70%); box-shadow: inset 0 -3px 0 var(--gold); }
-   .wslot.loaded .wkey { background: var(--ok); }
+   .wslot.sel.loaded .wkey { background: var(--ok); }
    .wslot.none { opacity: .3; }
    .wkey { position: absolute; left: 7px; top: 6px; width: 16px; height: 16px; border-radius: 50%; font: 700 10.5px/16px var(--mono); text-align: center; color: var(--ink); background: var(--gold); text-shadow: none; }
    .wicon { position: absolute; left: 6px; top: 24px; width: 20px; height: 20px; } .wicon svg { width: 100%; height: 100%; }
@@ -215,6 +215,9 @@
    .wbar { position: absolute; left: 36px; right: 8px; bottom: 6px; height: 3px; background: rgba(255,255,255,.12); }
    .wbar i { display: block; height: 100%; width: 0; background: var(--gold); }
    .wslot.loaded .wbar i { background: var(--ok); }
+   .wcnt { position: absolute; right: 7px; top: 5px; font: 700 12.5px var(--mono); color: #fff; }
+   .wslot.none .wcnt { color: var(--bad); }
+   #weapons.hidden { display: none; }
 
    /* --- scoreboard (Tab) + help (H) --- */
    #scoreboard, #help-panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel-solid); border: 1px solid var(--panel-edge); border-top: 3px solid var(--gold); padding: 14px 18px; }
@@ -397,30 +400,29 @@
          <div class="sb-title">Steuerung <span>H schließt</span></div>
          <div class="controls-grid" style="margin:0">
             <div><span class="k">W / S</span><span class="d">Maschinentelegraf eine Stufe hoch / runter</span></div>
-            <div><span class="k">A / D</span><span class="d">Ruder eine Stufe Backbord / Steuerbord</span></div>
-            <div><span class="k">Q</span><span class="d">Ruder mittschiffs</span></div>
+            <div><span class="k">A / D · Q</span><span class="d">Ruder eine Stufe Backbord / Steuerbord · Q: mittschiffs</span></div>
             <div><span class="k">Maus</span><span class="d">Peilung (seitlich) und Entfernung (hoch/runter)</span></div>
-            <div><span class="k">Linksklick</span><span class="d">Feuern (nur geladene, ausgerichtete Türme)</span></div>
-            <div><span class="k">Mausrad</span><span class="d">Zoom: Kamera näher/weiter · weiter hinein = Fernglas 2×/4×/8×/16×</span></div>
-            <div><span class="k">Shift</span><span class="d">Fernglas direkt an/aus (letzte Vergrößerung)</span></div>
-            <div><span class="k">C / Rechtsklick</span><span class="d">Freie Kamera (Türme halten das Ziel)</span></div>
-            <div><span class="k">1 / 2</span><span class="d">Sprenggranaten (HE) / Panzergranaten (AP)</span></div>
-            <div><span class="k">3</span><span class="d">Torpedos · nochmals 3: Fächer eng/weit</span></div>
+            <div><span class="k">Leertaste / Linksklick</span><span class="d">Feuern bzw. Starten der gewählten Waffe</span></div>
+            <div><span class="k">1</span><span class="d">Geschütz</span></div>
+            <div><span class="k">2</span><span class="d">Seezielflugkörper · auf das erfasste (X) oder anvisierte Ziel, sonst Peilungsschuss in Blickrichtung · nochmals 2: Typ wechseln</span></div>
+            <div><span class="k">3</span><span class="d">Marschflugkörper · öffnet die Lagekarte: Punkt oder Landstellung anklicken</span></div>
+            <div><span class="k">4</span><span class="d">Raketenwerfer (Schnellboote) · Salve auf den Zielpunkt</span></div>
+            <div><span class="k">5</span><span class="d">Torpedos · nochmals 5: Fächer eng/weit</span></div>
             <div><span class="k">X</span><span class="d">Ziel erfassen / lösen</span></div>
-            <div><span class="k">Strg + Linksklick</span><span class="d">Sekundärziel setzen · nochmals oder aufs Wasser: aufheben (feuert nicht)</span></div>
+            <div><span class="k">R</span><span class="d">Radar an / aus · aus = EMCON: du strahlst nicht, siehst aber nur mit Optik und ESM</span></div>
+            <div><span class="k">V</span><span class="d">Luftabwehr-Doktrin: Feuer frei · Selbstschutz · Feuer halten</span></div>
+            <div><span class="k">T</span><span class="d">Vorrangziel der Luftabwehr: anfliegender Flugkörper in Blickrichtung · nochmals: aufheben</span></div>
+            <div><span class="k">F / J</span><span class="d">Täuschkörper werfen / Störsender einschalten</span></div>
+            <div><span class="k">Y / U</span><span class="d">Schadensabwehr / Notreparatur</span></div>
+            <div><span class="k">Mausrad · Shift</span><span class="d">Zoom: Kamera näher/weiter, weiter hinein = Optik 2×/4×/8×/16× · Shift: Optik direkt an/aus</span></div>
+            <div><span class="k">C / Rechtsklick</span><span class="d">Freie Kamera (das Geschütz hält das Ziel)</span></div>
             <div><span class="k">L</span><span class="d">Vorhaltemarker an/aus</span></div>
-            <div><span class="k">R / T</span><span class="d">Leckwehr / Notreparatur</span></div>
-            <div><span class="k">Y / U</span><span class="d">Sonderausrüstung (Äußerste Kraft, Nebel …)</span></div>
-            <div><span class="k">F / G</span><span class="d">U-Boot: tiefer tauchen / auftauchen (Aufgetaucht · Sehrohrtiefe · Getaucht)</span></div>
-            <div><span class="k">G</span><span class="d">Zerstörer / Leichter Kreuzer: Wasserbomben werfen</span></div>
-            <div><span class="k">1 / 2 / 3</span><span class="d">Flugzeugträger: Torpedobomber / Sturzkampfbomber / Jäger wählen</span></div>
-            <div><span class="k">E</span><span class="d">Träger: Staffel starten bzw. übernehmen · in der Staffel: zurück zum Schiff (Staffel fliegt weiter)</span></div>
-            <div><span class="k">Staffel: A / D, Maus</span><span class="d">Kurs · W / S schneller (begrenzt) / langsamer · Mausrad Kameraabstand</span></div>
-            <div><span class="k">Staffel: Linksklick</span><span class="d">Halten = Zielanflug (Fächer bzw. Ellipse zieht sich zusammen), Loslassen = Abwurf · Jäger: Patrouille hier</span></div>
-            <div><span class="k">Staffel: F</span><span class="d">Rückruf zum Träger</span></div>
-            <div><span class="k">4</span><span class="d">Flak-Schwerpunkt: Backbord · Steuerbord · aus</span></div>
+            <div><span class="k">F / G</span><span class="d">U-Boot: tiefer tauchen / auftauchen · Täuschkörper liegen dort auf N</span></div>
+            <div><span class="k">G</span><span class="d">Schiffe mit U-Jagd-Bewaffnung: Wasserbomben werfen</span></div>
+            <div><span class="k">1 – 3 · E · 4</span><span class="d">Flugzeugträger: Flugzeugtyp wählen · Staffel starten / übernehmen · Flak-Schwerpunkt</span></div>
+            <div><span class="k">Staffel</span><span class="d">A / D und Maus: Kurs · W / S: Tempo · Linksklick halten: Zielanflug, loslassen: Abwurf · F: Rückruf</span></div>
             <div><span class="k">M / Tab</span><span class="d">Lagekarte / Übersicht</span></div>
-            <div><span class="k">B</span><span class="d">Geschoss-Kamera: laufende oder nächste Salve verfolgen</span></div>
+            <div><span class="k">B</span><span class="d">Geschoss- und Flugkörper-Kamera: laufenden oder nächsten Schuss verfolgen</span></div>
             <div><span class="k">P / Esc</span><span class="d">Pause</span></div>
          </div>
       </div>
@@ -548,13 +550,13 @@
       <div class="card">
          <div class="title" style="font-size:30px">So kämpfst du</div>
          <div class="howto-body">
-            <p><b>Zielen über die Bildmitte.</b> Das Fadenkreuz sitzt fest in der Bildmitte und liegt immer genau auf dem Zielpunkt. Maus seitlich dreht die Peilung, Maus hoch/runter verschiebt die Entfernung — die Anzeige rechts neben dem Fadenkreuz zeigt Distanz und Flugzeit der Granaten.</p>
-            <p><b>Vorhalt.</b> Die Striche auf dem Fadenkreuz sind ein Vorhaltelineal: „Strich ≈ 4 kn" heißt, ein Strich Vorhalt pro 4 Knoten Quergeschwindigkeit des Ziels. Die rote Vorhalteraute (L) zeigt, wo das Ziel beim Einschlag sein wird – Fadenkreuz darauf, dann feuern. Sie gehört zum erfassten Ziel (X), sonst zum Gegner nächst dem Fadenkreuz. Liegt der Vorhaltepunkt außerhalb des Bildes, sitzt sie mit Pfeil am Bildrand. Gestrichelt mit „zu weit": außerhalb der Reichweite. Blass mit „außer Sicht": Ziel kurz verloren, Position geschätzt. Im Torpedomodus ist die Raute grün.</p>
-            <p><b>Türme.</b> Unter dem Fadenkreuz siehst du dein Schiff mit allen Türmen: <span class="tc" style="background:var(--seal)">grün</span> = bereit und ausgerichtet, <span class="tc" style="background:var(--brass-lo)">gelb</span> = schwenkt, <span class="tc" style="background:var(--signal)">rot</span> = lädt oder kann nicht wirken. Ein Klick feuert nur die grünen.</p>
-            <p><b>Zoom und Fernglas.</b> Mausrad nach vorn zoomt heran: erst rückt die Kamera ans Schiff, der nächste Klick schaltet ins Fernglas (2×, dann 4×, 8×, 16×). Zurückdrehen zoomt wieder hinaus bis zur weiten Übersicht. Shift springt direkt ins Fernglas (mit der zuletzt benutzten Vergrößerung) und zurück. Der Zielpunkt bleibt beim Zoomen liegen, die Maus wird mit dem Zoom feiner.</p>
-            <p><b>Fahren.</b> Telegraf und Ruder bleiben stehen, wo du sie hinstellst — rechts unten neben der Seekarte siehst du beides. Große Schiffe reagieren träge: früh einlenken!</p>
-            <p><b>Auf Tablet und Handy</b> (quer halten): Links der Maschinenhebel (Stufe antippen) und die Ruderleiste, rechts der große Feuerknopf mit Fernglas, Zielerfassung und freier Kamera. Wischen über das Meer zielt, zwei Finger zoomen bis ins Fernglas. Munition, Torpedos und Verbrauchsgüter tippst du direkt auf ihren Anzeigen an; oben in der Mitte liegen Pause, Lagekarte, Übersicht und Hilfe. Träger und U-Boote bekommen ihre eigenen Knöpfe.</p>
-            <p><b>Überleben.</b> R (Leckwehr) löscht Brände und stoppt Wassereinbrüche, T (Notreparatur) flickt den Rumpf. Die Lampe an der Schiffstafel links unten zeigt, ob der Feind dich gesichtet hat. Rote Pfeile um das Fadenkreuz warnen vor Torpedos.</p>
+            <p><b>Zielen über die Bildmitte.</b> Das Fadenkreuz sitzt fest in der Bildmitte. Maus seitlich dreht die Peilung, Maus hoch/runter verschiebt die Entfernung. Unten in der Mitte liegt die Waffenleiste: <b>1</b> Geschütz, <b>2</b> Seezielflugkörper, <b>3</b> Marschflugkörper, <b>4</b> Raketen, <b>5</b> Torpedos – jede mit Bestand und Zustand. Leertaste oder Linksklick feuert die gewählte Waffe.</p>
+            <p><b>Seezielflugkörper.</b> Ziel mit X erfassen oder anvisieren und starten. Steht „Ziel erfasst“ in der Leiste, fliegt der Flugkörper das Ziel an. Ohne Feuerleitlösung geht er als <b>Peilungsschuss</b> in Blickrichtung hinaus und sucht selbst. Unter dem Fadenkreuz steht, was der Schuss tun wird – oder warum er nicht geht: kein Ziel, außer Reichweite, lädt nach, leer.</p>
+            <p><b>Marschflugkörper und Raketen.</b> Taste 3 öffnet die Lagekarte. Ein Klick auf einen Punkt oder eine Landstellung startet den Marschflugkörper dorthin; der gestrichelte Ring ist die Reichweite. Raketen (Schnellboote) gehen als Salve auf den Zielpunkt.</p>
+            <p><b>Radar und EMCON.</b> Mit Radar (R) siehst du weit und bekommst Feuerleitlösungen – aber jeder Gegner peilt dich über ESM. Radar aus heißt EMCON: du bleibst still und siehst nur mit Optik und über die Strahlung der anderen. Kontakte haben drei Güten: gestrichelte Raute mit „?“ = nur ESM-Peilung, hohle Raute = gesichtet, volle Raute = Feuerleitlösung.</p>
+            <p><b>Vampire!</b> Anfliegende Flugkörper erscheinen links oben mit Peilung und Sekunden bis zum Einschlag und als rote Pfeile um das Fadenkreuz. Ein grüner Ring heißt: die Luftabwehr bekämpft ihn. Die Luftabwehr schießt selbst – du gibst die Doktrin vor (V: Feuer frei, Selbstschutz, Feuer halten), setzt ein Vorrangziel (T), wirfst Täuschkörper (F) und schaltest den Störsender (J). Über der Waffenleiste siehst du Magazine und belegte Feuerleitkanäle.</p>
+            <p><b>Fahren und Überleben.</b> Telegraf und Ruder bleiben stehen, wo du sie hinstellst — rechts unten neben der Seekarte siehst du beides. Y (Schadensabwehr) löscht Brände und stoppt Wassereinbrüche, U (Notreparatur) flickt den Rumpf. Die Lampe an der Schiffstafel links unten zeigt, ob der Feind dich gesichtet hat.</p>
+            <p><b>Auf Tablet und Handy</b> (quer halten): Links Maschinenhebel und Ruderleiste, rechts der große Feuerknopf mit Optik, Zielerfassung und freier Kamera. Wischen über das Meer zielt, zwei Finger zoomen. Waffen, Radar, Doktrin, Vorrangziel und Verbrauchsgüter tippst du direkt auf ihren Anzeigen an; Marschflugkörper-Ziele tippst du auf der Lagekarte an.</p>
          </div>
          <div class="btn-row"><button class="play" id="btn-how-close">Verstanden</button></div>
       </div>

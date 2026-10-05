@@ -49,6 +49,12 @@ export function classSvg(type, size = 12) {
 
 // Equipment icons, "engraved" line style: 24 grid, 1.6 stroke, round caps, currentColor.
 const CONS_ICON = {
+   // chaff / flare burst (Täuschkörper)
+   decoy: '<path d="M12 20v-7"/><path d="M12 13l-5-6M12 13l5-6M12 13l-7-1.5M12 13l7-1.5M12 13V4.5"/><circle cx="7" cy="6.5" r=".9"/><circle cx="17" cy="6.5" r=".9"/><circle cx="12" cy="4" r=".9"/><circle cx="4.6" cy="11.3" r=".9"/><circle cx="19.4" cy="11.3" r=".9"/>',
+   // jammer: emitter with broken waves (Störsender)
+   jammer: '<path d="M12 21v-9"/><circle cx="12" cy="10" r="1.8"/><path d="M7.5 14.5a6.4 6.4 0 0 1 0-9M16.5 5.5a6.4 6.4 0 0 1 0 9M4.6 17a10.4 10.4 0 0 1 0-14M19.4 3a10.4 10.4 0 0 1 0 14" stroke-dasharray="3 2.2"/>',
+   // helicopter (Bordhubschrauber)
+   helo: '<path d="M3 6h16M11 6v3"/><path d="M6 9h8a4 4 0 0 1 4 4v1H9a3 3 0 0 1-3-3z"/><path d="M6 11H2.5M8 18h10M11 14v4M15 14v4"/>',
    // fire bucket with a drop (Leckwehr)
    damageControl: '<path d="M6 9h12l-1.6 11H7.6z"/><path d="M8 9a4 4 0 0 1 8 0"/><path d="M12 12.6c-1.3 1.7-1.8 2.6-1.8 3.3a1.8 1.8 0 0 0 3.6 0c0-.7-.5-1.6-1.8-3.3z"/>',
    // spanner + plus (Notreparatur)
@@ -71,8 +77,13 @@ const consSvg = (key) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 // Ammunition, same line style; colour from the --he / --ap / --torp tokens.
 const ammoSvg = (tok, body) => `<svg viewBox="0 0 24 24" fill="none" stroke="var(--${tok})" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">${body}</svg>`;
 const WEAPON_ICON = {
-   HE: ammoSvg('he', '<path d="M9 21V11.5a3 3 0 0 1 6 0V21z" fill="var(--he)" fill-opacity=".22"/><path d="M9 16.5h6M12 2.5V5M7.6 4.4l1.3 1.9M16.4 4.4l-1.3 1.9"/>'),
-   AP: ammoSvg('ap', '<path d="M9 21v-9l3-8.5 3 8.5v9z" fill="var(--ap)" fill-opacity=".22"/><path d="M9 16.5h6M10.2 9.6h3.6"/>'),
+   GUN: ammoSvg('he', '<path d="M9 21V11.5a3 3 0 0 1 6 0V21z" fill="var(--he)" fill-opacity=".22"/><path d="M9 16.5h6M12 2.5V5M7.6 4.4l1.3 1.9M16.4 4.4l-1.3 1.9"/>'),
+   // anti-ship missile: slim body, cruciform wings, sea line
+   SSM: ammoSvg('ap', '<path d="M3 11.2h13l4.5 1.8-4.5 1.8H3z" fill="var(--ap)" fill-opacity=".22"/><path d="M9 11.2l-2-3.4M9 14.8l-2 3.4M3 11.2L1.8 9.4M3 14.8l-1.2 1.8M3 21h18"/>'),
+   // cruise missile: long body with straight wings, flying over land
+   CRUISE: ammoSvg('gold', '<path d="M2.5 8.6h14l5 1.6-5 1.6h-14z" fill="var(--gold)" fill-opacity=".22"/><path d="M11 8.6L8.6 4.4M11 11.8l-2.4 4.2M2.5 8.6L1.6 7M3 21l5-4 4 3 4-5 5 6"/>'),
+   // rocket launcher: three tubes, salvo
+   ROCKET: ammoSvg('he', '<path d="M4 19l9-9M8 21l9-9M12 22l8-8" /><path d="M15 8l4-4M19 4h-3M19 4v3"/>'),
    TORP: ammoSvg('torp', '<rect x="2.5" y="9.5" width="14.5" height="5" rx="2.5" fill="var(--torp)" fill-opacity=".22"/><path d="M17 12h2.2M19.2 9.4v5.2M21.4 10.4v3.2"/>'),
 };
 
@@ -118,16 +129,7 @@ export class Hud {
       if (e.tele && !e.tele.children.length) {
          e.tele.innerHTML = TELE_ORDER.map(n => `<div class="tele-step" data-n="${n}">${TELE_LABEL[n]}</div>`).join('');
       }
-      if (e.weapons && !e.weapons.children.length) {
-         e.weapons.innerHTML = ['HE', 'AP', 'TORP'].map((k, i) => `
-            <div class="wslot" data-w="${k}">
-               <div class="wkey">${i + 1}</div>
-               <div class="wicon">${WEAPON_ICON[k]}</div>
-               <div class="wtxt"><div class="wname">${k === 'HE' ? 'Spreng' : k === 'AP' ? 'Panzer' : 'Torpedo'}</div><div class="wstat">—</div></div>
-               <div class="wbar"><i></i></div>
-            </div>`).join('');
-      }
-      this._wslots = e.weapons ? [...e.weapons.querySelectorAll('.wslot')] : [];
+      this._wslots = [];
       this._teleSteps = e.tele ? [...e.tele.querySelectorAll('.tele-step')] : [];
    }
 
@@ -400,32 +402,36 @@ export class Hud {
       });
    }
 
+   // Weapon bar from ui.weapons (missileui.js fill): [{ id, key, icon, name, count, sel, ready, none, frac, stat, tip }]
    _weapons(ui) {
-      const [he, ap, tp] = this._wslots;
-      if (!he) return;
-      const r = ui.reload || {};
-      const mainTxt = r.anyReady ? `bereit ${r.ready ?? r.loaded}/${r.total}` : r.left > 0 ? `lädt ${r.left.toFixed(1).replace('.', ',')} s`
-         : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Schusswinkel' : '—';
-      for (const [el, type] of [[he, 'HE'], [ap, 'AP']]) {
-         const sel = ui.mode === 'guns' && ui.ammo === type;
-         el.classList.toggle('sel', sel);
-         el.classList.toggle('loaded', sel && !!r.anyReady);
-         setText(el._stat || (el._stat = el.querySelector('.wstat')), sel ? mainTxt : '');
-         setStyle(el._bar || (el._bar = el.querySelector('.wbar i')), 'width', (sel ? (r.frac ?? 1) * 100 : 0).toFixed(1) + '%');
+      const box = this.el.weapons, list = ui.weapons || [];
+      if (!box) return;
+      const sig = list.map(w => w.id).join(',');
+      if (sig !== this._sig.weapons) {
+         this._sig.weapons = sig;
+         box.innerHTML = list.map(w => `
+            <div class="wslot" data-w="${w.id}" data-key="${w.key}">
+               <div class="wkey">${w.key}</div>
+               <div class="wicon">${WEAPON_ICON[w.icon] || ''}</div>
+               <div class="wtxt"><div class="wname"></div><div class="wstat">—</div></div>
+               <div class="wcnt"></div>
+               <div class="wbar"><i></i></div>
+            </div>`).join('');
+         this._wslots = [...box.querySelectorAll('.wslot')].map(el => ({ el, name: el.querySelector('.wname'), stat: el.querySelector('.wstat'), cnt: el.querySelector('.wcnt'), bar: el.querySelector('.wbar i') }));
+         box.classList.toggle('hidden', !list.length);
       }
-      const ti = ui.torpInfo;
-      tp.classList.toggle('sel', ui.mode === 'torp');
-      tp.classList.toggle('none', !ti);
-      const tStat = tp._stat || (tp._stat = tp.querySelector('.wstat')), tBar = tp._bar || (tp._bar = tp.querySelector('.wbar i'));
-      if (ti) {
-         const ready = ti.readyCount > 0;
-         tp.classList.toggle('loaded', ready && ui.mode === 'torp');
-         setText(tStat, (ready ? `bereit ${ti.readyCount}/${ti.total}` : ti.reload.toFixed(0) + ' s') + ' · ' + (ti.spread === 'wide' ? 'weit' : 'eng'));
-         setStyle(tBar, 'width', ((ready ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1))) * 100).toFixed(1) + '%');
-      } else {
-         setText(tStat, 'keine');
-         setStyle(tBar, 'width', '0%');
-      }
+      list.forEach((w, i) => {
+         const s = this._wslots[i];
+         if (!s) return;
+         s.el.classList.toggle('sel', !!w.sel);
+         s.el.classList.toggle('loaded', !!w.ready);
+         s.el.classList.toggle('none', !!w.none);
+         if (s.el._tip !== w.tip) { s.el._tip = w.tip; s.el.title = w.tip || ''; }
+         setText(s.name, w.name);
+         setText(s.stat, w.stat);
+         setText(s.cnt, w.count);
+         setStyle(s.bar, 'width', (clamp01(w.frac ?? 1) * 100).toFixed(1) + '%');
+      });
    }
 
    _lock(ui) {

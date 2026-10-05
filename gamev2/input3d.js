@@ -5,8 +5,8 @@
 // Key names are normalised to short ids ('W', 'SHIFT', 'TAB', '1', ...). Letters are read from
 // e.key (layout-aware) so a German QWERTZ keyboard's printed "Y" really is the Y action --
 // by physical code it would be KeyZ. Digits and special keys use e.code (Shift+1 = '!').
-const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H', 'O', 'B', 'F', 'G',
-   '1', '2', '3', '4', 'P', 'SHIFT', 'TAB', 'SPACE', 'CTRL']);
+const GAME_KEYS = new Set(['W', 'A', 'S', 'D', 'Q', 'E', 'C', 'X', 'L', 'M', 'R', 'T', 'Y', 'U', 'H', 'O', 'B', 'F', 'G', 'V', 'J', 'N',
+   '1', '2', '3', '4', '5', 'P', 'SHIFT', 'TAB', 'SPACE', 'CTRL']);
 
 export class Input3D {
    constructor(canvas) {
@@ -150,6 +150,7 @@ export class Input3D {
          case 'Digit2': case 'Numpad2': return '2';
          case 'Digit3': case 'Numpad3': return '3';
          case 'Digit4': case 'Numpad4': return '4';
+         case 'Digit5': case 'Numpad5': return '5';
          default: break;
       }
       if (key.length === 1) {
