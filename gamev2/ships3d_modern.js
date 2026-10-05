@@ -283,7 +283,12 @@ class Kit {
       this.b.band = 0;
       this.b.put(g, f.x + f.nx * 0.12, f.y, f.z + f.nz * 0.12, col || shade(this.c.sup, 0.74), 0, Math.atan2(-f.nz, f.nx), -Math.PI / 2 + f.tilt);
    }
-   ball(x, y, z, r, col) { this.b.band = 0; this.b.put(new THREE.SphereGeometry(r, this.det ? 10 : 7, this.det ? 7 : 5), x, y, z, col || this.c.white); }
+   ball(x, y, z, r, col, dome = false) {
+      this.b.band = 0;
+      const g = dome ? new THREE.SphereGeometry(r, this.det ? 12 : 8, this.det ? 5 : 3, 0, Math.PI * 2, 0, Math.PI / 2)
+         : new THREE.SphereGeometry(r, this.det ? 10 : 7, this.det ? 7 : 5);
+      this.b.put(g, x, y, z, col || this.c.white);
+   }
    mast(x, y0, h, r0, r1, o = {}) {
       this.b.band = 0;
       this.b.cyl(r1, r0, h, x, y0, o.z || 0, o.col || this.c.mast, o.seg || 6, Math.atan2(o.rake || 0, h));
@@ -475,7 +480,7 @@ function subHull(b, def, col) {
    }
    for (let i = 0; i < NS - 1; i++) for (let j = 0; j < M; j++) {
       const a = i * M + j, a2 = i * M + (j + 1) % M, c = a + M, c2 = a2 + M;
-      idx.push(a, c, a2, a2, c, c2);
+      idx.push(a, a2, c, a2, c2, c);
    }
    const g = new THREE.BufferGeometry();
    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

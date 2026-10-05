@@ -23,17 +23,22 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const page = await browser.newPage({ viewport: { width: W, height: H } });
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 500)); });
 page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
-await page.goto(`${BASE}/tests/v2-models.html`, { waitUntil: 'load' });
-await page.waitForFunction(() => window.__lab && window.__lab.frames > 2, null, { timeout: 240000 });
+const open = async () => {
+   await page.goto(`${BASE}/tests/v2-models.html`, { waitUntil: 'load' });
+   await page.waitForFunction(() => window.__lab && window.__lab.frames > 2, null, { timeout: 240000 });
+};
+await open();
 
 const keys = await page.evaluate(async () => Object.keys((await import('./v2.modelfixtures.mjs')).FIXTURES));
 const list = only ? only.split(',') : keys.filter(k => !k.includes('_'));
 const stats = {};
 const settle = () => page.waitForFunction(() => window.__lab.frames > 3, null, { timeout: 120000 });
+let n = 0;
 const stitch = await browser.newPage({ viewport: { width: W, height: H * views.length } });
 
 for (const key of [...(only ? [] : REF), ...list]) {
    stats[key] = {};
+   if (n++ % 4 === 3) await open();   // a fresh page now and then: the software renderer slows down as discarded worlds pile up
    for (const det of only ? [shotDetail] : [0, 1, 2, 3]) {
       const st = await page.evaluate(([k, d]) => { try { return window.__lab.show(k, d); } catch (e) { return { error: String(e && e.stack || e) }; } }, [key, det]);
       if (st.error) { fails.push(`${key}@${det}: ${st.error}`); continue; }

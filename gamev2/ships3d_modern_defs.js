@@ -33,10 +33,11 @@ function subFit(k, o) {
    k.mast(xm - len * 0.02, yT - 0.5, (pTop - yT) * 0.75 + 0.5, 0.26, 0.22, { col: c.dark, seg: 5 });    // search periscope / optronic mast
    if (k.det >= 1) k.mast(xm - len * 0.24, yT - 0.5, (pTop - yT) * 0.55 + 0.5, 0.4, 0.34, { col: c.dark, seg: 6 });   // snorkel / radar
    k.mastTop(xm + len * 0.16, pTop, 0);
-   if (o.casing) k.bx(o.casing[0], o.casing[1], D - 0.9, D + 0.25, -o.casing[2], o.casing[2], c.hull);
+   // free-flooding casing: a low, tapered walkway blended into the pressure hull
+   if (o.casing) k.hs(o.casing[0], o.casing[1], o.casing[2], D - 1.0, 1.12, { band: 0, col: c.hull, top: c.hull, cf: o.casing[2] * 0.95, ca: o.casing[2] * 0.95, s: o.casing[2] * 0.3 });
    if (o.sailPlanes) k.bx(xm - 0.9 + (o.planeX || 0), xm + 0.9 + (o.planeX || 0), D + o.sailH * 0.5, D + o.sailH * 0.5 + 0.22, -o.sailPlanes, o.sailPlanes, c.hull);
    if (o.bowPlanes) k.bx(o.bowPlanes[0] - 1, o.bowPlanes[0] + 1, yc + R * 0.35, yc + R * 0.35 + 0.22, -o.bowPlanes[1], o.bowPlanes[1], c.hull);
-   const xr = -h * 0.84, sp = o.rudder ?? R * 1.15;
+   const xr = -h * 0.8, sp = o.rudder ?? R * 0.95;
    b.band = 0;
    if (o.x) { b.box(R * 0.7, sp * 2, 0.3, xr, yc, 0, c.hull, 0, 0, PI / 4); b.box(R * 0.7, sp * 2, 0.3, xr, yc, 0, c.hull, 0, 0, -PI / 4); }
    else { b.box(R * 0.7, sp * 2, 0.3, xr, yc, 0, c.hull); b.box(R * 0.7, 0.3, sp * 2, xr, yc, 0, c.hull); }
@@ -376,7 +377,7 @@ export const MODELS = {
    },
    kilo: {
       L: 73.8, B: 9.9, T: 6.6, D: 2.0, kind: 'sub', nation: 'ru', hullCol: 0x1a1c1e, nose: 0.74, tail: -0.1,
-      build(k) { subFit(k, { sail: [-3, 12], sailW: 1.7, sailH: 5.0, sailAft: 0.6, sailS: 0.1, sailRf: 0.2, bowPlanes: [22, 4.6], casing: [-26, 30, 2.2], rudder: 5.2 }); },
+      build(k) { subFit(k, { sail: [-3, 12], sailW: 1.7, sailH: 5.0, sailAft: 0.6, sailS: 0.1, sailRf: 0.2, bowPlanes: [22, 4.6], casing: [-26, 30, 2.2], rudder: 4.4 }); },
    },
 
    // ================= East: China =================
@@ -588,11 +589,11 @@ export const MODELS = {
       build(k) {
          const c = k.c, y = k.dk(0);
          for (let i = 0; i < 4; i++) {
-            const x = -64 + i * 46;
-            k.ball(x, y - 1.5, 0, 20.5, c.white);
-            k.bx(x - 2, x + 2, y + 18.5, y + 21.5, -2, 2, c.mark);
+            const x = -72 + i * 44;
+            k.ball(x, y, 0, 19, c.white, true);
+            k.bx(x - 2, x + 2, y + 18, y + 20.6, -2, 2, c.mark);
          }
-         k.bx(-84, 96, y + 19.2, y + 20, -1, 1, c.mark);              // catwalk over the tank domes
+         k.bx(-92, 82, y + 18.8, y + 19.5, -1, 1, c.mark);             // catwalk over the tank domes
          merchantHouse(k, -129, -110, 19, 21, -138, -130);
       },
    },
