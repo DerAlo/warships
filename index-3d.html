@@ -274,7 +274,14 @@
    .gfx-adv[open] summary { color: var(--ink); }
    .gfx-adv .sens-row { margin-top: 12px; }
    body.touch #pause .sens-row select { min-height: 44px; min-width: 120px; font-size: 14px; padding: 0 10px; }
-   body.touch #pause .check-row { display: flex; align-items: center; min-height: 44px; margin-top: 6px; }
+   /* landscape phone: the pause card is taller than the screen, so it is set tighter */
+   @media (max-height: 480px) {
+      #pause .card { padding: 14px 24px 16px; }
+      #pause .title { font-size: 24px !important; }
+      #pause .btn-row { margin-top: 12px; }
+      #pause .sens-row { margin-top: 10px; }
+   }
+   body.touch #pause .check-row { display: flex; align-items: center; min-height: 44px; margin-top: 2px; }
    body.touch #pause .check-row input { width: 22px; height: 22px; flex: none; margin-right: 12px; }
    body.touch .gfx-adv summary { min-height: 44px; display: flex; align-items: center; }
    body.touch .gfx-adv summary::before { content: '▸'; margin-right: 8px; }
