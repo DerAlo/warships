@@ -213,7 +213,8 @@ const stored = (page, key) => page.evaluate((k) => localStorage.getItem(k), key)
    await page.waitForFunction(() => window.__phase() === 'playing');
    await page.waitForTimeout(1500);
    await page.evaluate(() => { window.__loseExt = window.__renderer3d.renderer.getContext().getExtension('WEBGL_lose_context'); window.__loseExt.loseContext(); });
-   await page.waitForTimeout(400);
+   // (the ?diag box refreshes once a second)
+   await page.waitForFunction(() => /contextLost: true/.test(document.getElementById('gfx-diag')?.textContent || ''), null, { timeout: 3000 }).catch(() => {});
    let g = await gfx();
    check('context loss: veil instead of a white canvas', await page.locator('#gfx-lost').isVisible() && g.contextLost === true && g.losses === 1, { lost: g.contextLost, losses: g.losses });
    check('context loss: GPU facts still in ?diag', typeof g.gpu === 'string' && g.maxTex > 0 && /contextLost: true/.test(await page.evaluate(() => document.getElementById('gfx-diag').textContent)));
