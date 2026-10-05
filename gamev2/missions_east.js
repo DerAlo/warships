@@ -36,7 +36,7 @@ export const EAST_TUNE = {
    },
    philsea: {
       easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0 },
-      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.6, frig: 1, dd: 0 },
+      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0 },
       hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0 },
    },
    countdown: {
@@ -141,7 +141,7 @@ export function eastMissions(H) {
                { c: P(-4000, -17000), r: 1000, height: 150, seed: 19, lobes: 4, rough: 0.5 },
             ]);
             const g = fleet(w, shipKey, [['Ford', 0, 0], ['Ticonderoga', 2600, 0], ['Burke', 600, -2400], ['Burke', 600, 2400], ['Daring', -2200, 900]],
-               P(-13500, -1000), 0, { swap: 4, dmg: T.ally, ai: { passive: true } });
+               P(-13500, -1000), 0, { swap: 4, dmg: T.ally });      // weapons tight from the first tick (coordinate)
             const ford = g[0];
             follow(g, ford);
             S.fordId = ford.id; S.own = ids(g);
@@ -346,10 +346,9 @@ export function eastMissions(H) {
          },
          update(w, dt, S) {
             const left = S.conv.map(id => live(w, id)).filter(Boolean);
-            if (!left.length) return;
             // the freighters only run while a human captain is close to the leading ship
             const lead = left[0];
-            const near = w.ships.some(s => s.alive && s.side === 'player' && human(s) && dist(s.pos, lead.pos) < (S.held ? 5000 : 7000));
+            const near = !lead || w.ships.some(s => s.alive && s.side === 'player' && human(s) && dist(s.pos, lead.pos) < (S.held ? 5000 : 7000));
             if (near === !!S.held) {
                S.held = !near;
                for (const f of left) f.ai.anchored = S.held;
@@ -482,7 +481,7 @@ export function eastMissions(H) {
             const C = P(9000, 0), R = 2400;
             islands(w, [{ c: C, r: R, height: 320, seed: 71, lobes: 6, rough: 0.55, name: 'Felseninsel', peaks: [{ x: 300, y: 200, h: 420, r: 900 }] }]);
             const g = fleet(w, shipKey, [['Ticonderoga', 0, 0], ['Burke', -1600, -2400], ['Burke', -1600, 2400], ['Daring', 1600, 2600]],
-               P(-14000, 1500), 0, { swap: 0, dmg: T.ally, subAt: P(0, -13000), subHdg: Math.PI / 3 });
+               P(-14000, 1500), 0, { swap: 0, dmg: T.ally, subAt: P(-3000, -14500), subHdg: Math.PI / 3 });
             follow(g, w.player);
             S.own = ids(g);
             // the surface flagship sails with the same load of cruise missiles whatever the class
@@ -491,22 +490,23 @@ export function eastMissions(H) {
             const at = (a) => P(C.x + Math.cos(a) * R * 0.6, C.y + Math.sin(a) * R * 0.6);
             const sam = { type: 'hq16', n: T.samN, ch: T.samCh };
             // the launcher stands in a rock tunnel: no target data until a drone can fly over the island
-            const rampe = addSite(w, 'launcher', 'enemy', at(-2.35), { name: 'Startrampe', hp: T.hp, hidden: true });
-            S.launcherId = rampe.id;
+            const rampe = addSite(w, 'launcher', 'enemy', at(-1.75), { name: 'Startrampe', hp: T.hp, hidden: true });
+            S.launcherId = rampe.id; S.lhp = rampe.hp;
+            rampe.hp = rampe.maxHp = rampe.maxHP = 1e9;      // out of reach in the tunnel until the drone has it
             S.sam = [addSite(w, 'sam', 'enemy', at(Math.PI), { name: 'Flugabwehr West', sam }).id, addSite(w, 'sam', 'enemy', at(-1.2), { name: 'Flugabwehr Süd', sam }).id];
             S.radarId = addSite(w, 'radar', 'enemy', at(2.5), { name: 'Radarstation' }).id;
             addSite(w, 'battery', 'enemy', at(1.3), { name: 'Küstenbatterie', delay: 30 });
             const dir = Math.atan2(rampe.y - C.y, rampe.x - C.x);
             addTaskPoint(w, { x: rampe.x + Math.cos(dir) * 120, y: rampe.y + Math.sin(dir) * 120, kind: 'sabotage', label: 'Startrampe', workTime: T.work, siteId: rampe.id });
             const scr = [add(w, 'Gorschkow', 'enemy', P(3800, 1500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(3800, 4000), P(3800, -1500)] } })];
-            for (let i = 0; i < T.corv; i++) scr.push(add(w, 'BuyanM', 'enemy', P(5200, i ? 4500 : -2500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(5200, i ? 4500 : -2500), P(5200, i ? 1500 : 500)] } }));
+            for (let i = 0; i < T.corv; i++) scr.push(add(w, 'BuyanM', 'enemy', P(5200, i ? 4500 : 500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(5200, i ? 4500 : 500), P(5200, i ? 1500 : -2500)] } }));
             S.boats = [];
             for (let i = 0; i < T.boats; i++) {
                const a0 = (hash(w, 20) + i / T.boats) * 2 * Math.PI, ring = [];
-               for (let k = 0; k < 6; k++) ring.push(P(C.x + Math.cos(a0 + k * Math.PI / 3) * (R + 1100), C.y + Math.sin(a0 + k * Math.PI / 3) * (R + 1100)));
+               for (let k = 0; k < 6; k++) ring.push(P(C.x + Math.cos(a0 + k * Math.PI / 3) * (R + 3400), C.y + Math.sin(a0 + k * Math.PI / 3) * (R + 3400)));
                S.boats.push(add(w, 'Typ022', 'enemy', ring[0], a0 + Math.PI / 2, { telegraph: 2, ai: { passive: true, patrol: ring } }).id);
             }
-            if (T.sub) add(w, 'Kilo', 'enemy', P(4500, 6500), Math.PI, { depth: 1, telegraph: 1 });
+            if (T.sub) add(w, 'Kilo', 'enemy', P(6500, -6500), 0, { depth: 1, telegraph: 1, ai: { patrol: [P(5000, -6000), P(9500, -6500)] } });      // guards the approach to the launcher
             S.screen = ids(scr);
             S.test = zone(w, -1500, 17500, 3600, 'Sperrgebiet (geräumt)', 'danger');
             objective(w, 'ad', 'Schalten Sie Radar und Flugabwehr der Insel aus (0/3)');
@@ -534,7 +534,7 @@ export function eastMissions(H) {
             if (S.reconAt && w.time >= S.reconAt) {
                S.reconAt = 0; S.shown = true;
                const L = w.sites.find(s => s.id === S.launcherId);
-               if (L && L.alive) { L.detected = L.targetable = true; radio(w, 'Lagezentrum', 'Die Drohne hat die Rampe im Stollen aufgeklärt. Zieldaten liegen vor – Marschflugkörper frei.'); }
+               if (L && L.alive) { L.hp = L.maxHp = L.maxHP = S.lhp; L.detected = L.targetable = true; radio(w, 'Lagezentrum', 'Die Drohne hat die Rampe im Stollen aufgeklärt. Zieldaten liegen vor – Marschflugkörper frei.'); }
             }
             // nothing left that could reach the launcher: no cruise missile on board or in the air, no team
             if (w.time > 30 && !S.spent) {

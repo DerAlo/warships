@@ -89,17 +89,18 @@ test('progression: every west ship is unlocked in a fresh profile', () => {
 });
 
 test('missions: exactly the two base missions, with menu data', () => {
-   assert.deepStrictEqual(MISSION_IDS, ['training', 'standard']);
+   const base = MISSIONS.filter(m => m.group !== 'ops');      // the operations have their own tests
+   assert.deepStrictEqual(base.map(m => m.id), ['training', 'standard']);
    assert.strictEqual(getMission('training').name, 'Gefechtsübung');
    assert.strictEqual(getMission('standard').name, 'Begegnungsgefecht');
-   for (const m of MISSIONS) {
+   for (const m of base) {
       assert.deepStrictEqual(m.playableShips, PLAYABLE);
       assert.ok(SHIPS[m.recommendedShip] && m.briefing.length > 40 && m.arena >= 12000);
    }
 });
 
 test('missions: both start with every playable ship and run 90 s without throwing', () => {
-   for (const id of MISSION_IDS) for (const ship of [...PLAYABLE, 'Slawa', 'Kilo', 'Shandong', 'Boghammar']) {
+   for (const id of ['training', 'standard']) for (const ship of [...PLAYABLE, 'Slawa', 'Kilo', 'Shandong', 'Boghammar']) {
       const w = new World('normal', { mission: id, ship, seed: 5 });
       assert.strictEqual(w.player.cls, ship, id);
       assert.strictEqual(w.player.side, 'player');
