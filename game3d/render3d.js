@@ -14,7 +14,7 @@ import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
-import { TIERS, applyGfx, startTier, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
+import { TIERS, GFX, OPTION_KEYS, tierOptions, applyGfx, startTier, gfxCustom, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
 
@@ -22,11 +22,13 @@ export class Renderer3D {
    constructor(canvas) {
       this.canvas = canvas;
       const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
-      this.tier = startTier();
-      applyGfx(this.tier);
-      const tq = TIERS[this.tier];
-      this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
-      r.setPixelRatio(this.pixelRatio);
+      // quality: a tier, or single options the player set on top of one (this.custom)
+      const custom = gfxCustom();
+      this.tier = custom ? custom.base : startTier();
+      this.custom = !!custom;
+      const tq = this.opts = tierOptions(this.tier, custom);
+      applyGfx(this.tier, tq);
+      this.onGfxChange = null;   // main3d: keeps the pause menu in step (tier switch, watchdog step-down)
       r.toneMapping = THREE.ACESFilmicToneMapping;
       r.outputColorSpace = THREE.SRGBColorSpace;
       r.shadowMap.enabled = true;
@@ -34,6 +36,8 @@ export class Renderer3D {
       r.info.autoReset = false;
       // GPU facts once, while the context is alive (a lost context answers null to everything)
       this._gpu = gpuInfo(r.getContext());
+      this.pixelRatio = this._pixelRatio(tq);
+      r.setPixelRatio(this.pixelRatio);
       // a lost context (mobile GPU out of memory / reset) would leave the canvas white for good:
       // three.js keeps it restorable; here the tier steps down for this and every later visit
       this.lost = 0;
@@ -63,6 +67,7 @@ export class Renderer3D {
       this.sky = new Sky(r);
       this.scene.add(this.sky.mesh);
       this.ocean = new Ocean({ segs: tq.oceanSegs });
+      this._oceanSegs = tq.oceanSegs;
       this.scene.add(this.ocean.mesh);
       this.terrain = new Terrain();
       this.scene.add(this.terrain.group);
@@ -71,7 +76,7 @@ export class Renderer3D {
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.air = new AirModels(this.scene, this.fx);
       this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
-      this.post = new Post(r, { samples: tq.samples, bloomLevels: 5 });
+      this.post = new Post(r, { samples: this._samples(tq), bloomLevels: tq.bloomLevels });
       this.post.setQuality({ bloom: tq.bloom });
       this._wd = { frames: 0, checks: 0, strikes: 0, blank: false, px: new Uint8Array(4) };
 
@@ -101,7 +106,7 @@ export class Renderer3D {
       const sun = new THREE.DirectionalLight(0xffffff, 3);
       sun.castShadow = true;
       const maxTex = this.renderer.capabilities.maxTextureSize || 4096;
-      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, TIERS[this.tier].shadow);
+      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, this.opts.shadow);
       sun.shadow.mapSize.set(sm, sm);
       sun.shadow.bias = -0.0004;
       sun.shadow.normalBias = 0.6;
@@ -195,24 +200,54 @@ export class Renderer3D {
    }
 
    // ================= QUALITY =================
-   // switch tier live: pixel ratio, MSAA, bloom, shadow-map size (ocean mesh density waits for a reload)
+   // switch tier live: pixel ratio, MSAA, bloom, shadow map (ocean mesh density waits for a reload,
+   // model detail for the next battle). Single options the player had set are dropped.
    setTier(name) {
-      const tq = TIERS[name];
-      if (!tq) return;
+      if (!TIERS[name]) return;
       this.tier = name;
-      applyGfx(name);
-      this.pixelRatio = Math.min(window.devicePixelRatio || 1, tq.pr);
+      this.custom = false;
+      this._applyOpts(tierOptions(name));
+   }
+
+   // single options on top of the current tier ("Benutzerdefiniert"), applied live like a tier
+   setOptions(patch) {
+      const o = tierOptions(this.tier, { ...this.opts, ...patch });
+      if (OPTION_KEYS.every(k => o[k] === this.opts[k])) return;
+      this.custom = true;
+      this._applyOpts(o);
+   }
+
+   // pixel ratio: never above the device's own, nor beyond the largest buffer the GPU takes
+   _pixelRatio(o) {
+      const side = Math.max(this._cssW || 1, this._cssH || 1, window.innerWidth || 1, window.innerHeight || 1);
+      return Math.min(window.devicePixelRatio || 1, o.pr, Math.max(0.5, (this._gpu.maxTex || 4096) / side));
+   }
+
+   // MSAA: what the GPU offers; above 4 only while the multisampled HDR target stays affordable
+   // (8 samples at 4K are ~0.8 GB with depth)
+   _samples(o) {
+      let s = Math.min(o.samples, this._gpu.maxSamples || 4);
+      const px = (this._cssW > 1 ? this._cssW * this._cssH : window.innerWidth * window.innerHeight) * this.pixelRatio * this.pixelRatio;
+      while (s > 4 && px * s > 68e6) s >>= 1;
+      return s;
+   }
+
+   _applyOpts(o) {
+      this.opts = o;
+      applyGfx(this.tier, o);
+      this.pixelRatio = this._pixelRatio(o);
       this.renderer.setPixelRatio(this.pixelRatio);
       this.resize(this._cssW, this._cssH);
-      this.post.setQuality({ samples: tq.samples, bloom: tq.bloom });
+      this.post.setQuality({ samples: this._samples(o), bloom: o.bloom, bloomLevels: o.bloomLevels });
       const maxTex = this.renderer.capabilities.maxTextureSize || 4096;
-      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, tq.shadow);
+      const sm = Math.min(maxTex >= 8192 ? 4096 : 2048, o.shadow);
       const sh = this.sun.shadow;
       if (sh.mapSize.x !== sm) {
          sh.mapSize.set(sm, sm);
          if (sh.map) { sh.map.dispose(); sh.map = null; }
       }
       this._wd.frames = 0; this._wd.checks = 0; this._wd.strikes = 0;
+      this.onGfxChange?.();
    }
 
    // blank-frame watchdog: read a few pixels of the finished frame (same task, so the drawing
@@ -242,8 +277,10 @@ export class Renderer3D {
    }
 
    gfxState() {
-      return { tier: this.tier, pixelRatio: this.pixelRatio, samples: this.post.sceneRT.samples, bloom: this.post.bloomOn,
-         shadow: this.sun.shadow.mapSize.x, ...this._gpu,
+      // what is in effect now (clamped to the GPU); options = what was asked for (tier or custom)
+      return { tier: this.tier, custom: this.custom, pixelRatio: this.pixelRatio, samples: this.post.sceneRT.samples, bloom: this.post.bloomOn,
+         bloomLevels: this.post.levels, shadow: this.sun.shadow.mapSize.x, shadowFit: this.opts.shadowFit,
+         oceanSegs: this._oceanSegs, detail: GFX.detail, effects: GFX.effects, options: { ...this.opts }, ...this._gpu,
          contextLost: this.renderer.getContext().isContextLost(), losses: this.lost, probes: this._wd.checks, blankStrikes: this._wd.strikes, stillBlank: this._wd.blank, lastProbe: this._wd.last };
    }
 
@@ -266,6 +303,7 @@ export class Renderer3D {
       const camD = Math.hypot(cp.x - cx, cp.y, cp.z - cz);
       let half = clamp(camD * 1.15 + 220, 380, 1800);
       if (this.debugView) half = clamp(camD * 0.9 + 300, 380, 2400);
+      half *= this.opts.shadowFit;   // ultra: a tighter box, so the same map gives sharper shadows
       const sh = this.sun.shadow;
       if (Math.abs(half - this._shadowHalf) > this._shadowHalf * 0.08) {
          this._shadowHalf = half;

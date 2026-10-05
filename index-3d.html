@@ -264,6 +264,29 @@
    body:not(.touch) .touch-only { display: none !important; }
    .sens-row select { float: right; pointer-events: auto; font: 600 12px var(--font); color: var(--ink); background: var(--paper-2);
       border: 1px solid var(--paper-edge); padding: 2px 6px; margin-top: -3px; }
+   /* a row with a select: label left, select right, on one line at any height */
+   .sens-row.sel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+   .sens-row.sel-row select { float: none; margin-top: 0; flex: none; max-width: 60%; }
+   .sel-row small { display: block; font-size: 11px; color: var(--ink-3); }
+   /* graphics: the single options behind "Erweitert" */
+   .gfx-adv { margin-top: 12px; padding-bottom: 6px; text-align: left; }
+   .gfx-adv summary { pointer-events: auto; cursor: pointer; font: 600 13px var(--font); color: var(--ink-2); padding: 4px 0; }
+   .gfx-adv[open] summary { color: var(--ink); }
+   .gfx-adv .sens-row { margin-top: 12px; }
+   body.touch #pause .sens-row select { min-height: 44px; min-width: 120px; font-size: 14px; padding: 0 10px; }
+   /* landscape phone: the pause card is taller than the screen, so it is set tighter */
+   @media (max-height: 480px) {
+      #pause .card { padding: 14px 24px 16px; }
+      #pause .title { font-size: 24px !important; }
+      #pause .btn-row { margin-top: 12px; }
+      #pause .sens-row { margin-top: 10px; }
+   }
+   body.touch #pause .check-row { display: flex; align-items: center; min-height: 44px; margin-top: 2px; }
+   body.touch #pause .check-row input { width: 22px; height: 22px; flex: none; margin-right: 12px; }
+   body.touch .gfx-adv summary { min-height: 44px; display: flex; align-items: center; }
+   body.touch .gfx-adv summary::before { content: '▸'; margin-right: 8px; }
+   body.touch .gfx-adv[open] summary::before { content: '▾'; }
+   body.touch .gfx-adv .sens-row { margin-top: 6px; }
    #shellcam-hint { bottom: 64px; }
    #photo-hint, #shellcam-hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20; pointer-events: none;
       background: var(--panel-solid); border: 1px solid var(--panel-edge); color: var(--hud); font: 13px/1.4 var(--font); letter-spacing: 0.04em;
@@ -559,12 +582,29 @@
          </label>
          <label class="sens-row check-row"><input type="checkbox" id="opt-killcam" checked> Versenkungs-Kamera</label>
          <label class="sens-row check-row touch-only"><input type="checkbox" id="opt-assist" checked> Zielhilfe (Touch, nicht im PvP)</label>
-         <label class="sens-row">Geschoss-Kamera
+         <label class="sens-row sel-row">Geschoss-Kamera
             <select id="opt-shellcam"><option value="off">Aus</option><option value="key" selected>Mit Taste (B)</option><option value="auto">Jede Salve</option></select>
          </label>
-         <label class="sens-row">Grafik
-            <select id="opt-gfx"><option value="auto">Automatisch</option><option value="high">Hoch</option><option value="medium">Mittel</option><option value="low">Niedrig</option></select>
+         <label class="sens-row sel-row">Grafik
+            <select id="opt-gfx"><option value="auto">Automatisch</option><option value="ultra">Ultra</option><option value="high">Hoch</option><option value="medium">Mittel</option><option value="low">Niedrig</option><option value="custom" hidden disabled>Benutzerdefiniert</option></select>
          </label>
+         <!-- single graphics options (main3d.js); changing one turns the tier into "Benutzerdefiniert" -->
+         <details class="gfx-adv" id="gfx-adv">
+            <summary>Grafik: Erweitert</summary>
+            <label class="sens-row sel-row">Auflösung <select id="gfx-pr"></select></label>
+            <label class="sens-row sel-row">Kantenglättung
+               <select id="gfx-aa"><option value="0">Aus</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+            </label>
+            <label class="sens-row check-row"><input type="checkbox" id="gfx-bloom"> Bloom (Lichtschein)</label>
+            <label class="sens-row sel-row">Schatten <select id="gfx-shadow"><option value="low">Niedrig</option><option value="medium">Mittel</option><option value="high">Hoch</option><option value="ultra">Ultra</option></select></label>
+            <label class="sens-row sel-row">Effekte <select id="gfx-effects"><option value="0">Niedrig</option><option value="1">Mittel</option><option value="2">Hoch</option><option value="3">Ultra</option></select></label>
+            <label class="sens-row sel-row"><span style="float:none;font-weight:inherit;color:inherit">Details <small>ab dem nächsten Gefecht</small></span>
+               <select id="gfx-detail"><option value="0">Niedrig</option><option value="1">Mittel</option><option value="2">Hoch</option><option value="3">Ultra</option></select>
+            </label>
+            <label class="sens-row sel-row"><span style="float:none;font-weight:inherit;color:inherit">Ozean <small>nach dem Neuladen der Seite</small></span>
+               <select id="gfx-ocean"><option value="128">Niedrig</option><option value="192">Mittel</option><option value="256">Hoch</option><option value="320">Ultra</option></select>
+            </label>
+         </details>
          <div class="hint">P oder Esc setzt fort · O: Fotomodus</div>
       </div>
    </div>

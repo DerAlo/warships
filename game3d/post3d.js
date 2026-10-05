@@ -99,18 +99,20 @@ void main() {
    gl_FragColor.rgb += (hash12(gl_FragCoord.xy + fract(uTime) * 91.0) - 0.5) / 255.0;
 }`;
 
+const MAX_BLOOM = 6;
+
 export class Post {
    constructor(renderer, { samples = 4, bloomLevels = 5 } = {}) {
       this.renderer = renderer;
       this.samples = samples;
-      this.levels = bloomLevels;
+      this.levels = bloomLevels;   // levels in use; MAX_BLOOM targets exist so the depth can change live
       this.bloomOn = true;
       this.sceneRT = new THREE.WebGLRenderTarget(4, 4, {
          type: THREE.HalfFloatType, samples, depthBuffer: true, stencilBuffer: false,
          minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
       });
       this.bloomRTs = [];
-      for (let i = 0; i < bloomLevels; i++) {
+      for (let i = 0; i < MAX_BLOOM; i++) {
          this.bloomRTs.push(new THREE.WebGLRenderTarget(4, 4, {
             type: THREE.HalfFloatType, depthBuffer: false, stencilBuffer: false,
             minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
@@ -136,6 +138,7 @@ export class Post {
       this.fsScene.add(this.quad);
       this.fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
       this.w = 0; this.h = 0;
+      this._chain = [];
    }
 
    setSize(w, h) {
@@ -174,7 +177,7 @@ export class Post {
       }
 
       // bloom chain
-      const rts = this.bloomRTs;
+      const rts = this._chain.length === this.levels ? this._chain : (this._chain = this.bloomRTs.slice(0, this.levels));
       this.brightMat.uniforms.tSrc.value = this.sceneRT.texture;
       this.brightMat.uniforms.uTexel.value.set(1 / this.w, 1 / this.h);
       this.brightMat.uniforms.uThreshold.value = p.bloomThreshold ?? 1.6;
@@ -199,9 +202,10 @@ export class Post {
       this._pass(this.compMat, null);
    }
 
-   // quality switch at runtime: MSAA sample count of the scene target and bloom on/off
-   setQuality({ samples, bloom }) {
+   // quality switch at runtime: MSAA sample count of the scene target, bloom on/off and its depth
+   setQuality({ samples, bloom, bloomLevels }) {
       if (bloom != null) this.bloomOn = !!bloom;
+      if (bloomLevels != null) this.levels = Math.min(MAX_BLOOM, Math.max(2, bloomLevels | 0));
       if (samples != null && samples !== this.sceneRT.samples) {
          this.sceneRT.samples = samples;
          this.sceneRT.dispose();   // three re-creates the buffers with the new count on next use
