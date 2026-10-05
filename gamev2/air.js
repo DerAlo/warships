@@ -36,7 +36,7 @@ import { launchAirSSM } from './missile.js';
 import { impactOnSites } from './sites.js';
 
 export const AIR_TYPES = ['tb', 'db', 'ft'];
-export const AIR_NAMES = { tb: 'Torpedobomber', db: 'Sturzkampfbomber', ft: 'Jäger' };
+export const AIR_NAMES = { tb: 'Anti-Schiff-Jets', db: 'Mehrzweck-Jets', ft: 'Jagdjets' };
 export const AIR_SHORT = { tb: 'TB', db: 'SB', ft: 'J' };
 export const AIR = {
    cruiseAlt: 420,          // m
