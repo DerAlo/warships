@@ -926,7 +926,7 @@ const AIR = (tb, db, ft, o = {}) => ({
    tb: { squad: 6, flight: 3, hp: 1250, speed: 150, restock: 42, ...tb, weapon: { speedKn: 40, range: 3200, dmg: 6200, flood: 0.3, ...tb.weapon } },
    db: { squad: 6, flight: 3, hp: 1150, speed: 168, restock: 40, ...db, weapon: { dmg: 4300, pen: 60, fire: 0.3, ap: false, ...db.weapon } },
    ft: { squad: 4, flight: 4, hp: 1400, speed: 195, restock: 34, dps: 115, ammo: 16, ...ft },
-   service: 18, fuel: 200, ...o,
+   service: 18, fuel: 240, ...o,
 });
 const CV_DETECT = (surface) => ({ surface, fire: surface + 2500, smokeFire: 6500, torp: 1300 });
 Object.assign(SHIPS, {

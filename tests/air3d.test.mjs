@@ -12,6 +12,8 @@ import {
 } from '../game3d/air.js';
 import { TECH_TREE } from '../game3d/progress3d.js';
 import { getMission } from '../game3d/missions.js';
+import { updateBot } from '../game3d/ai.js';
+import { strikeReach } from '../game3d/ai_air.js';
 import { buildNetWorld } from '../game3d/net/setup.js';
 
 const DT = 1 / 60;
@@ -286,4 +288,16 @@ test('Midway: Enterprise only, four Japanese carriers, US carriers on the own si
    assert.ok(w.ships.filter(s => s.air && s.side === 'player').length >= 2);
    run(w, 5);
    assert.ok(w.squadrons.every(s => s.side === 'player'), 'the Kido Butai is still rearming');
+});
+
+test('Midway: the carrier groups stay within strike range of each other (no drift into the corners)', () => {
+   const w = new World('normal', { mission: 'midway', ship: 'Enterprise', seed: 2 });
+   const jp = w.ships.filter(s => s.air && s.side === 'enemy'), us = w.ships.filter(s => s.air && s.side === 'player' && s !== w.player);
+   const cen = (a) => { const l = a.filter(s => s.alive); return { x: l.reduce((t, s) => t + s.pos.x, 0) / l.length, y: l.reduce((t, s) => t + s.pos.y, 0) / l.length }; };
+   // the idle player sits it out; the bots of both sides steer
+   run(w, 240, () => { for (const b of w.bots) if (b.alive) updateBot(b, w, DT); return w.phase === 'playing'; });
+   const a = cen(jp), b = cen(us), lim = w.arena - 1500;
+   const d = Math.hypot(a.x - b.x, a.y - b.y);
+   assert.ok(d < strikeReach(us[0]) + 6000, 'carrier groups ' + Math.round(d) + ' m apart');
+   for (const c of [a, b]) assert.ok(Math.abs(c.x) < lim && Math.abs(c.y) < lim, 'off the map edge: ' + JSON.stringify(c));
 });

@@ -169,6 +169,10 @@ export function carrierPlan(b, w, d, threat) {
    let cx = 0, cy = 0, n = 0;
    for (const o of w.ships) {
       if (o === b || !o.alive || o.side !== b.side || o.air || o.type === 'TR') continue;
+      // the escorts of a bot carrier follow it: counting them would pull the station back with every
+      // step the carrier takes (at Midway both fleets drifted into opposite corners, out of plane range)
+      const esc = o.ai && o.ai.escortId != null ? w.shipById(o.ai.escortId) : null;
+      if (esc && esc.air && !esc.isPlayer && !esc.human) continue;
       cx += o.pos.x; cy += o.pos.y; n++;
    }
    if (!n) { cx = b.pos.x; cy = b.pos.y; }
@@ -190,21 +194,35 @@ export function carrierPlan(b, w, d, threat) {
    }
    // keep station behind the fleet, away from the enemy
    let away = threat ? threat.away : 0;
-   if (!threat || !(threat.near || near)) {
-      let ex = 0, ey = 0, m = 0;
-      for (const e of w.ships) {
-         if (!e.alive || e.side === b.side) continue;
-         const p = b.side === 'player' ? e.lastSeen : e.pos;
-         if (p) { ex += p.x; ey += p.y; m++; }
-      }
-      if (m) away = Math.atan2(cy - ey / m, cx - ex / m);
+   let ex = 0, ey = 0, m = 0;
+   for (const e of w.ships) {
+      if (!e.alive || e.side === b.side) continue;
+      const p = b.side === 'player' ? e.lastSeen : e.pos;
+      if (p) { ex += p.x; ey += p.y; m++; }
    }
+   if (m) { ex /= m; ey /= m; }
+   if (m && (!threat || !(threat.near || near))) away = Math.atan2(cy - ey, cx - ex);
    const back = n ? 6500 : 0;
-   const gx = cx + Math.cos(away) * back, gy = cy + Math.sin(away) * back;
+   let gx = cx + Math.cos(away) * back, gy = cy + Math.sin(away) * back;
+   if (m) {
+      // never stand off further than the strike planes can fly there and back
+      const reach = strikeReach(b), ed = Math.hypot(gx - ex, gy - ey);
+      if (ed > reach) { gx = ex + (gx - ex) * reach / ed; gy = ey + (gy - ey) * reach / ed; }
+   }
+   // and stay off the map edge (a carrier in the corner is out of everybody's reach)
+   const lim = w.arena - 2500;
+   gx = clamp(gx, -lim, lim); gy = clamp(gy, -lim, lim);
    const gd = Math.sqrt((gx - b.pos.x) ** 2 + (gy - b.pos.y) ** 2);
    if (gd < 1200) return { want: b.heading + 0.25 * (ai.angSide || 1), tel: 2, goal: null };
    const goal = { x: gx, y: gy };
    return { want: Math.atan2(gy - b.pos.y, gx - b.pos.x), tel: gd > 4000 ? 4 : 3, goal };
+}
+
+// m: how far from the enemy a carrier may stand, so its slower bombers reach him with fuel left to
+// find the target, make their runs and come home
+export function strikeReach(b) {
+   const a = b.cfg.air;
+   return 0.4 * a.fuel * Math.min(a.tb.speed, a.db.speed);
 }
 
 function carrierLaunches(b, w, d, cx, cy) {
