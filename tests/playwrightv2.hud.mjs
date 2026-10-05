@@ -64,6 +64,8 @@ const state = S => S.ev(() => {
    return { mode: window.__weaponSel(), kinds: w.missiles.map(m => m.kind), own: w.missiles.filter(m => m.ownerId === p.id).map(m => m.kind), radar: p.radarOn, doc: p.samDoctrine, prio: p.samPriority ?? null,
       decoys: w.decoys.length, jam: !!p.jamming, mag: { ...p.mag }, map: window.__ctl().mapOpen, alive: p.alive };
 });
+// a slow headless frame can delay a launch past a fixed wait, so wait for the magazine instead
+const launched = (S, n) => S.waitFor(n => window.__world().player.mag.harpoon <= n, 4000, n);
 // screen position of a hostile land position on the open tactical map
 const sitePoint = S => S.ev(async () => {
    const M = await import('./gamev2/missileui.js'), r = M.tacticalMapRect(innerWidth, innerHeight), w = window.__world(), A = w.arena, sc = r.size / (A * 2);
@@ -112,12 +114,12 @@ if (ONLY.includes('desktop')) {
 
    await S.key('Digit2');
    check(T + '2 selects the anti-ship missile', (await state(S)).mode === 'ssm');
-   await S.key('Space'); await S.wait(300);
+   await S.key('Space'); await launched(S, 7);
    s = await state(S);
    check(T + 'Space launches it (missile in the world, magazine 8 -> 7)', s.own.includes('ssm') && s.mag.harpoon === 7, { own: s.own, mag: s.mag });
    await S.shot('desktop-1-ssm');
    await S.waitFor(() => document.querySelector('#weapons .wslot[data-w=ssm]').classList.contains('loaded'), 15000);
-   await S.page.mouse.click(720, 300); await S.wait(400);
+   await S.wait(300); await S.page.mouse.click(720, 300); await launched(S, 6); await S.wait(300);
    s = await state(S);
    check(T + 'left click launches as well, one missile per press', s.mag.harpoon === 6, s.mag);
 
@@ -196,7 +198,7 @@ async function touchRun(tag, w, h) {
 
    await S.tap('#weapons .wslot[data-w=ssm]');
    check(T + 'tap on the missile slot selects it', (await state(S)).mode === 'ssm');
-   await S.tap('#tu-fire'); await S.wait(300);
+   await S.tap('#tu-fire'); await launched(S, 7);
    s = await state(S);
    check(T + 'fire button launches (8 -> 7)', s.own.includes('ssm') && s.mag.harpoon === 7, s.mag);
    await S.tap('#mx-radar');
