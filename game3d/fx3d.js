@@ -11,6 +11,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { ATM_GLSL, bindAtm, clamp, lerp, mulberry32 } from './gfxcommon3d.js';
 import { WAVES_GLSL } from './water3d.js';
 import { T as THEME, FONT } from './theme.js';
+import { GFX } from './gfxquality.js';
 
 const TAU = Math.PI * 2;
 const rnd = Math.random;   // cosmetic only
@@ -831,6 +832,14 @@ class CapMarkers {
 const _p = new THREE.Vector3(), _q2 = new THREE.Vector3();
 const TOPS = [];
 
+// smoke by effects level (GFX.effects 0..3): puffs per smoke-screen cloud, the overdraw budget in
+// full-screen layers, emission rate of fire / funnel smoke and the opacity that makes up for it
+const SMOKE_PUFFS = [22, 32, 44, 56];
+const SMOKE_LAYERS = [8, 12, 16, 22];
+const SMOKE_RATE = [0.55, 0.8, 1, 1.25];
+const SMOKE_ALPHA = [1.3, 1.1, 1, 0.9];
+const SMK = 8;   // floats per smoke-screen candidate: x, y, z, size, alpha, grey, rotation, rank
+
 export class FX {
    constructor(scene, ocean, terrain) {
       this.scene = scene;
@@ -1161,7 +1170,7 @@ export class FX {
       }
 
       this._ships(world, dt, time, cam, ships);
-      this._smokeScreens(world, cam);
+      this._smokeScreens(world, cam, camera);
       this.caps.update(world.caps, time, camera);
 
       for (const l of this.lights) {
@@ -1411,7 +1420,7 @@ export class FX {
          if (nf > 0) {
             const lod = camD > 9000 ? 0.4 : 1;
             r.fxFlame = (r.fxFlame || 0) + dt * nf * 16 * lod;
-            r.fxSmoke = (r.fxSmoke || 0) + dt * nf * 3.2 * lod;
+            r.fxSmoke = (r.fxSmoke || 0) + dt * nf * 3.2 * lod * SMOKE_RATE[GFX.effects];
             while (r.fxFlame >= 1) {
                r.fxFlame -= 1;
                const sp = r.fireSpots[(r.fxFlameI = ((r.fxFlameI || 0) + 1) % nf)];
@@ -1435,14 +1444,14 @@ export class FX {
                p.vx = rr(-1, 1); p.vy = rr(6, 10); p.vz = rr(-1, 1); p.drag = 0.35; p.grav = -1.0;
                p.life = rr(8, 12); p.s0 = rr(5, 8); p.s1 = rr(38, 60); p.grow = 2;
                p.r = 0.035; p.g = 0.032; p.b = 0.03; p.r1 = 0.16; p.g1 = 0.155; p.b1 = 0.15;
-               p.a = 0.88; p.fin = 0.03; p.fout = 0.45; p.shape = 1; p.lit = 0.8; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
+               p.a = Math.min(0.95, 0.88 * SMOKE_ALPHA[GFX.effects]); p.fin = 0.03; p.fout = 0.45; p.shape = 1; p.lit = 0.8; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
                P.emit();
             }
          }
          // ---- funnel smoke (close ships only) ----
          if (r.alive && camD < 7000 && r.smoke.length) {
             // dense, faint puffs overlap into one continuous plume instead of a chain of balls
-            r.fxFun = (r.fxFun || 0) + dt * (2.6 + r.kn * 0.12) * r.smoke.length;
+            r.fxFun = (r.fxFun || 0) + dt * (2.6 + r.kn * 0.12) * r.smoke.length * SMOKE_RATE[GFX.effects];
             if (r.fxFun >= 1) {
                const n = ships.funnelTops(r, TOPS);
                while (r.fxFun >= 1) {
@@ -1453,7 +1462,7 @@ export class FX {
                   p.vx = rr(-0.5, 0.5); p.vy = rr(3, 5); p.vz = rr(-0.5, 0.5); p.drag = 0.4; p.grav = -0.3;
                   p.life = rr(6, 9); p.s0 = d.B * 0.16 + 2; p.s1 = d.B * 0.7 + 10; p.grow = 2;
                   p.r = 0.3; p.g = 0.29; p.b = 0.28; p.r1 = 0.52; p.g1 = 0.52; p.b1 = 0.52;
-                  p.a = 0.22; p.fin = 0.05; p.fout = 0.3; p.shape = 1; p.lit = 1; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
+                  p.a = 0.22 * SMOKE_ALPHA[GFX.effects]; p.fin = 0.05; p.fout = 0.3; p.shape = 1; p.lit = 1; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
                   P.emit();
                }
             }
@@ -1492,18 +1501,34 @@ export class FX {
       }
    }
 
-   _smokeScreens(world, cam) {
+   // Smoke screens: every cloud is a heap of big soft puffs, re-emitted each frame. A destroyer lays
+   // ~18 clouds of 450 m on top of each other, so with the camera inside the screen or the binoculars
+   // on it several hundred screen-filling layers were blended per frame (the frame-rate drop).
+   // Hence a screen-space budget: puffs outside the view are culled, the rest are weighed by the
+   // part of the screen they cover; beyond SMOKE_LAYERS full-screen layers only a share of them is
+   // drawn (in a fixed random rank, fading at the cut) with the opacity of the dropped ones folded
+   // into the kept ones. From normal distance the sum stays under the budget and nothing changes.
+   _smokeScreens(world, cam, camera) {
       const clouds = world.smokeClouds;
+      const SM = this._smk || (this._smk = { d: new Float32Array(1024 * SMK), n: 0, cov: 0, keep: 1, culled: 0 });
+      SM.n = 0; SM.cov = 0; SM.keep = 1; SM.culled = 0;
       if (!Array.isArray(clouds) || !clouds.length) return;
       const P = this.puff;
       const t = this.time;
+      const fx = GFX.effects;
+      // view: forward axis, half-angle tangents (the binoculars narrow them), cull cone
+      const e = camera.matrixWorld.elements, fwx = -e[8], fwy = -e[9], fwz = -e[10];
+      const tanH = Math.max(1e-4, Math.tan((camera.fov || 58) * Math.PI / 360)), asp = camera.aspect || 1.78;
+      const tanD = tanH * Math.hypot(1, asp);
+      let D = SM.d, m = 0, cov = 0;
       for (const c of clouds) {
          if (!c || !c.c) continue;
          let st = this._clouds.get(c);
          if (!st) {
-            const n = 44;
-            const rng = mulberry32((Math.abs(Math.round(c.c.x * 7 + c.c.y * 13)) + 1) >>> 0);
-            st = { n, ox: new Float32Array(n), oz: new Float32Array(n), h: new Float32Array(n), s: new Float32Array(n), ph: new Float32Array(n) };
+            const n = SMOKE_PUFFS[3];
+            const seed = (Math.abs(Math.round(c.c.x * 7 + c.c.y * 13)) + 1) >>> 0;
+            const rng = mulberry32(seed), rk = mulberry32((seed ^ 0x9e3779b9) >>> 0);
+            st = { n, ox: new Float32Array(n), oz: new Float32Array(n), h: new Float32Array(n), s: new Float32Array(n), ph: new Float32Array(n), rk: new Float32Array(n) };
             // each cloud is a billowing mound: central puffs stack high, rim puffs hug the water,
             // so a laid trail reads as a chain of heaps instead of one flat-topped wall
             const tall = 0.6 + rng() * 0.4;
@@ -1513,6 +1538,7 @@ export class FX {
                const mound = 1 - (rad / 0.85) ** 2;
                st.h[i] = 0.08 + 0.92 * tall * mound * (0.45 + 0.55 * rng());
                st.s[i] = 0.55 + rng() * 0.5; st.ph[i] = rng() * TAU;
+               st.rk[i] = rk();
             }
             this._clouds.set(c, st);
          }
@@ -1520,27 +1546,52 @@ export class FX {
          const life = Number.isFinite(c.life) ? c.life : 10;
          const aIn = Number.isFinite(c.age) ? clamp(c.age / 1.5, 0, 1) : 1;
          // camera inside the cloud (own smoke): thin it so the screen is not a grey wall, like WoWs does
-         const cd = cam ? Math.hypot(cam.x - c.c.x, cam.z - c.c.y) : 1e9;   // cam = camera position
+         const cd = Math.hypot(cam.x - c.c.x, cam.z - c.c.y);   // cam = camera position
          const inside = 0.3 + 0.7 * clamp((cd - R * 0.6) / (R * 0.9), 0, 1);
          const alpha = clamp(life / 5, 0, 1) * aIn * 0.7 * inside;
          if (alpha <= 0.01) continue;
          const Hs = clamp(R * 0.36, 18, 165);
-         for (let i = 0; i < st.n; i++) {
-            const p = P.t();
+         const n = Math.min(st.n, SMOKE_PUFFS[fx]);
+         if ((m + n) * SMK > D.length) { const nd = new Float32Array(D.length * 2 + n * SMK); nd.set(D); D = SM.d = nd; }
+         for (let i = 0; i < n; i++) {
             const hi = st.h[i];
             const sw = Math.sin(t * 0.13 + st.ph[i]) * 0.04;
-            p.x = c.c.x + (st.ox[i] + sw) * R; p.z = c.c.y + (st.oz[i] - sw) * R;
-            p.y = Hs * hi + Math.sin(t * 0.09 + st.ph[i] * 2) * 4;
+            const x = c.c.x + (st.ox[i] + sw) * R, z = c.c.y + (st.oz[i] - sw) * R;
+            const y = Hs * hi + Math.sin(t * 0.09 + st.ph[i] * 2) * 4;
             // big soft base, smaller puffs on top for a lumpy crown
-            p.s0 = p.s1 = R * (0.72 - 0.34 * hi) * st.s[i] + 18;
-            // underside in its own shadow, sunlit crown
-            const g = 0.54 + 0.2 * hi;
-            p.r = g; p.g = g + 0.01; p.b = g + 0.025; p.a = alpha; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
-            p.rot = st.ph[i] + t * 0.02 * (i % 2 ? 1 : -1);
-            P.emit(true);
+            const sz = R * (0.72 - 0.34 * hi) * st.s[i] + 18;
+            const dx = x - cam.x, dy = y - cam.y, dz = z - cam.z;
+            const d2 = dx * dx + dy * dy + dz * dz, dep = dx * fwx + dy * fwy + dz * fwz;
+            // not drawn anyway: the shader has faded it out this close; behind the camera; beside the view
+            if (d2 < sz * sz * 0.09 || dep < -0.75 * sz || Math.sqrt(Math.max(0, d2 - dep * dep)) > Math.max(dep, 0) * tanD + 0.75 * sz) { SM.culled++; continue; }
+            const k = sz / (2 * Math.sqrt(d2) * tanH);   // billboard height in screen heights
+            const o = m++ * SMK;
+            D[o] = x; D[o + 1] = y; D[o + 2] = z; D[o + 3] = sz; D[o + 4] = alpha;
+            D[o + 5] = 0.54 + 0.2 * hi;   // underside in its own shadow, sunlit crown
+            D[o + 6] = st.ph[i] + t * 0.02 * (i % 2 ? 1 : -1);
+            D[o + 7] = st.rk[i];
+            cov += Math.min(1, k * k / asp);
          }
       }
-      void cam;
+      const keep = Math.min(1, SMOKE_LAYERS[fx] / Math.max(cov, 1e-3));
+      SM.cov = cov; SM.keep = keep;
+      const inv = 1 / keep;
+      for (let j = 0; j < m; j++) {
+         const o = j * SMK;
+         let a = D[o + 4];
+         if (keep < 1) {
+            const vis = clamp((keep - D[o + 7]) / (0.2 * keep) + 1, 0, 1);
+            if (vis <= 0) continue;
+            a = Math.min(0.96, 1 - Math.pow(1 - a, inv)) * vis;
+         }
+         const p = P.t();
+         p.x = D[o]; p.y = D[o + 1]; p.z = D[o + 2];
+         p.s0 = p.s1 = D[o + 3];
+         const g = D[o + 5];
+         p.r = g; p.g = g + 0.01; p.b = g + 0.025; p.a = a; p.fin = 0; p.fout = 1; p.shape = 1; p.lit = 1;
+         p.rot = D[o + 6];
+         if (P.emit(true) >= 0) SM.n++;
+      }
    }
 
    clear() {
