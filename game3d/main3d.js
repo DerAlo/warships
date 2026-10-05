@@ -30,7 +30,7 @@ import { activeSquad } from './air.js';
 import { TouchUi } from './touch3d.js';
 import { makeCommand, applyCommand, execAction } from './net/command.js';
 import { createNetGame } from './net/game.js';
-import { gfxPref, setGfxPref, startTier, mountDiag, lostVeil, TIERS } from './gfxquality.js';
+import { gfxPref, setGfxPref, setGfxCustom, startTier, mountDiag, lostVeil, TIERS } from './gfxquality.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = WORLD.SIM_DT || 1 / 60;
@@ -191,6 +191,7 @@ window.__fired = () => ({ ...fired });
 window.__start = (opts) => startGame(opts || {});
 window.__gfx = () => renderer.gfxState();
 window.__setGfx = (t) => renderer.setTier(t);
+window.__setGfxOpt = (o) => renderer.setOptions(o);
 mountDiag(() => renderer.gfxState());
 window.__zoom3d = () => ({
    level: zoom.level, tp: zoom.tp, bino: zoom.bino, zoom: zoom.zoom, dist: zoom.dist, distTarget: zoom.distTarget,
@@ -1721,8 +1722,45 @@ click('btn-quit', toMenu);
    shellcam.bindSelect($('opt-shellcam'));
    const gfxSel = $('opt-gfx');
    if (gfxSel) {
-      gfxSel.value = gfxPref();
-      gfxSel.addEventListener('change', () => { setGfxPref(gfxSel.value); renderer.setTier(startTier(gfxSel.value)); });
+      // the tier select plus the single options behind "Erweitert": a tier fills them all in, changing
+      // one makes the choice "Benutzerdefiniert" (stored; a watchdog step-down discards it again)
+      const el = { pr: $('gfx-pr'), aa: $('gfx-aa'), bloom: $('gfx-bloom'), shadow: $('gfx-shadow'), effects: $('gfx-effects'), detail: $('gfx-detail'), ocean: $('gfx-ocean') };
+      const customOpt = gfxSel.querySelector('option[value="custom"]');
+      const SHADOW = { low: [1024, 1], medium: [2048, 1], high: [4096, 1], ultra: [4096, TIERS.ultra.shadowFit] };
+      const sync = () => {
+         const o = renderer.opts, g = renderer.gfxState();
+         if (customOpt) customOpt.hidden = customOpt.disabled = !renderer.custom;
+         gfxSel.value = renderer.custom ? 'custom' : gfxPref() === 'auto' ? 'auto' : renderer.tier;
+         if (el.pr) {   // only what the screen can show: steps up to the device's own pixel ratio
+            const dpr = window.devicePixelRatio || 1, cur = Math.min(o.pr, dpr);
+            const steps = [...new Set([0.5, 0.75, 1, 1.5, 2, 2.5, 3].filter(v => v < dpr).concat(dpr, cur))].sort((a, b) => a - b);
+            el.pr.textContent = '';
+            for (const v of steps) el.pr.add(new Option(String(Math.round(v * 100) / 100).replace('.', ',') + '×' + (v === dpr ? ' (nativ)' : ''), String(v)));
+            el.pr.value = String(cur);
+         }
+         if (el.aa) {
+            for (const op of el.aa.options) op.disabled = Number(op.value) > (g.maxSamples || 4);
+            el.aa.value = String(g.samples);
+         }
+         if (el.bloom) el.bloom.checked = o.bloom;
+         if (el.shadow) el.shadow.value = o.shadow >= 4096 ? (o.shadowFit < 1 ? 'ultra' : 'high') : o.shadow >= 2048 ? 'medium' : 'low';
+         if (el.effects) el.effects.value = String(o.effects);
+         if (el.detail) el.detail.value = String(o.detail);
+         if (el.ocean) el.ocean.value = String(o.oceanSegs);
+      };
+      const set = (patch) => { renderer.setOptions(patch); if (renderer.custom) setGfxCustom(renderer.tier, renderer.opts); sync(); };
+      gfxSel.addEventListener('change', () => { if (gfxSel.value === 'custom') return; setGfxPref(gfxSel.value); renderer.setTier(startTier(gfxSel.value)); });
+      el.pr?.addEventListener('change', () => set({ pr: Number(el.pr.value) }));
+      el.aa?.addEventListener('change', () => set({ samples: Number(el.aa.value) }));
+      el.bloom?.addEventListener('change', () => set({ bloom: el.bloom.checked }));
+      el.shadow?.addEventListener('change', () => { const s = SHADOW[el.shadow.value]; if (s) set({ shadow: s[0], shadowFit: s[1] }); });
+      el.effects?.addEventListener('change', () => set({ effects: Number(el.effects.value) }));
+      el.detail?.addEventListener('change', () => set({ detail: Number(el.detail.value) }));
+      el.ocean?.addEventListener('change', () => set({ oceanSegs: Number(el.ocean.value) }));
+      // opened on a small screen the options start below the fold of the card
+      $('gfx-adv')?.addEventListener('toggle', (e) => { if (e.target.open) e.target.scrollIntoView({ block: 'nearest' }); });
+      renderer.onGfxChange = sync;
+      sync();
    }
 }
 // Audio may only start after a user gesture.
