@@ -145,6 +145,8 @@ export function launchSquadron(world, ship, type, order = null, human = false) {
    ship.air.deckT = lt;
    const sq = {
       id: nextSqId(), side: ship.side, ownerId: ship.id, type, cfg: pc, n, n0: n,
+      // V2 render contract (air3d.js): what the flight does, whose it is, the airframe
+      kind: type === 'ft' ? 'fighter' : 'strike', nation: ship.cfg.hull.nation || null, model: pc.model || null,
       armed: type === 'ft' ? 0 : n, hp: pc.hp,
       pos: { x: ship.pos.x + c * L * 0.35, y: ship.pos.y + s * L * 0.35 }, alt: 20, altT: type === 'db' ? AIR.dbAlt : AIR.cruiseAlt,
       prev: { x: 0, y: 0, alt: 0, h: 0 },

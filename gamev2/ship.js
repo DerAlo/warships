@@ -8,6 +8,7 @@ import { makeShell, launchAngle, flightTime } from './combat.js';
 import { initSubState, subSpeedFactor, subDetectRange, SUB_TUBE_ARC } from './submarine.js';
 import { initAirState } from './air.js';
 import { deployDecoys } from './missile.js';
+import { launchHelo, heloBlock } from './helo.js';
 
 const FIRE_DUR = { BB: 45, CA: 35, CL: 30, DD: 20, SS: 18, TR: 60, CV: 45 };   // s (a bit shorter than WoWs: fights are faster)
 const FLOOD_DUR = 40;
@@ -228,6 +229,7 @@ export class Ship {
       if (!this.alive) return false;
       const c = this.consumable(key);
       if (!c || c.active || c.cd > 0 || c.charges <= 0) return false;
+      if (key === 'helo' && heloBlock(world, this)) return false;   // V2: one helicopter, one deck (helo.js)
       if (c.charges !== Infinity) c.charges--;
       c.active = true;
       c.t = c.dur;
@@ -238,6 +240,7 @@ export class Ship {
       } else if (key === 'smoke') {
          this._smokeT = 0;
       } else if (key === 'decoy') deployDecoys(world, this);   // V2 soft kill (missile.js)
+      else if (key === 'helo') launchHelo(world, this);        // screens ahead until it is sent somewhere
       world.pushEvent('consumable', { srcId: this.id, text: c.name, key });
       return true;
    }

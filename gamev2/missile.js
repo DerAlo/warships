@@ -8,7 +8,7 @@
 //      target (id of the designated ship / site / missile / squadron or null), tk 'ship'|'site'|'missile'|'squad'|'point'|'bearing',
 //      tx, ty (aim point), seekerOn, lock (ship id | null), lockDecoy (decoy id | null), seduced,
 //      detected, detT (sensors.js), eng (interceptors in flight against it), dist, range, t, alive }
-// Decoy cloud (world.decoys[]): { id, side, shipId, x, y, t0 }
+// Decoy cloud (world.decoys[]): { id, side, shipId, x, y, t0, n (seekers it has seduced, max DEFENCE.decoyCap) }
 // A "platform" is whatever launches and defends: a Ship or a land site (sites.js). Both carry
 //    id, side, pos, alive, radarOn, cfg.weapons, mag, samDoctrine, samPriority, lastSsmFire.
 // Defence state on a platform: samCh[] = { type, tgt (threat id | null), mid (interceptor id), readyT },
@@ -22,6 +22,7 @@ import { angleDelta, clamp, obstacleT, islandHeightAt, pointSegDist, toLocal, in
 import { jammed } from './sensors.js';
 import { damageSite, siteById } from './sites.js';
 import { hurtSquad, squadById } from './air.js';
+import { heloById, killHelo } from './helo.js';
 
 const DEF_DT = 0.2;                  // s between two fire-control passes
 const SCAN_DT = 0.2;                 // s between two seeker sweeps
@@ -225,7 +226,7 @@ export function deployDecoys(world, ship) {
    if (!ship.alive || ship.depth > 0) return null;
    const sgn = (ship._decoyN = (ship._decoyN || 0) + 1) & 1 ? 1 : -1;
    const a = ship.heading + sgn * Math.PI / 2, r = 160 + ship.cfg.hull.L * 0.4;
-   const d = { id: world._nextId++, side: ship.side, shipId: ship.id, x: ship.pos.x + Math.cos(a) * r, y: ship.pos.y + Math.sin(a) * r, t0: world.time };
+   const d = { id: world._nextId++, side: ship.side, shipId: ship.id, x: ship.pos.x + Math.cos(a) * r, y: ship.pos.y + Math.sin(a) * r, t0: world.time, n: 0 };
    world.decoys.push(d);
    world.pushEvent('decoy', { srcId: ship.id, decoyId: d.id, pos: { x: d.x, y: d.y }, text: 'Täuschkörper ausgestoßen' });
    return d;
@@ -268,6 +269,7 @@ function seek(world, m, c) {
    for (const D of world.decoys) {
       if (D.side === m.side || world.time - D.t0 > SENSOR.DECOY_LIFE) continue;
       if (m.rolled && m.rolled.includes(D.id)) continue;
+      if ((D.n || 0) >= DEFENCE.decoyCap) continue;               // a cloud holds only so many seekers
       const dx = D.x - m.x, dy = D.y - m.y, d2 = dx * dx + dy * dy;
       if (d2 > c.seeker * c.seeker || Math.abs(angleDelta(m.heading, Math.atan2(dy, dx))) > cone) continue;
       (m.rolled || (m.rolled = [])).push(D.id);
@@ -275,6 +277,7 @@ function seek(world, m, c) {
       if (world.rng() < seduceChance(c) * fresh) { viaDecoy = D; break; }
    }
    if (viaDecoy) {
+      viaDecoy.n = (viaDecoy.n || 0) + 1;
       m.lock = null; m.lockDecoy = viaDecoy.id; m.seduced = true;
       world.pushEvent('seduced', { srcId: viaDecoy.shipId, missileId: m.id, mtype: m.type, decoyId: viaDecoy.id, pos: { x: viaDecoy.x, y: viaDecoy.y }, text: 'Flugkörper abgelenkt' });
       return;
@@ -412,7 +415,12 @@ function stepRocket(world, m, dt) {
 
 // ---------------------------------------------------------------- interceptors
 function threatRef(world, m, idx) {
-   if (m.tk === 'squad') { const q = squadById(world, m.target); return q && q.n > 0 && q.state !== 'land' ? q : null; }
+   if (m.tk === 'squad') {
+      const q = squadById(world, m.target);
+      if (q) return q.n > 0 && q.state !== 'land' ? q : null;
+      const h = heloById(world, m.target);      // helicopters are engaged like a flight of one
+      return h && h.alive ? h : null;
+   }
    const t = idx.get(m.target);
    return t && t.alive ? t : null;
 }
@@ -435,11 +443,12 @@ function stepInterceptor(world, m, dt, idx) {
       m.x = Tx; m.y = Ty; m.alt = T.alt;
       const f = Math.hypot(Tx - m.sx, Ty - m.sy) / (sq ? c.air || c.range : c.range);
       let pk = c.pk * (f <= 0.5 ? 1 : 1 - (1 - DEFENCE.farPk) * Math.min(1, (f - 0.5) * 2));
-      pk *= sq ? DEFENCE.aircraftPk : MISSILES[T.type]?.evade ?? 1;
+      pk *= sq ? DEFENCE.aircraftPk : (MISSILES[T.type]?.evade ?? 1) * DEFENCE.missilePk;
       const by = m.kind === 'aam' ? 'aam' : 'sam', owner = platformById(world, m.ownerId);
       done();
       if (world.rng() < Math.min(0.95, pk)) {
-         if (sq) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); hurtSquad(world, T, T.hp + 1, owner && owner.aa ? owner : null); }
+         if (sq && T.isHelo) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); killHelo(world, T, owner, 'sam'); }
+         else if (sq) { world.addEffect('flak', T.pos, 0.8, 16, { alt: T.alt }); hurtSquad(world, T, T.hp + 1, owner && owner.aa ? owner : null); }
          else killMissile(world, T, by, owner, m);
       } else world.pushEvent('samMiss', { srcId: m.ownerId, missileId: sq ? null : T.id, sqId: sq ? T.id : null, mtype: m.type, pos: { x: Tx, y: Ty }, alt: T.alt });
       return;
@@ -563,7 +572,7 @@ function ciwsPass(world, dt, bySide) {
          const m = near[i < near.length ? i : 0];
          if (!m.alive) continue;
          if (!tg.includes(m.id)) tg.push(m.id);
-         const kps = k.kps * (MISSILES[m.type].supersonic ? CIWS_SUPER : 1);
+         const kps = k.kps * DEFENCE.ciwsK * (MISSILES[m.type].supersonic ? CIWS_SUPER : 1);
          if (world.rng() < 1 - Math.pow(1 - kps, dt)) killMissile(world, m, 'ciws', S, null);
       }
    }
@@ -600,6 +609,11 @@ function fightersPass(world, bySide) {
          const d = Math.hypot(q.pos.x - sq.pos.x, q.pos.y - sq.pos.y);
          if (d < bd) { bd = d; best = q; }
       }
+      if (!best) for (const h of world.helos) {      // a helicopter in reach is an easy kill
+         if (h.side === sq.side || !h.alive || (h.eng || 0) >= 1) continue;
+         const d = Math.hypot(h.pos.x - sq.pos.x, h.pos.y - sq.pos.y);
+         if (d < bd) { bd = d; best = h; }
+      }
       if (!best) for (const m of bySide[opp(sq.side)]) {
          if (!m.alive || !m.detected || (m.eng || 0) >= 1) continue;
          const d = Math.hypot(m.x - sq.pos.x, m.y - sq.pos.y);
@@ -614,7 +628,7 @@ const _by = { player: [], enemy: [] }, _sq = { player: [], enemy: [] }, _idx = n
 export function updateMissiles(world, dt) {
    const ms = world.missiles;
    if (world.decoys.length && world.time - world.decoys[0].t0 > SENSOR.DECOY_LIFE) world.decoys = world.decoys.filter(d => world.time - d.t0 <= SENSOR.DECOY_LIFE);
-   if (!ms.length && !world.squadrons.length) return;
+   if (!ms.length && !world.squadrons.length && !world.helos.length) return;
    _idx.clear();
    let guided = false;
    for (const m of ms) { if (m.kind === 'sam' || m.kind === 'aam') guided = true; else if (m.kind !== 'rocket') _idx.set(m.id, m); }
@@ -645,6 +659,7 @@ export function updateMissiles(world, dt) {
       world._defT = DEF_DT;
       _sq.player.length = _sq.enemy.length = 0;
       for (const q of world.squadrons) if (q.n > 0 && q.state !== 'land' && q.alt > 15) _sq[q.side].push(q);
+      for (const h of world.helos) if (h.alive && h.alt > 15 && (h.side === 'enemy' ? h.visible : h.visE)) _sq[h.side].push(h);
       for (const side of ['player', 'enemy']) {
          const o = opp(side);
          let threats = null;
