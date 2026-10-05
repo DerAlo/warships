@@ -496,5 +496,109 @@ export function westMissions(H) {
          },
          timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – der Kreuzer beherrscht weiter die Zufahrt.'); },
       },
+      // ========================================================= 5. Nordatlantik – GIUK-Lücke
+      // Submarine hunt. The boats are not on the map at the start: each one is reported by the script
+      // and placed ahead of the convoy, outside torpedo range of every ship of the player side.
+      {
+         id: 'giuk', group: 'ops', name: 'Nordatlantik – GIUK-Lücke', subtitle: 'U-Jagd · Bordhubschrauber, Tauchsonar, Leichtgewichtstorpedos',
+         briefing: 'Drei Versorger laufen durch die Lücke zwischen Island und Schottland nach Osten. Mehrere konventionelle U-Boote lauern am Kurs. ' +
+            'Ihr Rumpfsonar reicht nur wenige Kilometer – der Bordhubschrauber setzt sein Tauchsonar weit voraus und wirft selbst Leichtgewichtstorpedos. ' +
+            'Schicken Sie ihn dorthin, wo ein Kontakt gemeldet wird, bleiben Sie zwischen U-Boot und Geleit und halten Sie Täuschkörper gegen Torpedos bereit. ' +
+            'Mindestens zwei Versorger müssen durchkommen.',
+         debrief: 'Das Geleit ist durch. Ein U-Boot, das geortet ist, hat seinen größten Vorteil verloren – der Hubschrauber findet es, bevor es in Schussweite ist.',
+         fleet: { own: 'U-Jagd-Schiff mit Bordhubschrauber, 1 Korvette (ohne U-Jagd-Waffen), 3 Versorger', foe: '3–5 konventionelle U-Boote' },
+         env: { time: 'dawn', weather: 'rain' }, type: 'escort', playableShips: ['Sachsen', 'Burke', 'Virginia'], recommendedShip: 'Sachsen',
+         arena: 20000, timeLimit: 11 * 60, stars: 2,
+         setup(w, shipKey) {
+            const S = w._script;
+            islands(w, [{ c: P(-3000, 17500), r: 1500, height: 200, seed: 131, lobes: 5, elong: 2.4, rot: 0.1, rough: 0.7, name: 'Schären' }]);
+            add(w, shipKey, 'player', P(-10600, 900), 0, { isPlayer: true });
+            const route = [P(-2000, 300), P(4500, -400), P(9500, 0)];
+            S.convoy = [
+               add(w, 'Container', 'player', P(-12200, -300), 0, { name: 'MV Nordkap', speedKn: 16, ai: { route } }),
+               add(w, 'Tanker', 'player', P(-13400, -300), 0, { name: 'MT Skagerrak', speedKn: 16, ai: { route } }),
+               add(w, 'Container', 'player', P(-14600, -300), 0, { name: 'MV Färöer', speedKn: 16, ai: { route } }),
+            ];
+            S.ally = add(w, 'Braunschweig', 'player', P(-13400, -1900), 0, { ai: { escortId: S.convoy[1].id } });
+            S.goal = zone(w, 9500, 0, 1800, 'Sammelpunkt Ost');
+            S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.subs = []; S.planned = by(w, 3, 3, 4) + (shipKey === 'Burke' ? by(w, 0, 1, 1) : 0);      // the towed-array destroyer faces one boat more
+            objective(w, 'convoy', 'Bringen Sie die Versorger durch die Lücke (0/3 am Ziel, mindestens 2)');
+            objective(w, 'subs', `Versenken Sie alle U-Boote (0/${S.planned})`, { optional: true });
+            objective(w, 'all', 'Kein Versorger geht verloren', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
+            radio(w, 'Geleitführer', 'Geleit läuft mit 16 Knoten nach Osten. U-Boote am Kurs gemeldet – Sonar besetzen, Bordhubschrauber klar zum Start.');
+            // a boat is placed relative to the leading merchant: `ahead` m along the course, `side` m abeam
+            const boat = (cls, ahead, side, text) => {
+               const lead = S.convoy.find(m => m.alive);
+               if (!lead || w.phase !== 'playing') return;
+               let pos = P(Math.min(lead.pos.x + ahead, 16500), lead.pos.y + side);
+               const friends = w.ships.filter(s => s.alive && s.side === 'player');
+               for (let k = 0; k < 12 && friends.some(f => hyp(f.pos, pos) < 10500); k++) pos = P(Math.min(pos.x + 900, 17500), pos.y + Math.sign(side || 1) * 700);
+               // the boat lies in ambush beside the track and creeps towards it; the script fires its tubes (see update)
+               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.1, 0.9), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
+               for (const k of Object.keys(s.mag || {})) s.mag[k] = 0;      // torpedoes only
+               // the report is a datum, not a fix: a red area on the map that contains the boat somewhere
+               const o = (((w.seed >>> 0) * 31 + S.subs.length * 977) % 1000) / 1000 * Math.PI * 2;
+               s._datum = zone(w, pos.x + Math.cos(o) * 900, pos.y + Math.sin(o) * 900, 2400, 'Kontakt ' + (S.subs.length + 1), 'danger');
+               S.subs.push(s);
+               radio(w, 'Operationszentrale', text, 'warn');
+            };
+            later(S, 12, () => boat('Kilo', 11500, 1800, 'Unterwasserkontakt voraus, etwas an Backbord. Hubschrauber starten und Tauchsonar setzen!'));
+            later(S, by(w, 125, 110, 100), () => boat('Yuan', 11000, -2600, 'Zweiter Kontakt an Steuerbord voraus. Das Boot läuft auf das Geleit zu.'));
+            later(S, by(w, 215, 200, 190), () => boat('Kilo', 11000, 2400, 'Dritter Kontakt an Backbord voraus. Hubschrauber neu ansetzen.'));
+            if (S.planned > 3) later(S, 150, () => boat('Kilo', 11500, -2000, 'Weiterer Kontakt recht voraus.'));
+            if (S.planned > 4) later(S, 250, () => boat('Yuan', 11000, 2200, 'Noch ein Kontakt voraus. Das Geleit ist kurz vor dem Sammelpunkt.'));
+            later(S, 60, () => radio(w, 'Operationszentrale', 'Hinweis: Ein geortetes U-Boot bekämpft der Hubschrauber mit eigenen Torpedos. Unsere Leichtgewichtstorpedos reichen nur wenige Kilometer.'));
+         },
+         update(w, dt, S) {
+            if ((S.tick -= dt) > 0) return;
+            S.tick = 1;
+            // ambush: a boat at periscope depth with a loaded bow fires a narrow spread at the nearest merchant in range
+            const R = by(w, 3400, 4200, 4400);
+            for (const s of S.subs) {
+               if (!s.alive || s.depth > 1) continue;
+               let tgt = null, dm = R;
+               for (const m of S.convoy) if (m.alive && !m.escaped && hyp(m.pos, s.pos) < dm) { dm = hyp(m.pos, s.pos); tgt = m; }
+               if (!tgt || dm < 500) continue;
+               const t = dm / s.cfg.torp.speed;
+               const brg = Math.atan2(tgt.pos.y + tgt.vel.y * t - s.pos.y, tgt.pos.x + tgt.vel.x * t - s.pos.x);
+               s.ai.route = [P(s.pos.x + Math.cos(brg) * 400, s.pos.y + Math.sin(brg) * 400)]; s.ai.routeIdx = 0;      // lay the bow on
+               if (!s.torpLauncherFor(brg)) continue;
+               s.setTorpSpread('narrow');
+               if (s.fireTorpedoes(w, brg) > 0 && !s._shot) { s._shot = true; radio(w, 'Operationszentrale', 'Torpedos im Wasser! Das U-Boot hat auf das Geleit geschossen.', 'warn'); }
+            }
+            const sunk = S.subs.filter(s => !s.alive).length;
+            if (S.subs.length >= S.planned && sunk >= S.planned && S.lost <= S.convoy.length - S.need) {
+               if (!S.lost) setObj(w, 'all', 'done');
+               setObj(w, 'convoy', 'done');
+               w.end(true, 'Alle U-Boote sind versenkt – der Weg für das Geleit ist frei.');
+               return;
+            }
+            if (!convoyTick(w, S, 'Bringen Sie die Versorger durch die Lücke')) return;
+            if (S.arrived >= S.need) {
+               if (!S.lost) setObj(w, 'all', 'done');
+               setObj(w, 'convoy', 'done');
+               w.end(true, S.lost ? 'Das Geleit ist durch – ein Versorger ging verloren.' : 'Alle Versorger haben den Sammelpunkt erreicht.');
+            } else w.end(false, 'Zu viele Versorger gingen verloren.');
+         },
+         onSink(w, ship, killer, S) {
+            if (S.subs.includes(ship)) {
+               const n = S.subs.filter(s => !s.alive).length;
+               objText(w, 'subs', `Versenken Sie alle U-Boote (${n}/${S.planned})`);
+               if (n >= S.planned) setObj(w, 'subs', 'done');
+               radio(w, 'Operationszentrale', 'Unterwasserkontakt vernichtet.');
+               const zi = w.mission.zones.indexOf(ship._datum);
+               if (zi >= 0) w.mission.zones.splice(zi, 1);
+               return;
+            }
+            if (!convoyLoss(w, S, ship)) return;
+            radio(w, 'Geleitführer', ship.name + ' ist torpediert und sinkt. Rettungsinseln sind im Wasser.', 'warn');
+            if (S.lost > S.convoy.length - S.need) w.end(false, 'Zwei Versorger gingen verloren – der Auftrag ist gescheitert.');
+         },
+         timeout(w, S) {
+            if (S.arrived >= S.need) { setObj(w, 'convoy', 'done'); w.end(true, 'Das Geleit ist durch – ein Nachzügler blieb zurück.'); }
+            else w.end(false, 'Die Zeit ist abgelaufen – das Geleit hat den Sammelpunkt nicht erreicht.');
+         },
+      },
    ];
 }

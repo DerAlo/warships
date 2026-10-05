@@ -18,6 +18,7 @@ import { obstacleT } from '../gamev2/utils.js';
 import { buildNetWorld } from '../gamev2/net/setup.js';
 import { orderDepth } from '../gamev2/submarine.js';
 import { launchTeam, teamStatus } from '../gamev2/seal.js';
+import { sendHelo } from '../gamev2/helo.js';
 
 const IDS = ['hormus', 'redsea', 'pipeline', 'blacksea', 'giuk'].filter(id => getMission(id));
 const DIFFS = ['easy', 'normal', 'hard'];
@@ -36,7 +37,20 @@ function steerTo(p, to, tel) {
 const HINT = {
    hormus(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
    redsea(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
-   giuk(w) { w.player.ai = { escortId: w._script.convoy[1].id }; },
+   // the captain of the sub hunt also flies the helicopter: to the datum of the nearest reported boat
+   giuk(w) {
+      const S = w._script, p = w.player;
+      p.ai = { escortId: S.convoy[0].id };
+      let t = 0;
+      return () => {
+         if (w.time < t || !p.alive || !p.cfg.helo) return;
+         t = w.time + 2;
+         let best = null, bd = Infinity;
+         for (const s of S.subs) if (s.alive && hyp(s.pos, p.pos) < bd) { bd = hyp(s.pos, p.pos); best = s; }
+         if (best && S.heloAt !== best.id && sendHelo(w, p, best.detected ? best.pos : best._datum)) S.heloAt = best.id;
+         if (best && best.detected && S.heloFix !== best.id && sendHelo(w, p, best.pos)) S.heloFix = best.id;
+      };
+   },
    blacksea(w) { w.player.ai = { huntId: w._script.cruiser.id }; },
 };
 // Scripted captains (a function called every step) for missions the combat AI cannot play.
@@ -49,7 +63,7 @@ export function play(id, diff, seed, mode = 'bot', ship = null) {
    let step = null;
    if (mode === 'passive') { w.autoPlayer = true; w.player.ai = { passive: true, anchored: true }; }
    else if (SCRIPTED[id]) step = SCRIPTED[id](w);
-   else { w.autoPlayer = true; if (HINT[id]) HINT[id](w); }
+   else { w.autoPlayer = true; if (HINT[id]) step = HINT[id](w) || null; }
    const n = Math.round((def.timeLimit + 20) / DT);
    for (let i = 0; i < n && w.phase === 'playing'; i++) { if (step) step(w); w.update(DT); }
    return w;
@@ -86,7 +100,7 @@ if (process.env.BALANCE) {
 
 // ---------------------------------------------------------------- catalogue
 test('west operations: catalogue and menu data', () => {
-   assert.ok(IDS.length >= 1 && IDS[0] === 'hormus');
+   assert.deepEqual(IDS, ['hormus', 'redsea', 'pipeline', 'blacksea', 'giuk']);
    for (const id of IDS) {
       const m = getMission(id);
       assert.equal(m.group, 'ops', id);
@@ -371,4 +385,67 @@ test('blacksea: sinking the cruiser wins, the battery is optional, the clock los
    assert.equal(opStars(w), 1, 'one optional objective is open');
    const t = play('blacksea', 'normal', 5, 'passive');
    assert.match(t.result.reason, /Zeit ist abgelaufen/);
+});
+
+test('giuk: boats are reported one by one, each outside torpedo range, with a datum on the map', () => {
+   for (const diff of DIFFS) for (const ship of getMission('giuk').playableShips) {
+      const w = new World(diff, { mission: 'giuk', ship, seed: 9 });
+      const S = w._script;
+      assert.equal(w.ships.filter(s => s.side === 'enemy').length, 0, 'no boat at the start');
+      let seen = 0;
+      for (let t = 0; t < 300 && w.phase === 'playing'; t++) {
+         fast(w, 1);
+         for (; seen < S.subs.length; seen++) {
+            const b = S.subs[seen];
+            assert.equal(b.depth, 1); assert.ok(b.sub, 'a submarine');
+            for (const f of w.ships) if (f.alive && f.side === 'player') assert.ok(hyp(f.pos, b.pos) > b.cfg.torp.range, `${diff} ${ship}: boat ${seen} spawns ${Math.round(hyp(f.pos, b.pos))} m from ${f.name}`);
+            assert.ok(hyp(b._datum, b.pos) < b._datum.r, 'the datum contains the boat');
+            assert.ok(w.mission.zones.includes(b._datum));
+            assert.ok(Object.values(b.mag || {}).every(n => n === 0), 'torpedoes only');
+         }
+      }
+      assert.equal(S.subs.length, S.planned, `${diff} ${ship}: all boats reported`);
+      assert.equal(S.planned, diff === 'hard' ? (ship === 'Burke' ? 5 : 4) : (ship === 'Burke' && diff === 'normal' ? 4 : 3));
+   }
+});
+test('giuk: the ambush fires on the convoy; two ships lost = defeat', () => {
+   const w = play('giuk', 'normal', 5, 'passive');
+   const S = w._script;
+   assert.equal(w.phase, 'lost');
+   assert.match(w.result.reason, /Zwei Versorger/);
+   assert.ok(S.subs.some(s => s._shot), 'a boat fired');
+   assert.equal(obj(w, 'all').state, 'failed');
+   assert.ok(w.events.length >= 0);
+});
+test('giuk: sinking every boat wins early and removes the datums; the helicopter finds a boat', () => {
+   const w = new World('normal', { mission: 'giuk', ship: 'Sachsen', seed: 4 });
+   const S = w._script, p = w.player;
+   fast(w, 20);
+   assert.equal(S.subs.length, 1);
+   const b = S.subs[0];
+   assert.ok(!b.detected, 'unseen at first');
+   assert.ok(sendHelo(w, p, b.pos), 'helicopter launched');
+   let found = false;
+   for (let t = 0; t < 200 && !found; t++) { fast(w, 1); found = !!b.detected || w.time - b.pingT < 2 || !b.alive; }
+   assert.ok(found, 'the dipping sonar holds the boat');
+   for (let t = 0; t < 260 && S.subs.length < S.planned; t++) { for (const s of S.subs) if (s.alive) s.takeDamage(1e9, p, 'he'); fast(w, 1); }
+   for (const s of S.subs) if (s.alive) s.takeDamage(1e9, p, 'he');
+   fast(w, 2);
+   assert.equal(w.phase, 'won');
+   assert.match(w.result.reason, /Alle U-Boote/);
+   assert.equal(obj(w, 'subs').state, 'done'); assert.equal(obj(w, 'all').state, 'done');
+   assert.equal(w.mission.zones.filter(z => z.kind === 'danger').length, 0);
+   assert.equal(opStars(w), 2);
+});
+test('giuk: the convoy arriving wins, the clock decides by ships at the goal', () => {
+   const w = new World('easy', { mission: 'giuk', ship: 'Sachsen', seed: 4 });
+   const S = w._script;
+   S.def.timeout(w, S);
+   assert.equal(w.phase, 'lost');
+   const v = new World('easy', { mission: 'giuk', ship: 'Sachsen', seed: 4 });
+   v._script.arrived = 2; v._script.def.timeout(v, v._script);
+   assert.equal(v.phase, 'won');
+   let won = 0;
+   for (const seed of [1000, 1037, 1074]) { const r = play('giuk', 'easy', seed); if (r.phase === 'won') won++; }
+   assert.equal(won, 3, 'easy with a helicopter captain');
 });
