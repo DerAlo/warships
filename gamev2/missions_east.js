@@ -45,9 +45,11 @@ export const EAST_TUNE = {
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
    countdown: {
-      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 700 },
-      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570 },
-      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 565 },
+      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1 },
+      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3 },
+      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4 },
+      // the clock of a submarine run (the German boat is the slower one)
+      ship: { U212: (t, k) => ({ subTime: t.subTime + 60 + (k === 'normal' ? 15 : 0) }), Virginia: (t, k) => ({ subTime: t.subTime - (k === 'normal' ? 15 : 0) }) },
    },
 };
 
@@ -486,7 +488,7 @@ export function eastMissions(H) {
          recommendedShip: 'Ticonderoga', arena: 22000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'countdown');
-            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime + (shipKey === 'U212' ? 60 : 0) : T.time;
+            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime : T.time;
             const C = P(9000, 0), R = 2400;
             islands(w, [{ c: C, r: R, height: 320, seed: 71, lobes: 6, rough: 0.55, name: 'Felseninsel', peaks: [{ x: 300, y: 200, h: 420, r: 900 }] }]);
             const g = fleet(w, shipKey, [['Ticonderoga', 0, 0], ['Burke', -1600, -2400], ['Burke', -1600, 2400], ['Daring', 1600, 2600]],
@@ -510,8 +512,9 @@ export function eastMissions(H) {
             const scr = [add(w, 'Gorschkow', 'enemy', P(3800, 1500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(3800, 4000), P(3800, -1500)] } })];
             for (let i = 0; i < T.corv; i++) scr.push(add(w, 'BuyanM', 'enemy', P(5200, i ? 4500 : 500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(5200, i ? 4500 : 500), P(5200, i ? 1500 : -2500)] } }));
             S.boats = [];
-            for (let i = 0; i < T.boats; i++) {
-               const a0 = (hash(w, 20) + i / T.boats) * 2 * Math.PI, ring = [];
+            const nBoats = SHIPS[shipKey].hull.type === 'SS' ? T.subBoats : T.boats;
+            for (let i = 0; i < nBoats; i++) {
+               const a0 = (hash(w, 20) + i / nBoats) * 2 * Math.PI, ring = [];
                for (let k = 0; k < 6; k++) ring.push(P(C.x + Math.cos(a0 + k * Math.PI / 3) * (R + 3400), C.y + Math.sin(a0 + k * Math.PI / 3) * (R + 3400)));
                S.boats.push(add(w, 'Typ022', 'enemy', ring[0], a0 + Math.PI / 2, { telegraph: 2, ai: { passive: true, patrol: ring } }).id);
             }
