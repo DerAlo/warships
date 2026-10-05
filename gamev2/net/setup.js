@@ -65,7 +65,9 @@ export function cleanLoadout(lo) {
 // own ship, the flagship; every further captain takes one of the allied ships the mission brings,
 // the biggest first (battleship, cruisers, destroyers, boats), equal ones in spawn order. Scripted
 // ships (convoys, routes) and transports stay with the mission.
-const RANK = { BB: 0, CA: 1, CL: 2, DD: 3, SS: 4 };
+// V2 hull types (config.js): cruisers (CG), carriers, destroyers, frigates, corvettes, fast attack
+// craft, submarines last. TR (transport) is deliberately missing: merchants stay with the mission.
+export const RANK = { CG: 0, CV: 1, DD: 2, FF: 3, CO: 4, FAC: 5, SS: 6 };
 export function historicShips(world) {
    return world.bots.map((b, i) => [b, i])
       .filter(([b]) => b.side === 'player' && b.alive && RANK[b.type] !== undefined && !(b.ai && (b.ai.passive || b.ai.route)))
