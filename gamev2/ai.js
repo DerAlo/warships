@@ -20,6 +20,7 @@ import { subPlan, subFireRange } from './ai_sub.js';
 import { carrierPlan, airEvade } from './ai_air.js';
 import { botMissiles, botSoftKill } from './ai_missile.js';
 
+const BREAK_T = 30, BREAK_CD = 150;   // s a damaged bot breaks off to repair / until it may do so again
 const DECIDE_DT = 0.4;             // s between navigation decisions
 const TARGET_DT = 2;               // s between target re-evaluations
 const CANDIDATES = [0, 15, -15, 30, -30, 50, -50, 75, -75, 100, -100, 130, -130, 165, -165].map(d => d * DEG);
@@ -103,6 +104,7 @@ function pickTarget(b, w) {
       if (b.ai.huntId === e.id) s *= 3;
       if (e.type === 'TR' && b.ai.huntId != null) s *= 1.5;
       if (b.ai.role === 'dd' && e.type === 'DD') s *= 1.3;
+      if (e.cfg.hull.type === 'FAC' && dd <= b.cfg.main.range) s *= 2;   // V2: boats are gun targets, and urgent ones
       if (e === cur) s *= 1.3;                          // hysteresis
       // spread fire: a target already engaged by team-mates is less attractive, so the player
       // (usually the closest ship) doesn't get dog-piled by the whole enemy line
@@ -167,8 +169,9 @@ function decide(b, w, d) {
    // mission retreat (permanent) or generic break-off to repair
    if (ai.retreatBelow && hpF < ai.retreatBelow) ai.retreating = true;
    if (!ai.retreating && ai.role !== 'tr' && !ai.route && d.smarts > 0.6) {
-      if (hpF < 0.22 && b.consumable('repair')) ai.breakOff = true;
-      if (ai.breakOff && hpF > 0.45) ai.breakOff = false;
+      // V2: a break-off is short (BREAK_T) and not repeated at once, so a duel cannot end in a chase
+      if (hpF < 0.22 && b.consumable('repair') && !ai.breakOff && w.time > (ai.breakNext || 0)) { ai.breakOff = true; ai.breakNext = w.time + BREAK_T + BREAK_CD; }
+      if (ai.breakOff && (hpF > 0.45 || w.time > ai.breakNext - BREAK_CD)) ai.breakOff = false;
    }
    const threat = threatVector(b, w);
 
@@ -283,6 +286,8 @@ function engage(b, w, tgt, d, threat) {
    const brg = Math.atan2(tgt.pos.y - b.pos.y, tgt.pos.x - b.pos.x);
    let [lo, hi] = ai.pref;
    if (ai.aggro) { lo /= ai.aggro; hi /= ai.aggro; }
+   // V2: out of anti-ship missiles (or a boat as the target) the guns have to decide it: close in
+   if (!hasSsm(b) || tgt.cfg.hull.type === 'FAC') { lo *= 0.55; hi *= 0.55; }
    // an unescorted freighter shoots back with nothing: close in instead of kiting out of its
    // (small) detection range and losing it again
    if (tgt.type === 'TR' && !threat?.near) { lo = 1500; hi = Math.min(hi, 5500); }
@@ -307,6 +312,11 @@ function engage(b, w, tgt, d, threat) {
    // in band: angle ~55-65 deg off the bearing so all turrets bear but the belt is angled
    const ang = (ai.role === 'bb' ? 60 : 70) * DEG;
    return { want: brg + s * ang, tel: ai.role === 'bb' ? 3 : 4 };
+}
+
+function hasSsm(b) {
+   for (const s of b.cfg.weapons.ssm) if (b.mag[s.type] > 0) return true;
+   return false;
 }
 
 // Spotted with several enemy guns in range: a destroyer should break contact, not cap.

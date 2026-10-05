@@ -70,6 +70,7 @@ export class World {
       this.missiles = [];       // V2: missiles in flight (missile.js), plain data
       this.sites = [];          // V2: land positions (sites.js), plain data
       this.decoys = [];         // V2: chaff clouds (missile.js)
+      this.strike = {};         // V2: strike calls of the bot captains, side -> { id: target ship, t } (ai_missile.js)
       this.helos = [];          // V2: ship helicopters (helo.js)
       this.events = [];
       this._eventSeq = 0;

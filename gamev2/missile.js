@@ -8,7 +8,7 @@
 //      target (id of the designated ship / site / missile / squadron or null), tk 'ship'|'site'|'missile'|'squad'|'point'|'bearing',
 //      tx, ty (aim point), seekerOn, lock (ship id | null), lockDecoy (decoy id | null), seduced,
 //      detected, detT (sensors.js), eng (interceptors in flight against it), dist, range, t, alive }
-// Decoy cloud (world.decoys[]): { id, side, shipId, x, y, t0 }
+// Decoy cloud (world.decoys[]): { id, side, shipId, x, y, t0, n (seekers it has seduced, max DEFENCE.decoyCap) }
 // A "platform" is whatever launches and defends: a Ship or a land site (sites.js). Both carry
 //    id, side, pos, alive, radarOn, cfg.weapons, mag, samDoctrine, samPriority, lastSsmFire.
 // Defence state on a platform: samCh[] = { type, tgt (threat id | null), mid (interceptor id), readyT },
@@ -225,7 +225,7 @@ export function deployDecoys(world, ship) {
    if (!ship.alive || ship.depth > 0) return null;
    const sgn = (ship._decoyN = (ship._decoyN || 0) + 1) & 1 ? 1 : -1;
    const a = ship.heading + sgn * Math.PI / 2, r = 160 + ship.cfg.hull.L * 0.4;
-   const d = { id: world._nextId++, side: ship.side, shipId: ship.id, x: ship.pos.x + Math.cos(a) * r, y: ship.pos.y + Math.sin(a) * r, t0: world.time };
+   const d = { id: world._nextId++, side: ship.side, shipId: ship.id, x: ship.pos.x + Math.cos(a) * r, y: ship.pos.y + Math.sin(a) * r, t0: world.time, n: 0 };
    world.decoys.push(d);
    world.pushEvent('decoy', { srcId: ship.id, decoyId: d.id, pos: { x: d.x, y: d.y }, text: 'Täuschkörper ausgestoßen' });
    return d;
@@ -268,6 +268,7 @@ function seek(world, m, c) {
    for (const D of world.decoys) {
       if (D.side === m.side || world.time - D.t0 > SENSOR.DECOY_LIFE) continue;
       if (m.rolled && m.rolled.includes(D.id)) continue;
+      if ((D.n || 0) >= DEFENCE.decoyCap) continue;               // a cloud holds only so many seekers
       const dx = D.x - m.x, dy = D.y - m.y, d2 = dx * dx + dy * dy;
       if (d2 > c.seeker * c.seeker || Math.abs(angleDelta(m.heading, Math.atan2(dy, dx))) > cone) continue;
       (m.rolled || (m.rolled = [])).push(D.id);
@@ -275,6 +276,7 @@ function seek(world, m, c) {
       if (world.rng() < seduceChance(c) * fresh) { viaDecoy = D; break; }
    }
    if (viaDecoy) {
+      viaDecoy.n = (viaDecoy.n || 0) + 1;
       m.lock = null; m.lockDecoy = viaDecoy.id; m.seduced = true;
       world.pushEvent('seduced', { srcId: viaDecoy.shipId, missileId: m.id, mtype: m.type, decoyId: viaDecoy.id, pos: { x: viaDecoy.x, y: viaDecoy.y }, text: 'Flugkörper abgelenkt' });
       return;
@@ -435,7 +437,7 @@ function stepInterceptor(world, m, dt, idx) {
       m.x = Tx; m.y = Ty; m.alt = T.alt;
       const f = Math.hypot(Tx - m.sx, Ty - m.sy) / (sq ? c.air || c.range : c.range);
       let pk = c.pk * (f <= 0.5 ? 1 : 1 - (1 - DEFENCE.farPk) * Math.min(1, (f - 0.5) * 2));
-      pk *= sq ? DEFENCE.aircraftPk : MISSILES[T.type]?.evade ?? 1;
+      pk *= sq ? DEFENCE.aircraftPk : (MISSILES[T.type]?.evade ?? 1) * DEFENCE.missilePk;
       const by = m.kind === 'aam' ? 'aam' : 'sam', owner = platformById(world, m.ownerId);
       done();
       if (world.rng() < Math.min(0.95, pk)) {
@@ -563,7 +565,7 @@ function ciwsPass(world, dt, bySide) {
          const m = near[i < near.length ? i : 0];
          if (!m.alive) continue;
          if (!tg.includes(m.id)) tg.push(m.id);
-         const kps = k.kps * (MISSILES[m.type].supersonic ? CIWS_SUPER : 1);
+         const kps = k.kps * DEFENCE.ciwsK * (MISSILES[m.type].supersonic ? CIWS_SUPER : 1);
          if (world.rng() < 1 - Math.pow(1 - kps, dt)) killMissile(world, m, 'ciws', S, null);
       }
    }
