@@ -66,7 +66,17 @@ export function captain(w, mode = 'bot') {
          }
       };
    }
-   if (id === 'countdown') return () => { if (w.time > 20) strike([S.radarId, ...S.sam, ...(site(S.launcherId)?.targetable ? [S.launcherId] : [])]); };
+   if (id === 'countdown') return () => {
+      if (w.time > 20) strike([S.radarId, ...S.sam, ...(site(S.launcherId)?.targetable ? [S.launcherId] : [])]);
+      // the launcher's strike at the group: straight out of the danger zone at full speed, then back to the fight
+      const b = S.strikeId && w.blasts.find(x => x.id === S.strikeId && x.state === 'armed');
+      if (b && Math.hypot(p.pos.x - b.x, p.pos.y - b.y) < b.r.shock + 900) {
+         if (!p.ai.route) {
+            const d = Math.hypot(p.pos.x - b.x, p.pos.y - b.y), a = d > 300 ? Math.atan2(p.pos.y - b.y, p.pos.x - b.x) : p.heading;
+            p.ai.route = [{ x: b.x + Math.cos(a) * (b.r.shock + 3000), y: b.y + Math.sin(a) * (b.r.shock + 3000) }]; p.ai.routeIdx = 0;
+         }
+      } else if (p.ai.route) { delete p.ai.route; p.ai.routeIdx = 0; }
+   };
    if (id === 'strait') return () => { const f = S.conv.map(x => w.shipById(x)).find(s => s && s.alive); if (f) p.ai.escortId = f.id; };
    if (id === 'barents') { return () => { if (p.id !== S.fordId) p.ai.escortId = S.fordId; }; }
    if (id === 'philsea') return () => {
