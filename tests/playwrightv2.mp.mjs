@@ -193,6 +193,98 @@ if (ONLY.includes('pvp')) {
    await closeAll(ctx);
 }
 
+// ====================================================================== phase-2 systems on the guest
+// The guest runs on replicated data only: helicopter (I), ASW torpedo (G), team (K), large blast.
+if (ONLY.includes('phase2')) {
+   const plate = (P, cls) => P.evaluate((c) => { const e = document.querySelector('.ops-plate.' + c); return e ? { hidden: e.classList.contains('hidden'), txt: e.innerText.replace(/\s+/g, ' ').slice(0, 80) } : null; }, cls);
+   const e0 = errors.length;
+   // ---- scenario 1: two Sachsen (helicopter + ASW torpedoes), a hostile boat close to the guest
+   {
+      const T = 'phase2 heli/ASW: ', ctx = await newContext();
+      const A = await mkPage(ctx, 'A', 'Anna'); await host(A, { name: 'V2 Phase2 A', mission: 'standard', ship: 'Sachsen' });
+      const B = await mkPage(ctx, 'B', 'Bert');
+      await join(B, 'V2 Phase2 A'); await B.click('.mp [data-ship="Sachsen"]');
+      check(T + 'game starts', await startMatch(A, B));
+      await sleep(B, 2000); await B.bringToFront();
+      const me = await B.evaluate(() => ({ id: window.__world().player.id, helo: !!window.__world().player.cfg.helo, asw: !!window.__world().player.cfg.weapons.asw }));
+      check(T + 'guest ship carries helicopter and ASW torpedoes', me.helo && me.asw, me);
+      const pl0 = await plate(B, 'ops-helo');
+      check(T + 'helicopter plate is shown to the guest', pl0 && !pl0.hidden, pl0);
+      await B.keyboard.press('KeyI');
+      check(T + 'I: helicopter exists on the host, owned by the guest', await wait(A, (id) => window.__world().helos.some(h => h.ownerId === id), me.id, 8000));
+      check(T + 'the guest world shows the helicopter', await wait(B, () => window.__world().helos.length > 0 && window.__world().helos[0].net === true, null, 8000));
+      await sleep(B, 3000);
+      const h1 = await B.evaluate(() => { const h = window.__world().helos[0]; return h ? { x: h.pos.x, y: h.pos.y, st: h.state, fuel: h.fuel } : null; });
+      await sleep(B, 3000);
+      const h2 = await B.evaluate(() => { const h = window.__world().helos[0]; return h ? { x: h.pos.x, y: h.pos.y, st: h.state } : null; });
+      check(T + 'helicopter moves on the guest', h1 && h2 && Math.hypot(h1.x - h2.x, h1.y - h2.y) > 20, { h1, h2 });
+      const pl1 = await plate(B, 'ops-helo');
+      check(T + 'helicopter plate shows state (not the idle text)', pl1 && !pl1.hidden && pl1.txt.length > 8 && !/undefined|NaN/.test(pl1.txt), pl1);
+      await shot(B, 'phase2-helo');
+      // hostile boat 2.5 km from the guest, on the surface
+      await A.evaluate((id) => {
+         const w = window.__world(), g = w.ships.find(s => s.id === id);
+         w.spawn('Kilo', 'enemy', { x: g.pos.x + 2200, y: g.pos.y }, 0, { telegraph: 0, ai: { passive: true, anchored: true } });
+      }, me.id);
+      await sleep(B, 2500);
+      const torpsBefore = await B.evaluate(() => window.__world().torpedoes.length);
+      await B.keyboard.press('KeyG');
+      const hostAsw = await wait(A, () => window.__world().torpedoes.some(t => t.asw), null, 6000);
+      check(T + 'G: ASW torpedo launched on the host', hostAsw);
+      check(T + 'the guest world shows it (asw torpedo)', await wait(B, () => window.__world().torpedoes.some(t => t.asw), null, 6000), { before: torpsBefore });
+      const ap = await B.evaluate(() => document.getElementById('tu-asw') ? 'touch' : [...document.querySelectorAll('[data-key="G"]')].map(e => e.innerText.replace(/\s+/g, ' ').slice(0, 40)));
+      await shot(B, 'phase2-asw');
+      check(T + 'no console errors', errors.length === e0, errors.slice(e0, e0 + 3));
+      await closeAll(ctx);
+   }
+   // ---- scenario 2: guest in a submarine with a SEAL team, a task point beside it
+   {
+      const T = 'phase2 team: ', ctx = await newContext(), e1 = errors.length;
+      const A = await mkPage(ctx, 'A', 'Anna'); await host(A, { name: 'V2 Phase2 B', mission: 'standard', ship: 'Sachsen' });
+      const B = await mkPage(ctx, 'B', 'Bert');
+      await join(B, 'V2 Phase2 B'); await B.click('.mp [data-ship="U212"]');
+      check(T + 'game starts', await startMatch(A, B));
+      await sleep(B, 2000); await B.bringToFront();
+      const me = await B.evaluate(() => ({ id: window.__world().player.id, seal: !!window.__world().player.cfg.sub?.seal, depth: window.__world().player.depth }));
+      check(T + 'guest sails a boat with a team', me.seal && me.depth <= 1, me);
+      await A.evaluate(async (id) => {
+         const w = window.__world(), g = w.ships.find(s => s.id === id), S = await import('./gamev2/seal.js');
+         S.addTaskPoint(w, { x: g.pos.x + 600, y: g.pos.y + 100, label: 'Sender sprengen', side: 'player', workTime: 6 });
+      }, me.id);
+      check(T + 'the task point reaches the guest world', await wait(B, () => window.__world().taskPoints.length > 0, null, 8000));
+      for (let i = 0; i < 5; i++) { await B.keyboard.press('KeyS'); await sleep(B, 150); }      // telegraph to stop; the plate must stop saying "zu schnell"
+      check(T + 'plate follows the speed (no "zu schnell" once slow)', await wait(B, () => { const e = document.querySelector('.ops-team'); return !!e && !/schnell/i.test(e.innerText); }, null, 40000), await plate(B, 'ops-team'));
+      await B.keyboard.press('KeyK');
+      check(T + 'K: team in the water on the host', await wait(A, (id) => window.__world().teams.some(t => t.ownerId === id), me.id, 8000), await B.evaluate(() => [...document.querySelectorAll('#hud *')].filter(e => !e.children.length && /Trupp|Tief|schnell|Einsatz/.test(e.textContent)).map(e => e.textContent).slice(0, 3)));
+      check(T + 'the guest world shows the team', await wait(B, () => window.__world().teams.length > 0, null, 8000));
+      check(T + 'team plate shows the team under way (replicated state)', await wait(B, () => { const e = document.querySelector('.ops-team'); return !!e && /unterwegs|arbeitet|kehrt/.test(e.innerText); }, null, 8000), await plate(B, 'ops-team'));
+      await shot(B, 'phase2-team');
+      check(T + 'no console errors', errors.length === e1, errors.slice(e1, e1 + 3));
+      await closeAll(ctx);
+   }
+   // ---- scenario 3: the large blast of `countdown`
+   {
+      const T = 'phase2 blast: ', ctx = await newContext(), e1 = errors.length;
+      const A = await mkPage(ctx, 'A', 'Anna'); await host(A, { name: 'V2 Phase2 C', mission: 'countdown' });
+      const B = await mkPage(ctx, 'B', 'Bert');
+      check(T + 'B joins', await join(B, 'V2 Phase2 C'));
+      check(T + 'game starts', await startMatch(A, B));
+      await sleep(B, 2000); await B.bringToFront();
+      await A.evaluate(() => { const w = window.__world(); w.timeLeft = 8; });     // the script arms the final blast at <= 4 s
+      check(T + 'blast armed on the host', await wait(A, () => window.__world().blasts.length > 0, null, 15000));
+      check(T + 'blast reaches the guest (armed)', await wait(B, () => window.__world().blasts.some(b => b.state === 'armed' || b.state === 'done'), null, 8000));
+      await shot(B, 'phase2-blast-armed');
+      const white = await wait(B, () => { const e = document.querySelector('.blast-white'); return !!e && parseFloat(getComputedStyle(e).opacity) > 0.05; }, null, 12000);
+      const done = await wait(B, () => window.__world().blasts.some(b => b.state === 'done'), null, 12000);
+      await shot(B, 'phase2-blast-done');
+      check(T + 'blast detonates on the guest (state done)', done, { white });
+      await sleep(B, 1500);
+      check(T + 'both pages still run after the blast', await wait(B, () => !!window.__world() , null, 3000) && await wait(A, () => !!window.__world(), null, 3000));
+      check(T + 'no console errors', errors.length === e1, errors.slice(e1, e1 + 3));
+      await closeAll(ctx);
+   }
+}
+
 check('no request or WebSocket tried to leave localhost', external.length === 0, external.slice(0, 5));
 const bad = results.filter(r => !r.ok).length;
 console.log(`${results.length - bad}/${results.length} checks passed, console errors: ${errors.length}`);
