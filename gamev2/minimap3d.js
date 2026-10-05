@@ -10,6 +10,7 @@ import { drawSubMap } from './subui.js';
 import { T, rgba, FONT, MONO } from './theme.js';
 import { drawAirMap } from './airui.js';
 import { drawMissileMap } from './missileui.js';
+import { drawOpsMap } from './opsui.js';
 
 const TAU = Math.PI * 2;
 const ZONE_DASH = [6, 4], NO_DASH = [];   // shared, no per-frame arrays
@@ -290,6 +291,8 @@ function paintMapInner(g, world, x0, y0, size, opts) {
    if (world.squadrons?.length) drawAirMap(g, world, p, mx, my, big, opts.airCtl ?? null);
    // missiles, decoy clouds, land positions, ESM bearings, map targeting (missileui.js)
    drawMissileMap(g, world, p, mx, my, sc, big, opts);
+   // helicopters, task points, teams, danger zone of a charge (opsui.js); skipped while there is nothing
+   if (world.helos?.length || world.taskPoints?.length || world.blasts?.length || world.teams?.length || opts.ops?.mapMode) drawOpsMap(g, world, p, mx, my, sc, big, opts);
 
    // aim point
    if (opts.aimPoint && p?.alive) {

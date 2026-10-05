@@ -15,6 +15,8 @@ import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
 import { MissileFX } from './missiles3d.js';
+import { OpsFX } from './ops3d.js';
+import { BlastFX } from './blast3d.js';
 import { TIERS, GFX, OPTION_KEYS, tierOptions, applyGfx, startTier, gfxCustom, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
@@ -77,6 +79,8 @@ export class Renderer3D {
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.air = new AirModels(this.scene, this.fx);
       this.missiles = new MissileFX(this.scene, this.fx, this.terrain);
+      this.ops = new OpsFX(this.scene, this.fx, this.terrain);      // helicopter, task points, teams
+      this.blast = new BlastFX(this.scene, this.fx);                // scripted large detonation
       this.simAlpha = 1;            // interpolation factor between two sim steps (main3d sets it every frame)
       this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
       this.post = new Post(r, { samples: this._samples(tq), bloomLevels: tq.bloomLevels });
@@ -159,6 +163,8 @@ export class Renderer3D {
       this.fx.clear();
       this.air.clear();
       this.missiles.clear();
+      this.ops.clear();
+      this.blast.clear();
       this.arena = arena;
    }
    buildObstacles(world) { this.buildWorld(world); }
@@ -189,11 +195,17 @@ export class Renderer3D {
       this.missiles.alpha = this.simAlpha;
       this.missiles.update(world, dt, this.time, this.camera, this.ships);
       this.fx.update(world, dt, this.time, this.camera, this.ships);
+      // helicopters get their render pose here, before air3d draws them
+      this.ops.alpha = this.simAlpha;
+      this.ops.update(world, dt, this.time, this.camera);
       this.air.update(world, dt, this.time);
+      this.blast.update(world, dt, this.time, this.camera);
+      // the shock front of a large detonation reaching the camera (felt on the next frame)
+      if (this.blast.shake > 0) this.cam._shakeMag = Math.max(this.cam._shakeMag, this.blast.shake);
 
       const env = this.env;
       this.post.render(this.scene, this.camera, {
-         exposure: env.exposure * (1 + flash * 0.8 + this.fx.nightFlash * 0.35),
+         exposure: env.exposure * (1 + flash * 0.8 + this.fx.nightFlash * 0.35 + this.blast.exposure),
          bloom: env.night ? 0.2 : 0.12,
          bloomThreshold: env.night ? 1.0 : 1.6,
          saturation: env.frontK > 0 ? 1.08 - Math.max(0, (env.waterGrey ?? 0) - 0.25) * 0.66 : env.weather === 'storm' ? 0.85 : env.weather === 'rain' ? 0.92 : 1.08,

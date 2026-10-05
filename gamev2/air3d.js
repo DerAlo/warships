@@ -387,37 +387,41 @@ export class AirModels {
    }
 
    _planes(world, time) {
-      const sqs = world.squadrons || [];
       for (const M of this.list) M.userData.k = 0;
       let total = 0;
-      for (let i = 0; i < sqs.length; i++) {
-         const sq = sqs[i];
-         if (!(sq.n > 0) || !sq.visible) continue;
+      // two lists, one loop: carrier squadrons, then the ship-borne helicopters (world.helos). A
+      // replicated helicopter may lack n / visible / kind, so those default to "one, seen, helo".
+      const nSq = world.squadrons ? world.squadrons.length : 0, nAll = nSq + (world.helos ? world.helos.length : 0);
+      for (let i = 0; i < nAll; i++) {
+         const isH = i >= nSq, sq = isH ? world.helos[i - nSq] : world.squadrons[i];
+         if (!sq || !sq.pos) continue;
+         const cnt = isH ? (sq.n ?? 1) : sq.n;
+         if (!(cnt > 0) || (isH ? sq.visible === false || sq.alive === false : !sq.visible)) continue;
          if (sq._air == null) {
             const owner = world.shipById?.(sq.ownerId);
             const nation = sq.nation || owner?.cfg?.hull?.nation || null;
-            const key = airModelFor(sq, nation), def = AIR_MODELS[key];
+            const key = isH ? 'helo' : airModelFor(sq, nation), def = AIR_MODELS[key];
             const kind = airKind(sq);
             sq._air = { mesh: this.meshes[def.mesh], scale: def.scale, col: airColor(key, nation), nat: NATION_IDX[nation] ?? 6, helo: def.mesh === 'helo', fighter: kind === 'fighter' };
          }
          const A = sq._air, M = A.mesh, inst = M.userData.inst;
          const armed = A.fighter || sq.armed == null || sq.armed === true || sq.armed > 0 ? 1 : 0;
          _c.set(A.col);
-         const x = sq.rx ?? sq.pos.x, y = sq.ry ?? sq.pos.y, alt = sq.ralt ?? sq.alt, h = sq.rh ?? sq.heading;
+         const x = sq.rx ?? sq.pos.x, y = sq.ry ?? sq.pos.y, alt = sq.ralt ?? sq.alt ?? 0, h = sq.rh ?? sq.heading ?? 0;
          const dh = sq.want != null ? Math.atan2(Math.sin(sq.want - sq.heading), Math.cos(sq.want - sq.heading)) : 0;
          const lim = A.helo ? 0.3 : 1.0;
          const bank = Math.max(-lim, Math.min(lim, dh * (A.helo ? 0.8 : 2.2)));
-         const climb = sq.prev ? (sq.alt - sq.prev.alt) * 60 : 0;
+         const climb = sq.prev && sq.prev.alt != null ? (sq.alt - sq.prev.alt) * 60 : 0;
          // helicopters fly nose-down in proportion to their speed; jets pitch with the climb rate
          const pitch = A.helo ? -Math.min(0.16, (sq.speed || 0) / 400)
             : Math.max(-1.0, Math.min(0.5, Math.atan2(climb, Math.max(120, sq.speed || 0))));
          const c = Math.cos(h), s = Math.sin(h);
-         const n = Math.min(sq.n, SLOT.length), sp = A.helo ? 0.6 : 1;
+         const n = Math.min(cnt, SLOT.length), sp = A.helo ? 0.6 : 1;
          _s.setScalar(A.scale);
          for (let j = 0; j < n && M.userData.k < MAX_PER_MODEL; j++) {
             const fx = SLOT[j][0] * sp, fz = SLOT[j][1] * sp;
             const id = Number(sq.id) || 0;
-            const bob = Math.sin(time * 1.3 + j * 1.7 + id) * (A.helo ? 0.8 : 2.0);
+            const bob = (sq.rbob ?? 1) * Math.sin(time * 1.3 + j * 1.7 + id) * (A.helo ? 0.8 : 2.0);
             // formation offset in sim (x ahead, z right of the heading) -> world
             _p.set(x + fx * c - fz * s, alt + bob - Math.abs(fz) * 0.06, y + fx * s + fz * c);
             _e.set(bank, -h, pitch, 'YZX');

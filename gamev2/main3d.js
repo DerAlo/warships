@@ -26,6 +26,7 @@ import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
 import { MissileUi, CONS_KEYS } from './missileui.js';
+import { OpsUi } from './opsui.js';
 import { contactLevel } from './sensors.js';
 import { AirUi } from './airui.js';
 import { activeSquad } from './air.js';
@@ -66,6 +67,10 @@ const hud = new Hud();
 const audio = new Audio();
 const subui = new SubUi({ hud, audio });   // submarine / ASW client side (subui.js)
 const mui = new MissileUi({ hud, audio }); // guided weapons, air defence, threat display (missileui.js)
+const opsui = new OpsUi({ hud, audio, mui }); // helicopter, swimmer team, large detonation (opsui.js)
+window.__opsui = () => opsui;
+// the rumble of a large detonation arrives with its shock front (blast3d.js times it by distance)
+if (renderer.blast) renderer.blast.onShock = (dist, at) => audio.blast(dist, at);
 const input = new Input3D(scene3d);
 const minimap = new HudCanvases3D();
 minimap.setCanvases($('minimap-canvas'), null);
@@ -157,7 +162,7 @@ function touchState() {
       alive: !!p.alive, kn: Math.round(displayKn(p) || 0), tele: ctl.telegraph, rudder: ctl.rudder,
       map: ctl.mapOpen, help: ctl.help, bino: !!cam3.bino, free: !!cam3.freeLook, lock: ctl.lockId != null,
       cv: !!p.air, sub: !!p.sub, deep: !!p.sub && p.depth === 2, depthTarget: p.depthTarget ?? 0,
-      sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw, aa: !!p.air && !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net, mode: ctl.mode,
+      sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw || (!p.sub && !!p.cfg?.weapons?.asw), ltt: !p.sub && !!p.cfg?.weapons?.asw, aa: !!p.air && !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net, mode: ctl.mode,
       squad: !!airui.flying, sqType: sq?.type || null, sqHome: !!sq && (sq.state === 'return' || sq.state === 'land'),
       airSel: p.air?.sel || null, sqActive: !!(p.air && world && activeSquad(world, p, p.air.sel)),
    };
@@ -530,7 +535,7 @@ function beginMatch() {
    // the last match may have ended in the scope: snap the lens back instead of blending out
    if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
-   cam3.peri = null; subui.reset(world); airui.reset(world, cam3); mui.reset(world);
+   cam3.peri = null; subui.reset(world); airui.reset(world, cam3); mui.reset(world); opsui.reset(world);
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
 
@@ -639,6 +644,8 @@ function frameInput(dt) {
          hud.msg('Torpedofächer: ' + (ctl.spread === 'wide' ? 'weit' : 'eng'), 'info');
       } else { ctl.mode = 'torp'; audio.ammoSwitch(); }
    }
+   // I helicopter (map open: send it to a point), K swimmer team (opsui.js); it takes the map click first
+   opsui.input(inp, p, world, act, mctx());
    // 2 / 3 / 4, R radar, V doctrine, T priority target, map targeting (missileui.js)
    mui.input(inp, p, world, act, mctx());
    if (inp.tapped('SPACE')) inp.mouse.clicked = true;
@@ -1110,7 +1117,7 @@ function processEvents(dt) {
             if (e.state === 'done' || e.state === 'failed') audio.objective(e.state); else audio.radio();
             break;
          }
-         default: subui.event(e, p, world, mine, onMe); airui.event(e, p, world); mui.event(e, p, world); break;
+         default: subui.event(e, p, world, mine, onMe); airui.event(e, p, world); mui.event(e, p, world); opsui.event(e, p, world); break;
       }
    }
    // old sim: {kind:'sink', ship} records + synthesized hit ribbons
@@ -1228,6 +1235,7 @@ function pollAudio(dt) {
       if (fx.effSeen.has(e)) continue;
       fx.effSeen.add(e);
       if (!e.pos) continue;
+      if (e.blast) continue;                 // scripted large detonation: its rumble comes with the shock front (blast3d.js)
       const d = Math.hypot(e.pos.x - lx, e.pos.y - ly);
       if (d > 9000) continue;
       if (e.kind === 'splash') audio.splash(d, !!e.big || (e.size || 0) > 1.5, e.pos);
@@ -1470,8 +1478,9 @@ function buildUi(dt) {
    subui.fill(ui, p, world, cam3, project, subui.peri.y, dt);
    airui.fill(ui, p, world, project, dt);
    mui.fill(ui, p, world, project, mctx());
+   opsui.fill(ui, p, world, project, mctx(), renderer.blast ? renderer.blast.white : 0);
    ui.mapOpts = {
-      mx: ui.mx, sub: ui.sub.map, airCtl: airui.sqId, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
+      mx: ui.mx, ops: ui.ops, sub: ui.sub.map, airCtl: airui.sqId, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
       aimPoint: aim.point, torpFan: ctl.mode === 'torp' && ui.torpInfo ? { bearings: torpBearings(ui.torpInfo, aim.yaw), range: ui.torpInfo.range } : null,
    };
    return ui;
