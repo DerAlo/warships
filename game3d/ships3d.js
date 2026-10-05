@@ -9,6 +9,7 @@
 // fade out when the enemy is no longer spotted.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { patchAtmosphere, GeoBuilder, clamp, lerp, smoothstep, lin, shade, mulberry32 } from './gfxcommon3d.js';
+import { GFX } from './gfxquality.js';
 
 const LEGACY_DIMS = {
    DD: { L: 118, beam: 11.5, type: 'DD' }, LC: { L: 175, beam: 17.5, type: 'CL' },
@@ -37,6 +38,17 @@ function hullTint(ship) {
    if (hc !== undefined && hc !== null && hc !== '') { try { return lin(hc); } catch (e) { /* fall through */ } }
    if (ship.isPlayer || ship === ship.world?.player) return lin(0x5c6670);
    return ship.side === 'enemy' ? lin(0x4e5256) : lin(0x68717a);
+}
+
+// Deck finish per navy: teak on capital ships, steel on destroyers; the US Navy stained and
+// painted its decks deck blue, the IJN laid red-brown linoleum on cruisers and destroyers, and
+// British armoured flight decks were dark grey steel.
+function deckColor(type, nation) {
+   if (type === 'SS') return lin(0x3a3d40);
+   if (nation === 'us') return type === 'CV' ? lin(0x5d6873) : lin(0x4d5a68);
+   if (type === 'CV') return nation === 'uk' ? lin(0x5c6064) : lin(0xa88a64);
+   if (nation === 'jp' && type !== 'BB' && type !== 'TR') return lin(0x6e4332);
+   return type === 'DD' || type === 'TR' ? lin(0x6b665e) : lin(0xa88a64);
 }
 
 // ---------------- hull loft ----------------
@@ -70,6 +82,27 @@ function makeHullShape(d) {
       halfDeckAt(x) { const u = clamp(x / (L / 2), -1, 1); return hb * wd(u) * P.tumble; },
       deckAt(x) { return deckY(clamp(x / (L / 2), -1, 1)); },
    };
+}
+
+// Alpha-cut strip for the ship shader's line bands (4 = guard rail, 5 = rigging wire): a quad
+// from edge a0-a1 to edge b0-b1, both faces, with the band running band..band+0.5 across it.
+function ribbon(b, a0, a1, b0, b1, band, col) {
+   const n0 = b.bands.length;
+   b.raw([...a0, ...a1, ...b0, ...b1], [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0], [0, 2, 1, 1, 2, 3, 0, 1, 2, 1, 3, 2], col);
+   b.bands[n0] = b.bands[n0 + 2] = band; b.bands[n0 + 1] = b.bands[n0 + 3] = band + 0.5;
+}
+const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wd = new THREE.Vector3(), _ws = new THREE.Vector3(), _wu = new THREE.Vector3();
+// one rigging wire: two crossed ribbons, so it shows from abeam and from above
+function wire(b, ax, ay, az, bx, by, bz, col, hw = 0.3) {
+   _wa.set(ax, ay, az); _wb.set(bx, by, bz);
+   _wd.subVectors(_wb, _wa).normalize();
+   _ws.set(-_wd.z, 0, _wd.x);
+   if (_ws.lengthSq() < 1e-6) _ws.set(1, 0, 0);
+   _ws.normalize().multiplyScalar(hw);
+   _wu.crossVectors(_wd, _ws).normalize().multiplyScalar(hw);
+   for (const o of [_ws, _wu]) {
+      ribbon(b, [ax - o.x, ay - o.y, az - o.z], [ax + o.x, ay + o.y, az + o.z], [bx - o.x, by - o.y, bz - o.z], [bx + o.x, by + o.y, bz + o.z], 5, col);
+   }
 }
 
 function loftHull(b, d, S, hullCol, deckCol) {
@@ -165,6 +198,13 @@ function loftHull(b, d, S, hullCol, deckCol) {
       }
       b.band = 0;
       b.tris(arr, shade(hullCol, 0.92));
+      // guard rail on top of it (two wires and stanchions, drawn by the shader)
+      if (GFX.detail >= 2 && d.type !== 'SS' && d.type !== 'CV') {
+         for (let i = 1; i < NS - 2; i++) {
+            const p = rings[i][NR - 1], q = rings[i + 1][NR - 1];
+            for (const s of [1, -1]) ribbon(b, [p[0], p[1] + hgt, p[2] * s], [p[0], p[1] + hgt + 1.1, p[2] * s], [q[0], q[1] + hgt, q[2] * s], [q[0], q[1] + hgt + 1.1, q[2] * s], 4, hullCol);
+         }
+      }
    }
    b.band = 0;
 }
@@ -281,6 +321,7 @@ function superstructure(b, d, S, tl, col, ship) {
    const hw = (x) => S.halfDeckAt(x);
    const yD = (x) => S.deckAt(x);
    const smoke = [];
+   const masts = [];   // { x, top, yy, span, base }: mast top, yard height / span, where the halyards end
    // (dx, dz) turned by a (0 = ahead, +PI/2 = starboard) around (x, z); matches put(..., ry = -a)
    const rot = (x, z, a, dx, dz) => [x + dx * Math.cos(a) - dz * Math.sin(a), z + dx * Math.sin(a) + dz * Math.cos(a)];
 
@@ -469,6 +510,7 @@ function superstructure(b, d, S, tl, col, ship) {
       pole(xt - rT * 0.4, ft, mh, 0.42);
       yard(xt - rT * 0.4, ft + mh * 0.55, w * 2.4);
       yard(xt - rT * 0.4, ft + mh * 0.8, w * 1.3, 0.1);
+      masts.push({ x: xt - rT * 0.4, top: ft + mh, yy: ft + mh * 0.55, span: w * 2.4, base: y });
       return { xr: xr0, top: ft + mh };
    };
    // British: tall square block bridge, DCT on the compass platform, tripod foremast abaft
@@ -493,6 +535,7 @@ function superstructure(b, d, S, tl, col, ship) {
       const mh = (top - yb) * 0.4;
       pole(xm, ft, mh, 0.38);
       yard(xm, ft + mh * 0.6, w * 2.2);
+      masts.push({ x: xm, top: ft + mh, yy: ft + mh * 0.6, span: w * 2.2, base: y });
       return { xr: xr0 - 3.5, top: ft + mh };
    };
 
@@ -535,7 +578,112 @@ function superstructure(b, d, S, tl, col, ship) {
       }
    };
 
-   if (type === 'CV') {
+   // carrier at detail >= 2: closed hangar, shaped flight deck with lifts and arrestor wires, gun
+   // galleries, a stepped island with funnel and tripod, and a deck park of recognisable planes
+   const cvFine = () => {
+      const y0 = S.deckAt(0), yF = y0 + lv * 2.4, yT = yF + 0.6;
+      const hs = hull.sup || { x: L * 0.05, len: L * 0.12, w: 7, h: 20 };
+      const portIsland = !!hull.islandPort, jp = hull.nation === 'jp';
+      const fl = L * (hull.deckLen || 0.96), fx = -L * 0.01 - (L * 0.96 - fl) * 0.5;
+      const xa = fx - fl / 2, xb = fx + fl / 2, hwF = B * 0.625;
+      const dk = shade(col.deck, 0.62), white = col.lamp, stripe = jp ? lin(0xb8b4a6) : white;
+      const hwH = Math.min(B * 0.47, hw(L * 0.34) * 0.98, hw(-L * 0.36) * 0.98);
+      house(-L * 0.36, L * 0.34, y0 - 0.3, lv * 2.4 + 0.3, hwH, 0.5, 0.3);
+      for (const [x, k] of [[xb - fl * 0.03, 0.5], [xb - fl * 0.09, 0.7], [xa + fl * 0.03, 0.6], [xa + fl * 0.08, 0.75]]) {
+         for (const s of [1, -1]) strut(x, yD(x), s * hw(x) * 0.7, x, yF - 0.4, s * hwF * k, 0.32, sup);
+      }
+      prism(planShape(xa, xb, hwF, jp ? 0.55 : 0.3, 0.3), yF - 0.5, 1.0, shade(col.deck, 0.9));
+      prism(planShape(xa + 0.3, xb - 0.3, hwF - 0.3, jp ? 0.55 : 0.3, 0.3), yF + 0.5, 0.1, col.deck, 2);
+      // markings
+      for (let x = fx - fl * 0.44; x < fx + fl * 0.44; x += fl / 18) b.box(fl / 40, 0.05, 0.7, x, yT, 0, stripe);
+      for (const s of [1, -1]) b.box(fl * 0.86, 0.05, 0.45, fx, yT, s * B * 0.56, white);
+      if (jp) {
+         for (let k = -3; k <= 3; k++) b.box(B * 0.2, 0.05, B * 0.085, xa + B * 0.22, yT, k * B * 0.17, k % 2 ? white : lin(0xa8402e));   // round-down
+         b.put(new THREE.CylinderGeometry(B * 0.3, B * 0.3, 0.05, 20), xb - fl * 0.12, yT, 0, lin(0xa8402e));                          // hinomaru
+      } else for (const s of [1, -1]) b.box(B * 0.5, 0.05, 0.6, xa + fl * 0.04, yT, s * B * 0.3, white);
+      // lifts and arrestor wires
+      const lw = B * 0.36;
+      for (const k of [0.3, 0.02, -0.3]) {
+         b.box(lw + 0.7, 0.04, lw + 0.7, fx + fl * k, yT - 0.005, 0, dk);
+         b.box(lw, 0.05, lw, fx + fl * k, yT, 0, shade(col.deck, 0.9));
+      }
+      for (let i = 0; i < 8; i++) b.box(0.22, 0.05, B * 1.08, fx - fl * (0.16 + i * 0.024), yT + 0.01, 0, dk);
+      // gun galleries under the deck edge
+      for (const s of [1, -1]) for (const k of [0.3, -0.3]) {
+         const xg = fx + fl * k, lg = fl * 0.2, zg = s * (hwF + 0.9);
+         b.box(lg, 0.35, 2.6, xg, yF - 1.9, zg, plat);
+         b.box(lg, 1.0, 0.15, xg, yF - 1.3, s * (hwF + 2.15), sup);
+         for (let i = 0; i < 5; i++) {
+            const x = xg - lg * 0.4 + i * lg * 0.2;
+            b.cyl(0.45, 0.55, 0.9, x, yF - 1.7, zg, dark, 6);
+            b.box(0.1, 0.1, 2.0, x, yF - 0.45, zg + s * 0.7, dark, 0, 0, -s * 0.7);
+         }
+         aaTwin(xg + Math.sign(k) * lg * 0.62, yF - 1.9, zg, 1.25, s * Math.PI / 2);
+      }
+      // island
+      const side = portIsland ? -1 : 1;
+      const li = clamp(hs.len, L * 0.1, L * 0.17), wI = clamp(hs.w * 0.4, 2.2, 3.6);
+      const xi = hs.x, zi = side * (hwF - wI + 1.2), xI0 = xi - li / 2, xI1 = xi + li / 2;
+      const hz = (xs, xe, yy, h, w, rf, ra, c = sup, band = 3) => {
+         const g = new THREE.ExtrudeGeometry(planShape(xs, xe, w, rf, ra), { depth: h, bevelEnabled: false, curveSegments: 3 });
+         g.rotateX(-Math.PI / 2);
+         b.band = band; b.put(g, 0, yy, zi, c); b.band = 0;
+      };
+      const trunked = jp && portIsland, xs = trunked ? 0.1 : 0.46;
+      hz(xI0, xI1, yT, lv * 1.5, wI, 0.7, 0.4);
+      hz(xI0 - 0.4, xI1 + 0.4, yT + lv * 1.5, 0.3, wI + 0.5, 0.7, 0.4, plat, 0);
+      const y1 = yT + lv * 1.5 + 0.3;
+      hz(xI0 + li * xs, xI1 - li * 0.04, y1, lv * 1.1, wI * 0.82, 0.8, 0.3);
+      hz(xI0 + li * (xs + 0.1), xI1 - li * 0.08, y1 + lv * 1.1, lv, wI * 0.7, 0.9, 0.3);
+      hz(xI0 + li * (xs + 0.2), xI1 - li * 0.08 + 0.06, y1 + lv * 1.5, 0.8, wI * 0.7 + 0.06, 0.9, 0, win, 0);
+      hz(xI0 + li * (xs + 0.05), xI1 - li * 0.04, y1 + lv * 2.1, 0.25, wI * 0.85, 0.9, 0.3, plat, 0);
+      const yTop = y1 + lv * 2.1 + 0.25;
+      const xd = xI1 - li * 0.2;
+      b.cyl(1.0, 1.2, 1.5, xd, yTop, zi, sup, 10);
+      b.put(new THREE.CylinderGeometry(0.3, 0.3, 5, 6).rotateX(Math.PI / 2), xd, yTop + 1.8, zi, dark);
+      const xm = xI0 + li * (xs + 0.22), hm = lv * 4;
+      strut(xm, yTop, zi, xm, yTop + hm, zi, 0.38);
+      for (const s of [1, -1]) strut(xm - 2.6, yTop - lv, zi + s * wI * 0.45, xm, yTop + hm * 0.8, zi, 0.26);
+      b.put(new THREE.CylinderGeometry(0.12, 0.12, B * 0.3, 5).rotateX(Math.PI / 2), xm, yTop + hm * 0.72, zi, mast);
+      if (!jp) b.box(0.25, 2.4, 4.4, xm + 0.3, yTop + hm + 0.7, zi, dark);   // air-search radar
+      if (trunked) {
+         // Akagi / Hiryu: funnels trunked out and down over the starboard side, below the deck
+         const fx0 = (funnels[0]?.x ?? 4);
+         const g = new THREE.CylinderGeometry(2.6, 3.1, B * 0.45, 10).rotateX(Math.PI / 2 + 0.55);
+         b.put(g, fx0, yF - lv * 0.9, B * 0.58, dark);
+         smoke.push(new THREE.Vector3(fx0, yF - lv * 1.9, B * 0.82));
+      } else {
+         const xf = xI0 + li * 0.24, hF = lv * 3.3, rx = li * 0.19, rz = wI * 0.78;
+         const g = new THREE.CylinderGeometry(1, 1.06, hF, 14); g.translate(0, hF / 2, 0); g.scale(rx, 1, rz);
+         b.band = 3; b.put(g, xf, y1, zi, sup); b.band = 0;
+         const c = new THREE.CylinderGeometry(1.04, 1.04, 1.3, 14); c.scale(rx, 1, rz);
+         b.put(c, xf, y1 + hF + 0.4, zi, col.cap);
+         smoke.push(new THREE.Vector3(xf, y1 + hF + 1.2, zi));
+      }
+      // deck park, noses to the bow
+      const PL = { us: [0x24324c, 0x1c2a4a, 0xe4e4dc], jp: [0x34503a, 0xe4e4dc, 0xb02a20], uk: [0x56604e, 0x23366e, 0xa82a24],
+         de: [0x565e52, 0xe4e4dc, 0x141414], it: [0x6a6a4c, 0xe4e4dc, 0x3a5a34] }[hull.nation] || [0x6d7768, 0xe4e4dc, 0x141414];
+      const pc = lin(PL[0]), r0 = lin(PL[1]), r1 = lin(PL[2]);
+      const rows = GFX.detail >= 3 ? 4 : 3;
+      for (let r = 0; r < rows; r++) for (let k = -1; k <= 1; k++) {
+         const px = xa + fl * 0.1 + r * 15 + (k === 0 ? 5 : 0), pz = k * B * 0.36, yp = yT + 1.25;
+         b.tubeX(0.22, 0.72, 8.6, px - 4.6, yp, pz, pc, 6);
+         b.tubeX(0.74, 0.5, 1.3, px + 4.0, yp, pz, dark, 6);
+         b.box(2.3, 0.16, 12.4, px + 1.6, yp - 0.35, pz, pc);
+         b.box(1.2, 0.12, 4.2, px - 4.0, yp + 0.1, pz, pc);
+         b.box(1.5, 1.4, 0.14, px - 4.1, yp + 0.75, pz, pc);
+         b.box(2.0, 0.5, 0.62, px + 1.3, yp + 0.75, pz, win);
+         for (const s of [1, -1]) {
+            b.box(1.5, 0.03, 1.5, px + 1.6, yp - 0.26, pz + s * 4.4, r0);
+            b.box(0.75, 0.03, 0.75, px + 1.6, yp - 0.25, pz + s * 4.4, r1);
+         }
+         for (const s of [1, -1]) b.box(0.14, 0.9, 0.14, px + 1.9, yT + 0.45, pz + s * 1.9, dark);
+      }
+   };
+
+   if (type === 'CV' && GFX.detail >= 2) {
+      cvFine();
+   } else if (type === 'CV') {
       // flight deck on a hangar block; island from cfg.hull.sup (Akagi / Hiryu: port side, with
       // the funnel trunked down over the starboard side); deck stripes and a deck park aft
       const yF = S.deckAt(0) + lv * 2.4, yT = yF + 0.6;
@@ -650,6 +798,7 @@ function superstructure(b, d, S, tl, col, ship) {
       const xmF = xf - lenB * 0.85, yM = yb + lv * 1.1, topM = yD(xf) + H * 1.35;
       if (nat === 'uk') tripod(xmF, yM, topM - yM, 2.2); else pole(xmF, yM, topM - yM, 0.4);
       yard(xmF, topM - (topM - yM) * 0.25, hwD * 3);
+      masts.push({ x: xmF, top: topM, yy: topM - (topM - yM) * 0.25, span: hwD * 3, base: y });
       for (const f of funnels) funnel(f, st.fun);
       if (st.german && funnels.length >= 2) {   // searchlight tower between the funnels
          const xs = (funnels[0].x + funnels[1].x) / 2, ys = yD(xs);
@@ -669,6 +818,7 @@ function superstructure(b, d, S, tl, col, ship) {
          if (nat === 'uk') pompom((xh0 + xh1) / 2, yh + lv, 0, 0);
          else for (const s of [1, -1]) aaTwin((xh0 + xh1) / 2, yh + lv, s * hwh * 0.55, 0.9, s * 1.2);
          pole(xh1 - 1, yh + lv, H * 0.9, 0.3);
+         masts.push({ x: xh1 - 1, top: yh + lv + H * 0.9, span: 0, base: yh + lv });
       }
       for (const s of [1, -1]) b.box(4, 0.8, 0.9, -L * 0.46, yD(-L * 0.46) + 0.4, s * hw(-L * 0.46) * 0.6, dark);   // depth charges
    } else {
@@ -708,6 +858,7 @@ function superstructure(b, d, S, tl, col, ship) {
       const mmTop = Math.max(acTop + 4, y0 + H * (isBB ? 1.12 : 1.0));
       if (nat === 'uk' && isBB) tripod(xMM, yMM, mmTop - yMM, 2.5); else pole(xMM, yMM, mmTop - yMM, 0.45);
       yard(xMM, mmTop - (mmTop - yA) * 0.2, tw * 2);
+      masts.push({ x: xMM, top: mmTop, yy: mmTop - (mmTop - yA) * 0.2, span: tw * 2, base: yMM });
       // aircraft between the aft funnel and the aft control position
       const room = fBack - (xAC + acL), catX = (fBack + xAC + acL) / 2;
       if (hull.sternCat) {   // catapults on the quarterdeck
@@ -767,28 +918,98 @@ function superstructure(b, d, S, tl, col, ship) {
       if (fwd.length && type !== 'TR') { const t = fwd[fwd.length - 1]; const x = t.x + t.r * 2.1; if (x < L * 0.4) breakwater(x); }
       bowFittings();
    }
+   // rigging: wireless aerials from mast to mast, signal halyards from the yardarms down
+   if (GFX.detail >= 2 && masts.length) {
+      masts.sort((a, c) => c.x - a.x);
+      const f = masts[0], a = masts[masts.length - 1];
+      // the aerial hangs in a shallow curve
+      const sag = (x0, y0, x1, y1, z) => {
+         const n = 5, dip = Math.abs(x1 - x0) * 0.035;
+         for (let i = 0; i < n; i++) {
+            const t0 = i / n, t1 = (i + 1) / n;
+            wire(b, lerp(x0, x1, t0), lerp(y0, y1, t0) - dip * 4 * t0 * (1 - t0), z, lerp(x0, x1, t1), lerp(y0, y1, t1) - dip * 4 * t1 * (1 - t1), z, mast);
+         }
+      };
+      if (a !== f) for (const z of GFX.detail >= 3 ? [1.2, -1.2] : [0]) sag(f.x - 0.4, f.top - 0.6, a.x + 0.4, a.top - 0.4, z);
+      else sag(f.x - 0.4, f.top - 0.6, -L * 0.5 + 0.8, S.deckAt(-L * 0.49) + 6, 0);
+      for (const m of masts) {
+         if (!m.span) continue;
+         for (const s of [1, -1]) for (const k of GFX.detail >= 3 ? [0.48, 0.3] : [0.46]) {
+            wire(b, m.x, m.yy, s * m.span * k, m.x - 1.5 - k * 4, m.base + 0.4, s * Math.min(m.span * k * 0.55, hw(m.x) * 0.5), mast, 0.25);
+         }
+      }
+   }
    // jackstaff + ensign staff
    b.cyl(0.08, 0.12, 5, L * 0.5 + (HULL_PARAMS[type]?.rake || 0.03) * L * 0.9, S.deckAt(L * 0.49), 0, mast, 4);
    b.cyl(0.08, 0.12, 6, -L * 0.5 + 0.8, S.deckAt(-L * 0.49), 0, mast, 4);
    return { smoke };
 }
 
-// ---------------- materials ----------------
+/// ---------------- materials ----------------
+// Paint schemes (uPaint.x): 1 = German Baltic stripes + dark ends (capital ships, 1941), 2 = US
+// Measure 22 (navy blue hull below the lowest sheer point, haze grey above), 3 = Admiralty
+// disruptive splinters, 4 = Italian splinters + red/white recognition stripes on the forecastle.
+const PAINT = { de: 1, us: 2, uk: 3, it: 4 };
 const SHIP_FRAG_PARS = /* glsl */`
 varying float vBand;
 varying vec3 vLocal;
 varying vec3 vLN;
 uniform vec2 uBoot;
 uniform float uDeck;
+uniform vec4 uPaint;   // x scheme, y half length, z seed
 float sHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float sNoise(vec2 p) {
+   vec2 i = floor(p), f = fract(p);
+   f = f * f * (3.0 - 2.0 * f);
+   return mix(mix(sHash(i), sHash(i + vec2(1.0, 0.0)), f.x), mix(sHash(i + vec2(0.0, 1.0)), sHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// slanted stripes w metres wide, each on or off by a hash; edges one pixel soft
+float splinter(vec2 p, float w, float k, float seed, float thr) {
+   float s = (p.x + p.y * k) / w + seed;
+   float c0 = floor(s);
+   float v0 = step(thr, sHash(vec2(c0 - 1.0, seed))), v1 = step(thr, sHash(vec2(c0, seed)));
+   return mix(v0, v1, smoothstep(0.0, fwidth(s), s - c0));
+}
+float stripeAt(float x, float c, float w, float aw) { return 1.0 - smoothstep(w - aw, w + aw, abs(x - c)); }
+vec3 shipPaint(vec3 c, vec3 p, float hullSide) {
+   float sc = uPaint.x;
+   if (sc < 0.5) return c;
+   if (sc < 1.5) {
+      float hl = uPaint.y, w = hl * 0.026, aw = fwidth(p.x);
+      // stripe groups lean aft at the bow and forward at the stern
+      float xf = p.x + p.y * 0.4, xa = p.x - p.y * 0.4;
+      float wh = max(stripeAt(xf, hl * 0.47, w * 2.6, aw), max(stripeAt(p.x, -hl * 0.03, w * 2.6, aw), stripeAt(xa, -hl * 0.5, w * 2.6, aw)));
+      float bk = max(stripeAt(xf, hl * 0.47, w, aw), max(stripeAt(p.x, -hl * 0.03, w, aw), stripeAt(xa, -hl * 0.5, w, aw)));
+      c = mix(c, vec3(0.62, 0.64, 0.64), wh * 0.9);
+      c = mix(c, vec3(0.022, 0.023, 0.026), bk * 0.92);
+      return mix(c, c * 0.5, hullSide * smoothstep(-aw, aw, abs(p.x) - hl * 0.83));
+   }
+   if (sc < 2.5) {
+      float aw = fwidth(p.y);
+      return mix(vec3(0.04, 0.058, 0.094), c, max(1.0 - hullSide, smoothstep(-aw, aw, p.y - uDeck * 0.985)));
+   }
+   float sd = uPaint.z;
+   float A = splinter(p.xy, 31.0, 1.25, sd, 0.5), B = splinter(p.xy, 23.0, -0.8, sd + 3.7, 0.45), C = splinter(p.xy, 43.0, -1.9, sd + 8.1, 0.55);
+   if (sc < 3.5) {
+      c = mix(c, c * vec3(0.5, 0.58, 0.7), (1.0 - A) * C);
+      return mix(c, c * 0.34, A * B);
+   }
+   return mix(c, c * 0.42, A * C);
+}
 `;
-function makeShipMaterial(deckH) {
+function makeShipMaterial(d, nation, seed) {
    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.18, envMapIntensity: 0.85, alphaHash: true });
    const uBoot = { value: new THREE.Vector2(-0.9, 0.55) };
-   const uDeck = { value: deckH || 8 };
+   const uDeck = { value: d.D || 8 };
+   let scheme = PAINT[nation] || 0;
+   if (scheme === 1 && d.type !== 'BB' && d.type !== 'CA') scheme = 0;
+   if (d.type === 'SS' || d.type === 'TR' || (d.type === 'CV' && scheme !== 2)) scheme = 0;
+   const uPaint = { value: new THREE.Vector4(scheme, d.L / 2, seed, 0) };
+   // plate tones, blotches and rust only from "Hoch" up (a define: lower tiers compile the cheaper shader)
+   mat.defines = { ...mat.defines, SHIP_DETAIL: GFX.detail };
    patchAtmosphere(mat, {
       key: 'ship',
-      uniforms: { uBoot, uDeck },
+      uniforms: { uBoot, uDeck, uPaint },
       vertexPars: 'attribute float aBand;\nvarying float vBand;\nvarying vec3 vLocal;\nvarying vec3 vLN;\n',
       vertexMain: 'vBand = aBand; vLocal = position; vLN = normal;',
       fragmentPars: SHIP_FRAG_PARS,
@@ -796,12 +1017,27 @@ function makeShipMaterial(deckH) {
          float vert = 1.0 - smoothstep(0.25, 0.6, abs(vLN.y));
          // horizontal coordinate along a vertical face (z on end faces, x on side faces)
          float hc = abs(vLN.x) > abs(vLN.z) ? vLocal.z : vLocal.x;
-         if (vBand > 0.5 && vBand < 1.5) {
+         if (vBand > 3.5) {
+            // guard rails (4 + t/2) and rigging wires (5 + t/2), t across the strip: drawn as lines
+            // at least a pixel wide, thinned out by a screen dither once the strip gets tiny
+            bool wire = vBand > 4.75;
+            float t = (vBand - (wire ? 5.0 : 4.0)) * 2.0;
+            float ft = fwidth(t);
+            float hw = max(wire ? 0.07 : 0.045, ft * (wire ? 0.4 : 0.6));
+            float m = step(abs(t - 0.5), hw);
+            if (!wire) {
+               m = max(m, step(abs(t - 0.94), hw));
+               m = max(m, step(abs(fract(vLocal.x / 1.8) - 0.5) * 1.8, max(0.05, fwidth(vLocal.x) * 0.6)));
+            }
+            float cov = clamp(0.6 / max(ft, 1e-4) - (wire ? 0.25 : 0.45), 0.0, wire ? 0.8 : 1.0);
+            if (m < 0.5 || sHash(gl_FragCoord.xy) > cov) discard;
+            diffuseColor.rgb = wire ? vec3(0.07, 0.072, 0.076) : diffuseColor.rgb * 0.5;
+         } else if (vBand > 0.5 && vBand < 1.5) {
             float y = vLocal.y;
             float aw = fwidth(y);
             vec3 red = vec3(0.20, 0.035, 0.03), blk = vec3(0.016, 0.016, 0.018);
             vec3 c = mix(red, blk, smoothstep(uBoot.x - aw, uBoot.x + aw, y));
-            c = mix(c, diffuseColor.rgb, smoothstep(uBoot.y - aw, uBoot.y + aw, y));
+            c = mix(c, shipPaint(diffuseColor.rgb, vLocal, 1.0), smoothstep(uBoot.y - aw, uBoot.y + aw, y));
             // weathering: faint vertical rust/salt streaks below scuppers, grime toward the waterline
             float st = sHash(vec2(floor(vLocal.x * 0.7), 3.0));
             c *= 1.0 - 0.1 * step(0.8, st) * smoothstep(0.5, 4.0, y);
@@ -811,6 +1047,21 @@ function makeShipMaterial(deckH) {
             float near = clamp(1.3 - fx * 3.0, 0.0, 1.0);
             float seam = 1.0 - smoothstep(0.04, 0.04 + fx, abs(fract(vLocal.x / 9.0) - 0.5) * 9.0 - 4.4);
             c *= 1.0 - 0.07 * seam * step(uBoot.y, y) * near;
+            #if SHIP_DETAIL >= 2
+            {
+               // plate-to-plate tone steps, large soft blotches, rust runs under scuppers and ports
+               float above = step(uBoot.y, y);
+               c *= 1.0 + 0.09 * (sHash(vec2(floor(vLocal.x / 9.0), floor(y / 2.4))) - 0.5) * clamp(1.6 - fx * 2.0, 0.0, 1.0) * above;
+               c *= 0.9 + 0.2 * sNoise(vec2(vLocal.x * 0.045, y * 0.22));
+               float sx = vLocal.x * 0.45, sc0 = floor(sx);
+               float rh = sHash(vec2(sc0, 7.0)), y0 = uDeck * (rh > 0.93 ? 0.98 : 0.6);
+               float run = step(0.84, rh) * smoothstep(y0 - uDeck * (0.25 + 0.5 * sHash(vec2(sc0, 11.0))), y0, y) * step(y, y0);
+               run *= (1.0 - smoothstep(0.1, 0.45, abs(fract(sx) - 0.5))) * above * clamp(1.5 - fx * 1.2, 0.0, 1.0);
+               c = mix(c, vec3(0.11, 0.05, 0.025), run * 0.4);
+               // salt line just above the boot-topping
+               c = mix(c, vec3(0.42, 0.43, 0.42), 0.16 * above * (1.0 - smoothstep(0.0, 0.9, y - uBoot.y)) * sNoise(vec2(vLocal.x * 0.3, 2.0)));
+            }
+            #endif
             vec2 pc = vec2(fract(vLocal.x / 3.2) - 0.5, (y - uDeck * 0.62) / 3.2) * 3.2;
             float ph = 1.0 - smoothstep(0.22, 0.22 + max(fx, 0.02) * 1.5, length(pc));
             ph *= near * step(abs(vLocal.x), 70.0) * step(4.0, uDeck);
@@ -818,6 +1069,7 @@ function makeShipMaterial(deckH) {
             diffuseColor.rgb = c;
          } else if (vBand > 2.5) {
             // deckhouse: deck-level lines, window rows, stains; all fade to their mean when tiny
+            diffuseColor.rgb = mix(diffuseColor.rgb, shipPaint(diffuseColor.rgb, vLocal, 0.0), vert);
             float y = vLocal.y;
             float fy = fwidth(y) / 2.7, fh = fwidth(hc) / 1.6;
             float lvl = floor(y / 2.7);
@@ -832,6 +1084,9 @@ function makeShipMaterial(deckH) {
             float s0 = (1.0 - 0.3 * line - 0.8 * win) * ao;
             diffuseColor.rgb *= mix(1.0, mix(s0, 0.9, far), vert);
             diffuseColor.rgb *= 1.0 - 0.08 * vert * step(0.86, sHash(vec2(floor(hc * 1.3), lvl)));
+            #if SHIP_DETAIL >= 2
+               diffuseColor.rgb *= 0.91 + 0.18 * sNoise(vec2(hc * 0.11, y * 0.3));
+            #endif
          } else if (vBand > 1.5) {
             float pz = vLocal.z / 0.42;
             float row = floor(pz);
@@ -841,6 +1096,17 @@ function makeShipMaterial(deckH) {
             float fw = fwidth(pz);
             gap = mix(gap, 0.9, clamp(fw * 2.0, 0.0, 1.0));
             diffuseColor.rgb *= tone * (0.62 + 0.38 * gap);
+            if (uPaint.x > 3.5) {
+               // Italian air-recognition stripes on the forecastle
+               float dg = (vLocal.x + vLocal.z) / 7.0, aw = fwidth(dg);
+               float rw = smoothstep(0.5 - aw, 0.5 + aw, abs(fract(dg) - 0.5) * 2.0);
+               float on = smoothstep(-0.3, 0.3, vLocal.x - uPaint.y * 0.62);
+               diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.42, 0.035, 0.03), vec3(0.62, 0.62, 0.6), rw), on);
+            }
+            #if SHIP_DETAIL >= 2
+               // worn, sun-bleached patches and darker traffic grime
+               diffuseColor.rgb *= 0.86 + 0.26 * sNoise(vec2(vLocal.x * 0.07, vLocal.z * 0.21));
+            #endif
          }`],
          // readability cheat as in WoWs: spotted ships keep a darker silhouette through the haze
          // than the islands and sea around them (overcast/rain made 10+ km targets vanish)
@@ -853,6 +1119,21 @@ function makeShipMaterial(deckH) {
    mat.userData.uBoot = uBoot;
    mat.userData.uDeck = uDeck;
    return mat;
+}
+
+// Shadow pass for the hull mesh: rails and rigging are alpha-cut strips, as solid strips they
+// would lay a bar of shadow along the deck edge. One shared material.
+let _depthMat = null;
+function shipDepthMaterial() {
+   if (_depthMat) return _depthMat;
+   _depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+   _depthMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aBand;\nvarying float vBand;')
+         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBand = aBand;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vBand;')
+         .replace('void main() {', 'void main() {\nif (vBand > 3.5) discard;');
+   };
+   return _depthMat;
 }
 
 // ---------------- the manager ----------------
@@ -906,11 +1187,12 @@ export class ShipModels {
          const outboard = tl.filter(o => o !== t && Math.sign(o.x) === Math.sign(t.x) && Math.abs(o.x) > Math.abs(t.x) && Math.abs(o.x - t.x) < t.r * 4.5);
          t.y = S.deckAt(t.x) + (outboard.length ? Math.max(2.6, t.r * 0.78) : 0.25);
       }
-      const hullKey = `${ship.cls}|${d.type}|${d.L}|${d.B}|${tint.join(',')}|${tl.map(t => t.x.toFixed(1) + ':' + t.r.toFixed(1)).join(',')}`;
+      const hullKey = `${ship.cls}|${d.type}|${d.L}|${d.B}|${GFX.detail}|${tint.join(',')}|${tl.map(t => t.x.toFixed(1) + ':' + t.r.toFixed(1)).join(',')}`;
+      const nation = ship.cfg?.hull?.nation;
       const cols = {
          sup: shade(tint, 1.12), plat: shade(tint, 0.86), dark: lin(0x2a2d31), mast: lin(0x3b3f44), win: lin(0x0b0d10), boat: lin(0xcfccc3),
          cap: lin(0x17181a), capMetal: lin(0x45494e), plane: lin(0x6d7768), lamp: lin(0xe6eadc),
-         deck: d.type === 'SS' ? lin(0x3a3d40) : d.type === 'DD' || d.type === 'TR' ? lin(0x6b665e) : lin(0xa88a64),
+         deck: deckColor(d.type, nation),
       };
       let smoke = [];
       const hullGeo = this._geo(hullKey, () => {
@@ -927,12 +1209,13 @@ export class ShipModels {
          return g;
       });
       smoke = hullGeo.userData.smoke || [];
-      const mat = makeShipMaterial(d.D);
+      const mat = makeShipMaterial(d, nation, String(ship.cls || '').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 97, 7));
       const root = new THREE.Group();
       const body = new THREE.Group();   // pitch/roll/heave/sink
       root.add(body);
       const hull = new THREE.Mesh(hullGeo, mat);
       hull.castShadow = true; hull.receiveShadow = true;
+      if (GFX.detail >= 2) hull.customDepthMaterial = shipDepthMaterial();
       body.add(hull);
       const trs = tl.map((t) => {
          const big = t.cal >= 250;
