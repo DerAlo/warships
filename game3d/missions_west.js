@@ -9,6 +9,7 @@ import { orderDepth } from './submarine.js';
 export function westMissions(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, inZone, islands } = H;
    const pct = (f) => Math.max(0, Math.round(f * 100));
+   const soft = (k) => 1 + (k - 1) * 0.25;   // a quarter of the difficulty step: the bots' gunnery scales as well
    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
@@ -36,10 +37,10 @@ export function westMissions(H) {
             ]);
             const S = w._script, key = w.difficulty.key;
             S.port = zone(w, -10700, -1200, 1700, 'Río de la Plata', 'danger');
-            S.limit = key === 'hard' ? 0.42 : key === 'easy' ? 0.58 : 0.5;
-            S.baseDmg = w.difficulty.botDmg * 1.1;
+            S.limit = key === 'easy' ? 0.53 : 0.5;
+            S.baseDmg = soft(w.difficulty.botDmg) * 1.1;
             S.spee = add(w, 'Scharnhorst', 'enemy', P(-2600, -3600), 0.75, {
-               name: 'Admiral Graf Spee', telegraph: 4, speedKn: 28, hpMult: w.difficulty.botHP * 1.25, dmgMult: S.baseDmg,
+               name: 'Admiral Graf Spee', telegraph: 4, speedKn: 28, hpMult: soft(w.difficulty.botHP) * 1.25, dmgMult: S.baseDmg,
                ai: { retreatBelow: S.limit, retreatTo: P(S.port.x, S.port.y) },
             });
             const me = add(w, shipKey, 'player', P(3300, 4300), -2.25, { isPlayer: true, name: 'HMS Ajax', telegraph: 3 });
@@ -164,6 +165,8 @@ export function westMissions(H) {
                { c: P(6200, -6000), r: 950, height: 420, seed: 1203, lobes: 5, elong: 1.3, rot: 0.4, rough: 0.7, name: 'Pantelleria' },
             ]);
             const S = w._script, key = w.difficulty.key;
+            // the bots' gunnery and bombing already sharpen a lot with the difficulty: lean against it
+            const kd = key === 'hard' ? 0.85 : key === 'easy' ? 1.2 : 1;
             S.exit = zone(w, 10900, 1900, 1500, 'Kurs Malta', 'goal');
             const route = [P(-2500, 1500), P(4500, 1700), P(S.exit.x, S.exit.y)];
             const hulls = [['SS Ohio', 4.2], ['MV Melbourne Star', 2.4], ['MV Brisbane Star', 2.4], ['MV Rochester Castle', 2.4]];
@@ -185,9 +188,9 @@ export function westMissions(H) {
             // an airfield is not a ship: out of sight unless somebody runs right into it
             S.cv.cfg = { ...S.cv.cfg, detect: { ...S.cv.cfg.detect, surface: 2500, fire: 2500 } };
             S.cv.air.ft.max = S.cv.air.ft.hangar = 0;
-            S.cv.dmgMult = w.difficulty.botDmg * 0.55;   // scales the bombs and torpedoes of her squadrons
+            S.cv.dmgMult = kd * 0.55;   // scales the bombs and torpedoes of her squadrons
             // Axum waits submerged just off the track
-            S.sub = add(w, 'U96', 'enemy', P(-3300, 3300), Math.PI * 0.9, { name: 'Axum', nation: 'it', telegraph: 1, dmgMult: w.difficulty.botDmg * 0.8, ai: { huntId: S.ohio.id } });
+            S.sub = add(w, 'U96', 'enemy', P(-3300, 3300), Math.PI * 0.9, { name: 'Axum', nation: 'it', telegraph: 1, dmgMult: kd * 0.8, ai: { huntId: S.ohio.id } });
             orderDepth(S.sub, 1, w);
             const strike = (type, targetId) => {
                const cv = S.cv, o = S.ohio;
@@ -200,17 +203,16 @@ export function westMissions(H) {
                later(S, t + 38, () => { if (S.ohio.alive) radio(w, 'Radar HMS Kenya', text, 'warn'); });
             };
             wave(50, 'Flugzeuge aus Nord, zwanzig Meilen – Stukas! Flak klar, dicht an den Tanker!', [['db', true]]);
-            wave(170, 'Zweite Welle: Torpedoflieger tief über dem Wasser, dahinter Stukas!', key === 'easy' ? [['tb', false]] : [['tb', false], ['db', true]]);
-            if (key === 'hard') wave(300, 'Noch eine Welle Stukas aus Nord!', [['db', true]]);
+            wave(170, 'Zweite Welle: Torpedoflieger tief über dem Wasser, dahinter Stukas!', [['tb', false], ['db', true]]);
             // after dark: fast boats from behind Pantelleria and from under Cape Bon
             later(S, 270, () => {
                if (!S.ohio.alive) return;
                radio(w, 'HMS Ashanti', 'Es wird dunkel. Motorengeräusche an Backbord voraus – Schnellboote!', 'warn');
                const o = S.ohio;
-               const boats = [['MS 16', 5200, -5200], ['MS 22', 6000, -4300], ['S 30', 5400, 5600], ['S 36', 6400, 5000], ['MAS 564', 7400, -3200]];
-               S.boats = boats.slice(0, key === 'easy' ? 3 : key === 'hard' ? 5 : 4).map(([name, dx, dy]) =>
+               const boats = [['MS 16', 5200, -5200], ['MS 22', 6000, -4300], ['S 30', 5400, 5600], ['S 36', 6400, 5000]];
+               S.boats = boats.slice(0, 4).map(([name, dx, dy]) =>
                   add(w, 'Gnevny', 'enemy', P(Math.min(o.pos.x + dx, 11500), o.pos.y + dy), Math.PI, {
-                     name, nation: 'it', telegraph: 4, hpMult: w.difficulty.botHP * 0.36, dmgMult: w.difficulty.botDmg * 0.45,
+                     name, nation: 'it', telegraph: 4, hpMult: 0.36, dmgMult: kd * 0.45,
                      ai: { huntId: o.id, press: true, aggro: 1.6 },
                   }));
             });
