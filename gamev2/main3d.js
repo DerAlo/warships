@@ -25,6 +25,8 @@ import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
+import { MissileUi, CONS_KEYS } from './missileui.js';
+import { contactLevel } from './sensors.js';
 import { AirUi } from './airui.js';
 import { activeSquad } from './air.js';
 import { TouchUi } from './touch3d.js';
@@ -50,10 +52,7 @@ const RUDDER_NAMES = { '-2': 'hart Bb', '-1': 'halb Bb', 0: 'mittschiffs', 1: 'h
 // impossible.
 const OLD_THROTTLE = { '-1': -0.5, 0: -0.001, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 };
 const HOLD_DELAY = 0.35, HOLD_REPEAT = 0.28;
-const CONS_NAMES = {
-   damageControl: 'Leckwehr', repair: 'Notreparatur', smoke: 'Nebelanlage',
-   boost: 'Äußerste Kraft', hydro: 'Horchgerät', radar: 'Funkmessgerät', spotter: 'Aufklärer', fighter: 'Jäger',
-};
+const CONS_NAMES = { damageControl: 'Schadensabwehr', repair: 'Notreparatur', decoy: 'Täuschkörper', jammer: 'Störsender', hydro: 'Aktivsonar' };
 const OLD_BEAM = { DD: 13, LC: 18, HC: 22, EB: 36, Bismarck: 36 };
 
 // ------------------------------------------------------------------ setup
@@ -66,6 +65,7 @@ const overlay = new Overlay3D($('fx'));
 const hud = new Hud();
 const audio = new Audio();
 const subui = new SubUi({ hud, audio });   // submarine / ASW client side (subui.js)
+const mui = new MissileUi({ hud, audio }); // guided weapons, air defence, threat display (missileui.js)
 const input = new Input3D(scene3d);
 const minimap = new HudCanvases3D();
 minimap.setCanvases($('minimap-canvas'), null);
@@ -172,7 +172,8 @@ window.__cam3 = cam3;
 window.__camY = () => renderer.camera.position.y;
 window.__shipHdg = () => P ? P.heading : null;
 window.__scopeT = () => renderer.cam?.scopeT ?? renderer.scopeT ?? 0;
-window.__weaponSel = () => ctl.mode === 'torp' ? 'torp' : 'main';
+window.__weaponSel = () => ctl.mode === 'guns' ? 'main' : ctl.mode;
+window.__mui = () => mui;
 window.__badFireCount = 0;
 window.__phase = () => phase;
 window.__ctl = () => ({
@@ -332,8 +333,10 @@ function consumables() {
       const list = p.consumables;
       const dc = list.find(c => c.key === 'damageControl');
       const rp = list.find(c => c.key === 'repair');
-      const ordered = [dc, rp, ...list.filter(c => c !== dc && c !== rp)].filter(Boolean);
-      return ordered.slice(0, CONS_SLOTS.length).map((c, i) => ({ slot: CONS_SLOTS[i], key: c.key, name: c.name || CONS_NAMES[c.key] || c.key,
+      // one fixed key per kind (missileui.js CONS_KEYS); the helicopter has no effect in the sim yet and stays off the bar.
+      // Submarines dive on F / G, so their decoys sit on N.
+      const ordered = [dc, rp, ...list.filter(c => c !== dc && c !== rp)].filter(c => c && CONS_KEYS[c.key]);
+      return ordered.map((c) => ({ slot: c.key === 'decoy' && p.sub ? 'N' : CONS_KEYS[c.key], key: c.key, name: c.name || CONS_NAMES[c.key] || c.key,
          charges: c.charges, maxCharges: c.maxCharges, cd: c.cd || 0, cdMax: c.cdMax || 1, active: !!c.active, t: c.t || 0, dur: c.dur || 1, src: c }));
    }
    return consEmu || [];
@@ -499,7 +502,7 @@ function beginMatch() {
 
    // controls
    ctl.telegraph = P.telegraph ?? 0; ctl.rudder = P.rudderCmd ?? 0;
-   ctl.ammo = P.ammo || 'HE'; ctl.mode = 'guns'; ctl.spread = P.torps?.spread || 'narrow';
+   ctl.ammo = P.ammo || 'HE'; ctl.mode = P.turrets?.length ? 'guns' : torpInfo(P) ? 'torp' : MissileUi.defaultMode(P); ctl.spread = P.torps?.spread || 'narrow';
    ctl.lockId = null; ctl.mapOpen = false; ctl.board = false;
    ctl.lead = true; lead.id = null; lead.shown = false;
    for (const k in ctl.hold) ctl.hold[k] = 0;
@@ -527,7 +530,7 @@ function beginMatch() {
    // the last match may have ended in the scope: snap the lens back instead of blending out
    if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
-   cam3.peri = null; subui.reset(world); airui.reset(world, cam3);
+   cam3.peri = null; subui.reset(world); airui.reset(world, cam3); mui.reset(world);
    frozen.yaw = cam3.yaw; frozen.range = R0;
    updateAimPoint();
 
@@ -588,6 +591,14 @@ function toMenu() {
    if (n) n.quit();                    // tells the others and hands back to the lobby (session.onEnd)
 }
 
+// context for missileui.js (one object, reused)
+const _mctx = { ctl, aim, lockId: null, camYaw: 0, W: 1, H: 1 };
+function mctx() {
+   const l = ctl.lockId != null ? lockedShip() : null;
+   _mctx.lockId = l ? l.id : null; _mctx.camYaw = renderer.cam?.pose?.yaw ?? cam3.yaw; _mctx.W = W; _mctx.H = H;
+   return _mctx;
+}
+
 // ------------------------------------------------------------------ frame-level input
 function frameInput(dt) {
    const p = P;
@@ -599,6 +610,7 @@ function frameInput(dt) {
    if (inp.tapped('H')) { ctl.help = !ctl.help; hud.toggleHelp(ctl.help); }
 
    subui.frame(p, world, cam3, dt);
+   mui.frame(p, world, dt);
    // carrier keys (1-3 plane type, E launch / take over, 4 AA focus); true = squadron view
    if (airui.input(inp, p, world, dt, { mapOpen: ctl.mapOpen, sens: settings.sens, client: !!net && !net.isHost, act })) { cam3.bino = false; return; }
    if (!p || !p.alive) { cam3.bino = false; return; }
@@ -612,9 +624,12 @@ function frameInput(dt) {
 
    // --- weapons
    const ti = torpInfo(p);
-   if (!p.air && inp.tapped('1')) selectAmmo('HE');      // carriers: 1-3 pick the plane type (airui)
-   if (!p.air && inp.tapped('2')) selectAmmo('AP');
-   if (!p.air && inp.tapped('3')) {
+   // 1 gun · 2 anti-ship missile · 3 cruise missile (map) · 4 rockets · 5 torpedoes; carriers: 1-4 belong to the air group (airui)
+   if (!p.air && inp.tapped('1')) {
+      if (p.turrets?.length) selectAmmo('HE');
+      else { audio.denied(); hud.msg('Kein Geschütz an Bord', 'warn'); }
+   }
+   if (!p.air && inp.tapped('5')) {
       if (!ti) { audio.denied(); hud.msg('Keine Torpedos an Bord', 'warn'); }
       else if (ctl.mode === 'torp') {
          ctl.spread = ctl.spread === 'narrow' ? 'wide' : 'narrow';
@@ -624,13 +639,16 @@ function frameInput(dt) {
          hud.msg('Torpedofächer: ' + (ctl.spread === 'wide' ? 'weit' : 'eng'), 'info');
       } else { ctl.mode = 'torp'; audio.ammoSwitch(); }
    }
+   // 2 / 3 / 4, R radar, V doctrine, T priority target, map targeting (missileui.js)
+   mui.input(inp, p, world, act, mctx());
+   if (inp.tapped('SPACE')) inp.mouse.clicked = true;
    if (inp.tapped('L')) { ctl.lead = !ctl.lead; hud.msg('Vorhaltemarker ' + (ctl.lead ? 'an' : 'aus'), 'info'); audio.uiClick(); }
    if (inp.tapped('X')) toggleLock();
    if (inp.mouse.ctrlClicks && !ctl.mapOpen) pickSecTarget();
    watchSecTarget();
 
-   // --- consumables
-   for (const k of CONS_SLOTS) if (inp.tapped(k)) useConsumable(k);
+   // --- consumables (Y damage control, U repair, F decoys, J jammer)
+   for (const c of consumables()) if (inp.tapped(c.slot)) useConsumable(c.slot);
 
    // --- zoom ladder (zoom3d.js): the wheel runs third-person distance -> 2x..16x scope, Shift
    // jumps in/out on the same state. Only the camera moves: bearing and range stay put.
@@ -732,7 +750,7 @@ function selectAmmo(type) {
    }
    ctl.ammo = type;
    audio.ammoSwitch();
-   hud.msg('Munition: ' + (type === 'HE' ? 'Spreng (HE)' : 'Panzerbrechend (AP)'), 'info');
+   if (type !== 'HE') hud.msg('Munition: Panzerbrechend (AP)', 'info');
 }
 
 function toggleLock() {
@@ -887,8 +905,14 @@ function applyControls(dt) {
    if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
    // Ctrl held = secondary target picking, never a salvo
-   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked) && !input.down('CTRL')) fireGuns();
-   if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
+   // Space fires like the left mouse button
+   if (ctl.mode === 'guns' && (input.mouse.down || input.mouse.clicked || input.down('SPACE')) && !input.down('CTRL')) fireGuns();
+   else if (ctl.mode === 'torp' && input.mouse.clicked) { input.mouse.clicked = false; fireTorps(); }
+   else if (ctl.mode !== 'guns' && ctl.mode !== 'torp' && input.mouse.clicked && !input.down('CTRL')) {
+      // guided weapons (missileui.js): one launch per press
+      input.mouse.clicked = false;
+      mui.fire(p, world, act, mctx());
+   }
    if (simv.oldSecondaries) autoSecondaries();
 }
 
@@ -1086,7 +1110,7 @@ function processEvents(dt) {
             if (e.state === 'done' || e.state === 'failed') audio.objective(e.state); else audio.radio();
             break;
          }
-         default: subui.event(e, p, world, mine, onMe); airui.event(e, p, world); break;
+         default: subui.event(e, p, world, mine, onMe); airui.event(e, p, world); mui.event(e, p, world); break;
       }
    }
    // old sim: {kind:'sink', ship} records + synthesized hit ribbons
@@ -1396,7 +1420,7 @@ function buildUi(dt) {
       const hgt = hullDeckH(s) * 2.6 + 28;
       const sp = project(s.pos.x, hgt, s.pos.y);
       const dist = Math.hypot(s.pos.x - p.pos.x, s.pos.y - p.pos.y);
-      markers.push({ id: s.id, ship: s, x: sp.x, y: sp.y, onScreen: !!sp.visible, ally, name: s.name || s.cls, type: shipType(s),
+      markers.push({ id: s.id, ship: s, x: sp.x, y: sp.y, onScreen: !!sp.visible, ally, name: s.name || s.cls, type: shipType(s), level: ally ? 0 : contactLevel(world, p.side, s),
          hpFrac: clamp01(s.hp / (s.maxHP || 1)), dist, locked: s.id === ctl.lockId, sec: s.id === p.secTarget, fires: s.fires?.length || 0 });
    }
    ui.markers = markers;
@@ -1445,8 +1469,9 @@ function buildUi(dt) {
    ui.camYaw = pose?.yaw ?? cam3.yaw;
    subui.fill(ui, p, world, cam3, project, subui.peri.y, dt);
    airui.fill(ui, p, world, project, dt);
+   mui.fill(ui, p, world, project, mctx());
    ui.mapOpts = {
-      sub: ui.sub.map, airCtl: airui.sqId, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
+      mx: ui.mx, sub: ui.sub.map, airCtl: airui.sqId, intel, camYaw: ui.camYaw, camHfov: pose?.hfov, gunRange: aim.gunRange, detectRange: detectRangeOf(p),
       aimPoint: aim.point, torpFan: ctl.mode === 'torp' && ui.torpInfo ? { bearings: torpBearings(ui.torpInfo, aim.yaw), range: ui.torpInfo.range } : null,
    };
    return ui;
