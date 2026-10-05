@@ -20,35 +20,46 @@ import { setRadar } from './sensors.js';
 export const EAST_TUNE = {
    window: 120,              // s the allied bots keep firing after a human captain's last launch or hit
    barents: {
-      easy: { ally: 1, salvoAt: 120, granit: 14, oniks: 5, raids: 1, pjHp: 0.3, corv: 1, close: 14000 },
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500 },
       normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000 },
       hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000 },
+      ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'] },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'] },
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'] },
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1 },
+      ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
       easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1 },
       normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1 },
-      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 270, raid: 55, sub: 1 },
+      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 270, raid: 60, sub: 1 },
+      ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
       easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0 },
       normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0 },
       hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0 },
+      // an escort captain relies on the carrier bot: it hits harder and the Shandong stops flying earlier
+      ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
    countdown: {
-      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 700 },
-      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570 },
-      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 565 },
+      easy: { ally: 0.6, time: 660, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1 },
+      normal: { ally: 0.5, time: 600, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3 },
+      hard: { ally: 0.4, time: 540, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4 },
+      // the clock of a submarine run (the German boat is the slower one)
+      ship: { U212: (t, k) => ({ subTime: t.subTime + 60 + (k === 'normal' ? 15 : 0) }), Virginia: (t, k) => ({ subTime: t.subTime - (k === 'normal' ? 15 : 0) }) },
    },
 };
 
 export function eastMissions(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, SHIPS } = H;
-   const tune = (w, id) => EAST_TUNE[id][w.difficultyKey] || EAST_TUNE[id].normal;
+   // knobs of the difficulty, plus the adjustment (EAST_TUNE.<id>.ship[<ship>]) of the ship the player sails
+   const tune = (w, id) => {
+      const T = EAST_TUNE[id], t = T[w.difficultyKey] || T.normal, o = T.ship && T.ship[w._script && w._script.shipKey];
+      return o ? { ...t, ...(typeof o === 'function' ? o(t, w.difficultyKey) : o) } : t;
+   };
    const human = (s) => !!(s && (s.isPlayer || s.human));
    const live = (w, id) => { const s = w.shipById(id); return s && s.alive ? s : null; };
    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -135,7 +146,7 @@ export function eastMissions(H) {
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring', 'Sachsen'],
          recommendedShip: 'Ford', arena: 24000, timeLimit: 660, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'barents');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'barents');
             islands(w, [
                { c: P(3000, 21000), r: 2400, height: 210, seed: 7, lobes: 6, elong: 2.4, rot: 0.1, rough: 0.5, name: 'Nordküste' },
                { c: P(-4000, -17000), r: 1000, height: 150, seed: 19, lobes: 4, rough: 0.5 },
@@ -216,7 +227,7 @@ export function eastMissions(H) {
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Burke', 'Ticonderoga'],
          recommendedShip: 'Burke', arena: 20000, timeLimit: 600, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'reefs');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'reefs');
             islands(w, [
                { c: P(6000, -7500), r: 1200, height: 40, seed: 31, lobes: 5, rough: 0.3, name: 'Nordriff' },
                { c: P(9500, 0), r: 1500, height: 50, seed: 37, lobes: 6, rough: 0.3, name: 'Mittelriff' },
@@ -279,7 +290,7 @@ export function eastMissions(H) {
             if (S.blind && dead(S.bat) >= 2 && !S.relief) {
                const T = tune(w, 'reefs'), own = S.own.map(id => live(w, id)).filter(Boolean);
                S.relief = T.relief.map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
-                  { minDist: 14000, telegraph: 4, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
+                  { minDist: 14000, telegraph: 4, hpMult: T.reliefHp * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')');
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
             }
@@ -308,7 +319,7 @@ export function eastMissions(H) {
          env: { time: 'night', weather: 'overcast', front: { at: 200, dur: 80, to: 'rain' } }, type: 'ops',
          playableShips: ['Sachsen', 'Burke', 'Daring', 'Ticonderoga'], recommendedShip: 'Sachsen', arena: 20000, timeLimit: 630, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'strait');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'strait');
             islands(w, [
                { c: P(19500, 4000), r: 2600, height: 260, seed: 51, lobes: 6, elong: 2.6, rot: Math.PI / 2, rough: 0.5, name: 'Ostküste' },
                { c: P(-10500, 3000), r: 900, height: 120, seed: 57, lobes: 4, rough: 0.5 },
@@ -390,7 +401,7 @@ export function eastMissions(H) {
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring'],
          recommendedShip: 'Ford', arena: 26000, timeLimit: 660, stars: 3,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'philsea');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'philsea');
             islands(w, [
                { c: P(-2000, 3000), r: 800, height: 90, seed: 61, lobes: 4, rough: 0.4 },
                { c: P(1500, -9000), r: 700, height: 80, seed: 67, lobes: 4, rough: 0.4 },
@@ -476,8 +487,8 @@ export function eastMissions(H) {
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ticonderoga', 'Virginia', 'U212'],
          recommendedShip: 'Ticonderoga', arena: 22000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'countdown');
-            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime + (shipKey === 'U212' ? 60 : 0) : T.time;
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'countdown');
+            w.timeLeft = SHIPS[shipKey].hull.type === 'SS' ? T.subTime : T.time;
             const C = P(9000, 0), R = 2400;
             islands(w, [{ c: C, r: R, height: 320, seed: 71, lobes: 6, rough: 0.55, name: 'Felseninsel', peaks: [{ x: 300, y: 200, h: 420, r: 900 }] }]);
             const g = fleet(w, shipKey, [['Ticonderoga', 0, 0], ['Burke', -1600, -2400], ['Burke', -1600, 2400], ['Daring', 1600, 2600]],
@@ -501,8 +512,9 @@ export function eastMissions(H) {
             const scr = [add(w, 'Gorschkow', 'enemy', P(3800, 1500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(3800, 4000), P(3800, -1500)] } })];
             for (let i = 0; i < T.corv; i++) scr.push(add(w, 'BuyanM', 'enemy', P(5200, i ? 4500 : 500), Math.PI / 2, { telegraph: 1, ai: { patrol: [P(5200, i ? 4500 : 500), P(5200, i ? 1500 : -2500)] } }));
             S.boats = [];
-            for (let i = 0; i < T.boats; i++) {
-               const a0 = (hash(w, 20) + i / T.boats) * 2 * Math.PI, ring = [];
+            const nBoats = SHIPS[shipKey].hull.type === 'SS' ? T.subBoats : T.boats;
+            for (let i = 0; i < nBoats; i++) {
+               const a0 = (hash(w, 20) + i / nBoats) * 2 * Math.PI, ring = [];
                for (let k = 0; k < 6; k++) ring.push(P(C.x + Math.cos(a0 + k * Math.PI / 3) * (R + 3400), C.y + Math.sin(a0 + k * Math.PI / 3) * (R + 3400)));
                S.boats.push(add(w, 'Typ022', 'enemy', ring[0], a0 + Math.PI / 2, { telegraph: 2, ai: { passive: true, patrol: ring } }).id);
             }
