@@ -20,9 +20,9 @@ import { setRadar } from './sensors.js';
 export const EAST_TUNE = {
    window: 120,              // s the allied bots keep firing after a human captain's last launch or hit
    barents: {
-      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500 },
-      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000 },
-      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000 },
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0 },
+      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4 },
+      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6 },
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
@@ -38,9 +38,9 @@ export const EAST_TUNE = {
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
-      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0 },
-      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0 },
-      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0 },
+      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0 },
+      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75 },
+      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70 },
       // an escort captain relies on the carrier bot: it hits harder and the Shandong stops flying earlier
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
@@ -101,7 +101,8 @@ export function eastMissions(H) {
    // every allied bot follows `lead` (the ship the mission is about, or the player)
    function follow(group, lead) { for (const s of group) if (s !== lead && !s.isPlayer && s.ai) s.ai.escortId = lead.id; }
    // scripted ripple salvo: the platform launches n missiles of its selected type, one per launch gap
-   function ripple(S, fromId, n, aim) { (S.ripples || (S.ripples = [])).push({ fromId, n, aim }); }
+   // (load: the platform has reloaded, the salvo does not depend on what is left in the cells)
+   function ripple(S, fromId, n, aim, load) { (S.ripples || (S.ripples = [])).push({ fromId, n, aim, load }); }
    function runRipples(w, S) {
       if (!S.ripples) return false;
       let busy = false;
@@ -109,6 +110,7 @@ export function eastMissions(H) {
          if (r.n <= 0) continue;
          const from = live(w, r.fromId), aim = from && r.aim();
          if (!aim) { r.n = 0; continue; }
+         if (r.load) for (const x of from.cfg.weapons.ssm) from.mag[x.type] = Math.max(from.mag[x.type] || 0, 1);
          const m = launchSSM(w, from, aim);
          if (m) { r.n--; from.mag[m.type]++; }      // the scripted salvo does not empty the magazine
          else if (ssmBlock(w, from, aim) !== 'reload') r.n = 0;
@@ -209,7 +211,7 @@ export function eastMissions(H) {
          debrief: 'Der Verband hat die Salve aufgefangen und den Schlachtkreuzer ausgeschaltet. Beide Seiten ziehen ihre ' +
             'Einheiten zurück; die Lage in der Barentssee beruhigt sich.',
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring', 'Sachsen'],
-         recommendedShip: 'Ford', arena: 24000, timeLimit: 660, stars: 2,
+         recommendedShip: 'Ford', arena: 24000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'barents');
             islands(w, [
@@ -247,6 +249,17 @@ export function eastMissions(H) {
                for (const id of S.foes) { const s = live(w, id); if (s && s.cfg.name !== pj.cfg.name && s.cfg.weapons.ssm.length) ripple(S, id, s.type === 'CO' ? 1 : T.oniks, at); }
                S.phase = 1; S.salvoT = w.time;
             });
+            // the battle cruiser does not wait for the clock: reloaded, it fires a second salvo at the carrier
+            if (T.again) {
+               later(S, T.again - 35, () => { if (live(w, S.pjId) && S.phase === 2) radio(w, 'Aufklärung', 'Der Schlachtkreuzer hat nachgeladen – eine zweite Salve auf den Träger steht bevor. Schalten Sie ihn vorher aus!', 'warn'); });
+               later(S, T.again, () => {
+                  if (!live(w, S.pjId) || S.phase !== 2) return;
+                  radio(w, 'Luftlage', 'Flugkörperalarm. Zweite Salve des Schlachtkreuzers, Ziel Träger.', 'warn');
+                  const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+                  ripple(S, S.pjId, T.granit2, at, true);
+                  for (const id of S.foes) { const s = live(w, id); if (s && id !== S.pjId && s.type !== 'CO' && T.oniks2 && s.cfg.weapons.ssm.length) ripple(S, id, T.oniks2, at, true); }
+               });
+            }
             if (T.raids > 1) later(S, T.salvoAt + 110, () => raid('db'));
             if (T.raids > 2) later(S, T.salvoAt + 230, () => raid('tb'));
          },
@@ -473,7 +486,7 @@ export function eastMissions(H) {
             'Flugbetrieb der Shandong außer Gefecht. Die Gerald R. Ford darf nicht verloren gehen.',
          debrief: 'Das Flugdeck der Shandong ist ausgefallen, der gegnerische Verband läuft ab. Die Ford bleibt einsatzbereit.',
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring'],
-         recommendedShip: 'Ford', arena: 26000, timeLimit: 660, stars: 3,
+         recommendedShip: 'Ford', arena: 26000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'philsea');
             islands(w, [
@@ -499,6 +512,18 @@ export function eastMissions(H) {
             S.hot = false; S.found = false; S.hotAt = T.auto;
             later(S, 5, () => radio(w, 'Flottenkommando', 'Funk- und Radarstille im Verband. Jäger und Hubschrauber klären nach Osten auf.'));
             holdLine(w, S, 14, 'Verbandsführer', 'Der Verband hält Feuerdisziplin: Die Geleitschiffe schießen erst, wenn das Flaggschiff den Angriff eröffnet – ein früher Schuss würde unsere Position verraten.');
+            // the escorts of the Shandong do not let the clock decide: late in the operation they fire what they
+            // have reloaded at the Ford (salvo missiles per ship still afloat)
+            later(S, T.salvoAt - 35, () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); });
+            const salvo = () => {
+               if (w.phase !== 'playing') return;
+               const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+               let n = 0;
+               for (const id of S.foes) { const e = live(w, id); if (e && id !== S.sdId && e.cfg.weapons.ssm.length) { ripple(S, id, T.salvo, at, true); n++; } }
+               if (n) radio(w, 'Luftlage', 'Flugkörperalarm. Salve vom Verband der Shandong, Ziel Träger.', 'warn');
+               if (n && T.again) later(S, w.time + T.again, salvo);
+            };
+            later(S, T.salvoAt, salvo);
             later(S, 70, () => {
                if (S.found) return;
                const n = S.area.y < -6000 ? 'Südost' : S.area.y > 6000 ? 'Nordost' : 'Ost';
@@ -509,6 +534,7 @@ export function eastMissions(H) {
          update(w, dt, S) {
             const T = tune(w, 'philsea'), sd = w.shipById(S.sdId);
             if (!sd) return;
+            runRipples(w, S);
             coordinate(w, S, {});
             clock(w, S, 'Aufklärung', (t) => `Noch ${t}, dann ist der Verband der Shandong außer Reichweite.`);
             if (!S.found && S.foes.some(id => { const s = live(w, id); return s && s.detected; })) {

@@ -461,6 +461,30 @@ test('east: the escorts\' hold-fire is explained once; the time limit is stated 
    }
 });
 
+// --------------------------------------------------------------- the enemy forces the decision late
+test('east: late in the operation the enemy fires a reloaded salvo at the carrier (barents, philsea)', () => {
+   const ssm = (w) => w.missiles.filter(m => m.alive && m.kind === 'ssm' && m.side === 'enemy').length;
+   let w = mk('barents'), S = w._script, T = EAST_TUNE.barents.normal;
+   step(w, T.again - 1);
+   if (w.phase === 'playing' && S.phase === 2 && w.shipById(S.pjId).alive) {
+      assert.ok(radioed(w, 'zweite Salve'), 'announced');
+      const pj = w.shipById(S.pjId);
+      for (const x of pj.cfg.weapons.ssm) pj.mag[x.type] = 0;      // empty cells: the salvo is a reload
+      step(w, 12);
+      assert.ok(radioed(w, 'Zweite Salve') && ssm(w) > 0, 'second salvo in the air');
+   }
+   // the salvo comes well before the clock runs out
+   for (const k of DIFFS) {
+      assert.ok(EAST_TUNE.barents[k].again < def('barents').timeLimit - 120, k);
+      assert.ok(EAST_TUNE.philsea[k].salvoAt < def('philsea').timeLimit - 120, k);
+   }
+   w = mk('philsea'); S = w._script; T = EAST_TUNE.philsea.normal;
+   w.player.setTelegraph(0);
+   step(w, T.salvoAt + 8);
+   const escort = S.foes.some(id => id !== S.sdId && w.shipById(id) && w.shipById(id).alive);
+   if (w.phase === 'playing' && escort) assert.ok(radioed(w, 'drehen auf uns ein') && radioed(w, 'Salve vom Verband der Shandong'));
+});
+
 // ------------------------------------------------------------------------------------ balance table
 test('east: balance table (EAST_BALANCE=<runs>, optional ONLY, SHIP, DIFFS, MODES)', { skip: !process.env.EAST_BALANCE }, () => {
    const runs = +process.env.EAST_BALANCE || 30;
