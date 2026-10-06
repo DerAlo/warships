@@ -12,6 +12,18 @@ import { addSite } from './sites.js';
 import { launchSSM } from './missile.js';
 import { addTaskPoint } from './seal.js';
 
+// Balance knobs per mission and difficulty (tests/v2.missions.west.test.mjs measures them with a bot captain).
+// blacksea: `out` s into the mission the cruiser leaves its patrol line under the coastal umbrella and
+// closes on the flagship (0 = never), so the enemy decides the mission and not the clock. `coopHp`:
+// the cruiser's hull with two or more captains (measured: the co-op group otherwise wins less often than one captain).
+export const WEST_TUNE = {
+   blacksea: {
+      easy: { out: 480, coopHp: 1 },
+      normal: { out: 420, coopHp: 0.8 },
+      hard: { out: 360, coopHp: 0.8 },
+   },
+};
+
 export function westMissions(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, inZone, islands } = H;
    const by = (w, e, n, h) => (w.difficultyKey === 'easy' ? e : w.difficultyKey === 'hard' ? h : n);
@@ -418,7 +430,7 @@ export function westMissions(H) {
          debrief: 'Der Kreuzer ist versenkt. Seine Abwehr hätte jede Einzelsalve abgefangen – entschieden hat, dass alle Schiffe gleichzeitig auf dasselbe Ziel geschossen haben.',
          fleet: { own: '2 Fregatten, 1 Zerstörer, 1 Korvette', foe: '1 Lenkwaffenkreuzer, 2–4 Korvetten, Küstenbatterie, Flugabwehrstellung, Radar' },
          env: { time: 'day', weather: 'overcast' }, type: 'strike', playableShips: ['Sachsen'], recommendedShip: 'Sachsen',
-         arena: 24000, timeLimit: 11 * 60, stars: 2,
+         arena: 24000, timeLimit: 12 * 60, stars: 2,
          setup(w, shipKey) {
             const S = w._script;
             islands(w, [
@@ -444,17 +456,33 @@ export function westMissions(H) {
             S.radar = addSite(w, 'radar', 'enemy', P(14800, 13600), { name: 'Radarstation Kap' });
             S.tick = 0; S.called = -99; S.calls = 0; S.best = 0; S.seen = new Set(); S.free = false;
             S.needSalvo = by(w, 6, 8, 8);
-            objective(w, 'cruiser', 'Versenken Sie den Lenkwaffenkreuzer, bevor Verstärkung die Zufahrt schließt (Zeitlimit 11:00)');
+            objective(w, 'cruiser', 'Versenken Sie den Lenkwaffenkreuzer, bevor Verstärkung die Zufahrt schließt (Zeitlimit 12:00)');
             objective(w, 'salvo', `Koordinierte Salve: ${S.needSalvo} Flugkörper von mindestens zwei Schiffen gleichzeitig im Anflug auf den Kreuzer`, { optional: true });
             objective(w, 'battery', 'Schalten Sie die Küstenbatterie aus', { optional: true });
             w.score = { kind: 'count', player: 0, enemy: 0, target: 1 };
             radio(w, 'Verbandsführer', 'Verband läuft an. Alle Schiffe halten die Seezielflugkörper zurück, bis das Führungsschiff feuert.');
             later(S, 70, () => radio(w, 'Operationszentrale', 'Zwei Korvetten laufen uns als Vorposten entgegen. Sie tragen Seezielflugkörper – Radar an, Abwehr klar.'));
             later(S, 200, () => { if (S.cruiser.alive) radio(w, 'Operationszentrale', 'Der Kreuzer steht unter dem Schirm der Küstenstellungen. Einzelne Flugkörper kommen nicht durch – feuern Sie, wenn der ganze Verband in Reichweite ist.'); });
+            // the cruiser does not wait for the clock: late in the mission it leaves its line and attacks the flagship
+            const T = WEST_TUNE.blacksea[w.difficultyKey] || WEST_TUNE.blacksea.normal;
+            if (T.out) later(S, T.out, () => {
+               const c = S.cruiser, humans = w.net ? w.net.humans : [w.player];
+               const F = [w.player, ...humans, ...S.allies].find(s => s && s.alive);      // the flagship, else another captain, else an escort
+               if (!c.alive || !F) return;
+               S.out = true;
+               radio(w, 'Operationszentrale', 'Der Kreuzer wartet nicht auf die Verstärkung: Er verlässt seine Position vor der Bucht und läuft auf das Führungsschiff zu. Stellen Sie ihn!', 'warn');
+               delete c.ai.patrol; c.ai.huntId = F.id; c.ai.press = true;
+            });
          },
          update(w, dt, S) {
             // the flagship or a human captain has fired an anti-ship missile at a ship: strike call
             const humans = w.net ? w.net.humans : [w.player];
+            // co-op (world.net is set after setup): the cruiser's hull is scaled once for a group with several captains
+            if (!S.coop && humans.length > 1) {
+               S.coop = true;
+               const k = (WEST_TUNE.blacksea[w.difficultyKey] || WEST_TUNE.blacksea.normal).coopHp || 1, c = S.cruiser;
+               c.hp = Math.round(c.hp * k); c.maxHP = Math.round(c.maxHP * k);
+            }
             let n = 0, own = new Set();
             for (const m of w.missiles) {
                if (m.side !== 'player' || m.kind !== 'ssm') continue;
