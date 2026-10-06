@@ -8,6 +8,7 @@
 // Works from replicated data alone: a replicated helicopter has no `goal` (the last order of the
 // own helicopter is remembered from its heloOrder event), every other field is read with a fallback.
 import { heloStatus, heloBlock, HELO } from './helo.js';
+import { slotTip } from './guide.js';
 import { teamStatus, SEAL } from './seal.js';
 import { execAction } from './net/command.js';
 import { T, FONT, MONO, rgba } from './theme.js';
@@ -76,6 +77,7 @@ export class OpsUi {
          return { root: p, stat: p.querySelector('.ops-stat'), sub: p.querySelector('.ops-sub'), bar: p.querySelector('.ops-bar'), fill: p.querySelector('.ops-bar i') };
       };
       const helo = mk('ops-helo', 'HUBSCHRAUBER', HELO_KEY), team = mk('ops-team', 'KOMMANDOTRUPP', TEAM_KEY);
+      helo.root.title = slotTip('helo');
       const white = el('div', 'blast-white');
       const host = document.getElementById('hud');
       if (host) { host.appendChild(panel); host.parentNode.insertBefore(white, host); }
@@ -250,6 +252,9 @@ export class OpsUi {
             const dist = Math.hypot((h.rx ?? h.pos.x) - p.pos.x, (h.ry ?? h.pos.y) - p.pos.y);
             sub = km(dist) + ' · Torpedos ' + (st.torps | 0);
             mark(h.rx ?? h.pos.x, (h.ralt ?? h.alt ?? 0) + 14, h.ry ?? h.pos.y, 'helo', 'HELI', km(dist), st.state, st.fuel);
+         } else if (st.state === 'ready' && st.sorties > 0) {
+            // on deck and ready: one line on what it is for and how to send it
+            sub = c?.ctl?.mapOpen ? (touch() ? 'antippen' : HELO_KEY) + ', dann Punkt auf der Karte' : 'U-Jagd · ' + (touch() ? 'antippen' : HELO_KEY) + ': Start voraus';
          } else sub = 'Einsätze ' + (st.sorties | 0) + ' · Torpedos ' + (st.torps | 0);
          if (d) {
             const H = d.helo;

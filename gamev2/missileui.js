@@ -10,6 +10,7 @@ import { MISSILES, WORLD } from './config.js';
 import { ssmBlock, ssmType, cruiseBlock, rocketState, DOCTRINES, DOCTRINE_NAMES, inbound, samStatus } from './missile.js';
 import { contactLevel } from './sensors.js';
 import { T, FONT, MONO, rgba } from './theme.js';
+import { slotTip, hints } from './guide.js';
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
@@ -404,6 +405,7 @@ export class MissileUi {
       const h = MissileUi.has(p), w = p.cfg?.weapons || {};
       u.radarOn = !!p.radarOn; u.emcon = h.radar && !p.radarOn;
       u.status = this.status;
+      hints.frame(this.hud, p, world, ctl.mode);   // Waffenkunde: one notice per weapon on first use
 
       // --- weapon bar
       const list = ui.weapons || (ui.weapons = []);
@@ -412,7 +414,7 @@ export class MissileUi {
       if (h.gun && !p.air) {
          list.push({ id: 'gun', key: '1', icon: 'GUN', name: 'Geschütz', count: '', sel: ctl.mode === 'guns', ready: !!r.anyReady, none: false, frac: r.frac ?? 1,
             stat: r.anyReady ? 'bereit' : r.left > 0 ? 'lädt ' + r.left.toFixed(1).replace('.', ',') + ' s' : r.trav > 0 ? 'schwenkt' : r.total ? 'kein Schusswinkel' : '—',
-            tip: 'Geschütz (1) · Feuer: Leertaste / Linksklick' });
+            tip: slotTip('gun', p.cfg) });
       }
       u.aimInfo = ''; u.aimBad = false;
       if (h.ssm) {
@@ -424,7 +426,7 @@ export class MissileUi {
          const sel = ctl.mode === 'ssm';
          list.push({ id: 'ssm', key: '2', icon: 'SSM', name: cfg?.name || 'Seeziel-FK', count: String(n), sel, ready: !b, none: n <= 0, frac: n > 0 ? gap : 0,
             stat: b ? BLOCK_TEXT[b].toLowerCase() : bearingShot ? 'Peilungsschuss' : 'Ziel erfasst',
-            tip: 'Seezielflugkörper (2)' + (w.ssm.length > 1 ? ' · 2 erneut: Typ wechseln' : '') + ' · Ziel erfassen (X) oder anvisieren, sonst Peilungsschuss' });
+            tip: slotTip('ssm', p.cfg) });
          if (sel) {
             const dist = tgt ? Math.hypot(tgt.pos.x - p.pos.x, tgt.pos.y - p.pos.y) : 0;
             u.aimBad = !!b;
@@ -440,14 +442,14 @@ export class MissileUi {
          const b0 = n <= 0 ? 'empty' : world.time - (p.lastSsmFire ?? -99) < 1.1 ? 'reload' : p.depth > 1 ? 'reload' : null;
          list.push({ id: 'cruise', key: '3', icon: 'CRUISE', name: cfg?.name || 'Marsch-FK', count: String(n), sel, ready: !b0, none: n <= 0,
             frac: n > 0 ? clamp01((world.time - (p.lastSsmFire ?? -99)) / 1.1) : 0, stat: b0 ? BLOCK_TEXT[b0].toLowerCase() : sel ? 'Ziel: Karte' : 'bereit',
-            tip: 'Marschflugkörper (3) · öffnet die Lagekarte: Punkt oder Landstellung ' + (isTouch() ? 'antippen' : 'anklicken') });
+            tip: slotTip('cruise', p.cfg) });
          if (sel) { map.mode = 'cruise'; map.range = cfg.range; u.aimInfo = u.aimInfo || (ctl.mapOpen ? '' : cfg.name + ': Ziel auf der Lagekarte wählen' + (isTouch() ? '' : ' (3)')); }
       }
       const rk = rocketState(p);
       if (rk) {
          const left = Math.max(0, rk.readyT - world.time), sel = ctl.mode === 'rockets';
          list.push({ id: 'rockets', key: '4', icon: 'ROCKET', name: 'Raketen', count: String(rk.salvo), sel, ready: left <= 0, none: false, frac: 1 - clamp01(left / (rk.reload || 1)),
-            stat: left > 0 ? 'lädt ' + Math.ceil(left) + ' s' : 'bereit', tip: 'Raketenwerfer (4) · Salve auf den Zielpunkt oder einen Punkt der Lagekarte' });
+            stat: left > 0 ? 'lädt ' + Math.ceil(left) + ' s' : 'bereit', tip: slotTip('rockets', p.cfg) });
          if (sel) {
             map.mode = 'rockets'; map.range = rk.range;
             const dd = Math.hypot(c.aim.point.x - p.pos.x, c.aim.point.y - p.pos.y);
@@ -460,7 +462,7 @@ export class MissileUi {
          const ready = ti.readyCount > 0;
          list.push({ id: 'torp', key: '5', icon: 'TORP', name: 'Torpedo', count: ready ? ti.readyCount + '/' + ti.total : '0/' + ti.total, sel: ctl.mode === 'torp', ready, none: false,
             frac: ready ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1)), stat: (ready ? 'bereit' : ti.reload.toFixed(0) + ' s') + ' · ' + (ti.spread === 'wide' ? 'weit' : 'eng'),
-            tip: 'Torpedos (5) · 5 erneut: Fächer eng / weit' });
+            tip: slotTip('torp', p.cfg) });
       }
       if (map.mode && ctl.mapOpen) {
          const pt = this._mapPoint(world, p, c.W, c.H);
@@ -755,5 +757,6 @@ export function mapTargetHint(ui) {
    const m = ui.mx?.map;
    if (!m || !m.mode) return '';
    const verb = isTouch() ? 'antippen' : 'anklicken';
-   return m.mode === 'cruise' ? 'MARSCHFLUGKÖRPER – Punkt oder Landstellung ' + verb : 'RAKETEN – Zielpunkt ' + verb;
+   // the cruise line says what the weapon is good for; short enough for a phone chart
+   return m.mode === 'cruise' ? 'MARSCHFLUGKÖRPER – Landstellung oder Punkt im Ring ' + verb + (isTouch() ? '' : '  ·  fahrende Schiffe trifft er nicht') : 'RAKETEN – Zielpunkt ' + verb;
 }
