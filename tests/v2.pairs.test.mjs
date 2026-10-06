@@ -1,5 +1,6 @@
 // V2 ship-versus-ship fairness: same-tier west-versus-east bot duels on a small fixed seed set, both sides
-// swapped. Each pair must stay within 65/35 (15 seeds per order: neither ship wins more than 19 of 30).
+// swapped. Each pair must stay within 65/35 (15 seeds per order: neither ship wins more than 19 of 30),
+// the two pairs at the end within 60/40 (no more than 18 of 30).
 // The wider measurement (40+ runs per order, three difficulties) is tests/v2.balance.mjs, section "duel".
 import { test } from 'node:test';
 import assert from 'node:assert';
@@ -31,5 +32,12 @@ for (const [a, b] of [['Sachsen', 'Gorschkow'], ['Slawa', 'Ticonderoga'], ['Tico
    test(`pair ${a} vs ${b} stays within 65/35`, () => {
       const [pa, pb] = split(a, b);
       assert.ok(pa <= 19.5 && pb <= 19.5, `${a} ${pa} : ${b} ${pb} of ${SEEDS.length * 2}`);
+   });
+}
+// the two pairs that were lopsided (corvettes 77/23, cruisers 38/62 on 300 duels) are held to 60/40
+for (const [a, b] of [['Braunschweig', 'BuyanM'], ['Slawa', 'Typ055']]) {
+   test(`pair ${a} vs ${b} stays within 60/40`, () => {
+      const [pa, pb] = split(a, b);
+      assert.ok(pa <= 18 && pb <= 18, `${a} ${pa} : ${b} ${pb} of ${SEEDS.length * 2}`);
    });
 }

@@ -230,6 +230,20 @@ test('hormus: two tankers lost = defeat, the sub objective counts', () => {
    fast(w, 1);
    assert.equal(w.phase, 'lost');
 });
+test('hormus: the first wave has the boats of WEST_TUNE, with a captain on the corvette `coopBoats` more', () => {
+   for (const diff of ['easy', 'normal', 'hard']) {
+      const T = WEST_TUNE.hormus[diff];
+      assert.ok(T.boats >= 3 && T.boats <= 7 && Math.abs(T.coopBoats) <= 2 && T.boats + T.coopBoats >= 3, diff);
+      const w = new World(diff, { mission: 'hormus', ship: 'Sachsen', seed: 7 });
+      fast(w, 45);
+      assert.equal(w._script.boats, T.boats, diff + ': one captain');
+      const classes = ['Sachsen', 'Sachsen'];
+      const n = buildNetWorld({ mission: 'hormus', difficulty: diff, seed: 7, classes, loadouts: [null, null], names: ['Kpt0', 'Kpt1'], self: 0 });
+      assert.equal(n.net.humans[1], n._script.escort, 'the second captain sails the corvette');
+      fast(n, 45);
+      assert.equal(n._script.boats, T.boats + T.coopBoats, diff + ': two captains');
+   }
+});
 
 // ---------------------------------------------------------------- 2. Rotes Meer
 test('redsea: waves are launched from hidden ramps, a ramp that fired is located, the magazines run down', () => {
