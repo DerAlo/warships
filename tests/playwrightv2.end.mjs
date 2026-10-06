@@ -89,7 +89,7 @@ for (const view of ONLY) {
          check(T + 'mission name, reason, ship and duration', r.mis.length > 4 && r.reason.length > 4 && /Dauer \d+:\d\d/.test(r.meta) && /Gegner \S+/.test(r.meta), { mis: r.mis, reason: r.reason, meta: r.meta });
          check(T + 'objectives listed with their marks', r.objs.length === forced.objs && r.objs.every(o => /^(done:✔|failed:✘)$/.test(o)) && (win ? r.objs.every(o => o === 'done:✔') : r.objs.some(o => o === 'failed:✘')), r.objs);
          check(T + (win ? 'clasp awarded (silver: all optional objectives met)' : 'no clasp on a loss'), win ? /^◆◆ Silberne Spange verliehen$/.test(r.medal) : r.medal === '', r.medal);
-         check(T + 'reward table with a total, earnings counted up', r.rw.length >= 2 && /Gesamt.*EP.*Mark/.test(r.rw[r.rw.length - 1]) && /\d/.test(r.earn) && (!win || !/^0\s*ERFAHRUNG/.test(r.earn)), { rw: r.rw.slice(-2), earn: r.earn });
+         check(T + 'reward table with a total, earnings counted up', r.rw.length >= 2 && /Gesamt.*EP.*Budget/.test(r.rw[r.rw.length - 1]) && /\d/.test(r.earn) && (!win || !/^0\s*ERFAHRUNG/.test(r.earn)), { rw: r.rw.slice(-2), earn: r.earn });
          const want = ['again', 'next', 'port'];
          check(T + 'buttons: again, next operation, port — inside the screen' + (V.touch ? ', at least 40 px' : ''), want.every(a => r.btns.some(b => b.act === a && b.in && (!V.touch || (b.h >= 40 && b.w >= 40)))), r.btns);
          check(T + 'sheet, head and foot inside the screen, the body keeps room', r.sheetIn && r.headIn && r.footIn && r.bodyH >= 90, { bodyH: r.bodyH, scrolls: r.scrolls });

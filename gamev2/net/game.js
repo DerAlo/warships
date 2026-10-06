@@ -84,6 +84,7 @@ export function createNetGame(session, hooks) {
    // host migration (client side)
    let succ = null;                  // the successor the host named
    let mig = null;                   // successor: the newest full state from the host
+   const migLate = [];               // successor: the missiles launched since (host.js migLate)
    let orphan = 0;                   // when the host was lost (waiting for the successor)
    let startIn = null, myTeam = 0, mySlot = 0, flipNow = false;
    const pend = [];                  // messages of the successor that overtook its announcement
@@ -223,7 +224,9 @@ export function createNetGame(session, hooks) {
       const m = mig, oldHost = hostId, since = orphan;
       try {
          const h = replica.handover();
-         const lossInfo = restoreWorld(world, m, { flip: flipNow, tick: h.tick, seen: h.seen, torps: h.torps, mids: h.mids, me: world.player });
+         const lossInfo = restoreWorld(world, m, { flip: flipNow, tick: h.tick, seen: h.seen, torps: h.torps, mids: h.mids, me: world.player,
+            late: migLate.filter(e => e.t > m.t) });
+         migLate.length = 0;
          h.own();
          world.player.human = false; world.player.isPlayer = true;
          const humans = world.net.humans, pl = Array.isArray(m.pl) ? m.pl : [];
@@ -266,6 +269,7 @@ export function createNetGame(session, hooks) {
    // Another client took over: the replica listens to it from now on.
    function adopt(id, m) {
       if (done || lostText || !replica || replica.ended) return;
+      migLate.length = 0;
       hostId = id; orphan = 0; succ = null; heir = null;
       tp._setHost?.(id);
       flipNow = pvp && !!m.team && myTeam !== m.team;
@@ -298,7 +302,16 @@ export function createNetGame(session, hooks) {
    });
    let migAsm = null;
    tp.on('migc', (d, from) => {
-      if (isHost || from !== hostId || !d || d.k !== 'migc' || typeof d.s !== 'string') return;
+      if (isHost || from !== hostId || !d) return;
+      // the missiles launched since the last full state (host.js migLate); kept until a newer full state has them
+      if (d.k === 'migm') {
+         if (!(d.t >= 0) || !d.ms || typeof d.ms !== 'object') return;
+         if (hooks.measure) stat.in += size(d);
+         while (migLate.length && (migLate.length >= 240 || (mig && migLate[0].t <= mig.t))) migLate.shift();
+         migLate.push({ t: d.t, tm: +d.tm || 0, ms: d.ms });
+         return;
+      }
+      if (d.k !== 'migc' || typeof d.s !== 'string') return;
       if (!(d.n > 0 && d.n <= 64 && d.i >= 0 && d.i < d.n)) return;
       if (hooks.measure) stat.in += size(d);
       if (!migAsm || d.t > migAsm.t) migAsm = { t: d.t, n: d.n, got: 0, parts: new Array(d.n) };

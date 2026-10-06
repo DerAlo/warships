@@ -564,15 +564,30 @@ export function packV2(world) {
       at: world.torpedoes.filter(t => t.asw && t.alive).map(t => [t.id, t.homeId, r1(t.tx), r1(t.ty), r3(t.speed), t.speedKn, t.arm, t.locked ? 1 : 0]),
    };
 }
+// The missiles launched since the last full state, in full (host.js sends them to the successor in
+// the tick they start: a host that vanishes leaves a full state up to a second old).
+export function packMissiles(list) { return rows(list); }
 // v: packV2 of the old host; flip: this World sails the other team as 'player'; dtm: the state's age (s)
 // mids: the missiles the successor's newest snapshot carried; one it should have seen (its own, or
 // a tracked one) and that is missing there was shot down or hit in the meantime
-export function restoreV2(world, v, flip = false, dtm = 0, mids = null) {
+// late: { tick: of that snapshot, list: [{ t, tm, ms: packMissiles }] } the launches after the full state
+export function restoreV2(world, v, flip = false, dtm = 0, mids = null, late = null) {
    if (!v || typeof v !== 'object') return;
    const sideOf = (s) => flipS(s, flip);
    world.missiles = unrows(v.ms, flip);
-   if (mids) world.missiles = world.missiles.filter(m => mids.has(m.id) || !(m.side === 'player' || m.detected));
-   for (const m of world.missiles) { m.x += Math.cos(m.heading) * m.speed * dtm; m.y += Math.sin(m.heading) * m.speed * dtm; m.px = m.x; m.py = m.y; }
+   const age = new Map(), young = new Set(), added = [];
+   for (const m of world.missiles) age.set(m.id, dtm);
+   if (late && Array.isArray(late.list)) for (const e of late.list) {
+      if (!e || !(e.t >= 0)) continue;
+      for (const m of unrows(e.ms, flip)) {
+         if (typeof m.id !== 'number' || age.has(m.id) || !m.alive || !Number.isFinite(m.x + m.y + m.heading + m.speed)) continue;
+         age.set(m.id, Math.max(0, late.tick * (1 / 60) - (e.tm || 0)));
+         if (e.t > late.tick) young.add(m.id);      // younger than the newest snapshot: it cannot be in there
+         world.missiles.push(m); added.push(m);
+      }
+   }
+   if (mids) world.missiles = world.missiles.filter(m => mids.has(m.id) || young.has(m.id) || !(m.side === 'player' || m.detected));
+   for (const m of world.missiles) { const d = age.get(m.id) || 0; m.x += Math.cos(m.heading) * m.speed * d; m.y += Math.sin(m.heading) * m.speed * d; m.px = m.x; m.py = m.y; }
    world.helos = unrows(v.hl, flip);
    if (flip) for (const h of world.helos) { const a = h.visible; h.visible = h.visE; h.visE = a; }
    world.teams = unrows(v.tm, flip);
@@ -589,6 +604,12 @@ export function restoreV2(world, v, flip = false, dtm = 0, mids = null) {
       SITE_KEYS.forEach((k, i) => { const x = r[1 + i]; if (x !== null || k === 'samPriority' || k === 'salvoTgt') s[k] = x; });
       if (!s.samCh) delete s.samCh;
       s.esmSeen = null;
+   }
+   // the launcher's magazine in the full state is the one from before these launches
+   for (const m of added) {
+      if (m.sqId != null || m.ownerId == null) continue;
+      const P = world.shipById(m.ownerId) || siteById(world, m.ownerId);
+      if (P && P.mag && P.mag[m.type] > 0) P.mag[m.type]--;
    }
    const at = new Map((v.at || []).map(r => [r[0], r]));
    for (const t of world.torpedoes) {

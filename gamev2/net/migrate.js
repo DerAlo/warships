@@ -335,11 +335,11 @@ export function restoreWorld(world, m, o) {
    world.torpedoes = torps;
    const squads = restoreSquads(world, m, o, dtm);
    // missiles, helicopters, teams, task points, blasts, decoys, the land sites' state (v2.js)
-   restoreV2(world, m.v2, flip, dtm, o.mids);
+   restoreV2(world, m.v2, flip, dtm, o.mids, o.late ? { tick: o.tick, list: o.late } : null);
    const shells = world.shells.length;
    world.shells = [];
    if (world.depthCharges) for (const d of world.depthCharges) d.alive = false;
-   world._nextId = Math.max(m.nid || 1, 1 + Math.max(0, ...world.roster.map(s => s.id))) + 1000;
+   world._nextId = Math.max(m.nid || 1, 1 + Math.max(0, ...world.roster.map(s => s.id)), 1 + Math.max(0, ...world.missiles.map(x => x.id))) + 1000;
    const me = o.me;
    if (me) { me.human = false; me.isPlayer = true; }
    return { shells, timers: timersLost, squads };

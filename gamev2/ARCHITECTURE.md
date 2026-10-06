@@ -220,7 +220,8 @@ menu.loadout(ship)                   // career snapshot { modules, skills } -> n
 
 - `startGame(opts)` always builds a fresh `World` and calls `renderer.buildWorld(world)`, which
   clears every per-match GPU resource first; GPU memory stays flat across restarts
-  (`tests/playtest3d.mjs` logs `renderer.info.memory` per round).
+  (`tests/playtest3d.mjs` logs `renderer.info.memory` per round). `toMenu()` makes the same call with
+  the empty world, so the menu holds no battle scene (`tests/playwrightv2.leak.mjs`).
 - The end screen appears ~2.5 s after `world.phase` turns `won`/`lost` (sinking / ending shot).
 - Progress (unlocked missions, best results) lives in `localStorage['warshipsv2.progress.v1']`.
 - Visual scale: the sim runs ~5x time-compressed (`KN_TO_MS` ~2.6 m/s per knot), so time-based

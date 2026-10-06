@@ -643,7 +643,7 @@ export class Menu3D {
             }).join('')}</div>
             <div class="bt"><button class="warn" data-cap="reset">PROFIL ZURÜCKSETZEN</button><span style="flex:1"></span>
                <button data-cap="respec" ${pf.skills.length ? '' : 'disabled'}>NEU VERTEILEN</button><button class="pri" data-cap="close">FERTIG</button></div>
-            ${confirm ? `<div class="m3-confirm"><span>Wirklich zurücksetzen? EP, Mark, in Dienst gestellte Schiffe, Umbauten und Lehrgänge gehen verloren. Spangen und Einsatzsiege bleiben erhalten.</span>
+            ${confirm ? `<div class="m3-confirm"><span>Wirklich zurücksetzen? EP, Budget, in Dienst gestellte Schiffe, Umbauten und Lehrgänge gehen verloren. Spangen und Einsatzsiege bleiben erhalten.</span>
                <button data-cap="no">ABBRECHEN</button><button class="warn" data-cap="yes">ZURÜCKSETZEN</button></div>` : ''}
          </div>`;
       const act = (sel, fn) => el.querySelector(sel)?.addEventListener('click', () => { fn(); this.cb.onClick?.(); });
@@ -673,12 +673,12 @@ export class Menu3D {
       const shipLocked = !this._unlocked(k0), cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
       const need = shipLocked ? unlockNeeds(pf, k0) : null, crCost = UNLOCK_CREDITS[k0] || 0;
       const needTxt = need ? [need.req ? `Erfordert ${SHIPS[need.req]?.name || need.req}` : '', need.xp ? `Noch ${fmtInt(need.xp)} EP benötigt` : '',
-         need.credits ? `Noch ${fmtInt(need.credits)} Mark benötigt` : ''].filter(Boolean).join(' · ') : '';
+         need.credits ? `Noch ${fmtInt(need.credits)} Budget benötigt` : ''].filter(Boolean).join(' · ') : '';
       const prog = !S ? '' : shipLocked ? `<div class="m3-prog">
-            <div class="m3-h"><span>Indienststellung</span><span>${fmtInt(pf.xp)} EP · ${fmtInt(pf.credits)} Mark</span></div>
-            <button class="m3-buy big" data-act="unlock" ${canUnlock(pf, k0) ? '' : 'disabled'}>IN DIENST STELLEN · ${fmtInt(UNLOCK_XP[k0])} EP${crCost ? ` · ${fmtInt(crCost)} Mark` : ''}</button>
+            <div class="m3-h"><span>Indienststellung</span><span>${fmtInt(pf.xp)} EP · ${fmtInt(pf.credits)} Budget</span></div>
+            <button class="m3-buy big" data-act="unlock" ${canUnlock(pf, k0) ? '' : 'disabled'}>IN DIENST STELLEN · ${fmtInt(UNLOCK_XP[k0])} EP${crCost ? ` · ${fmtInt(crCost)} Budget` : ''}</button>
             ${needTxt ? `<div class="hint">${esc(needTxt)}</div>` : ''}</div>`
-         : `<div class="m3-prog"><div class="m3-h"><span>Umbauten</span><span>${fmtInt(pf.credits)} Mark</span></div>
+         : `<div class="m3-prog"><div class="m3-h"><span>Umbauten</span><span>${fmtInt(pf.credits)} Budget</span></div>
             ${MODULES.map(d => {
                const t = moduleTier(pf, k0, d.key), c = moduleCost(pf, k0, d.key);
                return `<div class="m3-mod"><span class="n">${d.name}</span><span class="m3-pips">${d.tiers.map((_, i) => `<i class="${i < t ? 'on' : ''}"></i>`).join('')}</span>
@@ -747,11 +747,11 @@ export class Menu3D {
       const card = (k, i, list) => {
          const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !this._unlocked(k), cr = UNLOCK_CREDITS[k] || 0;
          const gs = i > 0 && SHIP_STATS[list[i - 1]].type !== st.type;
-         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Noch nicht in Dienst — mit EP und Mark in Dienst stellen' : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
+         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Noch nicht in Dienst — mit EP und Budget in Dienst stellen' : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
             ${m.recommendedShip === k && ok ? '<span class="rec">VORGESCHLAGEN</span>' : ''}
             <div class="hd"><span class="tr">${st.tier}</span>${classSvg(st.type, 13)}<span class="nm2">${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
             ${silhouetteSvg(k)}
-            ${ok ? (lk ? `<div class="lk">${icon('lock', 18)}<span>${fmtInt(UNLOCK_XP[k])} EP</span>${cr ? `<span class="kr">${fmtInt(cr)} Mark</span>` : ''}</div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}
+            ${ok ? (lk ? `<div class="lk">${icon('lock', 18)}<span>${fmtInt(UNLOCK_XP[k])} EP</span>${cr ? `<span class="kr">${fmtInt(cr)} Budget</span>` : ''}</div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}
          </div>`;
       };
       const cards = tab === 'all'
@@ -779,7 +779,7 @@ export class Menu3D {
             <div class="m3-go"><button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst in Dienst stellen"' : 'title="Auslaufen (Enter)"'}>AUSLAUFEN</button></div>
             <div class="m3-mr">
                <div class="m3-foe"><span>Gegner</span><div>${DIFFS.map(([k, l]) => `<button data-diff="${k}" class="${k === this.difficulty ? 'sel' : ''}" title="Gegner: ${l}">${l}</button>`).join('')}</div></div>
-               <div class="m3-acct"><div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b>EP</span><span><b>${fmtInt(pf.credits)}</b>Mark</span></div>
+               <div class="m3-acct"><div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b>EP</span><span><b>${fmtInt(pf.credits)}</b>Budget</span></div>
                   <button class="m3-help" data-act="help" title="So kämpfst du">?</button></div>
             </div>
          </div>
@@ -848,8 +848,8 @@ export class Menu3D {
       if (!world._careerBooked) { world._careerBooked = true; grantRewards(pf, rw); this._saveProfile(); }
       const lvl1 = captainLevel(pf.totalXp).level, newShips = PLAYABLE.filter(k => canUnlock(pf, k) && !canBefore.includes(k));
       const rwBox = `<div class="m3r-rw"><div class="m3-h"><span>Belohnung</span><span>${rw.mult && rw.mult !== 1 ? 'Schwierigkeit ×' + String(rw.mult).replace('.', ',') : ''}</span></div>
-         <table>${rw.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="xp">${fmtInt(l.xp)} EP</td><td class="cr">${fmtInt(l.credits)} Mark</td></tr>`).join('')}
-         <tr class="sum"><td>Gesamt</td><td class="xp">${fmtInt(rw.xp)} EP</td><td class="cr">${fmtInt(rw.credits)} Mark</td></tr></table>
+         <table>${rw.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="xp">${fmtInt(l.xp)} EP</td><td class="cr">${fmtInt(l.credits)} Budget</td></tr>`).join('')}
+         <tr class="sum"><td>Gesamt</td><td class="xp">${fmtInt(rw.xp)} EP</td><td class="cr">${fmtInt(rw.credits)} Budget</td></tr></table>
          ${lvl1 > lvl0 ? `<div class="m3r-note">Kommandant erreicht Stufe ${lvl1} · +${lvl1 - lvl0} Lehrgangspunkt${lvl1 - lvl0 > 1 ? 'e' : ''}</div>` : ''}
          ${newShips.length ? `<div class="m3r-note">Kann in Dienst gestellt werden: ${newShips.map(k => esc(SHIPS[k].name)).join(', ')}</div>` : ''}</div>`;
       const rec = pr.missions[opts.mission] || { won: false, best: 0, plays: 0 };
@@ -908,7 +908,7 @@ export class Menu3D {
                ${isOp && m.debrief ? `<div class="m3r-hist"><b>LAGE NACH DEM EINSATZ</b>${esc(m.debrief)}</div>` : ''}</div>
          </div>
          <div class="m3r-foot">
-            <div class="m3r-earn"><div class="xp"><b data-count="${res.xp || 0}">0</b><span>ERFAHRUNG</span></div><div class="cr"><b data-count="${res.credits || 0}">0</b><span>MARK</span></div></div>
+            <div class="m3r-earn"><div class="xp"><b data-count="${res.xp || 0}">0</b><span>ERFAHRUNG</span></div><div class="cr"><b data-count="${res.credits || 0}">0</b><span>BUDGET</span></div></div>
             <div class="m3r-btns">${extra.net ? `
                <button class="m3r-btn pri" data-act="port">ZUR LOBBY</button>` : `
                <button class="m3r-btn pri" data-act="again">NOCHMAL</button>

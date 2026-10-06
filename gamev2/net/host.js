@@ -19,7 +19,7 @@ import { encodeShips, encodeOwn, visibleTo } from './codec.js';
 import { mirrorEvent, mirrorLog, mirrorReason } from './pvp.js';
 import { MIG_EVERY, packWorld, packScript, scriptSig } from './migrate.js';
 const MIG_CHUNK = 9000;   // characters of a full-state message per piece (transport limit about 16 kB)
-import { encodeV2, encodeOwnV2, slowV2, v2EventFor } from './v2.js';
+import { encodeV2, encodeOwnV2, slowV2, v2EventFor, packMissiles } from './v2.js';
 
 export const SNAP_EVERY = 3;        // sim steps between snapshots (20 Hz)
 const STATE_EVERY = 15;             // slow state (score, caps, timer, weather): 4 Hz
@@ -85,7 +85,7 @@ export function makeHost(world, o) {
    // host migration
    const self = o.self || { id: '', slot: 0 };
    let rejected = 0;
-   let succId = null, migAt = -1e9, migSig = '', migBytes = 0, migCount = 0;
+   let succId = null, migAt = -1e9, migSig = '', migBytes = 0, migCount = 0, migNext = 0;
    let snapBytes = 0, snapCount = 0, snapPeak = 0, slowBytes = 0;
    const buf = new ArrayBuffer(32768), dv = new DataView(buf), u8 = new Uint8Array(buf);
    const P = World.prototype;
@@ -442,6 +442,16 @@ export function makeHost(world, o) {
       for (const c of clients.values()) if (!c.gone && !c.back) return c.id;
       return null;
    }
+   // Between two full states: the missiles launched since go to the successor in full, in the tick
+   // they start (reliable, a few hundred bytes each). Without them a host that vanishes takes every
+   // missile of its last second with it: the snapshots do not carry what a missile needs to fly on.
+   function migLate(tick, sid) {
+      let list = null;
+      for (const m of world.missiles) if (m.id >= migNext && m.alive) (list || (list = [])).push(m);
+      migNext = world._nextId;
+      // (a whole salvo in one tick: several messages, each far below the transport limit)
+      if (list) for (let i = 0; i < list.length; i += 12) o.send('migc', { k: 'migm', t: tick, tm: r3(world.time), ms: packMissiles(list.slice(i, i + 12)) }, sid);
+   }
    function migrate(tick) {
       if (o.migrate === false) return;
       const sid = successor();
@@ -449,12 +459,12 @@ export function makeHost(world, o) {
       if (!sid) return;
       let scr;
       if (tick - migAt < MIG_EVERY) {
-         if (tick % STATE_EVERY !== 0 || !world._script) return;
+         if (tick % STATE_EVERY !== 0 || !world._script) { migLate(tick, sid); return; }
          scr = packScript(world);
-         if (scriptSig(scr) === migSig) return;
+         if (scriptSig(scr) === migSig) { migLate(tick, sid); return; }
       }
       if (scr === undefined) scr = packScript(world);
-      migSig = scriptSig(scr); migAt = tick;
+      migSig = scriptSig(scr); migAt = tick; migNext = world._nextId;
       const pl = [[self.id, self.slot, 0]];
       for (const c of clients.values()) pl.push([c.id, c.ship.slot, c.gone || c.back ? 1 : 0]);
       const m = { k: 'mig', ...packWorld(world, { pl, scr }) };

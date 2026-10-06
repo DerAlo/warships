@@ -14,6 +14,8 @@
 
 const LOOK_GAIN = 1.25;          // camera px per finger px (mouse px equivalent)
 const PINCH_GAIN = 5;            // wheel notches per e-fold of finger distance
+import { tacticalMapRect } from './missileui.js';
+
 const REFRESH = 0.2;             // s between state refreshes of the buttons
 const TELE_STEPS = [4, 3, 2, 1, 0, -1];
 const TELE_TXT = { 4: 'Voll', 3: '3/4', 2: '1/2', 1: '1/4', 0: 'Stopp', '-1': 'Zurück' };
@@ -44,6 +46,9 @@ body.touch canvas#scene3d { touch-action: none; }
 .tu-btn.off { opacity: .35; }
 #tu-fire { right: calc(18px + var(--sr)); bottom: calc(18px + var(--sb)); width: 104px; height: 104px; border: 3px solid var(--signal-hi);
    background: radial-gradient(circle, rgba(179,53,42,.55), rgba(125,34,25,.4)); font: 700 15px var(--font-cond); letter-spacing: 2px; color: var(--flag-w); }
+/* the open chart's own way back, at its top corner (placed by _placeChartX from the chart rectangle) */
+#tu-chartx { display: none; width: 48px; height: 48px; border-radius: 3px; border-color: var(--signal-hi); font-size: 9px; }
+body.touch.tu-chart #tu-chartx { display: flex; }
 #tu-fire.press { background: radial-gradient(circle, rgba(210,70,52,.85), rgba(125,34,25,.7)); }
 #tu-scope { right: calc(132px + var(--sr)); bottom: calc(18px + var(--sb)); }
 #tu-lock { right: calc(132px + var(--sr)); bottom: calc(86px + var(--sb)); }
@@ -180,7 +185,9 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    body.touch:has(#mx-threat:not(.hidden)) #tu-hud-o { display: none; }   /* an incoming salvo takes the band */
    /* notices stack under the minimap (TouchUi._arrange), clear of the reticle, the target marker and the ship
       labels: the newest three, the oldest clipped first. They stay readable while a finger aims. */
-   body.touch #tu-hud-r > #msgs { zoom: 1; width: auto; max-width: 286px; max-height: 96px; align-items: flex-end; justify-content: flex-end; overflow: hidden; }
+   body.touch #tu-hud-r > #msgs { zoom: 1; width: auto; max-width: 286px; max-height: 96px; align-items: flex-end; justify-content: flex-end; overflow: hidden;
+      flex-shrink: 1000; min-height: 0; }   /* the notices give way (oldest first), the hit tally below them stays in view; */
+   body.touch #tu-hud-r > #tally { flex-shrink: 1; min-height: 0; }   /* only the newest notice in full (min-height, _refresh) comes before it */
    body.touch #tu-hud-r > #msgs:empty { display: none; }
    body.touch #msgs .msg:nth-last-child(n+4) { display: none; }
    body.touch .msg, body.touch .msg.radio { max-width: 286px; font-size: 12px; }
@@ -237,6 +244,7 @@ const ICON = {
    scope: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="14" r="4"/><circle cx="17" cy="14" r="4"/><path d="M10 12h4M5 10l2-5h3M19 10l-2-5h-3"/></svg>',
    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg>',
    free: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
    rotate: '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="17" y="6" width="14" height="24" rx="2"/><rect x="10" y="27" width="28" height="15" rx="2" stroke-dasharray="3 3"/><path d="M38 14a12 12 0 0 1 2 10l-3-2M40 24l2-3"/></svg>',
 };
 
@@ -315,6 +323,7 @@ export class TouchUi {
       const scope = btn('tu-scope', '', ICON.scope + 'Glas');
       const lock = btn('tu-lock', '', ICON.lock + 'Ziel');
       const free = btn('tu-free', '', ICON.free + 'Frei');
+      const chartX = btn('tu-chartx', '', ICON.close + 'Zu');
       const col = el('div', 'tu-col'); root.appendChild(col);
       const bar = el('div', 'tu-bar'); root.appendChild(bar);
       const ctx = {
@@ -333,7 +342,7 @@ export class TouchUi {
       const host = document.getElementById('app') || document.body;
       host.appendChild(root);
       this.dom = { root, bPause, bMap, bBoard, bHelp, bMore, tele, kn: tele.querySelector('.tu-kn'), steps: [...tele.querySelectorAll('.tu-st')],
-         rud, thumb: rud.querySelector('.tu-th'), rudL: rud.querySelector('.tu-rl'), fire, scope, lock, free, ctx, air };
+         rud, thumb: rud.querySelector('.tu-th'), rudL: rud.querySelector('.tu-rl'), fire, scope, lock, free, chartX, ctx, air };
 
       // help: a touch section in front of the key list
       const help = document.querySelector('#help-panel .controls-grid');
@@ -352,13 +361,16 @@ export class TouchUi {
       for (const b of [ctx.sec, ctx.aa]) b.addEventListener('pointerup', () => { if (this.more) this.moreT = MORE_OPEN; });
       this._press(bBoard, () => { this.board = !this.board; this.input.virtualKey('TAB', this.board); setCls(bBoard, 'on', this.board); });
       tap(scope, 'SHIFT'); tap(lock, 'X');
+      // (the button goes at once; the next refresh puts it back if the chart stayed up)
+      this._press(chartX, () => { this.input.virtualTap('M'); setCls(document.body, 'tu-chart', false); });
       this._press(free, () => { const on = !this.held.has('C'); this._hold('C', on); setCls(free, 'on', on); });
       this._press(ctx.sec, () => { this.input.mouse.ctrlClicks++; });   // = Ctrl+click: secondary target
       tap(ctx.asw, 'G'); tap(ctx.aa, '4'); tap(ctx.dive, 'F'); tap(ctx.up, 'G');
       tap(ctx.launch, 'E'); tap(ctx.ship, 'E'); tap(ctx.recall, 'F');
       for (const b of air) tap(b, b.dataset.k);
       // fire: LMB semantics (hold = keep firing / carrier attack run, release = drop)
-      this._press(fire, () => { this.input.mouse.down = true; this.input.mouse.clicked = true; },
+      // (_FIRE: the press itself, for the open chart of a map-aimed weapon, where the ship's fire is held)
+      this._press(fire, () => { this.input.mouse.down = true; this.input.mouse.clicked = true; this.input.virtualTap('_FIRE'); },
          () => { this.input.mouse.down = false; });
       // telegraph lever: absolute steps on the ship, held W / S in the squadron view
       this._drag(tele, (e, phase) => {
@@ -575,6 +587,18 @@ export class TouchUi {
       this._refresh(this.api.state());
    }
 
+   // The chart's close button sits outside the chart's top corner: on the right, on a phone on the left
+   // (the notices stack on its right there). The chart rectangle is the one hud3d.js paints.
+   _placeChartX() {
+      const W = window.innerWidth, H = window.innerHeight, left = !!this.mq?.compact.matches, k = W + 'x' + H + left;
+      if (k === this._cxk) return;
+      this._cxk = k;
+      const r = tacticalMapRect(W, H), st = this.dom.chartX.style;
+      st.top = r.y0 + 'px';
+      st.left = left ? 'auto' : (r.x0 + r.size + 8) + 'px';
+      st.right = left ? (W - r.x0 + 8) + 'px' : 'auto';
+   }
+
    _paintTele(n) { for (const s of this.dom.steps) setCls(s, 'on', Number(s.dataset.n) === n); }
    _paintRudder(n) {
       setLeft(this.dom.thumb, `calc(22px + (100% - 44px) * ${(n + 2) / 4})`);
@@ -593,9 +617,16 @@ export class TouchUi {
       const obj = document.getElementById('objectives'), ot = obj ? obj.textContent : '';
       if (ot !== this.objTxt) { this.objTxt = ot; this.objT = 0; } else this.objT += REFRESH;
       setCls(obj, 'tu-fresh', this.objT < OBJ_SHOW);
+      // phone: the notices give way to the hit tally under them (CSS), but the newest one keeps its full height
+      const mg = document.getElementById('msgs');
+      if (mg) {
+         const mh = this.mq.compact.matches && mg.lastElementChild ? Math.min(96, mg.lastElementChild.offsetHeight) : 0;
+         if (mh !== this.msgMin) { this.msgMin = mh; mg.style.minHeight = mh ? mh + 'px' : ''; }
+      }
       setCls(body, 'tu-cv', s.cv && !s.squad);
       setCls(body, 'tu-squad', s.squad);
       setCls(body, 'tu-chart', s.map);
+      if (s.map) this._placeChartX();
       setCls(d.tele, 'squad', s.squad);
       if (!s.squad) {
          // the squadron view closed under a held finger: its held keys must not step the ship's helm
@@ -635,7 +666,7 @@ export class TouchUi {
          setCls(b, 'hidden', !s.cv || s.squad || s.net);
          setCls(b, 'on', b.dataset.t === s.airSel);
       }
-      setText(d.fire, s.squad ? (s.sqType === 'ft' ? 'Patrouille' : 'Angriff') : s.mode === 'cruise' ? (s.map ? 'Ziel' : 'Karte') : s.mode === 'ssm' || s.mode === 'rockets' ? 'Start' : 'Feuer');
+      setText(d.fire, s.squad ? (s.sqType === 'ft' ? 'Patrouille' : 'Angriff') : s.map && (s.mode === 'cruise' || s.mode === 'rockets') ? (s.mark ? 'Start' : 'Ziel') : s.mode === 'cruise' ? 'Karte' : s.mode === 'ssm' || s.mode === 'rockets' ? 'Start' : 'Feuer');
    }
 }
 
@@ -650,7 +681,7 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Zielhilfe</span><span class="d">Erfasstes Ziel: das Fadenkreuz folgt dem Vorhalt, Wischen korrigiert (nicht im PvP, im Pausenmenü abschaltbar)</span></div>
    <div><span class="k">Waffenleiste</span><span class="d">Geschütz, Seezielflugkörper, Marschflugkörper, Raketen, Torpedos antippen · nochmals: Flugkörpertyp bzw. Torpedofächer</span></div>
    <div><span class="k">Seezielflugkörper</span><span class="d">Ziel erfassen oder anvisieren, dann Start · ohne Ziel: Peilungsschuss in Blickrichtung</span></div>
-   <div><span class="k">Marschflugkörper</span><span class="d">Antippen öffnet die Lagekarte · Punkt oder Landstellung auf der Karte antippen</span></div>
+   <div><span class="k">Marschflugkörper</span><span class="d">Antippen öffnet die Lagekarte · Punkt oder Landstellung auf der Karte antippen · Start bei offener Karte: noch einer auf das markierte Ziel</span></div>
    <div><span class="k">Radar · Luftabwehr · Vorrang</span><span class="d">Felder über der Waffenleiste antippen: Radar an/aus (EMCON) · Doktrin wechseln · anfliegenden Flugkörper in Blickrichtung zum Vorrangziel machen</span></div>
    <div><span class="k">Runde Felder</span><span class="d">Schadensabwehr, Notreparatur, Täuschkörper, Störsender</span></div>
    <div><span class="k">Träger</span><span class="d">Flugzeugtyp, Start/Übernehmen · Staffel: Leiste links = Kurs, Hebel = Tempo, Schiff, Rückruf</span></div>
@@ -658,5 +689,5 @@ const TOUCH_HELP_HTML = `<div class="sb-title" style="font-size:13px">Touch-Steu
    <div><span class="k">Hubschrauber</span><span class="d">Feld antippen: Start voraus / Rückruf · bei offener Lagekarte: Feld, dann Punkt auf der Karte antippen</span></div>
    <div><span class="k">Kommandotrupp</span><span class="d">U-Boot nahe am Einsatzpunkt, langsam, höchstens auf Sehrohrtiefe: Feld antippen · zur Aufnahme zum Trupp zurück</span></div>
    <div><span class="k">Knopfleiste oben</span><span class="d">Pause · Lagekarte · Übersicht · Hilfe · am Handy klappt ⋯ Karte, Übersicht, Hilfe, Luftabwehr und Sek.-Ziel aus</span></div>
-   <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte</span></div>
+   <div><span class="k">Minikarte</span><span class="d">Antippen: große Lagekarte · „Zu“ neben der Karte schließt sie</span></div>
 </div>`;
