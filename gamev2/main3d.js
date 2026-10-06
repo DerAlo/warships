@@ -163,6 +163,7 @@ function touchState() {
       map: ctl.mapOpen, help: ctl.help, bino: !!cam3.bino, free: !!cam3.freeLook, lock: ctl.lockId != null,
       cv: !!p.air, sub: !!p.sub, deep: !!p.sub && p.depth === 2, depthTarget: p.depthTarget ?? 0,
       sec: !!p.cfg?.sec, secTarget: p.secTarget != null, asw: !!p.asw || (!p.sub && !!p.cfg?.weapons?.asw), ltt: !p.sub && !!p.cfg?.weapons?.asw, aa: !!p.air && !!p.aa?.range, aaFocus: p.aaFocus || 0, net: !!net, mode: ctl.mode,
+      mark: !!mui.marked(world, ctl.mode),
       squad: !!airui.flying, sqType: sq?.type || null, sqHome: !!sq && (sq.state === 'return' || sq.state === 'land'),
       airSel: p.air?.sel || null, sqActive: !!(p.air && world && activeSquad(world, p, p.air.sel)),
    };
@@ -649,6 +650,8 @@ function frameInput(dt) {
    opsui.input(inp, p, world, act, mctx());
    // 2 / 3 / 4, R radar, V doctrine, T priority target, map targeting (missileui.js)
    mui.input(inp, p, world, act, mctx());
+   // touch: the fire button on the open chart of a map-aimed weapon (the ship's own fire is held there)
+   if (inp.tapped('_FIRE') && ctl.mapOpen && !opsui.mapMode && (ctl.mode === 'cruise' || ctl.mode === 'rockets')) mui.chartFire(p, world, act, ctl.mode);
    // touch: another weapon chosen on the cruise-missile chart puts the chart away (no second tap on the minimap)
    if (cruiseChart && touch.shown && !opsui.mapMode && (ctl.mode === 'guns' || ctl.mode === 'ssm' || ctl.mode === 'torp')) ctl.mapOpen = false;
    if (inp.tapped('SPACE')) inp.mouse.clicked = true;

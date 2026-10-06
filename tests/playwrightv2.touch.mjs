@@ -4,7 +4,7 @@
 // something on screen has to answer (a plate, a notice, the lever). One tap each: a control that
 // needs a second tap or stays silent fails here.
 // Covered: telegraph, rudder (tap and drag), weapon plates, fire, target lock (with and without a
-// target), the chart with a cruise-missile target, helicopter, consumables, glass, free look, pause,
+// target), the chart with a cruise-missile target (its close button, the fire button on it), helicopter, consumables, glass, free look, pause,
 // and on the submarine: depth and the swimmer team.
 // Exit code 1 on a failed check or any console error.
 //
@@ -176,6 +176,18 @@ const SEL = `[...document.querySelectorAll('#weapons .wslot')].map(e => e.classN
       await S.act('weapon plate 3 opens the chart for a cruise missile', `#weapons .wslot[data-key="3"]`, `window.__msgs()`, `window.__weaponSel() === 'cruise' && window.__ctl().mapOpen`, `window.__msgs() !== b`, { say: true });
       const fireTxt = await S.ev(() => document.getElementById('tu-fire').textContent);
       console.log('INFO fire button reads: ' + fireTxt);
+      // the chart's own close button: on screen, on top, a thumb wide
+      const cx = await S.ev(() => { const e = document.getElementById('tu-chartx'), r = e?.getBoundingClientRect(); if (!r || !r.width) return null;
+         const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+         return { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left), y: Math.round(r.top), top: top?.closest('#tu-chartx') != null, in: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight }; });
+      check(`${T}: the open chart shows its own close button (40 px or more, on top, on screen)`, !!cx && cx.top && cx.in && cx.w >= 40 && cx.h >= 40, JSON.stringify(cx));
+      // the fire button on the open chart with nothing marked: it says what to do, every time
+      const HINT = `/Ziel auf der Karte antippen/.test(window.__msgs())`;
+      check(`${T}: the fire button on the open chart reads "Ziel"`, /^ziel$/i.test(fireTxt.trim()), fireTxt);
+      await S.act('fire button on the open chart, nothing marked (a hint)', '#tu-fire', `0`, HINT, HINT, { say: true });
+      check(`${T}: that tap launched nothing and left the chart open`, await S.ev(() => window.__ctl().mapOpen && !window.__world().missiles.some(m => m.kind === 'cruise')));
+      await S.page.waitForFunction(() => !/Ziel auf der Karte antippen/.test(window.__msgs()), null, { timeout: 8000 }).catch(() => {});
+      await S.act('fire button on the open chart again (the hint again)', '#tu-fire', `0`, HINT, HINT, { say: true });
       // a point on the chart well clear of the plates: the middle of the screen, a little off the ship
       const pt = await S.ev(() => { const x = innerWidth / 2 + 46, y = innerHeight / 2 - 40; return { x, y, tag: document.elementFromPoint(x, y)?.tagName }; });
       check(`${T}: the chart point is free of plates`, pt.tag === 'CANVAS', pt.tag);
@@ -185,6 +197,17 @@ const SEL = `[...document.querySelectorAll('#weapons .wslot')].map(e => e.classN
       await S.shot('burke-cruise');
       await S.act('weapon plate 3 again closes the chart', `#weapons .wslot[data-key="3"]`, `0`, `window.__ctl().mapOpen === false`, `true`);
       await S.act('fire button in cruise mode opens the chart', '#tu-fire', `0`, `window.__ctl().mapOpen === true`, `true`);
+      // a target is marked now: the fire button reads "Start" and sends one more there
+      await S.page.waitForFunction(() => !/gestartet/.test(window.__msgs()), null, { timeout: 20000 }).catch(() => {});
+      await S.wait(3000);   // the launcher is ready again
+      const startTxt = await S.ev(() => document.getElementById('tu-fire').textContent);
+      check(`${T}: with a marked target the fire button on the chart reads "Start"`, /^start$/i.test(startTxt.trim()), startTxt);
+      const MAG = `window.__world().player.mag[window.__world().player.cfg.weapons.cruise.type]`;
+      await S.act('fire button on the open chart sends one more at the marked target', '#tu-fire', MAG, `${MAG} < b`, `/gestartet/.test(window.__msgs())`, { say: true, settle: 500 });
+      await S.shot('burke-cruise-again');
+      await S.act('the close button on the chart closes it', '#tu-chartx', `0`, `window.__ctl().mapOpen === false`, `getComputedStyle(document.getElementById('tu-chartx')).display === 'none'`);
+      check(`${T}: the cruise missile stays selected after the close button`, await S.ev(() => window.__weaponSel() === 'cruise' && !window.__ctl().mapOpen));
+      await S.act('fire button opens the chart again', '#tu-fire', `0`, `window.__ctl().mapOpen === true`, `true`);
       await S.act('weapon plate 1 (main) from the chart', `#weapons .wslot[data-key="1"]`, SEL, `window.__weaponSel() === 'main'`, `${SEL} !== b`);
       check(`${T}: choosing the guns on the cruise chart puts the chart away`, !(await S.ev(() => window.__ctl().mapOpen)));
    } else notes.push('burke: no cruise missile plate');

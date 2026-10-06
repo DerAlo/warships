@@ -86,6 +86,7 @@ function el(tag, id, cls, html) {
 }
 
 const MAX_THREATS = 12, MAX_ROWS = 4;
+const MARK_SECS = 60;            // s the last map target stays marked on the chart
 
 export class MissileUi {
    constructor({ hud, audio }) {
@@ -261,7 +262,7 @@ export class MissileUi {
          if (b) { this._deny('Marschflugkörper: ' + BLOCK_TEXT[b]); return false; }
          const ok = pt.siteId != null ? act(['K', pt.siteId]) : act(['k', pt.x, pt.y]);
          if (!ok) { this._deny('Marschflugkörper: ' + BLOCK_TEXT.reload); return false; }
-         this.lastTgt = { x: pt.sx ?? pt.x, y: pt.sy ?? pt.y, t: world.time };
+         this.lastTgt = { x: pt.sx ?? pt.x, y: pt.sy ?? pt.y, t: world.time, mode, siteId: pt.siteId ?? null };
          this.hud.msg(MISSILES[p.cfg.weapons.cruise.type].name + ' gestartet → ' + (pt.name || 'Kartenpunkt'), 'info');
          return true;
       }
@@ -270,8 +271,22 @@ export class MissileUi {
       if (world.time < st.readyT) { this._deny('Raketen: ' + BLOCK_TEXT.reload); return false; }
       const n = act(['o', pt.sx ?? pt.x, pt.sy ?? pt.y]);
       if (!n) { this._deny('Raketen: ' + BLOCK_TEXT.reload); return false; }
-      this.lastTgt = { x: pt.sx ?? pt.x, y: pt.sy ?? pt.y, t: world.time };
+      this.lastTgt = { x: pt.sx ?? pt.x, y: pt.sy ?? pt.y, t: world.time, mode, siteId: null };
       return true;
+   }
+   // The map target of the last minute (the cross on the chart) for this weapon, or null.
+   marked(world, mode) {
+      const t = this.lastTgt;
+      return t && world && t.mode === mode && world.time - t.t < MARK_SECS ? t : null;
+   }
+   // Touch: the fire button while the chart of a map-aimed weapon is open. One more at the marked
+   // target; with nothing marked it says what to do (the chart itself takes the target tap).
+   chartFire(p, world, act, mode) {
+      const t = this.marked(world, mode);
+      if (!t) { this.audio.uiClick?.(); this._hint('Ziel auf der Karte antippen'); return false; }
+      const site = t.siteId != null ? (world.sites || []).find(s => s.id === t.siteId && s.alive) : null;
+      return this._launchAt(p, world, act, mode, site ? { x: t.x, y: t.y, sx: t.x, sy: t.y, siteId: site.id, name: site.name }
+         : { x: t.x, y: t.y, siteId: null, name: '' });
    }
 
    // The contact the anti-ship missile would go for: the locked ship, else the one under the crosshair.
@@ -419,7 +434,7 @@ export class MissileUi {
       }
       const map = u.map;
       map.mode = null; map.cur = null; map.block = null; map.siteId = null; map.range = 0;
-      map.lastTgt = this.lastTgt && world.time - this.lastTgt.t < 60 ? this.lastTgt : null;
+      map.lastTgt = this.lastTgt && world.time - this.lastTgt.t < MARK_SECS ? this.lastTgt : null;
       if (h.cruise) {
          const type = w.cruise.type, cfg = MISSILES[type], n = p.mag?.[type] || 0, sel = ctl.mode === 'cruise';
          const b0 = n <= 0 ? 'empty' : world.time - (p.lastSsmFire ?? -99) < 1.1 ? 'reload' : p.depth > 1 ? 'reload' : null;
