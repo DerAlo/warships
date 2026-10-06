@@ -20,27 +20,27 @@ import { setRadar } from './sensors.js';
 export const EAST_TUNE = {
    window: 120,              // s the allied bots keep firing after a human captain's last launch or hit
    barents: {
-      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500 },
-      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000 },
-      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000 },
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0 },
+      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4 },
+      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6 },
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6 },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1 },
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1 },
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1, again: 120, salvo: 12 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
-      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1 },
-      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1 },
-      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 270, raid: 60, sub: 1 },
+      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1, again: 420, salvo: 2 },
+      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1, again: 420, salvo: 3 },
+      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 290, raid: 60, sub: 1, again: 480, salvo: 2 },
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
-      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0 },
-      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0 },
-      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0 },
+      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0 },
+      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75 },
+      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70 },
       // an escort captain relies on the carrier bot: it hits harder and the Shandong stops flying earlier
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
@@ -101,7 +101,8 @@ export function eastMissions(H) {
    // every allied bot follows `lead` (the ship the mission is about, or the player)
    function follow(group, lead) { for (const s of group) if (s !== lead && !s.isPlayer && s.ai) s.ai.escortId = lead.id; }
    // scripted ripple salvo: the platform launches n missiles of its selected type, one per launch gap
-   function ripple(S, fromId, n, aim) { (S.ripples || (S.ripples = [])).push({ fromId, n, aim }); }
+   // (load: the platform has reloaded, the salvo does not depend on what is left in the cells)
+   function ripple(S, fromId, n, aim, load) { (S.ripples || (S.ripples = [])).push({ fromId, n, aim, load }); }
    function runRipples(w, S) {
       if (!S.ripples) return false;
       let busy = false;
@@ -109,6 +110,7 @@ export function eastMissions(H) {
          if (r.n <= 0) continue;
          const from = live(w, r.fromId), aim = from && r.aim();
          if (!aim) { r.n = 0; continue; }
+         if (r.load) for (const x of from.cfg.weapons.ssm) from.mag[x.type] = Math.max(from.mag[x.type] || 0, 1);
          const m = launchSSM(w, from, aim);
          if (m) { r.n--; from.mag[m.type]++; }      // the scripted salvo does not empty the magazine
          else if (ssmBlock(w, from, aim) !== 'reload') r.n = 0;
@@ -209,7 +211,7 @@ export function eastMissions(H) {
          debrief: 'Der Verband hat die Salve aufgefangen und den Schlachtkreuzer ausgeschaltet. Beide Seiten ziehen ihre ' +
             'Einheiten zurück; die Lage in der Barentssee beruhigt sich.',
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring', 'Sachsen'],
-         recommendedShip: 'Ford', arena: 24000, timeLimit: 660, stars: 2,
+         recommendedShip: 'Ford', arena: 24000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'barents');
             islands(w, [
@@ -247,6 +249,17 @@ export function eastMissions(H) {
                for (const id of S.foes) { const s = live(w, id); if (s && s.cfg.name !== pj.cfg.name && s.cfg.weapons.ssm.length) ripple(S, id, s.type === 'CO' ? 1 : T.oniks, at); }
                S.phase = 1; S.salvoT = w.time;
             });
+            // the battle cruiser does not wait for the clock: reloaded, it fires a second salvo at the carrier
+            if (T.again) {
+               later(S, T.again - 35, () => { if (live(w, S.pjId) && S.phase === 2) radio(w, 'Aufklärung', 'Der Schlachtkreuzer hat nachgeladen – eine zweite Salve auf den Träger steht bevor. Schalten Sie ihn vorher aus!', 'warn'); });
+               later(S, T.again, () => {
+                  if (!live(w, S.pjId) || S.phase !== 2) return;
+                  radio(w, 'Luftlage', 'Flugkörperalarm. Zweite Salve des Schlachtkreuzers, Ziel Träger.', 'warn');
+                  const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+                  ripple(S, S.pjId, T.granit2, at, true);
+                  for (const id of S.foes) { const s = live(w, id); if (s && id !== S.pjId && s.type !== 'CO' && T.oniks2 && s.cfg.weapons.ssm.length) ripple(S, id, T.oniks2, at, true); }
+               });
+            }
             if (T.raids > 1) later(S, T.salvoAt + 110, () => raid('db'));
             if (T.raids > 2) later(S, T.salvoAt + 230, () => raid('tb'));
          },
@@ -292,7 +305,7 @@ export function eastMissions(H) {
             'Batterien mit Marschflugkörpern aus. Rechnen Sie danach mit einem Entsatzverband. Die Riffe sind reine Militäranlagen.',
          debrief: 'Radar und Küstenbatterien sind ausgefallen, der Entsatzverband ist abgedreht. Die Seewege an den Riffen sind wieder frei befahrbar.',
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Burke', 'Ticonderoga'],
-         recommendedShip: 'Burke', arena: 20000, timeLimit: 600, stars: 2,
+         recommendedShip: 'Burke', arena: 20000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'reefs');
             islands(w, [
@@ -338,6 +351,7 @@ export function eastMissions(H) {
             later(S, T.boatsAt, () => S.boatsOut());
          },
          update(w, dt, S) {
+            runRipples(w, S);
             coordinate(w, S, {});
             clock(w, S, 'Flottenkommando', (t) => S.relief ? `Noch ${t}: Der Entsatzverband muss abgewehrt sein, sonst hält er die Riffe.` : `Noch ${t}: Radar und Batterien müssen fallen, sonst bleiben die Seewege gesperrt.`);
          },
@@ -366,6 +380,18 @@ export function eastMissions(H) {
                   { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : 0.5) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
+               // the relief group does not wait for the clock: `again` s after it appears its main units fire a
+               // reloaded salvo at the flagship
+               if (T.salvo) {
+                  const main = S.relief.slice(0, T.relief.length), up = () => main.some(id => live(w, id));
+                  later(S, w.time + T.again - 30, () => { if (up()) radio(w, 'Lagezentrum', 'Der Entsatzverband hat nachgeladen und dreht auf Sie ein – eine geschlossene Salve auf das Flaggschiff steht bevor. Versenken Sie ihn vorher!', 'warn'); });
+                  later(S, w.time + T.again, () => {
+                     if (!up()) return;
+                     radio(w, 'Luftlage', 'Flugkörperalarm. Salve des Entsatzverbands, Ziel Flaggschiff.', 'warn');
+                     const at = () => { const F = w.player && w.player.alive ? w.player : S.own.map(id => live(w, id)).find(Boolean); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+                     for (const id of main) { const e = live(w, id); if (e && e.cfg.weapons.ssm.length) ripple(S, id, T.salvo, at, true); }
+                  });
+               }
             }
          },
          onSink(w, ship, killer, S) {
@@ -390,7 +416,7 @@ export function eastMissions(H) {
             'müssen den Zielraum erreichen. Schützen Sie die zivilen Besatzungen.',
          debrief: 'Der Konvoi hat den Zielraum erreicht, die Versorgung ist für die nächsten Wochen gesichert.',
          env: { time: 'night', weather: 'overcast', front: { at: 200, dur: 80, to: 'rain' } }, type: 'ops',
-         playableShips: ['Sachsen', 'Burke', 'Daring', 'Ticonderoga'], recommendedShip: 'Sachsen', arena: 20000, timeLimit: 630, stars: 2,
+         playableShips: ['Sachsen', 'Burke', 'Daring', 'Ticonderoga'], recommendedShip: 'Sachsen', arena: 20000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'strait');
             islands(w, [
@@ -419,17 +445,31 @@ export function eastMissions(H) {
             const wave = (list, from, text) => {
                const tgt = S.conv.map(id => live(w, id)).find(Boolean);
                if (!tgt) return;
-               list.forEach((cls, i) => add(w, cls, 'enemy', P(from.x + (i % 2) * 900, from.y + i * 800), 0, { minDist: 12500, ai: { huntId: tgt.id, press: true } }));
+               const made = list.map((cls, i) => add(w, cls, 'enemy', P(from.x + (i % 2) * 900, from.y + i * 800), 0, { minDist: 12500, ai: { huntId: tgt.id, press: true } }));
                radio(w, 'Luftlage', text, 'warn');
+               return ids(made);
             };
             later(S, 5, () => radio(w, 'Konvoiführer', 'Konvoi ist bereit. Wir halten Kurs Nord und bleiben dicht bei Ihnen.'));
             later(S, 30, () => wave(Array(T.fac1).fill('Typ022'), P(15000, -7000), 'Schnellbootrudel läuft von Osten an.'));
-            later(S, T.w2, () => wave(['Typ054A', ...(T.dd ? ['Typ052D'] : [])], P(13000, 12000), 'Überwassereinheiten aus Nordost, Kurs auf den Konvoi.'));
+            later(S, T.w2, () => { S.block = wave(['Typ054A', ...(T.dd ? ['Typ052D'] : [])], P(13000, 12000), 'Überwassereinheiten aus Nordost, Kurs auf den Konvoi.') || []; });
             later(S, T.w3, () => wave(Array(T.fac2).fill('Typ022'), P(-15000, 9000), 'Zweites Schnellbootrudel aus Nordwest.'));
+            // late in the passage the blockade ships that are still afloat reload and fire a closed salvo at the leading freighter
+            if (T.salvo) {
+               const up = () => (S.block || []).map(id => live(w, id)).filter(Boolean);
+               const lead = () => { const f = S.conv.map(id => live(w, id)).find(Boolean); return f ? { x: f.pos.x, y: f.pos.y } : null; };
+               later(S, T.again - 30, () => { if (up().length && lead()) radio(w, 'Lagezentrum', 'Die Blockadeschiffe im Nordosten haben nachgeladen und drehen auf den Konvoi ein – eine geschlossene Salve steht bevor. Versenken Sie sie vorher!', 'warn'); });
+               later(S, T.again, () => {
+                  const from = up().filter(e => e.cfg.weapons.ssm.length);
+                  if (!from.length || !lead()) return;
+                  radio(w, 'Luftlage', 'Flugkörperalarm. Salve der Blockadeschiffe, Ziel Konvoi.', 'warn');
+                  for (const e of from) ripple(S, e.id, T.salvo, lead, true);
+               });
+            }
             S.holdMsg = 0;
          },
          update(w, dt, S) {
             const left = S.conv.map(id => live(w, id)).filter(Boolean);
+            runRipples(w, S);
             clock(w, S, 'Konvoiführer', (t) => `Noch ${t}, dann schließt sich die Blockade vor dem Zielraum. Bleiben Sie dicht bei uns, damit wir Fahrt halten.`);
             // the freighters only run while a human captain is close to the leading ship
             const lead = left[0];
@@ -473,7 +513,7 @@ export function eastMissions(H) {
             'Flugbetrieb der Shandong außer Gefecht. Die Gerald R. Ford darf nicht verloren gehen.',
          debrief: 'Das Flugdeck der Shandong ist ausgefallen, der gegnerische Verband läuft ab. Die Ford bleibt einsatzbereit.',
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Ford', 'Burke', 'Ticonderoga', 'Daring'],
-         recommendedShip: 'Ford', arena: 26000, timeLimit: 660, stars: 3,
+         recommendedShip: 'Ford', arena: 26000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'philsea');
             islands(w, [
@@ -499,6 +539,18 @@ export function eastMissions(H) {
             S.hot = false; S.found = false; S.hotAt = T.auto;
             later(S, 5, () => radio(w, 'Flottenkommando', 'Funk- und Radarstille im Verband. Jäger und Hubschrauber klären nach Osten auf.'));
             holdLine(w, S, 14, 'Verbandsführer', 'Der Verband hält Feuerdisziplin: Die Geleitschiffe schießen erst, wenn das Flaggschiff den Angriff eröffnet – ein früher Schuss würde unsere Position verraten.');
+            // the escorts of the Shandong do not let the clock decide: late in the operation they fire what they
+            // have reloaded at the Ford (salvo missiles per ship still afloat)
+            later(S, T.salvoAt - 35, () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); });
+            const salvo = () => {
+               if (w.phase !== 'playing') return;
+               const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+               let n = 0;
+               for (const id of S.foes) { const e = live(w, id); if (e && id !== S.sdId && e.cfg.weapons.ssm.length) { ripple(S, id, T.salvo, at, true); n++; } }
+               if (n) radio(w, 'Luftlage', 'Flugkörperalarm. Salve vom Verband der Shandong, Ziel Träger.', 'warn');
+               if (n && T.again) later(S, w.time + T.again, salvo);
+            };
+            later(S, T.salvoAt, salvo);
             later(S, 70, () => {
                if (S.found) return;
                const n = S.area.y < -6000 ? 'Südost' : S.area.y > 6000 ? 'Nordost' : 'Ost';
@@ -509,6 +561,7 @@ export function eastMissions(H) {
          update(w, dt, S) {
             const T = tune(w, 'philsea'), sd = w.shipById(S.sdId);
             if (!sd) return;
+            runRipples(w, S);
             coordinate(w, S, {});
             clock(w, S, 'Aufklärung', (t) => `Noch ${t}, dann ist der Verband der Shandong außer Reichweite.`);
             if (!S.found && S.foes.some(id => { const s = live(w, id); return s && s.detected; })) {

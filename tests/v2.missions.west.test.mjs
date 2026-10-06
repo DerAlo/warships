@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { World } from '../gamev2/state.js';
 import { MISSIONS, getMission, opStars } from '../gamev2/missions.js';
 import { SHIPS, MISSILES } from '../gamev2/config.js';
+import { WEST_TUNE } from '../gamev2/missions_west.js';
 import { obstacleT } from '../gamev2/utils.js';
 import { buildNetWorld } from '../gamev2/net/setup.js';
 import { orderDepth } from '../gamev2/submarine.js';
@@ -387,12 +388,50 @@ test('blacksea: sinking the cruiser wins, the battery is optional, the clock los
    assert.match(t.result.reason, /Zeit ist abgelaufen/);
    // the limit is stated in the objective and counted down on the radio, the hold-fire is explained once
    const said = (part) => t.events.filter(e => e.type === 'objective' && e.text.includes(part)).length;
-   assert.match(obj(t, 'cruiser').text, /Zeitlimit 11:00/);
+   assert.match(obj(t, 'cruiser').text, /Zeitlimit 12:00/);
    assert.equal(said('noch zwei Minuten'), 1);
    assert.equal(said('noch eine Minute'), 1);
    const w0 = new World('normal', { mission: 'blacksea', ship: 'Sachsen', seed: 5 });
    fast(w0, 30);
    assert.equal(w0.events.filter(e => e.type === 'objective' && e.text.includes('halten die Seezielflugkörper zurück')).length, 1);
+});
+test('blacksea: late in the mission the cruiser leaves its line and closes on the flagship', () => {
+   const lim = getMission('blacksea').timeLimit;
+   for (const k of DIFFS) assert.ok(WEST_TUNE.blacksea[k].out > 0 && WEST_TUNE.blacksea[k].out <= lim - 240, k + ': the breakout leaves time for the fight');
+   const w = new World('normal', { mission: 'blacksea', ship: 'Sachsen', seed: 5 });
+   const S = w._script, p = w.player, c = S.cruiser, T = WEST_TUNE.blacksea.normal;
+   const said = () => w.events.filter(e => e.type === 'objective' && e.text.includes('läuft auf das Führungsschiff zu')).length;
+   w.autoPlayer = true; p.ai = { passive: true, anchored: true };
+   fast(w, T.out - 2);
+   assert.equal(w.phase, 'playing');
+   assert.ok(p.alive && c.alive, 'flagship and cruiser are afloat before the breakout');
+   assert.equal(said(), 0, 'not announced early');
+   assert.ok(c.ai.patrol && c.ai.huntId == null, 'the cruiser keeps its line until then');
+   const d0 = hyp(c.pos, p.pos);
+   fast(w, 4);
+   assert.equal(said(), 1, 'announced by radio, once');
+   assert.ok(!c.ai.patrol && c.ai.huntId === p.id && c.ai.press, 'the cruiser hunts the flagship');
+   fast(w, 60);
+   assert.equal(w.phase, 'playing');
+   assert.ok(hyp(c.pos, p.pos) < d0 - 1500, `the cruiser closes: ${Math.round(d0)} -> ${Math.round(hyp(c.pos, p.pos))} m`);
+   // a cruiser that is already sunk does not break out
+   const w2 = new World('easy', { mission: 'blacksea', ship: 'Sachsen', seed: 5 });
+   w2.autoPlayer = true; w2.player.ai = { passive: true, anchored: true };
+   fast(w2, 5);
+   w2._script.cruiser.takeDamage(1e9, w2.player, 'he');
+   fast(w2, 1);
+   assert.equal(w2.phase, 'won');
+   // co-op: with two captains the cruiser's hull is scaled once (coopHp), a single captain meets the full hull
+   const full = c.maxHP, k = T.coopHp;
+   assert.ok(k > 0.5 && k < 1, 'coopHp ' + k);
+   const classes = ['Sachsen', 'Sachsen'];
+   const n = buildNetWorld({ mission: 'blacksea', difficulty: 'normal', seed: 5, classes, loadouts: [null, null], names: ['Kpt0', 'Kpt1'], self: 0 });
+   assert.equal(n._script.cruiser.maxHP, full, 'unscaled at setup');
+   for (let i = 0; i < 90; i++) n.update(DT);
+   const nc = n._script.cruiser;
+   assert.equal(nc.maxHP, Math.round(full * k), 'scaled in co-op');
+   assert.equal(nc.hp, nc.maxHP, 'still undamaged');
+   assert.equal(c.maxHP, full, 'not scaled for one captain');
 });
 
 test('giuk: boats are reported one by one, each outside torpedo range, with a datum on the map', () => {
