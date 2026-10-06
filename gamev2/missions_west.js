@@ -16,11 +16,19 @@ import { addTaskPoint } from './seal.js';
 // blacksea: `out` s into the mission the cruiser leaves its patrol line under the coastal umbrella and
 // closes on the flagship (0 = never), so the enemy decides the mission and not the clock. `coopHp`:
 // the cruiser's hull with two or more captains (measured: the co-op group otherwise wins less often than one captain).
+// giuk: the second captain sails the corvette, which cannot fight a boat (measured: two captains won as
+// often as one). `coopHelo`: helicopter sorties the corvette embarks under a human captain (0 = none),
+// `coopHp`: hull factor of the boats that meet the two helicopters.
 export const WEST_TUNE = {
    blacksea: {
       easy: { out: 480, coopHp: 1 },
       normal: { out: 420, coopHp: 0.8 },
       hard: { out: 360, coopHp: 0.8 },
+   },
+   giuk: {
+      easy: { coopHelo: 2, coopHp: 1 },
+      normal: { coopHelo: 2, coopHp: 1.4 },
+      hard: { coopHelo: 2, coopHp: 1.05 },
    },
 };
 
@@ -571,7 +579,7 @@ export function westMissions(H) {
                const friends = w.ships.filter(s => s.alive && s.side === 'player');
                for (let k = 0; k < 12 && friends.some(f => hyp(f.pos, pos) < 10500); k++) pos = P(Math.min(pos.x + 900, 17500), pos.y + Math.sign(side || 1) * 700);
                // the boat lies in ambush beside the track and creeps towards it; the script fires its tubes (see update)
-               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.1, 0.9), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
+               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.1, 0.9) * (S.coopHp || 1), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
                for (const k of Object.keys(s.mag || {})) s.mag[k] = 0;      // torpedoes only
                // the report is a datum, not a fix: a red area on the map that contains the boat somewhere
                const o = (((w.seed >>> 0) * 31 + S.subs.length * 977) % 1000) / 1000 * Math.PI * 2;
@@ -585,6 +593,17 @@ export function westMissions(H) {
             if (S.planned > 3) later(S, 150, () => boat('Kilo', 11500, -2000, 'Weiterer Kontakt recht voraus.'));
             if (S.planned > 4) later(S, 250, () => boat('Yuan', 11000, 2200, 'Noch ein Kontakt voraus. Das Geleit ist kurz vor dem Sammelpunkt.'));
             later(S, 60, () => radio(w, 'Operationszentrale', 'Hinweis: Ein geortetes U-Boot bekämpft der Hubschrauber mit eigenen Torpedos. Unsere Leichtgewichtstorpedos reichen nur wenige Kilometer.'));
+         },
+         // co-op (net/setup.js, once the captains have their ships): the corvette has no sonar and no
+         // torpedoes, so under a human captain it embarks a helicopter for `coopHelo` sorties; the
+         // boats, reported later, then have a `coopHp` times tougher hull
+         coop(w, S, humans) {
+            const a = S.ally, T = WEST_TUNE.giuk[w.difficultyKey] || WEST_TUNE.giuk.normal;
+            if (!T.coopHelo || !humans.includes(a) || a.cfg.helo) return;
+            a.cfg = { ...a.cfg, helo: { name: 'Sea Lynx' } };
+            a.addConsumable({ key: 'helo', charges: T.coopHelo, dur: 1, cd: 70 });
+            S.coopHp = T.coopHp || 1;
+            radio(w, 'Geleitführer', a.name + ' hat für diesen Einsatz einen Bordhubschrauber eingeschifft.');
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;

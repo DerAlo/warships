@@ -16,7 +16,7 @@ import { MISSIONS, getMission, opStars } from '../gamev2/missions.js';
 import { SHIPS, MISSILES } from '../gamev2/config.js';
 import { WEST_TUNE } from '../gamev2/missions_west.js';
 import { obstacleT } from '../gamev2/utils.js';
-import { buildNetWorld } from '../gamev2/net/setup.js';
+import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { orderDepth } from '../gamev2/submarine.js';
 import { launchTeam, teamStatus } from '../gamev2/seal.js';
 import { sendHelo } from '../gamev2/helo.js';
@@ -495,4 +495,43 @@ test('giuk: the convoy arriving wins, the clock decides by ships at the goal', (
    let won = 0;
    for (const seed of [1000, 1037, 1074]) { const r = play('giuk', 'easy', seed); if (r.phase === 'won') won++; }
    assert.equal(won, 3, 'easy with a helicopter captain');
+});
+test('giuk: in co-op the second captain\'s corvette embarks a helicopter and the boats are tougher', () => {
+   for (const k of DIFFS) {
+      const T = WEST_TUNE.giuk[k];
+      assert.ok(T.coopHelo >= 1 && T.coopHelo <= 2, k + ': coopHelo ' + T.coopHelo);
+      assert.ok(T.coopHp >= 1 && T.coopHp <= 1.5, k + ': coopHp ' + T.coopHp);
+   }
+   assert.equal(missionSlots('giuk'), 2, 'flagship and corvette');
+   const said = (w) => w.events.filter(e => e.type === 'objective' && e.text.includes('Bordhubschrauber eingeschifft')).length;
+   for (const diff of DIFFS) {
+      const T = WEST_TUNE.giuk[diff];
+      // one captain: the corvette is the bot it always was
+      const w = new World(diff, { mission: 'giuk', ship: 'Sachsen', seed: 9 });
+      const a = w._script.ally;
+      assert.equal(a.cls, 'Braunschweig');
+      assert.ok(!a.cfg.helo && !a.consumable('helo') && !a.cfg.weapons.asw && !a.cfg.sonar.hull, 'no means against a boat');
+      assert.equal(said(w), 0);
+      assert.ok(!sendHelo(w, a, { x: 0, y: 0 }));
+      // two captains: the second one sails that corvette, now with a helicopter
+      const classes = ['Sachsen', 'Burke'];
+      const n = buildNetWorld({ mission: 'giuk', difficulty: diff, seed: 9, classes, loadouts: [null, null], names: ['Kpt0', 'Kpt1'], self: 0 });
+      const S = n._script, c = n.net.humans[1];
+      assert.equal(n.net.humans.length, 2);
+      assert.equal(c, S.ally, 'the captain takes the mission\'s corvette');
+      assert.equal(c.cls, 'Braunschweig');
+      assert.ok(c.cfg.helo && c.cfg.helo.name, 'helicopter embarked');
+      assert.equal(c.consumable('helo').charges, T.coopHelo, diff + ': sorties');
+      assert.equal(c.consumables.filter(x => x.key === 'helo').length, 1);
+      assert.ok(!SHIPS.Braunschweig.helo, 'the class itself is unchanged');
+      assert.equal(said(n), 1, 'announced by radio, once');
+      assert.equal(S.planned, w._script.planned, 'as many boats as for one captain');
+      for (let i = 0; i < 20 / DT; i++) { w.update(DT); n.update(DT); }
+      assert.equal(S.subs.length, 1); assert.equal(w._script.subs.length, 1);
+      assert.equal(S.subs[0].maxHP, Math.round(w._script.subs[0].maxHP * T.coopHp), diff + ': hull of a boat in co-op');
+      assert.equal(S.subs[0].hp, S.subs[0].maxHP);
+      const h = sendHelo(n, c, S.subs[0]._datum);
+      assert.ok(h && h.ownerId === c.id, 'the corvette\'s helicopter flies');
+      assert.equal(c.consumable('helo').charges, T.coopHelo - 1);
+   }
 });
