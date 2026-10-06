@@ -79,9 +79,12 @@ const layout = S => S.ev(() => {
       const col = e.closest('#tu-hud-l, #tu-hud-r');
       if (col && col !== e) {
          const c = col.getBoundingClientRect();
-         // (the hit tally and the loss reports are the columns' low-priority plates: they give way to the notices by design)
+         // (the loss reports are the columns' low-priority plates: they give way by design; so do the older notices,
+         // which their own box clips from the top to keep the hit tally in view)
          if (!/tally|killfeed/.test(s) && (b - c.bottom > 3 || R - c.right > 3 || c.left - l > 3)) cut.push(s + ' by ' + Math.round(Math.max(b - c.bottom, R - c.right, c.left - l)) + 'px');
          l = Math.max(l, c.left); t = Math.max(t, c.top); R = Math.min(R, c.right); b = Math.min(b, c.bottom);
+         const mb = e.closest('#msgs');
+         if (mb && mb !== e) { const m = mb.getBoundingClientRect(); l = Math.max(l, m.left); t = Math.max(t, m.top); R = Math.min(R, m.right); b = Math.min(b, m.bottom); }
          if (R - l < 3 || b - t < 3) return;
       }
       // content that does not fit inside its own plate (scrolled or clipped text)
@@ -167,6 +170,25 @@ for (const [mission, ship] of SCENES) {
    await vampires(S, 3);
    const seen = await S.waitFor(() => window.__mui().ui.threats.length > 0 && !document.getElementById('mx-threat').classList.contains('hidden'), mission === 'pipeline' ? 6000 : 25000);
    await messages(S, [RADIO, ...NOTES]); await S.wait(350);
+   // three notices up: the hit tally under them stays in view (the older notices give way; only the newest
+   // one in full comes before the tally, so a long radio call that arrives right now may still cut it)
+   const tl = await S.ev(async () => {
+      const box = document.getElementById('ribbons'), own = [], mb = document.getElementById('msgs'), mine = mb.lastElementChild;
+      for (const n of ['Panzertreffer', 'Sprengtreffer', 'Brand gelegt']) { const r = document.createElement('div'); r.className = 'ribbon'; r.innerHTML = `<span class="rname">${n}</span><span class="rcount">×3</span>`; box.appendChild(r); own.push(r); }
+      let out;
+      for (let i = 0; i < 5; i++) {
+         await new Promise(r => setTimeout(r, 300));
+         const c = document.getElementById('tu-hud-r').getBoundingClientRect(), a = mb.getBoundingClientRect(), last = mb.lastElementChild.getBoundingClientRect(), tb = document.getElementById('tally').getBoundingClientRect();
+         const whole = (e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.top >= Math.max(c.top, tb.top) - 1 && r.bottom <= Math.min(c.bottom, tb.bottom) + 1; };
+         out = { col: document.getElementById('tally').parentNode.id, ribbons: own.filter(whole).length, newest: last.top >= a.top - 1 && last.bottom <= Math.min(a.bottom, c.bottom) + 1, own: mb.lastElementChild === mine,
+            shown: [...mb.children].filter(m => getComputedStyle(m).display !== 'none').length, box: [Math.round(a.top), Math.round(a.bottom)], tally: [Math.round(tb.top), Math.round(tb.bottom)], colBottom: Math.round(c.bottom) };
+         if (out.newest && (out.ribbons === 3 || !out.own)) break;
+      }
+      for (const r of own) r.remove();
+      return out;
+   });
+   check(T + 'three notices up: the hit tally under the minimap stays in view, the newest notice whole', tl.col === 'tu-hud-r' && tl.newest && tl.shown === 3 && (tl.ribbons === 3 || !tl.own), tl);
+   await S.wait(300);
    L = await layout(S);
    // (a submerged boat is no target for a sea-skimmer: no plate there)
    const deep = await S.ev(() => window.__world().player.depth > 0);

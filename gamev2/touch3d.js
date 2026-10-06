@@ -185,7 +185,9 @@ body.touch #torp-alert { top: calc(50% - 96px); }
    body.touch:has(#mx-threat:not(.hidden)) #tu-hud-o { display: none; }   /* an incoming salvo takes the band */
    /* notices stack under the minimap (TouchUi._arrange), clear of the reticle, the target marker and the ship
       labels: the newest three, the oldest clipped first. They stay readable while a finger aims. */
-   body.touch #tu-hud-r > #msgs { zoom: 1; width: auto; max-width: 286px; max-height: 96px; align-items: flex-end; justify-content: flex-end; overflow: hidden; }
+   body.touch #tu-hud-r > #msgs { zoom: 1; width: auto; max-width: 286px; max-height: 96px; align-items: flex-end; justify-content: flex-end; overflow: hidden;
+      flex-shrink: 1000; min-height: 0; }   /* the notices give way (oldest first), the hit tally below them stays in view; */
+   body.touch #tu-hud-r > #tally { flex-shrink: 1; min-height: 0; }   /* only the newest notice in full (min-height, _refresh) comes before it */
    body.touch #tu-hud-r > #msgs:empty { display: none; }
    body.touch #msgs .msg:nth-last-child(n+4) { display: none; }
    body.touch .msg, body.touch .msg.radio { max-width: 286px; font-size: 12px; }
@@ -615,6 +617,12 @@ export class TouchUi {
       const obj = document.getElementById('objectives'), ot = obj ? obj.textContent : '';
       if (ot !== this.objTxt) { this.objTxt = ot; this.objT = 0; } else this.objT += REFRESH;
       setCls(obj, 'tu-fresh', this.objT < OBJ_SHOW);
+      // phone: the notices give way to the hit tally under them (CSS), but the newest one keeps its full height
+      const mg = document.getElementById('msgs');
+      if (mg) {
+         const mh = this.mq.compact.matches && mg.lastElementChild ? Math.min(96, mg.lastElementChild.offsetHeight) : 0;
+         if (mh !== this.msgMin) { this.msgMin = mh; mg.style.minHeight = mh ? mh + 'px' : ''; }
+      }
       setCls(body, 'tu-cv', s.cv && !s.squad);
       setCls(body, 'tu-squad', s.squad);
       setCls(body, 'tu-chart', s.map);
