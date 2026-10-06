@@ -405,7 +405,7 @@ export class MissileUi {
       const h = MissileUi.has(p), w = p.cfg?.weapons || {};
       u.radarOn = !!p.radarOn; u.emcon = h.radar && !p.radarOn;
       u.status = this.status;
-      hints.frame(this.hud, p, world, ctl.mode);   // Waffenkunde: one notice per weapon on first use
+      hints.frame(this.hud, p, world, ctl.mode, !!ctl.mapOpen);   // Waffenkunde: one notice per weapon on first use
 
       // --- weapon bar
       const list = ui.weapons || (ui.weapons = []);

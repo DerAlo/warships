@@ -147,11 +147,12 @@ function tipText(id, cfg) {
 }
 
 // First-use notices: one per weapon and page session, never two at once, none in the first seconds
-// of a battle. MissileUi.fill calls hints.frame every frame with the player's ship and weapon mode.
+// of a battle, none while the chart is open. MissileUi.fill calls hints.frame every frame with the
+// player's ship, the weapon mode and whether the chart is open.
 const TIP_SECS = 11, TIP_GAP = 14, MODE_TIP = { ssm: 'ssm', cruise: 'cruise', rockets: 'rockets', torp: 'torp' };
 export const hints = {
    seen: new Set(), queue: [], nextT: 0, mode: null, shipKey: null, world: null,
-   frame(hud, p, world, mode) {
+   frame(hud, p, world, mode, chart = false) {
       if (!p || !p.alive || !hud || !world) return;
       const cfg = p.cfg, now = performance.now() / 1000;
       if (world !== this.world) { this.world = world; this.queue.length = 0; this.mode = mode; this.nextT = Math.max(this.nextT, now + 5); }
@@ -163,6 +164,7 @@ export const hints = {
          if (cfg.sub) this._want('sub');
       }
       if (guideOpen) { if (!anyOpen('pause') && !anyOpen('menu')) closeGuide(); return; }
+      if (chart) return;   // the notices lie over the open chart: wait until it is closed (its own line says what to do)
       if (!this.queue.length || now < this.nextT) return;
       const id = this.queue.shift(), text = tipText(id, cfg);
       if (!text) return;
