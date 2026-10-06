@@ -186,6 +186,12 @@ upload, about 325 bytes per snapshot for either team.
   measured 14.9 kB) would reach that limit, so a `mig` over 9000 characters goes out as reliable `migc`
   pieces `{k:'migc', t, i, n, s}` (s = slice of the JSON text); the successor reassembles only the newest
   tick and treats the result exactly like a `mig`.
+- Between two full states the missiles launched since go to the successor in full, in the tick they
+  start: `{k:'migm', t, tm, ms}` on the channel `migc` (reliable; ms = the same rows as `v2.ms` of the
+  full state, about 0.4 kB per missile). The successor keeps them until a newer full state has them
+  and adds those with `t` above the full state's tick when it takes over; the launcher's magazine is
+  counted down for each. A host that vanishes without a goodbye (its full state is up to 1 s old)
+  therefore loses no missile. A client that does not know `migm` ignores it (no version change).
 
 ## Host migration
 
@@ -241,7 +247,8 @@ What is lost in a migration (by design):
 
 - Shells and depth charges in flight disappear (the console logs the count), so do falling bombs
   and the flak bookkeeping (the AA damage on a flight builds up again at the next AA tick).
-  Torpedoes survive, aerial ones included.
+  Torpedoes survive, aerial ones included; so do missiles, also the ones launched after the newest
+  full state (`migm`). Their launch timer (`lastSsmFire`) is the one of the full state.
 - The bot AI keeps its state from the full state (up to 1 s old); long route lists that did not
   fit on the wire are re-planned. Squadrons in the air are carried over (position, planes, fuel,
   ammo, order, whether the captain flies it, the pilots' attack-run state), so are the carriers'

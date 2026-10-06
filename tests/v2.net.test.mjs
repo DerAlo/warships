@@ -575,8 +575,8 @@ test('v2 net: host migration mid-salvo; the successor flies the missiles on, the
 });
 
 test('v2 net: a busy scene stays under the transport limit (chunked full state) and the successor still takes over', () => {
-   const sizes = { mig: 0, migc: 0 };
-   const room = makeRoom({ tap: (i, ch, d) => { if (ch === 'mig' || ch === 'migc') sizes[ch] = Math.max(sizes[ch], JSON.stringify(d).length); } });
+   const sizes = { mig: 0, migc: 0, pieces: 0 };
+   const room = makeRoom({ tap: (i, ch, d) => { if (ch === 'mig' || ch === 'migc') sizes[ch] = Math.max(sizes[ch], JSON.stringify(d).length); if (d && d.k === 'migc') sizes.pieces++; } });
    assert.ok(ready(room));
    const [gh, ga] = room.games, hw = gh.world, h0 = human(room, 0), h1 = human(room, 1);
    room.run(2);
@@ -589,8 +589,62 @@ test('v2 net: a busy scene stays under the transport limit (chunked full state) 
    assert.ok(before.length >= 30, 'busy: ' + before.length);
    gh.quit();
    assert.ok(room.run(3, () => ga.isHost), 'anna took over');
-   assert.ok(sizes.migc > 0, 'the state went out in pieces');
+   assert.ok(sizes.pieces > 1, 'the state went out in pieces');
    assert.ok(sizes.mig < 12000 && sizes.migc < 12000, 'every message small: ' + sizes.mig + ' / ' + sizes.migc);
    const kept = before.filter(id => ga.world.missiles.some(m => m.id === id)).length;
    assert.ok(kept >= before.length - 3, 'missiles kept: ' + kept + ' of ' + before.length);
+});
+
+// The host vanishes without a goodbye (crash, connection gone): its last full state is up to a
+// second old. What was launched since reached the successor in full (host.js migLate).
+for (const how of ['silent', 'left']) test('v2 net: the host is lost (' + how + ') within a second of a launch; the successor has the missiles', () => {
+   const room = makeRoom();
+   assert.ok(ready(room));
+   const [gh, ga, gb] = room.games, hw = gh.world;
+   room.run(2);
+   for (const s of hw.ships) if (s.side === 'enemy') s.samDoctrine = 'hold';
+   // right after a full state went out
+   const n0 = gh.host.migStats().count;
+   assert.ok(room.run(3, () => gh.host.migStats().count > n0), 'a full state went out');
+   const fullTick = hw.tick, old = [];
+   const h0 = human(room, 0), ha = human(room, 1), hb = human(room, 2);
+   for (const s of [h0, ha, hb]) { s.lastSsmFire = -99; const m = launchSSM(hw, s, { bearing: 0.2 }); assert.ok(m, 'launch'); old.push(m); }
+   const mag0 = new Map([h0, ha, hb].map(s => [s.id, JSON.stringify(s.mag)]));
+   room.run(0.4);
+   // a second wave a few ticks before the end: younger than the successor's newest snapshot
+   const late = [];
+   for (const s of [h0, hb]) { s.lastSsmFire = -99; const m = launchSSM(hw, s, { bearing: -0.4 }); assert.ok(m, 'launch'); late.push(m); }
+   const mag1 = new Map([h0, ha, hb].map(s => [s.id, JSON.stringify(s.mag)]));
+   room.run(2 / 60);
+   assert.equal(gh.host.migStats().count, n0 + 1, 'no full state since the launches');
+   assert.ok(hw.tick - fullTick < 60, 'within a second: ' + (hw.tick - fullTick));
+   const want = [...old, ...late].filter(m => m.alive).map(m => ({ id: m.id, x: m.x, y: m.y, type: m.type, tk: m.tk, ownerId: m.ownerId, dmg: m.dmg, range: m.range, tx: m.tx, ty: m.ty, heading: m.heading }));
+   assert.equal(want.length, 5);
+   room.frozen.add(0);                    // the host's page is dead
+   if (how === 'left') room.tps[0].leave();
+   assert.ok(room.run(12, () => ga.isHost && gb.info().hostId === 'anna'), 'anna took over');
+   const aw = ga.world;
+   for (const b of want) {
+      const m = aw.missiles.find(x => x.id === b.id);
+      assert.ok(m, 'missile ' + b.id + ' (' + b.type + ') is in the successor\'s world');
+      assert.ok(m.alive && !m.net, 'a real missile');
+      assert.equal(m.type, b.type); assert.equal(m.tk, b.tk); assert.equal(m.ownerId, b.ownerId); assert.equal(m.side, 'player');
+      assert.ok(Math.abs(m.dmg - b.dmg) < 0.01 && m.dmg > 0, 'damage'); assert.ok(Math.abs(m.range - b.range) < 0.01 && m.range > 0, 'range');
+      assert.ok(Math.abs(m.tx - b.tx) < 1 && Math.abs(m.ty - b.ty) < 1, 'aim point');
+   }
+   assert.equal(new Set(aw.missiles.map(m => m.id)).size, aw.missiles.length, 'no missile twice');
+   assert.ok(aw._nextId > Math.max(...aw.missiles.map(m => m.id)), 'new ids do not collide');
+   // the launchers' magazines count the rounds that are in the air
+   for (const s of [ha, hb]) assert.equal(JSON.stringify(aw._byId.get(s.id).mag), mag1.get(s.id), 'magazine of ' + s.name);
+   assert.notEqual(mag1.get(hb.id), mag0.get(hb.id));
+   // they fly on from where they were, and the other replica sees them
+   const p0 = want.map(b => { const m = aw.missiles.find(x => x.id === b.id); return { id: b.id, x: m.x, y: m.y, hx: b.x, hy: b.y, sp: m.speed }; });
+   for (const p of p0) assert.ok(Math.hypot(p.x - p.hx, p.y - p.hy) < 80 + p.sp * 0.5, 'missile ' + p.id + ' carries on from where it was: ' + Math.round(Math.hypot(p.x - p.hx, p.y - p.hy)));
+   room.run(2);
+   let moved = 0;
+   for (const p of p0) { const m = aw.missiles.find(x => x.id === p.id); if (m && Math.hypot(m.x - p.x, m.y - p.y) > 100) moved++; }
+   assert.ok(moved >= 4, 'missiles fly on: ' + moved);
+   const own = ids(aw.missiles.filter(m => m.side === 'player'));
+   assert.deepEqual(ids(gb.world.missiles.filter(m => m.side === 'player')), own, 'bert sees the new host\'s missiles');
+   assert.deepEqual(room.lost[1], []); assert.deepEqual(room.lost[2], []);
 });
