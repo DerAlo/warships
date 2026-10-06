@@ -16,11 +16,26 @@ import { addTaskPoint } from './seal.js';
 // blacksea: `out` s into the mission the cruiser leaves its patrol line under the coastal umbrella and
 // closes on the flagship (0 = never), so the enemy decides the mission and not the clock. `coopHp`:
 // the cruiser's hull with two or more captains (measured: the co-op group otherwise wins less often than one captain).
+// giuk: the second captain sails the corvette, which cannot fight a boat (measured: two captains won as
+// often as one). `coopHelo`: helicopter sorties the corvette embarks under a human captain (0 = none),
+// `coopHp`: hull factor of the boats that meet the two helicopters.
+// hormus: `boats` in the first wave; `coopBoats` is added once a second captain sails the corvette
+// (measured: the co-op group wins less often than one captain against the same boats).
 export const WEST_TUNE = {
+   hormus: {
+      easy: { boats: 4, coopBoats: 0 },
+      normal: { boats: 5, coopBoats: -1 },
+      hard: { boats: 5, coopBoats: 0 },
+   },
    blacksea: {
       easy: { out: 480, coopHp: 1 },
-      normal: { out: 420, coopHp: 0.8 },
+      normal: { out: 420, coopHp: 0.85 },
       hard: { out: 360, coopHp: 0.8 },
+   },
+   giuk: {
+      easy: { coopHelo: 2, coopHp: 1 },
+      normal: { coopHelo: 2, coopHp: 1.45 },
+      hard: { coopHelo: 2, coopHp: 1.05 },
    },
 };
 
@@ -84,7 +99,7 @@ export function westMissions(H) {
             S.goal = zone(w, 9800, 0, 1800, 'Golf von Oman');
             S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.boats = 0;
             const extra = { Burke: 2 }[shipKey] || 0;      // one more boat per wave for the strongest escort
-            const gun = { Burke: 2, Daring: 1.6 }[shipKey] || 1;      // the better-armed escorts meet heavier batteries
+            const gun = { Burke: 2, Daring: 1.5 }[shipKey] || 1;      // the better-armed escorts meet heavier batteries
             // the batteries stay silent (radar off, not yet located) until the convoy is deep in the strait
             S.batteries = [
                addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
@@ -105,7 +120,8 @@ export function westMissions(H) {
                }
                S.boats += n;
             };
-            later(S, 40, () => wave(by(w, 4, 4, 5), P(-6500, 9500), S.convoy[0], 'Schnellboote von Norden, schnell näher kommend. Geschütz klar!'));
+            const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
+            later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0],'Schnellboote von Norden, schnell näher kommend. Geschütz klar!'));
             later(S, 215, () => wave(by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
             later(S, by(w, 345, 315, 285), () => {
                radio(w, 'Operationszentrale', 'Feuerleitradar von der Nordküste! Die Küstenbatterien schalten auf. Flugkörperabwehr klar, Täuschkörper bereithalten.', 'warn');
@@ -113,6 +129,11 @@ export function westMissions(H) {
             });
             later(S, 410, () => wave(by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Südosten, hinter dem Riff hervor.'));
             later(S, 130, () => radio(w, 'Operationszentrale', 'Hinweis: Ein Kleinst-U-Boot wird im Fahrwasser voraus vermutet. Sonar besetzen, Bordhubschrauber bereithalten.'));
+         },
+         // co-op (net/setup.js): with a captain on the corvette the first wave changes by `coopBoats`
+         coop(w, S, humans) {
+            const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
+            if (humans.includes(S.escort)) S.coopBoats = T.coopBoats || 0;
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;
@@ -571,7 +592,7 @@ export function westMissions(H) {
                const friends = w.ships.filter(s => s.alive && s.side === 'player');
                for (let k = 0; k < 12 && friends.some(f => hyp(f.pos, pos) < 10500); k++) pos = P(Math.min(pos.x + 900, 17500), pos.y + Math.sign(side || 1) * 700);
                // the boat lies in ambush beside the track and creeps towards it; the script fires its tubes (see update)
-               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.1, 0.9), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
+               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.05, 0.9) * (S.coopHp || 1), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
                for (const k of Object.keys(s.mag || {})) s.mag[k] = 0;      // torpedoes only
                // the report is a datum, not a fix: a red area on the map that contains the boat somewhere
                const o = (((w.seed >>> 0) * 31 + S.subs.length * 977) % 1000) / 1000 * Math.PI * 2;
@@ -585,6 +606,17 @@ export function westMissions(H) {
             if (S.planned > 3) later(S, 150, () => boat('Kilo', 11500, -2000, 'Weiterer Kontakt recht voraus.'));
             if (S.planned > 4) later(S, 250, () => boat('Yuan', 11000, 2200, 'Noch ein Kontakt voraus. Das Geleit ist kurz vor dem Sammelpunkt.'));
             later(S, 60, () => radio(w, 'Operationszentrale', 'Hinweis: Ein geortetes U-Boot bekämpft der Hubschrauber mit eigenen Torpedos. Unsere Leichtgewichtstorpedos reichen nur wenige Kilometer.'));
+         },
+         // co-op (net/setup.js, once the captains have their ships): the corvette has no sonar and no
+         // torpedoes, so under a human captain it embarks a helicopter for `coopHelo` sorties; the
+         // boats, reported later, then have a `coopHp` times tougher hull
+         coop(w, S, humans) {
+            const a = S.ally, T = WEST_TUNE.giuk[w.difficultyKey] || WEST_TUNE.giuk.normal;
+            if (!T.coopHelo || !humans.includes(a) || a.cfg.helo) return;
+            a.cfg = { ...a.cfg, helo: { name: 'Sea Lynx' } };
+            a.addConsumable({ key: 'helo', charges: T.coopHelo, dur: 1, cd: 70 });
+            S.coopHp = T.coopHp || 1;
+            radio(w, 'Geleitführer', a.name + ' hat für diesen Einsatz einen Bordhubschrauber eingeschifft.');
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;

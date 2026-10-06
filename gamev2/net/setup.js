@@ -123,6 +123,9 @@ export function buildNetWorld(o) {
    }
    // flag: in a historical operation the battle is lost with the flagship, as in singleplayer
    w.net = { humans, flag: fixed ? host : null, pvp };
+   // an operation may fit out the ships of its further captains (runs on every peer, so the ships match)
+   const script = w._script;
+   if (!pvp && humans.length > 1 && script && script.def.coop) script.def.coop(w, script, humans);
    if (pvp) {
       // bots aim at every captain alike (single player: a little worse at the player)
       w.difficulty = { ...w.difficulty, vsPlayer: 1 };

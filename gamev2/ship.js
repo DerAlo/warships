@@ -113,10 +113,8 @@ export class Ship {
          spread: 'narrow', range: tc.range, speedKn: tc.speedKn, speed: tc.speed, dmg: tc.dmg,
       } : null;
       this.sec = cfg.sec ? { t: [0.5, 0.8], target: null, retarget: 0, lastSec: null } : null;
-      this.consumables = cfg.consumables.map(c => ({
-         ...c, name: CONSUMABLES[c.key].name, short: CONSUMABLES[c.key].short, icon: CONSUMABLES[c.key].icon,
-         charges: c.charges, maxCharges: c.charges, cd: 0, cdMax: c.cd, active: false, t: 0, dur: c.dur,
-      }));
+      this.consumables = [];
+      for (const c of cfg.consumables) this.addConsumable(c);
       this._smokeT = 0;
       // ---- stats / AI scratch ----
       this.dmgDealt = 0; this.dmgTaken = 0; this.kills = 0; this.shotsFired = 0; this.hits = 0;
@@ -147,6 +145,13 @@ export class Ship {
       return this.maxSpeedKn * WORLD.KN_TO_MS * (b && b.active ? (b.mult || 1.08) : 1) * (this.depthF > 0 ? subSpeedFactor(this) : 1);
    }
    consumable(key) { for (const c of this.consumables) if (c.key === key) return c; return null; }
+   // c: a config entry { key, charges, dur, cd, ... } (also for equipment a mission embarks later)
+   addConsumable(c) {
+      this.consumables.push({
+         ...c, name: CONSUMABLES[c.key].name, short: CONSUMABLES[c.key].short, icon: CONSUMABLES[c.key].icon,
+         charges: c.charges, maxCharges: c.charges, cd: 0, cdMax: c.cd, active: false, t: 0, dur: c.dur,
+      });
+   }
    consumableActive(key) { const c = this.consumable(key); return !!(c && c.active); }
 
    // Fire every loaded turret that bears on the aim point within FIRE_TOL. aim: {x,y} (or a
