@@ -115,7 +115,7 @@ const layout = S => S.ev(() => {
 // a spotted enemy ship 5 km ahead, the view on it: the lock button finds it
 const enemyAhead = S => S.ev(() => {
    const w = window.__world(), p = w.player;
-   const T = w.ships.find(s => s.alive && s.side !== p.side && !s.cfg?.submarine && !(s.depth > 0));
+   const T = w.ships.find(s => s.alive && s.side !== p.side && !s.sub && !s.cfg?.submarine && !(s.depth > 0));
    if (!T) return null;
    const put = () => { T.pos.x = p.pos.x + Math.cos(p.heading) * 5000; T.pos.y = p.pos.y + Math.sin(p.heading) * 5000; T.detected = true; T.visible = true; T.spotted = true; };
    put(); clearInterval(window.__keep); window.__keep = setInterval(() => { if (T.alive && p.alive) put(); }, 50);
