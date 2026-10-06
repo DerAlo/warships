@@ -101,7 +101,7 @@ export class MissileUi {
       // ui.mx snapshot (one object, reused)
       this.ui = {
          on: false, mode: 'guns', threats: this.threats, nMine: 0, minTti: Infinity, status: null, radarOn: true, emcon: false,
-         aimInfo: '', aimBad: false, ghosts: [], sites: [], map: { mode: null, cur: null, range: 0, block: null, lastTgt: null, siteId: null },
+         aimInfo: '', aimBad: false, ghosts: [], sites: [], map: { mode: null, cur: null, range: 0, block: null, lastTgt: null, siteId: null, free: false, freeTip: '', helo: false },
       };
       if (typeof window !== 'undefined') {
          window.addEventListener('pointermove', (e) => {
@@ -462,6 +462,18 @@ export class MissileUi {
             frac: ready ? 1 : 1 - clamp01(ti.reload / (ti.reloadMax || 1)), stat: (ready ? 'bereit' : ti.reload.toFixed(0) + ' s') + ' · ' + (ti.spread === 'wide' ? 'weit' : 'eng'),
             tip: 'Torpedos (5) · 5 erneut: Fächer eng / weit' });
       }
+      // the locked pointer keeps counting while the player aims outside the map: it starts in the middle when the
+      // map opens and stays on the map, so the cursor cannot be lost beyond its edge
+      if (ctl.mapOpen && typeof document !== 'undefined' && document.pointerLockElement) {
+         const r = tacticalMapRect(c.W, c.H), k = this.cur;
+         if (!this.mapWas) { k.x = r.x0 + r.size / 2; k.y = r.y0 + r.size / 2; }
+         k.x = clamp(k.x, r.x0, r.x0 + r.size); k.y = clamp(k.y, r.y0, r.y0 + r.size);
+      }
+      this.mapWas = !!ctl.mapOpen;
+      // no chart weapon selected: a plain cursor that says how to get one
+      map.free = ctl.mapOpen && !map.mode && !isTouch();
+      map.freeTip = h.cruise ? '3 · Marschflugkörper-Ziel wählen' : rk ? '4 · Raketen-Ziel wählen' : '';
+      if (map.free) { map.cx = this.cur.x; map.cy = this.cur.y; }
       if (map.mode && ctl.mapOpen) {
          const pt = this._mapPoint(world, p, c.W, c.H);
          if (pt) {
@@ -738,6 +750,16 @@ export function drawMissileMap(g, world, p, mx, my, sc, big, opts) {
          const tw = g.measureText(txt).width, lx = x + 28 + tw > mx(arenaOf(world)) ? x - 28 - tw : x + 18;   // flip at the right map edge
          g.fillStyle = 'rgba(10,12,13,0.78)'; g.fillRect(lx, y - 10, tw + 10, 20);
          g.fillStyle = bad ? '#ffd9d0' : '#fff'; g.fillText(txt, lx + 5, y + 1);
+      }
+   } else if (big && u && u.map.free && !u.map.helo && p.alive) {
+      const M = u.map, x = M.cx, y = M.cy;
+      g.strokeStyle = '#fff'; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(x - 12, y); g.lineTo(x - 3, y); g.moveTo(x + 3, y); g.lineTo(x + 12, y); g.moveTo(x, y - 12); g.lineTo(x, y - 3); g.moveTo(x, y + 3); g.lineTo(x, y + 12); g.stroke();
+      if (M.freeTip) {
+         g.font = FONT(12, '600'); g.textAlign = 'left'; g.textBaseline = 'middle';
+         const tw = g.measureText(M.freeTip).width, lx = x + 28 + tw > mx(arenaOf(world)) ? x - 28 - tw : x + 18;
+         g.fillStyle = 'rgba(10,12,13,0.78)'; g.fillRect(lx, y - 10, tw + 10, 20);
+         g.fillStyle = '#fff'; g.fillText(M.freeTip, lx + 5, y + 1);
       }
    }
    g.restore();

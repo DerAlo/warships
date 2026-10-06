@@ -312,6 +312,7 @@ export class OpsUi {
 
       // ---- map cursor while the helicopter waits for its point
       u.cur.on = false;
+      if (this.mui) this.mui.ui.map.helo = this.mapMode;   // the helicopter cursor replaces the plain one
       if (this.mapMode && this.mui && c) {
          const pt = this.mui._mapPoint(world, p, c.W, c.H);
          if (pt && (this.mui.cur.moved || !touch())) { u.cur.on = true; u.cur.x = pt.x; u.cur.y = pt.y; }

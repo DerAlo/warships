@@ -154,6 +154,23 @@ if (ONLY.includes('desktop')) {
    check(T + 'click on a land position launches at it (24 -> 23)', s.own.includes('cruise') && s.mag.tomahawk === 23, { cm, name: sp.name });
    await S.key('KeyM'); await S.key('Digit1');
    check(T + '1 back to the gun, map closed', (s = await state(S)).mode === 'main' && !s.map, s.mode);
+   // the map without a chart weapon still has a cursor, and it says how to get a target
+   await S.key('KeyM'); await S.wait(300);
+   const free = await S.ev(() => { const m = window.__mui().ui.map; return { free: m.free, tip: m.freeTip, mode: m.mode }; });
+   check(T + 'M with the gun selected: the map shows a plain cursor and the key for the chart', free.free === true && /^3 · /.test(free.tip) && !free.mode, free);
+   await S.shot('desktop-3b-map-free');
+   await S.key('KeyM'); await S.wait(200);
+   // a locked pointer that drifted to the screen edge while aiming is back on the chart when it opens
+   await S.ev(() => { Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => document.querySelector('canvas') }); const c = window.__mui().cur; c.x = 0; c.y = 0; });
+   await S.key('Digit3'); await S.wait(300);
+   const back = await S.ev(() => { const m = window.__mui(), u = m.ui.map, W = window.innerWidth, H = window.innerHeight; return { x: m.cur.x, y: m.cur.y, cur: !!u.cur, mid: Math.abs(m.cur.x - W / 2) < 2, W, H }; });
+   check(T + 'chart reopened after aiming elsewhere: the cursor starts in the middle of the map', back.cur && back.mid, back);
+   await S.ev(() => window.dispatchEvent(new PointerEvent('pointermove', { movementX: -5000, movementY: -5000 }))); await S.wait(200);
+   const edge = await S.ev(() => { const m = window.__mui(); return { x: m.cur.x, y: m.cur.y, cur: !!m.ui.map.cur }; });
+   check(T + 'the locked cursor cannot leave the chart', edge.cur && edge.x > 0 && edge.y > 0, edge);
+   await S.ev(() => { delete document.pointerLockElement; });
+   await S.key('Digit3'); await S.key('Digit1');
+   check(T + 'chart closed again, gun selected', (s = await state(S)).mode === 'main' && !s.map, s.mode);
 
    // empty magazine: the slot says so and the launch is refused with the reason
    await S.ev(() => { window.__world().player.mag.harpoon = 0; });
