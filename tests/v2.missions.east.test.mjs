@@ -466,7 +466,8 @@ test('east: late in the operation the enemy fires a reloaded salvo at the carrie
    const ssm = (w) => w.missiles.filter(m => m.alive && m.kind === 'ssm' && m.side === 'enemy').length;
    let w = mk('barents'), S = w._script, T = EAST_TUNE.barents.normal;
    step(w, T.again - 1);
-   if (w.phase === 'playing' && S.phase === 2 && w.shipById(S.pjId).alive) {
+   assert.ok(w.phase === 'playing' && S.phase === 2 && w.shipById(S.pjId).alive, 'barents still runs with the cruiser afloat');
+   {
       assert.ok(radioed(w, 'zweite Salve'), 'announced');
       const pj = w.shipById(S.pjId);
       for (const x of pj.cfg.weapons.ssm) pj.mag[x.type] = 0;      // empty cells: the salvo is a reload
@@ -482,7 +483,39 @@ test('east: late in the operation the enemy fires a reloaded salvo at the carrie
    w.player.setTelegraph(0);
    step(w, T.salvoAt + 8);
    const escort = S.foes.some(id => id !== S.sdId && w.shipById(id) && w.shipById(id).alive);
-   if (w.phase === 'playing' && escort) assert.ok(radioed(w, 'drehen auf uns ein') && radioed(w, 'Salve vom Verband der Shandong'));
+   assert.ok(w.phase === 'playing' && escort, 'philsea still runs with an escort afloat');
+   assert.ok(radioed(w, 'drehen auf uns ein') && radioed(w, 'Salve vom Verband der Shandong'));
+});
+
+test('east/reefs: the relief group reloads and fires a closed salvo at the flagship', () => {
+   const fired = (w, id) => w.events.filter(e => e.type === 'ssmLaunch' && e.srcId === id).length;
+   const arrive = (w) => { const S = w._script; step(w, 2); for (const id of [S.radarId, ...S.bat]) kill(w, id); return S; };
+   for (const k of DIFFS) assert.ok(EAST_TUNE.reefs[k].salvo > 0 && EAST_TUNE.reefs[k].again >= 60, k);
+   const T = EAST_TUNE.reefs.normal;
+   let w = mk('reefs'), S = arrive(w);
+   const r = w.shipById(S.relief[0]);
+   step(w, T.again - 32);
+   assert.equal(w.phase, 'playing');
+   assert.ok(!radioed(w, 'hat nachgeladen'), 'not announced early');
+   step(w, 3);
+   assert.ok(r.alive && radioed(w, 'hat nachgeladen'), 'announced half a minute ahead');
+   assert.ok(!radioed(w, 'Salve des Entsatzverbands'));
+   step(w, 28);
+   for (const x of r.cfg.weapons.ssm) r.mag[x.type] = 0;      // empty cells: what flies now is the reload
+   const n0 = fired(w, r.id);
+   step(w, 30);
+   assert.equal(w.phase, 'playing');
+   assert.ok(radioed(w, 'Salve des Entsatzverbands'), 'alarm');
+   const n = fired(w, r.id) - n0;      // the reload leaves one round per type in the cells, the ship may fire that too
+   assert.ok(n >= T.salvo && n <= T.salvo + r.cfg.weapons.ssm.length, 'the whole salvo is in the air: ' + n);
+   // a relief group that was sunk in time fires nothing
+   w = mk('reefs'); S = arrive(w);
+   for (const id of S.sam) kill(w, id);
+   const id = S.relief[0];
+   w.shipById(id).takeDamage(1e9, null, 'test');
+   step(w, T.again + 5);
+   assert.ok(!radioed(w, 'hat nachgeladen') && !radioed(w, 'Salve des Entsatzverbands'));
+   assert.ok(!S.ripples || !S.ripples.length);
 });
 
 // ------------------------------------------------------------------------------------ balance table

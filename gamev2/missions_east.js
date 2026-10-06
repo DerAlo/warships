@@ -26,9 +26,9 @@ export const EAST_TUNE = {
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6 },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1 },
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1 },
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1, again: 120, salvo: 12 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
@@ -305,7 +305,7 @@ export function eastMissions(H) {
             'Batterien mit Marschflugkörpern aus. Rechnen Sie danach mit einem Entsatzverband. Die Riffe sind reine Militäranlagen.',
          debrief: 'Radar und Küstenbatterien sind ausgefallen, der Entsatzverband ist abgedreht. Die Seewege an den Riffen sind wieder frei befahrbar.',
          env: { time: 'day', weather: 'clear' }, type: 'ops', playableShips: ['Burke', 'Ticonderoga'],
-         recommendedShip: 'Burke', arena: 20000, timeLimit: 600, stars: 2,
+         recommendedShip: 'Burke', arena: 20000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'reefs');
             islands(w, [
@@ -351,6 +351,7 @@ export function eastMissions(H) {
             later(S, T.boatsAt, () => S.boatsOut());
          },
          update(w, dt, S) {
+            runRipples(w, S);
             coordinate(w, S, {});
             clock(w, S, 'Flottenkommando', (t) => S.relief ? `Noch ${t}: Der Entsatzverband muss abgewehrt sein, sonst hält er die Riffe.` : `Noch ${t}: Radar und Batterien müssen fallen, sonst bleiben die Seewege gesperrt.`);
          },
@@ -379,6 +380,18 @@ export function eastMissions(H) {
                   { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : 0.5) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
+               // the relief group does not wait for the clock: `again` s after it appears its main units fire a
+               // reloaded salvo at the flagship
+               if (T.salvo) {
+                  const main = S.relief.slice(0, T.relief.length), up = () => main.some(id => live(w, id));
+                  later(S, w.time + T.again - 30, () => { if (up()) radio(w, 'Lagezentrum', 'Der Entsatzverband hat nachgeladen und dreht auf Sie ein – eine geschlossene Salve auf das Flaggschiff steht bevor. Versenken Sie ihn vorher!', 'warn'); });
+                  later(S, w.time + T.again, () => {
+                     if (!up()) return;
+                     radio(w, 'Luftlage', 'Flugkörperalarm. Salve des Entsatzverbands, Ziel Flaggschiff.', 'warn');
+                     const at = () => { const F = w.player && w.player.alive ? w.player : S.own.map(id => live(w, id)).find(Boolean); return F ? { x: F.pos.x, y: F.pos.y } : null; };
+                     for (const id of main) { const e = live(w, id); if (e && e.cfg.weapons.ssm.length) ripple(S, id, T.salvo, at, true); }
+                  });
+               }
             }
          },
          onSink(w, ship, killer, S) {
