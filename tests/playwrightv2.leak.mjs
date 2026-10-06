@@ -128,8 +128,9 @@ for (let m = 1; m <= 2; m++) {
    U.push(await snap('battle 3, min ' + m));
 }
 // (like with like: minute 2 against minute 2; missiles in flight and notices move the scene and the document a little)
+// (geometries reach the GPU when a ship or an island first comes into view: minute 2 read 65 and 72 in two runs of the same build)
 const x = U[U.length - 1], f = S[Math.min(1, S.length - 1)], dom1 = Math.max(...S.map(s => s.dom));
-check('first mission again: running, no more in it than the first time', x.phase === 'playing' && x.geo <= f.geo + 4 && x.tex <= f.tex + 1 && x.prog <= z.prog + 2 && x.scene <= f.scene + 24 && x.dom <= dom1 + 10,
+check('first mission again: running, no more in it than the first time', x.phase === 'playing' && x.geo <= f.geo + 10 && x.tex <= f.tex + 1 && x.prog <= z.prog + 2 && x.scene <= f.scene + 24 && x.dom <= dom1 + 10,
    { first: [f.geo, f.tex, z.prog, f.scene, dom1], again: [x.geo, x.tex, x.prog, x.scene, x.dom] });
 check('first mission again: heap not above the first time', x.heapMB <= Math.max(...S.map(s => s.heapMB)) * 1.15 + 3, { first: Math.max(...S.map(s => s.heapMB)), again: x.heapMB });
 const menu3 = await toMenu('menu (after 3)');
