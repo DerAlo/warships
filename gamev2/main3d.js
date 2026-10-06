@@ -591,6 +591,9 @@ function toMenu() {
    input.gameActive = false;
    input.releaseLock();
    world = null; P = null;
+   // the battle scene (terrain, ship models, effects: some 50 MB on a phone) is not kept behind the menu;
+   // the next start builds its own anyway
+   try { renderer.buildWorld(emptyWorld()); } catch (e) { console.warn('[gfx] clearing the battle scene failed', e); }
    for (const id of ['pause', 'howto']) $(id)?.classList.add('hidden');
    hud.show(false);
    menu.show();

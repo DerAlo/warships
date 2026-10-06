@@ -2,7 +2,8 @@
 // One fleet fight (mission "standard", tier medium, 844x390 touch) runs for 10 minutes of game time with missile
 // salvos, air defence, decoys and a helicopter kept going the whole time. Once a minute, after a forced garbage
 // collection: geometries / textures / shader programs (renderer.info), DOM nodes, JS heap, live particles.
-// Then back to the menu, a second mission (redsea), and the same numbers again.
+// Then back to the menu, a second mission (redsea), the menu, the first mission once more and the menu again:
+// the menu holds no battle scene, and a mission played a second time leaves nothing more behind than the first time.
 // Exit code 1 when a count keeps climbing or on a console error.
 //
 // Run:  node server.js 8838   then   URLV2=http://localhost:8838/index-v2.html node tests/playwrightv2.leak.mjs
@@ -43,6 +44,7 @@ const snap = async (label) => {
 // a battle that never ends by itself: nobody sinks, hostile batteries keep the salvos coming, the player answers
 const busy = () => page.evaluate(async () => {
    const w = window.__world(), p = w.player, M = await import('./gamev2/missile.js'), St = await import('./gamev2/sites.js'), H = await import('./gamev2/helo.js');
+   w.end = () => { };                 // (no objective or clock ends it either: the load below would win redsea in half a minute)
    const sites = [[10500, -5500], [9000, 7500]].map(([dx, dy]) => St.addSite(w, 'battery', 'enemy', { x: p.pos.x + dx, y: p.pos.y + dy }));
    let k = 0;
    window.__busy = setInterval(() => {
@@ -74,9 +76,11 @@ for (let m = 1; m <= MINUTES; m++) {
    S.push(await snap('battle 1, min ' + m));
 }
 await page.screenshot({ path: 'tests/shots/v2-leak-10min.png' });
-const a = S[Math.min(1, S.length - 1)], z = S[S.length - 1];
+// Baseline minute 4: a geometry counts from its first draw, and ships and island detail levels come into view
+// during the first minutes (measured over 20 minutes: 54, 72, 79, 86 in minutes 1-4, then 86-88 to the end).
+const a = S[Math.min(3, S.length - 1)], z = S[S.length - 1];
 check(`battle ran ${MINUTES} minutes of game time and was still on`, z.phase === 'playing' && z.t >= MINUTES * 60 - 2, { t: z.t, phase: z.phase });
-check('geometries do not climb (minute 2 -> end)', z.geo <= a.geo + 4, { from: a.geo, to: z.geo });
+check('geometries do not climb (minute 4 -> end)', z.geo <= a.geo + 4, { from: a.geo, to: z.geo });
 check('textures do not climb', z.tex <= a.tex + 1, { from: a.tex, to: z.tex });
 check('shader programs do not climb', z.prog <= a.prog + 2, { from: a.prog, to: z.prog });
 check('scene objects do not climb', z.scene <= a.scene + 12, { from: a.scene, to: z.scene });
@@ -88,12 +92,18 @@ check('JS heap does not climb steadily (second half vs. first half, after a coll
 check('event list of the world stays bounded', z.events <= Math.max(400, a.events * 1.5), { from: a.events, to: z.events });
 
 // back to the menu, second mission
-await page.evaluate(() => { clearInterval(window.__busy); document.getElementById('btn-quit').click(); });
-await page.waitForFunction(() => window.__phase() === 'menu', null, { timeout: 10000 });
-await page.waitForTimeout(1500);
-const menu1 = await snap('menu (after 1)');
-check('back in the menu: geometries and textures of the battle are released', menu1.geo <= menu0.geo + 6 && menu1.tex <= menu0.tex + 2, { fresh: [menu0.geo, menu0.tex, menu0.scene], now: [menu1.geo, menu1.tex, menu1.scene] });
-check('back in the menu: DOM back to the menu size', menu1.dom <= menu0.dom + 60, { fresh: menu0.dom, now: menu1.dom });
+const toMenu = async (label) => {
+   await page.evaluate(() => { clearInterval(window.__busy); document.getElementById('btn-quit').click(); });
+   await page.waitForFunction(() => window.__phase() === 'menu', null, { timeout: 10000 });
+   await page.waitForTimeout(1500);
+   return snap(label);
+};
+const menu1 = await toMenu('menu (after 1)');
+// (the shared models and materials of the weapons stay loaded, and the HUD, built at the first start, stays in the
+// document: both are there once, the later returns below show that they do not grow)
+check('back in the menu: the battle scene is released', menu1.scene <= menu0.scene + 4 && menu1.geo <= menu0.geo + 16 && menu1.tex <= menu0.tex + 2 && menu1.heapMB <= z.heapMB * 0.6,
+   { fresh: [menu0.geo, menu0.tex, menu0.scene, menu0.heapMB], now: [menu1.geo, menu1.tex, menu1.scene, menu1.heapMB], battleHeapMB: z.heapMB });
+check('back in the menu: the document holds the menu and the HUD built once', menu1.dom <= z.dom + 10, { fresh: menu0.dom, battle: z.dom, now: menu1.dom });
 await start({ mission: 'redsea', difficulty: 'normal' });
 const T = [];
 for (let m = 1; m <= 2; m++) {
@@ -104,11 +114,27 @@ const y = T[T.length - 1];
 check('second mission: still running, shader programs not piled up', y.phase === 'playing' && y.prog <= z.prog + 3, { first: z.prog, second: y.prog });
 check('second mission: heap not above the first battle', y.heapMB <= Math.max(...S.map(s => s.heapMB)) * 1.15 + 3, { first: Math.max(...S.map(s => s.heapMB)), second: y.heapMB });
 check('second mission: DOM not above the first battle (+60)', y.dom <= z.dom + 60, { first: z.dom, second: y.dom });
-await page.evaluate(() => { clearInterval(window.__busy); document.getElementById('btn-quit').click(); });
-await page.waitForTimeout(1500);
-const menu2 = await snap('menu (after 2)');
-check('menu after the second mission: nothing left over compared with the first return', menu2.geo <= menu1.geo + 2 && menu2.tex <= menu1.tex + 1 && menu2.dom <= menu1.dom + 10 && menu2.scene <= menu1.scene + 4,
-   { first: [menu1.geo, menu1.tex, menu1.dom, menu1.scene], second: [menu2.geo, menu2.tex, menu2.dom, menu2.scene] });
+const menu2 = await toMenu('menu (after 2)');
+// (another mission brings its own HUD plates and weapon models: bounded by the content, compared loosely here;
+// the strict comparison is the same mission played again, below)
+check('menu after the second mission: scene released again, heap as after the first', menu2.scene <= menu1.scene + 4 && menu2.tex <= menu1.tex + 1 && menu2.geo <= menu1.geo + 12 && menu2.heapMB <= menu1.heapMB * 1.15 + 3,
+   { first: [menu1.geo, menu1.tex, menu1.dom, menu1.scene, menu1.heapMB], second: [menu2.geo, menu2.tex, menu2.dom, menu2.scene, menu2.heapMB] });
+
+// the first mission once more: the same content, so the same numbers
+await start({ mission: 'standard', ship: 'Burke', difficulty: 'normal' });
+const U = [];
+for (let m = 1; m <= 2; m++) {
+   await page.waitForFunction(t => { const w = window.__world(); return !w || window.__phase() !== 'playing' || w.time >= t; }, m * 60, { timeout: 120000 });
+   U.push(await snap('battle 3, min ' + m));
+}
+// (like with like: minute 2 against minute 2; missiles in flight and notices move the scene and the document a little)
+const x = U[U.length - 1], f = S[Math.min(1, S.length - 1)], dom1 = Math.max(...S.map(s => s.dom));
+check('first mission again: running, no more in it than the first time', x.phase === 'playing' && x.geo <= f.geo + 4 && x.tex <= f.tex + 1 && x.prog <= z.prog + 2 && x.scene <= f.scene + 24 && x.dom <= dom1 + 10,
+   { first: [f.geo, f.tex, z.prog, f.scene, dom1], again: [x.geo, x.tex, x.prog, x.scene, x.dom] });
+check('first mission again: heap not above the first time', x.heapMB <= Math.max(...S.map(s => s.heapMB)) * 1.15 + 3, { first: Math.max(...S.map(s => s.heapMB)), again: x.heapMB });
+const menu3 = await toMenu('menu (after 3)');
+check('menu after three battles: nothing left over compared with the first return', menu3.geo <= Math.max(menu1.geo, menu2.geo) + 2 && menu3.tex <= menu1.tex + 1 && menu3.dom <= menu1.dom + 10 && menu3.scene <= menu1.scene + 4 && menu3.heapMB <= menu1.heapMB * 1.15 + 3,
+   { first: [menu1.geo, menu1.tex, menu1.dom, menu1.scene, menu1.heapMB], third: [menu3.geo, menu3.tex, menu3.dom, menu3.scene, menu3.heapMB] });
 
 await browser.close();
 const failed = results.filter(r => !r.ok);
