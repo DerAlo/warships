@@ -86,7 +86,7 @@ export const GUIDE = [
       what: `Der Hubschrauber jagt U-Boote – gegen Schiffe und Flugkörper kann er nichts. Er fliegt ${km(HELO.screen)} voraus, senkt sein Tauchsonar ins Wasser und findet getauchte Boote im Umkreis von ${km(HELO.dipRange)}, die dein Schiff nicht hört. Auf einen Kontakt wirft er einen seiner ${HELO.torps} U-Jagd-Torpedos.`,
       how: `Start voraus mit I, nochmals I ruft ihn zurück. Bei offener Lagekarte schickst du ihn an einen Punkt, an dem du ein Boot vermutest. Der Treibstoff reicht ${Math.round(HELO.fuel / 60)} Minuten, dann kehrt er von selbst zurück und wird neu klargemacht.`,
       vs: 'Lohnt sich nur, wenn der Gegner U-Boote hat. Ein einziger Luftabwehr-Flugkörper holt ihn herunter: nicht über feindliche Schiffe schicken.' },
-   { id: 'asw', name: 'U-Jagd vom Schiff', key: 'G', tap: 'Knopf U-Jagd', has: c => !!W(c).asw,
+   { id: 'asw', name: 'U-Jagd vom Schiff', key: 'G', tap: 'Knopf U-Jagd-Torpedo / Wasserbomben', has: c => !!W(c).asw,
       what: `Das Sonar des Schiffs hört getauchte Boote nur auf wenige Kilometer. Auf einen Sonarkontakt startet G einen leichten U-Jagd-Torpedo (bis ${km(4500)}), der das Boot selbst sucht und nur U-Boote trifft; ohne Kontakt fallen Wasserbomben über das Heck.`,
       how: 'Ein schnelles Boot ist laut und wird früher gehört. Der Hubschrauber findet das Boot, das Schiff oder der Hubschrauber bekämpft es.',
       vs: 'Wasserbomben wirken nur, wenn du fast über dem Boot bist.' },
@@ -95,7 +95,7 @@ export const GUIDE = [
       how: 'Einschalten, wenn du ein U-Boot in der Nähe vermutest oder Torpedos gemeldet werden.',
       vs: 'Nur wenige Ladungen und eine lange Pause dazwischen.' },
    { id: 'sub', name: 'U-Boot', key: 'F tiefer · G höher', tap: 'Tiefenknöpfe', has: c => !!c.sub,
-      what: 'Getaucht bist du für Radar und Auge unsichtbar und für Flugkörper unerreichbar. Auf Sehrohrtiefe siehst du durch das Sehrohr und startest Marschflugkörper. Ganz getaucht erreichen dich nur noch Wasserbomben und U-Jagd-Torpedos, du selbst hörst aber nur noch Peilungen.',
+      what: 'Getaucht bist du für Radar und Auge unsichtbar und für Flugkörper unerreichbar. Auf Sehrohrtiefe siehst du durch das Sehrohr und schießt Torpedos und Marschflugkörper – tiefer geht beides nicht mehr. Ganz getaucht erreichen dich nur noch Wasserbomben und U-Jagd-Torpedos, du selbst hörst aber nur noch Peilungen.',
       how: 'Getaucht läuft die Batterie leer (Atom-U-Boote nicht); aufgetaucht lädt sie. Wer schleicht, wird kaum gehört.',
       vs: 'Deine Gegner sind Hubschrauber mit Tauchsonar, U-Jagd-Torpedos, Wasserbomben und andere U-Boote. Nach einem Torpedoschuss sofort tiefer gehen und den Kurs ändern.' },
    { id: 'seal', name: 'Kommandotrupp', key: 'K', tap: 'Feld Kommandotrupp', has: c => !!c.sub?.seal,
@@ -103,7 +103,7 @@ export const GUIDE = [
       how: 'Nah an den Einsatzpunkt, fast stoppen, höchstens Sehrohrtiefe, dann K. Nach der Arbeit kommt der Trupp zurück: wieder langsam auf Sehrohrtiefe warten.',
       vs: 'Bleibt ein feindliches Schiff in der Nähe, wird der Trupp entdeckt.' },
    { id: 'air', name: 'Trägerjets', key: '1–3 Typ · E Start / übernehmen · F Rückruf', tap: 'Staffelfelder antippen', has: c => !!c.air,
-      what: 'Anti-Schiff-Jets tragen Seezielflugkörper und starten sie aus rund 13 km Abstand – außerhalb der Nahbereichsabwehr. Mehrzweck-Jets werfen Lenkbomben auf Schiffe und Landstellungen, müssen dafür aber über das Ziel. Jagdjets schießen feindliche Flugzeuge und Hubschrauber ab und decken den Verband.',
+      what: 'Anti-Schiff-Jets tragen Seezielflugkörper und schießen sie beim Abwurf als Peilungsschuss in Flugrichtung – am besten aus über 12 km Abstand, außerhalb der Nahbereichsabwehr. Mehrzweck-Jets werfen Lenkbomben auf Schiffe und Landstellungen, müssen dafür aber über das Ziel. Jagdjets schießen feindliche Flugzeuge und Hubschrauber ab und decken den Verband.',
       how: 'Typ wählen, mit E starten und die Staffel selbst fliegen: Linksklick halten = Zielanflug, loslassen = Abwurf. Jagdjets richten mit einem Klick eine Patrouille voraus ein. Der Treibstoff ist knapp; die Staffel kehrt von selbst um.',
       vs: 'Bereichsabwehr (SM-2, S-300F, HQ-9) holt Jets auf über 20 km herunter. Erst Schiffe mit schwacher Luftabwehr angreifen oder von mehreren Seiten kommen.' },
    { id: 'sites', name: 'Landstellungen', key: '', tap: '', has: () => false,
@@ -181,7 +181,7 @@ export const hints = {
 const CSS = `
 .msg.tip { max-width: min(520px, 86vw); white-space: normal; text-align: left; font-size: 13px; font-weight: 500; line-height: 1.35; padding: 6px 14px;
    background: rgba(17,20,21,.78); border-left: 3px solid var(--gold); }
-body.touch .msg.tip { font-size: 11.5px; line-height: 1.3; padding: 4px 9px; }
+body.touch .msg.tip { font-size: 11.5px; line-height: 1.3; padding: 4px 9px; max-width: min(286px, calc(50vw - 92px)); }   /* small phones: clear of the reticle */
 #guide { z-index: 25; }
 #guide .card { width: min(900px, 96vw); text-align: left; padding: 22px 28px 20px; }
 #guide .title { text-align: center; }
