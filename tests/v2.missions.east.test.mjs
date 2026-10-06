@@ -487,6 +487,44 @@ test('east: late in the operation the enemy fires a reloaded salvo at the carrie
    assert.ok(radioed(w, 'drehen auf uns ein') && radioed(w, 'Salve vom Verband der Shandong'));
 });
 
+test('east/strait: the blockade ships that are still afloat fire a reloaded salvo at the convoy', () => {
+   const fired = (w, id) => w.events.filter(e => e.type === 'ssmLaunch' && e.srcId === id).length;
+   for (const k of DIFFS) {
+      const t = EAST_TUNE.strait[k];
+      assert.ok(t.salvo > 0 && t.again > t.w2 + 120 && t.again <= def('strait').timeLimit - 240, k);
+   }
+   const T = EAST_TUNE.strait.normal;
+   // nobody is lost while the test waits: freighters, captain and blockade ships are kept afloat
+   const keep = (w) => () => { const S = w._script; for (const s of w.ships) if (s.alive && (s === w.player || S.conv.includes(s.id) || (S.block || []).includes(s.id))) s.hp = s.maxHP; };
+   let w = mk('strait'), S = w._script;
+   step(w, T.w2 + 1, keep(w));
+   assert.equal(S.block.length, 1 + T.dd);
+   step(w, T.again - 32 - w.time, keep(w));
+   assert.equal(w.phase, 'playing');
+   assert.ok(!radioed(w, 'haben nachgeladen'), 'not announced early');
+   step(w, 3, keep(w));
+   assert.ok(radioed(w, 'haben nachgeladen'), 'announced half a minute ahead');
+   assert.ok(!radioed(w, 'Salve der Blockadeschiffe'));
+   step(w, 28, keep(w));
+   const block = S.block.map(id => w.shipById(id));
+   assert.ok(block.every(b => b && b.alive));
+   for (const b of block) for (const x of b.cfg.weapons.ssm) b.mag[x.type] = 0;      // empty cells: what flies now is the reload
+   const n0 = block.map(b => fired(w, b.id));
+   step(w, 30, keep(w));
+   assert.equal(w.phase, 'playing');
+   assert.ok(radioed(w, 'Salve der Blockadeschiffe'), 'alarm');
+   block.forEach((b, i) => { const n = fired(w, b.id) - n0[i]; assert.ok(n >= T.salvo && n <= T.salvo + b.cfg.weapons.ssm.length, b.name + ' fired ' + n); });
+   // blockade ships that were sunk in time fire nothing
+   w = mk('strait'); S = w._script;
+   step(w, T.w2 + 1, keep(w));
+   for (const id of S.block) w.shipById(id).takeDamage(1e9, null, 'test');
+   const keep2 = keep(w);
+   step(w, T.again + 5 - w.time, keep2);
+   assert.equal(w.phase, 'playing');
+   assert.ok(!radioed(w, 'haben nachgeladen') && !radioed(w, 'Salve der Blockadeschiffe'));
+   assert.ok(!S.ripples || !S.ripples.length);
+});
+
 test('east/reefs: the relief group reloads and fires a closed salvo at the flagship', () => {
    const fired = (w, id) => w.events.filter(e => e.type === 'ssmLaunch' && e.srcId === id).length;
    const arrive = (w) => { const S = w._script; step(w, 2); for (const id of [S.radarId, ...S.bat]) kill(w, id); return S; };

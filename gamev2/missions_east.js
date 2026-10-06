@@ -32,9 +32,9 @@ export const EAST_TUNE = {
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
-      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1 },
-      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1 },
-      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 270, raid: 60, sub: 1 },
+      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1, again: 420, salvo: 2 },
+      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1, again: 420, salvo: 3 },
+      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 290, raid: 60, sub: 1, again: 480, salvo: 2 },
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
@@ -416,7 +416,7 @@ export function eastMissions(H) {
             'müssen den Zielraum erreichen. Schützen Sie die zivilen Besatzungen.',
          debrief: 'Der Konvoi hat den Zielraum erreicht, die Versorgung ist für die nächsten Wochen gesichert.',
          env: { time: 'night', weather: 'overcast', front: { at: 200, dur: 80, to: 'rain' } }, type: 'ops',
-         playableShips: ['Sachsen', 'Burke', 'Daring', 'Ticonderoga'], recommendedShip: 'Sachsen', arena: 20000, timeLimit: 630, stars: 2,
+         playableShips: ['Sachsen', 'Burke', 'Daring', 'Ticonderoga'], recommendedShip: 'Sachsen', arena: 20000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; const T = tune(w, 'strait');
             islands(w, [
@@ -445,17 +445,31 @@ export function eastMissions(H) {
             const wave = (list, from, text) => {
                const tgt = S.conv.map(id => live(w, id)).find(Boolean);
                if (!tgt) return;
-               list.forEach((cls, i) => add(w, cls, 'enemy', P(from.x + (i % 2) * 900, from.y + i * 800), 0, { minDist: 12500, ai: { huntId: tgt.id, press: true } }));
+               const made = list.map((cls, i) => add(w, cls, 'enemy', P(from.x + (i % 2) * 900, from.y + i * 800), 0, { minDist: 12500, ai: { huntId: tgt.id, press: true } }));
                radio(w, 'Luftlage', text, 'warn');
+               return ids(made);
             };
             later(S, 5, () => radio(w, 'Konvoiführer', 'Konvoi ist bereit. Wir halten Kurs Nord und bleiben dicht bei Ihnen.'));
             later(S, 30, () => wave(Array(T.fac1).fill('Typ022'), P(15000, -7000), 'Schnellbootrudel läuft von Osten an.'));
-            later(S, T.w2, () => wave(['Typ054A', ...(T.dd ? ['Typ052D'] : [])], P(13000, 12000), 'Überwassereinheiten aus Nordost, Kurs auf den Konvoi.'));
+            later(S, T.w2, () => { S.block = wave(['Typ054A', ...(T.dd ? ['Typ052D'] : [])], P(13000, 12000), 'Überwassereinheiten aus Nordost, Kurs auf den Konvoi.') || []; });
             later(S, T.w3, () => wave(Array(T.fac2).fill('Typ022'), P(-15000, 9000), 'Zweites Schnellbootrudel aus Nordwest.'));
+            // late in the passage the blockade ships that are still afloat reload and fire a closed salvo at the leading freighter
+            if (T.salvo) {
+               const up = () => (S.block || []).map(id => live(w, id)).filter(Boolean);
+               const lead = () => { const f = S.conv.map(id => live(w, id)).find(Boolean); return f ? { x: f.pos.x, y: f.pos.y } : null; };
+               later(S, T.again - 30, () => { if (up().length && lead()) radio(w, 'Lagezentrum', 'Die Blockadeschiffe im Nordosten haben nachgeladen und drehen auf den Konvoi ein – eine geschlossene Salve steht bevor. Versenken Sie sie vorher!', 'warn'); });
+               later(S, T.again, () => {
+                  const from = up().filter(e => e.cfg.weapons.ssm.length);
+                  if (!from.length || !lead()) return;
+                  radio(w, 'Luftlage', 'Flugkörperalarm. Salve der Blockadeschiffe, Ziel Konvoi.', 'warn');
+                  for (const e of from) ripple(S, e.id, T.salvo, lead, true);
+               });
+            }
             S.holdMsg = 0;
          },
          update(w, dt, S) {
             const left = S.conv.map(id => live(w, id)).filter(Boolean);
+            runRipples(w, S);
             clock(w, S, 'Konvoiführer', (t) => `Noch ${t}, dann schließt sich die Blockade vor dem Zielraum. Bleiben Sie dicht bei uns, damit wir Fahrt halten.`);
             // the freighters only run while a human captain is close to the leading ship
             const lead = left[0];
