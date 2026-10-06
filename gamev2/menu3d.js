@@ -8,6 +8,7 @@ import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, UNLOCK_CREDITS, un
    unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout } from './progress3d.js';
 import { classSvg } from './hud.js';
 import { logoSvg } from './theme.js';
+import { openGuide } from './guide.js';
 
 const TYPE_LABEL = {
    training: 'Übung', annihilation: 'Vernichtung', domination: 'Seeraum', escort: 'Geleitschutz',
@@ -157,6 +158,8 @@ body.touch .m3 { --tap:44px; }
 .m3-purse b { font:600 16px/1 var(--font); letter-spacing:.5px; color:var(--paper); }
 .m3-help { cursor:pointer; flex:none; width:var(--tap); height:var(--tap); border-radius:50%; border:1px solid rgba(226,189,110,.5); background:transparent; color:var(--brass-hi);
    font:italic 700 17px var(--font-serif); }
+.m3-guide { cursor:pointer; pointer-events:auto; display:block; width:100%; margin:10px 0 2px; min-height:var(--tap); padding:6px 10px; border:1px solid var(--ink-2); background:transparent; color:var(--ink); font:700 11.5px var(--font); letter-spacing:1.5px; }
+.m3-guide:hover { background:var(--ink); color:var(--paper); }
 .m3-help:hover { background:var(--navy-2); color:var(--paper); }
 /* the main button (also used by the lobby): signal red in a brass ring, an arrow pointing out to sea */
 .m3-battle { cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; padding:0 14px; overflow:hidden; white-space:nowrap; border:1px solid var(--signal-lo);
@@ -717,7 +720,8 @@ export class Menu3D {
          <div class="cl">${S.tier ? `<b>Stufe ${S.tier}</b> · ` : ''}${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
          ${S.desc ? `<p class="ds">${esc(S.desc)}</p>` : ''}
          <div class="bars">${RATING_LABEL.filter(([k]) => k !== 'torpedoes' || S.ratings[k] > 0).map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${k === 'torpedoes' ? (S.torp || S.air ? l : 'U-Jagd') : k === 'antiAir' ? 'Luftabwehr' : l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
-         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div></div>
+         <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>
+         <button class="m3-guide" data-act="guide" title="Waffenkunde: wofür jede Waffe dieses Schiffs gut ist">WAFFENKUNDE · Was kann dieses Schiff?</button></div>
          <div><div class="m3-kv">
             <span>Kampfkraft</span><span>${fmtInt(S.hp)} HP</span>
             ${S.mainGuns ? `<span>Geschütz</span><span>${esc(S.main)}</span>
@@ -808,6 +812,7 @@ export class Menu3D {
       }));
       this.root.querySelector('[data-act="battle"]').addEventListener('click', () => this.start());
       this.root.querySelector('[data-act="help"]').addEventListener('click', () => this.cb.onHowTo?.());
+      this.root.querySelector('[data-act="guide"]')?.addEventListener('click', () => { openGuide(this.ship); this.cb.onClick?.(); });
       this.root.querySelector('[data-act="captain"]').addEventListener('click', () => this._openCaptain());
       // the multiplayer screen (and everything network-related) is only loaded on demand
       this.root.querySelector('[data-act="mp"]').addEventListener('click', () => {
