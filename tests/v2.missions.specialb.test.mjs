@@ -251,8 +251,12 @@ test('specialb/bastion: a shot before the release loses; located at 100 % loses;
    w = mk('bastion'); step(w, 1); step(w, 30, hold(w, 1500, Math.PI));
    assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /geortet/);
    w = mk('bastion'); step(w, 1);
-   const fr = w.shipById(w._script.frig[0]); fr.takeDamage ? fr.takeDamage(1e9, w.player) : (fr.hp = 0); step(w, 1);
-   if (!fr.alive) { assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /alarmiert/); }
+   const fr = w.shipById(w._script.frig[0]);
+   assert.equal(typeof fr.takeDamage, 'function');
+   fr.takeDamage(fr.maxHP * 50, w.player, 'test'); step(w, 1);
+   assert.equal(fr.alive, false, 'the frigate is sunk');
+   assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /Fregatte Alfa ist versenkt worden/);
+   assert.equal(obj(w, 'fire').state, 'failed');
 });
 test('specialb/bastion: the trail astern and the run to the exit win; a check astern catches a boat that is not slow', () => {
    const w = mk('bastion', { diff: 'easy' }), S = w._script, T = SPECIAL_B_TUNE.bastion.easy;

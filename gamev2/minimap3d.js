@@ -195,7 +195,7 @@ function paintMapInner(g, world, x0, y0, size, opts) {
       g.setLineDash(ZONE_DASH); g.stroke(); g.setLineDash(NO_DASH);
       g.fillStyle = col; g.font = `bold ${big ? 13 : Math.max(8, Math.round(size / 32))}px ${MAP_FONT}`;
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(z.label, x, y);
+      g.fillText(z.label, x, z.lab ? y + z.lab * (r + (big ? 10 : 7)) : y);      // z.lab -1 / 1: label above / below the circle
    }
 
    // smoke

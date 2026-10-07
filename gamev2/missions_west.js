@@ -78,7 +78,7 @@ export function westMissions(H) {
       {
          id: 'hormus', group: 'ops', name: 'Straße von Hormus', subtitle: 'Geleitschutz · Schnellboote, Kleinst-U-Boot, Küstenbatterien',
          briefing: 'Drei Tanker laufen durch die Meerenge nach Osten. Bewaffnete Schnellboote haben in den letzten Tagen Handelsschiffe bedrängt, ' +
-            'an der Nordküste stehen Flugkörperbatterien, und ein Kleinst-U-Boot wird im Fahrwasser vermutet. ' +
+            'an der Südküste stehen Flugkörperbatterien, und ein Kleinst-U-Boot wird im Fahrwasser vermutet. ' +
             'Bleiben Sie beim Geleit. Schnellboote sind Ziele für das Geschütz – Flugkörper sind für sie zu schade. ' +
             'Gegen anfliegende Flugkörper helfen Nahbereichsabwehr und Täuschkörper. Mindestens zwei Tanker müssen durchkommen.',
          debrief: 'Das Geleit ist durch. Schnellboote bekämpft man mit dem Geschütz, anfliegende Flugkörper mit Abwehr und Täuschkörpern – ' +
@@ -88,12 +88,13 @@ export function westMissions(H) {
          arena: 20000, timeLimit: 12 * 60, stars: 1,
          setup(w, shipKey) {
             const S = w._script;
+            // (sim y grows south: north is up on the chart, missileui.js compass())
             islands(w, [
-               { c: P(1500, 17800), r: 3000, height: 320, seed: 21, lobes: 6, elong: 3.6, rot: 0, rough: 0.6, name: 'Nordküste' },
-               { c: P(-4000, -17600), r: 2800, height: 420, seed: 33, lobes: 6, elong: 2.8, rot: 0.1, rough: 0.8, name: 'Südkap' },
+               { c: P(1500, 17800), r: 3000, height: 320, seed: 21, lobes: 6, elong: 3.6, rot: 0, rough: 0.6, name: 'Südküste' },
+               { c: P(-4000, -17600), r: 2800, height: 420, seed: 33, lobes: 6, elong: 2.8, rot: 0.1, rough: 0.8, name: 'Nordkap' },
                { c: P(-3200, 6400), r: 850, height: 120, seed: 41, lobes: 4, rough: 0.5, name: 'Westinsel' },
                { c: P(5600, 7200), r: 1100, height: 160, seed: 47, lobes: 5, rough: 0.5, name: 'Felseninsel' },
-               { c: P(9500, -8200), r: 900, height: 140, seed: 53, lobes: 4, rough: 0.5, name: 'Südriff' },
+               { c: P(9500, -8200), r: 900, height: 140, seed: 53, lobes: 4, rough: 0.5, name: 'Nordriff' },
             ]);
             add(w, shipKey, 'player', P(-12200, 600), 0, { isPlayer: true });
             S.escort = add(w, 'Braunschweig', 'player', P(-14800, -1900), 0, { dmgMult: by(w, 0.05, 0.6, 0.6), ai: { escortId: null } });
@@ -111,7 +112,7 @@ export function westMissions(H) {
             // the batteries stay silent (radar off, not yet located) until the convoy is deep in the strait
             S.batteries = [
                addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
-               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Nord', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
+               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Süd', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
             ];
             S.sub = add(w, 'Ghadir', 'enemy', P(4200, -2600), Math.PI, { depth: 1, telegraph: 1, ai: { huntId: S.convoy[0].id } });
             objective(w, 'convoy', 'Geleiten Sie die Tanker durch die Meerenge (0/3 am Ziel, mindestens 2)');
@@ -129,13 +130,13 @@ export function westMissions(H) {
                S.boats += n;
             };
             const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
-            later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0],'Schnellboote von Norden, schnell näher kommend. Geschütz klar!'));
+            later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0], 'Schnellboote von Süden, schnell näher kommend. Geschütz klar!'));
             later(S, 215, () => wave(by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
             later(S, by(w, 345, 315, 285), () => {
-               radio(w, 'Operationszentrale', 'Feuerleitradar von der Nordküste! Die Küstenbatterien schalten auf. Flugkörperabwehr klar, Täuschkörper bereithalten.', 'warn');
+               radio(w, 'Operationszentrale', 'Feuerleitradar von der Südküste! Die Küstenbatterien schalten auf. Flugkörperabwehr klar, Täuschkörper bereithalten.', 'warn');
                for (const b of S.batteries) if (b.alive) { b.radarOn = true; b.detected = b.targetable = true; b.nextT = 10 + S.batteries.indexOf(b) * 12; }
             });
-            later(S, 410, () => wave(by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Südosten, hinter dem Riff hervor.'));
+            later(S, 410, () => wave(by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Nordosten, hinter dem Riff hervor.'));
             later(S, 130, () => radio(w, 'Operationszentrale', 'Hinweis: Ein Kleinst-U-Boot wird im Fahrwasser voraus vermutet. Sonar besetzen, Bordhubschrauber bereithalten.'));
          },
          // co-op (net/setup.js): with a captain on the corvette the first wave changes by `coopBoats`
