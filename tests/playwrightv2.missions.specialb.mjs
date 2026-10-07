@@ -2,8 +2,10 @@
 // Every mission is started from the menu (mission card -> AUSLAUFEN -> briefing -> AUSLAUFEN) on a
 // desktop (1440x810) and on a phone held sideways (844x390), runs 30 s and must show its objectives
 // without a single console error; then the mission's special rule is triggered (hijack: alongside the
-// tanker the boarding clock runs; evac: lying in the pickup zone the lift counter runs). The operations list of the menu is checked for reach with all entries.
-// Screenshots: tests/shots/v2-specialb-<mission>-<view>.png (+ briefing, menu, rule).
+// tanker the boarding clock runs; evac: lying in the pickup zone the lift counter runs; bastion: submerged
+// 2 km astern of the missile boat at 1/4 the trail counter runs, the chart shows her and the trailing band, and
+// before her bow the detection meter rises with its reason). The operations list of the menu is checked for reach with all entries.
+// Screenshots: tests/shots/v2-specialb-<mission>-<view>.png (+ briefing, menu, rule; bastion: chart, bow).
 //
 // Run:  node server.js 8831   then   node tests/playwrightv2.missions.specialb.mjs
 //       (URLV2, OUT, RUN_S, ONLY=hijack,... and VIEWS=desktop,phone to limit; NO_GPU=1 for software GL)
@@ -13,7 +15,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URLV2 || 'http://localhost:8831/index-v2.html';
 const OUT = process.env.OUT || 'tests/shots';
 const RUN_S = +(process.env.RUN_S || 30);
-const IDS = (process.env.ONLY || 'hijack,evac').split(',');
+const IDS = (process.env.ONLY || 'hijack,evac,bastion').split(',');
 const VIEWS = { desktop: { w: 1440, h: 810, touch: false }, phone: { w: 844, h: 390, touch: true } };
 const ONLY_VIEWS = (process.env.VIEWS || 'desktop,phone').split(',');
 mkdirSync(OUT, { recursive: true });
@@ -92,6 +94,7 @@ for (const view of ONLY_VIEWS) {
             world: w.mission.objectives.map(x => x.text),
             box: r ? { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } : null,
             shown: !!(r && r.width > 20 && r.height > 8 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.2 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1),
+            fresh: !!(o && o.classList.contains('tu-fresh')), opacity: cs ? +cs.opacity : 0,
             threat: !!document.querySelector('body.touch #mx-threat:not(.hidden)'),      // a phone gives the band to an incoming salvo (touch3d.js)
             radio: w.events.filter(e => e.type === 'objective').length };
       });
@@ -129,15 +132,65 @@ for (const view of ONLY_VIEWS) {
             const put = () => { p.pos.x = S.zone.x - 250; p.pos.y = S.zone.y - 350; p.heading = 0.5; p.speed = 0; p.setTelegraph(0); };
             S.nextAt = Math.min(S.nextAt, w.time);
             const t0 = performance.now();
-            while (performance.now() - t0 < 8000 && S.load < 4) { put(); await new Promise(r => setTimeout(r, 50)); }
+            while (performance.now() - t0 < 25000 && S.load < 13) { put(); await new Promise(r => setTimeout(r, 50)); }
             const obst = w.obstacles.map(o => ({ name: o.name, x: Math.round(o.c.x), y: Math.round(o.c.y), r: Math.round(o.r) }));
             return { stage: S.stage, load: +S.load.toFixed(1), text: w.mission.objectives.find(o => o.id === 'lifts').text, hud: [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent.trim())[0] || '',
                ferry: f ? { x: Math.round(f.pos.x), y: Math.round(f.pos.y), kn: +(f.speed / 2.6).toFixed(1), d: Math.round(Math.hypot(f.pos.x - p.pos.x, f.pos.y - p.pos.y)) } : null, zone: S.zone, obst };
          });
-         check(`${tag}: in the pickup zone the lift counter runs`, rule.stage === 1 && rule.load >= 4 && /Transport 1\/\d: [1-9]\d*\/\d+ an Bord/.test(rule.text), rule);
+         check(`${tag}: in the pickup zone the lift counter runs`, rule.stage === 1 && rule.load >= 13 && /Transport 1\/\d: [1-9]\d*\/\d+ an Bord/.test(rule.text), rule);
          check(`${tag}: the ferry lies at its berth`, !!rule.ferry && Math.abs(rule.ferry.kn) < 0.5, rule.ferry);
          await wait(400);
          await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-rule.png` });
+      }
+      if (id === 'bastion') {
+         // nothing has changed in the objectives for half a minute of searching: the phone's band has faded
+         if (V.touch) check(`${tag}: the objectives band fades while nothing changes`, !late.fresh && late.opacity < 0.2, { fresh: late.fresh, opacity: late.opacity });
+         // the boat is held 2 km dead astern of the missile boat, deep, at telegraph 1/4 (window.__put: 'astern' | 'bow' | '')
+         await ev(() => {
+            const w = window.__world(), S = w._script, p = w.player;
+            window.__put = 'astern';
+            window.__putT = setInterval(() => {
+               const t = w.shipById(S.tgtId), k = window.__put === 'astern' ? -2000 : window.__put === 'bow' ? 1500 : 0;
+               if (!k || !t) return;
+               p.pos.x = t.pos.x + Math.cos(t.heading) * k; p.pos.y = t.pos.y + Math.sin(t.heading) * k; p.heading = t.heading;
+               p.depthTarget = p.depthF = p.depth = 2; p.setTelegraph(1);
+            }, 30);
+         });
+         const state = () => ev(() => {
+            const w = window.__world(), S = w._script, t = w.shipById(S.tgtId), p = w.player, o = document.getElementById('objectives');
+            return { stage: S.stage, trail: S.trail, meter: +S.meter.toFixed(1), why: S.why, phase: window.__phase(), kn: +(Math.abs(p.speed) / 2.6).toFixed(1), depth: p.depth,
+               d: Math.round(Math.hypot(p.pos.x - t.pos.x, p.pos.y - t.pos.y)), text: w.mission.objectives.find(x => x.id === 'trail').text,
+               hud: o ? [...o.querySelectorAll('.obj')].map(e => e.textContent.trim()) : [], zones: w.mission.zones.map(z => z.label),
+               contact: !!(t.sonarSeen && w.time - t.sonarSeen.t < 2) };
+         });
+         await page.waitForFunction(() => window.__world()._script.trail >= 20 || window.__phase() !== 'playing', null, { timeout: 60000 }).catch(() => {});
+         await wait(700);      // (the HUD repaints the objectives a few times a second)
+         const a = await state();
+         check(`${tag}: 2 km astern, deep, at 1/4 the trail counter runs`, a.stage === 1 && a.trail >= 20 && a.depth === 2 && /achteraus: [1-9]\d*\/\d+ s/.test(a.text) && a.hud.some(x => x === a.text), a);
+         check(`${tag}: she and the trailing band are marked on the chart`, a.zones.includes('Folgeposition') && a.zones.some(z => /^Wolchow [←↖↙↑↓→↗↘]$/.test(z)) && !a.zones.includes('Patrouillengebiet'), a.zones);
+         check(`${tag}: the sonar holds her as a contact`, a.contact, a.contact);
+         check(`${tag}: the meter stays down in her wake`, a.meter < 30 && a.phase === 'playing', { meter: a.meter, why: a.why });
+         await wait(400);
+         await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-rule.png` });
+         // the chart while trailing
+         if (V.touch) await page.tap('#minimap-wrap').catch(() => {}); else await page.keyboard.press('m');
+         await wait(900);
+         const chart = await ev(() => window.__ctl().mapOpen);
+         check(`${tag}: the chart opens while trailing`, chart);
+         await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-chart.png` });
+         await page.keyboard.press('m');
+         await wait(500);
+         // before her bow her sonar hears the boat: the meter rises and the objective names the reason
+         const m0 = (await state()).meter;
+         await ev(() => { window.__put = 'bow'; });
+         await page.waitForFunction((m0) => { const S = window.__world()._script; return (S.meter >= m0 + 12 && S.why === 'bow') || window.__phase() !== 'playing'; }, m0, { timeout: 30000 }).catch(() => {});
+         await wait(700);      // (the HUD repaints the objectives a few times a second)
+         const b = await state();
+         await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-bow.png` });
+         await ev(() => { window.__put = 'astern'; });
+         check(`${tag}: before her bow the meter rises`, b.meter >= m0 + 12 && b.phase === 'playing', { from: m0, to: b.meter });
+         check(`${tag}: the objective names the reason`, b.why === 'bow' && /Ortungsgefahr [1-9]\d* % . steigt: vor ihrem Sonar/.test(b.text) && b.hud.some(x => x === b.text), { why: b.why, text: b.text, hud: b.hud[1] });
+         await ev(() => { clearInterval(window.__putT); });
       }
       check(`${tag}: no console errors`, errors.length === e0, errors.slice(e0, e0 + 4));
       await ctx.close();

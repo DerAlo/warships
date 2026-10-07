@@ -56,10 +56,12 @@ export const SPECIAL_B_TUNE = {
 // shadower's noise; while it checks astern the blind arc is gone and only a boat at telegraph 1/4 or less stays unheard.
 // hear: m at which the sonar team classifies it. The speed rules follow the telegraph, so they read the same in both
 // boats (share of the boat's top speed submerged): creep = up to 1/4, fast = more than 1/2, both also at periscope depth, where a boat runs faster (loud near a listener, near m).
-export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creep: 0.33, hear: 5000, fast: 0.62, near: 6500, frig: 3000, sub: 2200 };
+export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creep: 0.33, hear: 5000, fast: 0.62, near: 6500, frig: 3000, sub: 2200, coop: 0.08 };
 // why the detection meter rises, as shown in the objective
 const WHY = { listen: 'sie horcht, Sie sind zu schnell', close: 'zu dicht am Heck', bow: 'vor ihrem Sonar, nicht achteraus', fast: 'zu schnell im Kielwasser',
    held: 'ein Wachschiff hört Sie', ping: 'das Jagd-U-Boot hält Sie im Sonar', seen: 'Sehrohr gesichtet', noise: 'zu laut nahe der Wachschiffe' };
+// course arrows of the chart label (sim heading 0 = east, y grows south)
+const ARROW = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'];
 // Evacuation (evac): a lift is loaded while a captain's ship lies inside the pickup zone (r m) at no more
 // than slowKn kn and no armed boat stands within clear m of it; people per lift, people the ferry takes.
 export const EVAC = { r: 800, slowKn: 6, clear: 1500, people: 40, ferry: 320 };
@@ -302,8 +304,10 @@ export function specialMissionsB(H) {
             later(S, 14, () => radio(w, 'Hafenkapitän', `Die Boote kommen nur zu Ihnen, wenn Sie in der Zone liegen und höchstens ${EVAC.slowKn} Knoten laufen. Jedes Fenster bleibt ${T.win} Sekunden offen, ein Transport braucht ${T.load}. ${T.miss ? 'Mehr als einen Transport dürfen wir nicht verpassen' : 'Wir dürfen keinen einzigen Transport verpassen'} – und die Fähre darf nicht sinken.`, 'warn'));
          },
          liftText(w, S, T) {
-            const n = Math.min(T.lifts, S.lift + (S.stage === 1 ? 0 : 1)), left = S.stage === 1 ? Math.max(0, S.winEnd - w.time) : Math.max(0, S.nextAt - w.time);
-            const head = S.stage === 1 ? `Transport ${n}/${T.lifts}: ${Math.min(EVAC.people, Math.floor(S.load / T.load * EVAC.people))}/${EVAC.people} an Bord, Fenster noch ${mmss(left)}`
+            // (clocks in steps of 10 s until the last 30 s, people in tens: the phone's band fades while nothing changes)
+            const n = Math.min(T.lifts, S.lift + (S.stage === 1 ? 0 : 1)), exact = S.stage === 1 ? Math.max(0, S.winEnd - w.time) : Math.max(0, S.nextAt - w.time);
+            const left = exact > 30 ? Math.ceil(exact / 10) * 10 : Math.ceil(exact);
+            const head = S.stage === 1 ? `Transport ${n}/${T.lifts}: ${Math.min(EVAC.people, Math.floor(S.load / T.load * EVAC.people / 10) * 10)}/${EVAC.people} an Bord, Fenster noch ${mmss(left)}`
                : S.stage === 0 ? `Transport ${n}/${T.lifts} legt in ${mmss(left)} ab` : `${S.done}/${T.lifts} Transporte an Bord`;
             return `Nehmen Sie die Transporte auf: in der Aufnahmezone, höchstens ${EVAC.slowKn} kn – ${head} · verpasst ${S.missed} (erlaubt ${T.miss})` + lim(w);
          },
@@ -411,14 +415,15 @@ export function specialMissionsB(H) {
       {
          id: 'bastion', group: 'ops', name: 'Arktis – Bastion', subtitle: 'Sondereinsatz · Raketen-U-Boot beschatten, unentdeckt bleiben',
          briefing: 'An der Eiskante liegt das geschützte Patrouillengebiet eines Raketen-U-Boots – die Bastion. Fregatten mit Schleppsonar ' +
-            'und ein Jagd-U-Boot decken es. Spüren Sie den Raketenträger Wolchow auf und beschatten Sie ihn: getaucht, ' +
-            '1,2 bis 2,8 Kilometer genau achteraus – dort ist sein eigenes Sonar taub. Halten Sie die Position, bis genug Geräuschdaten ' +
+            'und ein Jagd-U-Boot decken es. Spüren Sie die Wolchow auf und beschatten Sie sie: getaucht, ' +
+            '1,2 bis 2,8 Kilometer genau achteraus – dort ist ihr eigenes Sonar taub. Halten Sie die Position, bis genug Geräuschdaten ' +
             'aufgezeichnet sind, und laufen Sie dann zum Ablaufpunkt. Die Ortungsgefahr steht im Auftrag, mit dem Grund, warum sie steigt: ' +
-            'vor oder neben dem Raketenträger hört Sie sein Sonar, die Wachschiffe hören Sie auf bis zu 3 Kilometer, mit mehr als ' +
-            'halber Fahrt sind Sie in ihrer Nähe zu laut, und am Sehrohr werden Sie gesichtet. Von Zeit zu Zeit horcht der ' +
-            'Raketenträger nach achtern – das Sonar meldet es vorher: Dann höchstens Fahrtstufe 1/4, bis er fertig ist. ' +
+            'Vor oder neben der Wolchow hört Sie ihr Sonar, die Wachschiffe hören Sie auf bis zu 3 Kilometer, mit mehr als ' +
+            'halber Fahrt sind Sie in ihrer Nähe zu laut, und am Sehrohr werden Sie gesichtet. Von Zeit zu Zeit horcht die ' +
+            'Wolchow nach achtern – das Sonar meldet es vorher: dann höchstens Fahrtstufe 1/4, bis sie fertig ist. ' +
+            'Sobald Ihr Sonar sie hält, steht sie mit Kurspfeil auf der Lagekarte, dahinter die Folgeposition. ' +
             'Bei 100 % sind Sie geortet, der Einsatz ist verloren. ' +
-            'Waffen sind gesperrt: Ein Schuss ohne Freigabe beendet den Einsatz. Der Raketenträger ist niemals ein Ziel.',
+            'Waffen sind gesperrt: Ein Schuss ohne Freigabe beendet den Einsatz. Die Wolchow ist niemals ein Ziel.',
          debrief: 'Die Geräuschsignatur der Wolchow ist aufgezeichnet, in der Bastion hat niemand etwas bemerkt. ' +
             'Entschieden hat nicht eine Waffe, sondern die Fahrtstufe: langsam genug, um unhörbar zu bleiben, schnell genug, um dranzubleiben.',
          fleet: { own: '1 Jagd-U-Boot · 1 Schwesterboot als Sicherung am Ablaufpunkt', foe: 'Raketen-U-Boot Wolchow (kein Ziel), 2 Fregatten, 1 Jagd-U-Boot' },
@@ -457,19 +462,19 @@ export function specialMissionsB(H) {
             S.guardId = T.guard ? add(w, 'Kilo', 'enemy', g0, -0.2, { name: 'Jagd-U-Boot Ladoga', depth: 2, speedKn: 7, ai: { passive: true, route: [S.guardLoop[1], S.guardLoop[2], S.guardLoop[0]] } }).id : 0;
             S.area = zone(w, -2600, 3000, 4200, 'Patrouillengebiet');
             S.stage = 0; S.why = ''; S.whyT = 0; S.meter = 0; S.peak = 0; S.trail = 0; S.tick = 0; S.shown = ''; S.listenAt = 0; S.listenEnd = 0; S.released = false; S.sunk = 0;
-            objective(w, 'find', 'Spüren Sie den Raketenträger Wolchow im Patrouillengebiet auf' + lim(w));
+            objective(w, 'find', 'Spüren Sie die Wolchow im Patrouillengebiet auf' + lim(w));
             objective(w, 'trail', this.trailText(S, T));
             objective(w, 'exit', 'Laufen Sie danach unentdeckt zum Ablaufpunkt ab');
-            objective(w, 'fire', 'Waffen gesperrt – kein Schuss ohne Freigabe, der Raketenträger ist nie ein Ziel');
+            objective(w, 'fire', 'Waffen gesperrt – kein Schuss ohne Freigabe, die Wolchow ist nie ein Ziel');
             objective(w, 'ghost', 'Die Ortungsgefahr bleibt unter 50 %', { optional: true });
             w.score = { kind: 'count', player: 0, enemy: 0, target: 100 };
-            later(S, 4, () => radio(w, 'Flottenkommando', `Sie stehen am Rand der Bastion. Der Raketenträger Wolchow läuft mit ${T.kn} Knoten nach Südwesten durch das Patrouillengebiet. Finden Sie ihn, hängen Sie sich ${T.trail} Sekunden achteraus an – und lassen Sie sich nicht orten.`));
-            later(S, 14, () => radio(w, 'Flottenkommando', 'Waffen sind gesperrt. Ein Schuss ohne Freigabe beendet den Einsatz, und der Raketenträger ist niemals ein Ziel.', 'warn'));
-            later(S, 26, () => radio(w, 'Sonar', `Zwei Fregatten mit Schleppsonar laufen nördlich ihres Kurses Streife${T.guard ? ', ein Jagd-U-Boot kreist vor dem Ablaufpunkt' : ''}. Gestoppt hören uns die Fregatten auf ${String(TRAIL.frig / 2000).replace('.', ',')} Kilometer, bei voller Fahrt auf ${TRAIL.frig / 1000} – Abstand halten. Mit mehr als halber Fahrt sind wir in ihrer Nähe ohnehin zu laut.`));
+            later(S, 4, () => radio(w, 'Flottenkommando', `Sie stehen am Rand der Bastion. Die Wolchow läuft mit ${T.kn} Knoten nach Südwesten durch das Patrouillengebiet. Finden Sie sie, hängen Sie sich ${T.trail} Sekunden achteraus an – und lassen Sie sich nicht orten.`));
+            later(S, 14, () => radio(w, 'Flottenkommando', 'Waffen sind gesperrt. Ein Schuss ohne Freigabe beendet den Einsatz, und die Wolchow ist niemals ein Ziel.', 'warn'));
+            later(S, 26, () => radio(w, 'Sonar', `Zwei Fregatten mit Schleppsonar laufen nördlich ihres Kurses Streife${T.guard ? ', ein Jagd-U-Boot kreist vor dem Ablaufpunkt' : ''}. Gestoppt hören uns die Fregatten auf ${String(TRAIL.frig / 2000).replace('.', ',')} Kilometer, bei voller Fahrt auf ${TRAIL.frig / 1000} – Abstand halten. Mit mehr als halber Fahrt sind wir in ihrer Nähe ohnehin zu laut. Was unser Sonar hält, steht als Kontakt auf der Karte.`));
          },
          trailText(S, T) {
             const m = Math.floor(S.meter / 10) * 10, sec = Math.min(T.trail, Math.floor(S.trail / 10) * 10);
-            return `Beschatten Sie die Wolchow getaucht,${String(TRAIL.min / 1000).replace('.', ',')}–${String(TRAIL.max / 1000).replace('.', ',')} km achteraus: ${sec}/${T.trail} s · Ortungsgefahr ${S.meter >= 100 ? 100 : m} %` +
+            return `Beschatten Sie die Wolchow getaucht, ${String(TRAIL.min / 1000).replace('.', ',')}–${String(TRAIL.max / 1000).replace('.', ',')} km achteraus: ${sec}/${T.trail} s · Ortungsgefahr ${S.meter >= 100 ? 100 : m} %` +
                (S.why ? ` – steigt: ${WHY[S.why]}` : '') + (S.listening ? ` · SIE HORCHT – höchstens Fahrtstufe 1/4!` : '');
          },
          update(w, dt, S) {
@@ -499,6 +504,11 @@ export function specialMissionsB(H) {
             }
             if ((S.tick -= dt) > 0) return;
             const step = 0.5; S.tick += step;
+            // what the own sonar team holds is shown like any sonar contact (subui.js: ring on the chart, "SONAR x km" in
+            // the deep view; co-op sends it): the Wolchow from the first contact on, a guard while it is near enough to matter
+            const held = (o) => { const c = o.sonarSeen || (o.sonarSeen = { x: 0, y: 0, t: 0, by: 0, evT: -99 }); c.x = o.pos.x; c.y = o.pos.y; c.t = w.time; };
+            if (S.stage >= 1) held(t);
+            for (const o of hunters) if (boats.some(b => dist(b.pos, o.pos) < TRAIL.near)) held(o);
             // ---- the check astern: announced, then for listenFor s the blind arc is gone
             S.listening = S.stage === 1 && w.time >= S.listenAt && w.time < S.listenEnd;
             if (S.stage === 1 && w.time >= S.listenEnd) {
@@ -526,7 +536,8 @@ export function specialMissionsB(H) {
                if (r > rate) { rate = r; why = y; }
                if (astern && d >= TRAIL.min && d <= TRAIL.max && b.depth > 0) inBand = true;
             }
-            S.meter = Math.max(0, Math.min(100, S.meter + rate * step));
+            // co-op: two boats are two sources of noise, the meter rises faster per captain beyond the first
+            S.meter = Math.max(0, Math.min(100, S.meter + (rate > 0 ? rate * (1 + TRAIL.coop * extraCaptains(w)) : rate) * step));
             S.peak = Math.max(S.peak, S.meter);
             w.score.player = Math.round(S.meter);
             // the reason stays in the objective for a few seconds after the meter stops rising (no flicker at a limit)
@@ -552,9 +563,14 @@ export function specialMissionsB(H) {
             if (S.stage === 0 && nearest < TRAIL.hear) {
                S.stage = 1; setObj(w, 'find', 'done');
                S.listenAt = w.time + T.listen * (0.75 + 0.5 * w.rng()); S.listenEnd = S.listenAt + T.listenFor;
-               S.tz = zone(w, t.pos.x, t.pos.y, 800, 'Folgeposition');
-               radio(w, 'Sonar', `Kontakt: ein großes Boot, sieben Blätter, ${T.kn} Knoten – das ist die Wolchow. Die Folgeposition steht auf der Karte: genau achteraus, ${String(TRAIL.min / 1000).replace('.', ',')} bis ${String(TRAIL.max / 1000).replace('.', ',')} Kilometer.`);
+               // on the chart from now on: she with her course (red, the circle is the range of her sonar astern), the
+               // trailing position behind her; the search area has done its work
+               S.tz = zone(w, t.pos.x, t.pos.y, 800, 'Folgeposition'); S.tz.lab = 1;
+               S.wz = zone(w, t.pos.x, t.pos.y, TRAIL.aft, 'Wolchow', 'danger'); S.wz.lab = -1;
+               w.mission.zones.splice(w.mission.zones.indexOf(S.area), 1);
+               radio(w, 'Sonar', `Kontakt: ein großes Boot, sieben Blätter, ${T.kn} Knoten – das ist die Wolchow. Sie steht jetzt mit Kurspfeil auf der Karte, dahinter die Folgeposition: genau achteraus, ${String(TRAIL.min / 1000).replace('.', ',')} bis ${String(TRAIL.max / 1000).replace('.', ',')} Kilometer.`);
             }
+            if (S.wz) { S.wz.x = Math.round(t.pos.x / 50) * 50; S.wz.y = Math.round(t.pos.y / 50) * 50; S.wz.label = 'Wolchow ' + ARROW[((Math.round(t.heading / (Math.PI / 4)) % 8) + 8) % 8]; }
             if (S.tz) {      // the marked trailing position follows the boat (coarse steps: co-op sends zones on change)
                const k = (TRAIL.min + TRAIL.max) / 2;
                S.tz.x = Math.round((t.pos.x - hx * k) / 50) * 50; S.tz.y = Math.round((t.pos.y - hy * k) / 50) * 50;
@@ -568,9 +584,9 @@ export function specialMissionsB(H) {
                if (T.hunt && g && !S.released && S.trail >= T.trail * T.hunt) {
                   S.released = true;
                   g.sonarDeafT = 0; g.ai.passive = false; g.ai.route = null; g.ai.huntId = boats.length ? boats.reduce((a, b) => dist(b.pos, g.pos) < dist(a.pos, g.pos) ? b : a).id : null; g.ai.press = true;
-                  objText(w, 'fire', 'Waffen frei gegen das Jagd-U-Boot Ladoga – nur gegen dieses, der Raketenträger ist nie ein Ziel');
+                  objText(w, 'fire', 'Waffen frei gegen das Jagd-U-Boot Ladoga – nur gegen dieses, die Wolchow ist nie ein Ziel');
                   radio(w, 'Sonar', 'Torpedorohre werden geflutet – das Jagd-U-Boot Ladoga hat unsere Spur!', 'warn');
-                  radio(w, 'Flottenkommando', 'Waffen frei gegen das Jagd-U-Boot – nur gegen dieses. Der Raketenträger und die Fregatten bleiben gesperrt.', 'warn');
+                  radio(w, 'Flottenkommando', 'Waffen frei gegen das Jagd-U-Boot – nur gegen dieses. Die Wolchow und die Fregatten bleiben gesperrt.', 'warn');
                }
                if (S.trail >= T.trail) {
                   S.stage = 2; setObj(w, 'trail', 'done');
@@ -595,7 +611,7 @@ export function specialMissionsB(H) {
             }
             if (ship.id === S.guardId && S.released) { S.sunk++; radio(w, 'Sonar', 'Das Jagd-U-Boot ist versenkt. Weiter – leise.'); return; }
             S.stage = 3; setObj(w, 'fire', 'failed');
-            w.end(false, ship.id === S.tgtId ? 'Der Raketenträger Wolchow ist gesunken – das war nie der Auftrag.' : `${ship.name} ist versenkt worden – die Bastion ist alarmiert, der Einsatz ist gescheitert.`);
+            w.end(false, ship.id === S.tgtId ? 'Die Wolchow ist gesunken – das war nie der Auftrag.' : `${ship.name} ist versenkt worden – die Bastion ist alarmiert, der Einsatz ist gescheitert.`);
          },
          timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – das Boot hat den Ablaufpunkt nicht erreicht.'); },
       },
