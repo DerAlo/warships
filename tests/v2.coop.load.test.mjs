@@ -156,6 +156,17 @@ test('co-op reefs: the relief group grows by coopFrig frigates at most, by none 
    }
 });
 
+test('co-op barents: the battle cruiser has a coopHp hull against three or more captains only', () => {
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = EAST_TUNE.barents[difficulty], hull = (n) => { const w = build('barents', n, 0, difficulty), pj = w.shipById(w._script.pjId); assert.equal(pj.hp, pj.maxHP); return pj.maxHP; };
+      assert.ok(T.coopHp > 0.5 && T.coopHp <= 1.5, difficulty);
+      const solo = hull(1);
+      assert.equal(hull(2), solo, difficulty + ': two captains');
+      for (const n of [3, 4]) assert.equal(hull(n), Math.round(solo * T.coopHp), `${difficulty}: ${n} captains`);
+   }
+   assert.ok(EAST_TUNE.barents.normal.coopHp < 1);
+});
+
 test('co-op redsea: from wave coopFrom on every launcher fires one missile more at a destroyer with a captain', () => {
    // missiles a wave puts into the launch queue
    const queued = (n, difficulty, k) => { const w = build('redsea', n, 0, difficulty), S = w._script; S.queue.length = 0; S.def.wave(w, S, k); return S.queue.length; };

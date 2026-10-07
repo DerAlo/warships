@@ -20,9 +20,12 @@ import { setRadar } from './sensors.js';
 export const EAST_TUNE = {
    window: 120,              // s the allied bots keep firing after a human captain's last launch or hit
    barents: {
-      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0 },
-      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4 },
-      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6 },
+      // co-op: `coopHp` scales the battle cruiser's hull against three or more captains, who sink it less often
+      // before its second salvo than two do. Measured on 60 runs with 2/3/4 captains: normal 1 -> 63/48/52 %,
+      // 0.85 -> ./50/63 %, 0.75 -> ./58/67 %, 0.7 -> ./60/68 %; hard 1 -> 23/22/20 %; easy 1 -> 100/./97 % (30 runs)
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0, coopHp: 1 },
+      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4, coopHp: 0.75 },
+      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6, coopHp: 1 },
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
@@ -315,6 +318,12 @@ export function eastMissions(H) {
                setObj(w, 'strike', 'done'); setObj(w, 'screen', 'done'); setObj(w, 'deck', 'done');
                w.end(true, 'Der Schlachtkreuzer ist ausgeschaltet, der Träger ist einsatzbereit.');
             }
+         },
+         // co-op (net/setup.js): against three or more captains the battle cruiser's hull is scaled by `coopHp`
+         coop(w, S, humans) {
+            const k = tune(w, 'barents').coopHp, pj = w.shipById(S.pjId);
+            if (humans.length < 3 || k === 1 || !pj) return;
+            pj.hp = Math.round(pj.hp * k); pj.maxHP = Math.round(pj.maxHP * k);
          },
          timeout(w) { w.end(false, 'Der gegnerische Verband hat sich abgesetzt – der Gegenschlag kam zu spät.'); },
       },
