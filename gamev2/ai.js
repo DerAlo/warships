@@ -743,6 +743,7 @@ function gunnery(b, w, d, dt) {
    if (ai.role === 'dd' && !b.detected && tgt.type !== 'DD' && b.torps && b.torps.launchers.some(l => l.reload <= 2)) { b.aimPoint = tgtLead(b, tgt, d, dd); return; }
    const aim = tgtLead(b, tgt, d, dd);
    b.aimPoint = aim;
+   if (w._script && w._script.noFire && w._script.noFire(b, aim)) return;   // V2 mission rule: no shell may come down there (missions_special_a.js, rig)
    if (dd > m.range || w.time - ai.targetSince < d.reaction) return;
    // ammo choice (re-evaluated every 8 s so the reload penalty is not paid constantly)
    ai.ammoT -= dt;

@@ -12,7 +12,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URLV2 || 'http://localhost:8871/index-v2.html';
 const OUT = process.env.OUT || 'tests/shots';
 const RUN_S = Number(process.env.RUN_S) || 30;
-const ids = (process.env.MISSIONS || 'cable').split(',');
+const ids = (process.env.MISSIONS || 'cable,rig').split(',');
 const VIEWS = { desktop: { width: 1440, height: 810, touch: false }, phone: { width: 844, height: 390, touch: true } };
 const views = (process.env.VIEWS || 'desktop,phone').split(',');
 const SHOTS = process.env.SHOTS !== '0';
@@ -118,12 +118,13 @@ for (const view of views) {
             visible: !!r && r.width > 40 && r.height > 10 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 && cs.display !== 'none' && cs.visibility !== 'hidden',
             opacity: cs ? +cs.opacity : 0,
             box: r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : null,
+            threat: !!document.querySelector('body.touch #mx-threat:not(.hidden)'),      // a phone gives the band to an incoming salvo (touch3d.js)
             want: w.mission.objectives.length, fps: window.__fps ? window.__fps() : null,
          };
       });
       await shot(id + '-30s');
       check(`${view} ${id}: sim ran ${RUN_S} s`, hud.t > RUN_S * 0.5 && hud.phase === 'playing', { t: hud.t, phase: hud.phase, fps: hud.fps });
-      check(`${view} ${id}: objectives text visible`, hud.visible && (seen || hud.opacity > 0.5) && hud.objs.length === hud.want && hud.objs.every(t => t && t.trim().length > 8 && !/undefined|NaN/.test(t)), { box: hud.box, n: hud.objs.length, atStart: seen, opacityAt30s: hud.opacity, first: hud.objs[0] });
+      check(`${view} ${id}: objectives text visible`, (hud.visible || (hud.threat && seen)) && (seen || hud.opacity > 0.5) && hud.objs.length === hud.want && hud.objs.every(t => t && t.trim().length > 8 && !/undefined|NaN/.test(t)), { box: hud.box, n: hud.objs.length, atStart: seen, opacityAt30s: hud.opacity, first: hud.objs[0] });
       if (id === 'cable') {
          // radio traffic of the first half minute, then the special rule: alongside the dragging ship the lookout
          // identifies it and the boarding team goes over (the test holds the ship there for a few seconds)
@@ -144,6 +145,29 @@ for (const view of views) {
          check(`${view} cable: alongside, the dragging ship is identified and boarding counts up`, res.found && res.find === 'done' && res.board > 1 && /Boarding/.test(res.stop), res);
          const objs = await ev(() => [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent).join(' | '));
          check(`${view} cable: the objective shows the boarding progress`, /längsseits/.test(objs) && /Kabel hält noch/.test(objs), objs.slice(0, 200));
+      }
+      if (id === 'rig') {
+         // the special moment: the boats are gone from the platform, the ship lies stopped inside the circle with the
+         // platform ahead, and the boarding team goes over by itself (the test holds the ship there for a few seconds)
+         const res = await ev(() => new Promise(done => {
+            const w = window.__world(), S = w._script, p = w.player;
+            const plat = w.sites.find(s => s.id === S.platId);
+            const t0 = performance.now();
+            const hold = () => {
+               S.boats.forEach((id, k) => { const b = w.shipById(id); if (b && b.alive) { b.pos.x = 10500; b.pos.y = -10500 + k * 300; b.ai.anchored = true; } });
+               p.pos.x = plat.pos.x - 520; p.pos.y = plat.pos.y - 60; p.heading = 0.1; p.speed = 0; p.setTelegraph(0);
+               if (window.__setAim) window.__setAim(0, 520);      // the view on the platform
+               if (performance.now() - t0 < 6000 && w.phase === 'playing') requestAnimationFrame(hold);
+               else done({ model: plat.model, hidden: !plat.detected && !plat.targetable, hp: plat.hp === plat.maxHp, teams: w.teams.map(t => t.state), left: S.teamsLeft, board: w.mission.objectives.find(o => o.id === 'board').text, phase: w.phase });
+            };
+            hold();
+         }));
+         const text = await ev(() => document.body.innerText);
+         check(`${view} rig: radio traffic says what happens at that moment`, /Boardingteam: Wir setzen von/.test(text), (text.match(/Boardingteam: .{0,90}/) || [''])[0]);
+         await shot(id + '-boarding');
+         check(`${view} rig: stopped in the circle with no boat at the platform, the team goes over`, res.phase === 'playing' && res.model === 'platform' && res.hidden && res.hp && res.teams[0] === 'out' && /setzt über/.test(res.board), res);
+         const objs = await ev(() => [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent).join(' | '));
+         check(`${view} rig: the objective shows the crossing and the valve clock`, /setzt über/.test(objs) && /Ventile in/.test(objs), objs.slice(0, 200));
       }
       check(`${view} ${id}: no console errors`, errors.length === e0, errors.slice(e0, e0 + 4));
    }

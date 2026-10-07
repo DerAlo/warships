@@ -155,6 +155,22 @@ const SITE_BUILD = {
       parts.push(cyl(0.5, 0.8, 22, 6, -6, 27, 6, C.steel), box(6, 0.5, 0.5, -6, 34, 6, C.steel), box(4, 0.5, 0.5, -6, 30, 6, C.steel));
       return { parts, dish: null };
    },
+   // gas platform at sea (site.model = 'platform', missions_special_a.js): four legs with braces, two decks,
+   // quarters with the helideck, drilling derrick, process modules, crane and flare boom; fixed size
+   platform() {
+      const parts = [];
+      for (const x of [-26, 26]) for (const z of [-20, 20]) parts.push(cyl(3.2, 3.2, 46, 8, x, 1, z, C.yellow));
+      for (const z of [-20, 20]) parts.push(box(52, 1.6, 1.6, 0, 9, z, C.steel), box(58, 1.4, 1.4, 0, 16, z, C.steel, 0, 0, 0.26));
+      for (const x of [-26, 26]) parts.push(box(1.6, 1.6, 40, x, 9, 0, C.steel));
+      parts.push(box(64, 3, 50, 0, 25, 0, C.steel), box(74, 2.5, 58, 0, 31, 0, C.dark));
+      parts.push(box(20, 14, 30, -25, 39.2, -8, C.white), box(14, 5, 18, -25, 48.7, -8, C.white), box(21, 1.2, 0.6, -25, 42, 7.2, C.glass));
+      parts.push(cyl(15, 15, 1.2, 8, -44, 47, -24, C.asphalt), box(8, 0.3, 1.4, -44, 47.7, -24, C.white), box(14, 1.4, 1.4, -34, 45, -22, C.steel));
+      parts.push(cyl(2.4, 9, 46, 4, 12, 55.2, 8, C.red, 0, Math.PI / 4, 0), box(7, 3, 7, 12, 79.6, 8, C.steel));
+      parts.push(box(22, 9, 20, 16, 36.7, -17, C.concrete), cyl(4, 4, 18, 10, 26, 36.4, 20, C.white, 0, 0, Math.PI / 2), cyl(4, 4, 18, 10, 26, 36.4, 10, C.white, 0, 0, Math.PI / 2));
+      parts.push(cyl(1.6, 1.6, 14, 6, 31, 39.2, -25, C.yellow), box(30, 1.4, 1.4, 43, 51, -25, C.yellow, 0, 0, 0.35));
+      parts.push(box(44, 1.2, 1.2, 55, 41, 24, C.steel, 0, 0, 0.45), box(2.4, 3, 2.4, 75, 51, 24, C.red));
+      return { parts, dish: null };
+   },
    // missile launch site: an inclined rail with a big round on it, blast wall, bunkered control
    launcher(r) {
       const parts = [cyl(r * 0.92, r * 1.0, 3, 14, 0, -1.5, 0, C.pad)];
@@ -626,7 +642,7 @@ export class MissileFX {
       for (const S of sites) {
          let r = this.sites.get(S);
          if (!r) {
-            const g = this._siteGeo(S.kind, S.r);
+            const g = this._siteGeo(S.model || S.kind, S.r);
             const group = new THREE.Group();
             const mesh = new THREE.Mesh(g.geo, this.siteMat);
             mesh.castShadow = false; mesh.receiveShadow = false;

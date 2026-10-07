@@ -7,7 +7,7 @@
 // Balance table:  node tests/v2.missions.speciala.captain.mjs [mission] [runs]   (prints wins per difficulty and the loss causes)
 import { World } from '../gamev2/state.js';
 import { sendHelo, heloOf } from '../gamev2/helo.js';
-import { CABLE } from '../gamev2/missions_special_a.js';
+import { CABLE, RIG } from '../gamev2/missions_special_a.js';
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // The captain takes the helm of ship p while the ship's AI keeps fighting: the AI's own rudder and
@@ -67,6 +67,19 @@ export function captain(w, mode = 'bot') {
          else steerTo({ x: p.pos.x + c * 800 - s * side * (260 - hyp(goal.pos, p.pos)), y: p.pos.y + s * 800 + c * side * (260 - hyp(goal.pos, p.pos)) }, Math.abs(p.speed) > Math.abs(goal.speed) + 3 ? 1 : 2);
       };
    }
+   if (id === 'rig') {
+      // Run in on the platform from the west, take the way off inside the launch circle and stay there: the boats
+      // come out and the ship's AI fights them in open water (its guns hold while the fall of shot would lie at
+      // the platform, world._script.noFire); the team goes over by itself once no boat is left at the platform.
+      const steerTo = takeHelm(p);
+      const hold = { x: RIG.x - RIG.launch * 0.8, y: RIG.y - 250 };
+      return () => {
+         if (!p.alive || w.phase !== 'playing') return;
+         const d = Math.hypot(p.pos.x - RIG.x, p.pos.y - RIG.y);
+         if (d > RIG.launch * 0.93) steerTo(hold, d > 3200 ? 4 : 2);
+         else steerTo({ x: RIG.x, y: RIG.y }, d < 700 ? -1 : 0);
+      };
+   }
    return () => {};
 }
 
@@ -78,14 +91,14 @@ export function play(id, diff, seed, mode = 'bot', ship = null) {
    return w;
 }
 if (process.argv[1] && process.argv[1].endsWith('v2.missions.speciala.captain.mjs')) {
-   const ids = process.argv[2] && process.argv[2] !== 'all' ? process.argv[2].split(',') : ['cable'];
+   const ids = process.argv[2] && process.argv[2] !== 'all' ? process.argv[2].split(',') : ['cable', 'rig'];
    const runs = Number(process.argv[3]) || 30, diffs = (process.argv[4] || 'easy,normal,hard').split(',');
    for (const id of ids) for (const diff of diffs) {
       let wins = 0, t = 0; const why = {}, times = [];
       for (let k = 0; k < runs; k++) {
          const w = play(id, diff, 1000 + k * 7919);
          if (w.phase === 'won') { wins++; t += w.time; times.push(Math.round(w.time)); }
-         else { const r = (w.result?.reason || 'no result').replace(/^(MV|MT|LNG) [^ ]+ [^ ]+ /, '<Schiff> ').slice(0, 60); why[r] = (why[r] || 0) + 1; }
+         else { const r = (w.result?.reason || 'no result').replace(/^(MV|MT|LNG) [^ ]+ [^ ]+ /, '<Schiff> ').slice(0, 44); why[r] = (why[r] || 0) + 1; }
       }
       console.log(`${id.padEnd(8)} ${diff.padEnd(6)} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg win ${wins ? Math.round(t / wins) : '-'} s  losses: ${JSON.stringify(why)}${process.env.TIMES ? '  win times: ' + times.sort((a, b) => a - b).join(' ') : ''}`);
    }
