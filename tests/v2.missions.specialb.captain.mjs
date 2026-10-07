@@ -69,6 +69,27 @@ export function captain(w, mode = 'bot') {
       }
       think(hijackHelm(w, p));
    };
+   // evac: the captain runs into the pickup zone and lies stopped there (the AI fights from where the ship
+   // lies); a second captain keeps between the pier and the boats. Once the ferry sails both escort it.
+   if (id === 'evac') return () => {
+      if (w.phase !== 'playing') return;
+      const f = w.shipById(S.ferryId), z = S.zone;
+      if (S.stage >= 2) {
+         delete p.ai.route; p.ai.escortId = f ? f.id : null;
+         for (const e of extras) e.ai.escortId = p.ai.escortId;
+         think();
+         return;
+      }
+      for (const e of extras) { e.ai.escortId = null; e.ai.route = [{ x: z.x - 1300, y: z.y + 900 }]; e.ai.routeIdx = 0; }
+      const d = hyp(p.pos, z);
+      if (d > 1500) { p.ai.route = [{ x: z.x, y: z.y }]; p.ai.routeIdx = 0; think(); return; }
+      delete p.ai.route;
+      think(() => {
+         if (d < 450) { p.setTelegraph(0); p.setRudder(0); return; }
+         turn(p, Math.atan2(z.y - p.pos.y, z.x - p.pos.x));
+         p.setTelegraph(d > 900 ? 2 : 1);
+      });
+   };
    return () => {};
 }
 
@@ -86,3 +107,17 @@ export function play(id, o = {}) {
    return w;
 }
 export { BOARD };
+
+// Balance table:   node tests/v2.missions.specialb.captain.mjs <id> [runs = 30] [captains = 1]
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop()) && process.argv[2]) {
+   const id = process.argv[2], runs = +process.argv[3] || 30, n = +process.argv[4] || 1;
+   for (const diff of ['easy', 'normal', 'hard']) {
+      let wins = 0, t = 0; const why = {};
+      for (let i = 0; i < runs; i++) {
+         const w = play(id, { diff, seed: 1000 + i * 7919, n });
+         t += w.time;
+         if (w.phase === 'won') wins++; else { const r = (w.result ? w.result.reason : 'no end').slice(0, 44); why[r] = (why[r] || 0) + 1; }
+      }
+      console.log(`${id.padEnd(8)} ${diff.padEnd(6)} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg ${Math.round(t / runs)} s  ${JSON.stringify(why)}`);
+   }
+}
