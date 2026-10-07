@@ -7,7 +7,7 @@ import { updateBots } from '../gamev2/ai.js';
 import { orderDepth } from '../gamev2/submarine.js';
 import { launchTeam, teamStatus } from '../gamev2/seal.js';
 import { sendHelo } from '../gamev2/helo.js';
-import { captain } from './v2.missions.east.captain.mjs';
+import { captain, cruiseOrders } from './v2.missions.east.captain.mjs';
 
 const EAST = ['barents', 'reefs', 'strait', 'philsea', 'countdown'];
 const WEST = ['hormus', 'redsea', 'pipeline', 'blacksea', 'giuk'];
@@ -52,6 +52,9 @@ function helo(w, p) {
 function extraOrders(w, id, e) {
    const S = w._script;
    e.ai = e.ai || {};
+   // A captain's ship has the full load of its class (net/setup.js), so he fires his cruise missiles like
+   // the host's captain: in the order of the briefing (reefs, countdown), elsewhere by the AI's own choice.
+   const fire = cruiseOrders(w, e) || (() => {});
    switch (id) {
       case 'strait': return () => { const f = S.conv.map(x => w.shipById(x)).find(s => s && s.alive); if (f) e.ai.escortId = f.id; };
       case 'barents': return () => { if (e.id !== S.fordId) e.ai.escortId = S.fordId; };
@@ -72,6 +75,7 @@ function extraOrders(w, id, e) {
          };
       }
       case 'countdown': return () => {
+         fire();
          // out of the danger zone of the launcher's strike, like the host's captain
          const b = S.strikeId && w.blasts.find(x => x.id === S.strikeId && x.state === 'armed');
          if (b && hyp(e.pos, b) < b.r.shock + 900) {
@@ -81,7 +85,8 @@ function extraOrders(w, id, e) {
             }
          } else if (e.ai.route) { delete e.ai.route; e.ai.routeIdx = 0; }
       };
-      default: return () => {};      // reefs: fight with what the ship has
+      case 'reefs': return fire;
+      default: return () => {};
    }
 }
 

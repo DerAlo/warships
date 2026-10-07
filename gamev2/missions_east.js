@@ -101,6 +101,12 @@ export function eastMissions(H) {
       return out;
    }
    const ids = (list) => list.map(s => s.id);
+   // Co-op: a captain's ship has the full load of its class (net/setup.js). When he leaves, the AI takes
+   // the ship with what is left in the cells and holds those cruise missiles back like every allied bot
+   // (ai_missile.js fires when ai.crT runs out); they are his again when he comes back.
+   function holdCruise(w) {
+      for (const s of w.ships) if (s.side === 'player' && s.ai && !human(s) && s.cfg.weapons.cruise) s.ai.crT = 1e9;
+   }
    // every allied bot follows `lead` (the ship the mission is about, or the player)
    function follow(group, lead) { for (const s of group) if (s !== lead && !s.isPlayer && s.ai) s.ai.escortId = lead.id; }
    // scripted ripple salvo: the platform launches n missiles of its selected type, one per launch gap
@@ -136,6 +142,7 @@ export function eastMissions(H) {
          if (human(w.shipById(q.ownerId))) { S.freeT = Math.max(S.freeT || 0, w.time + 30); break; }
       }
       const free = !o.hold && w.time < (S.freeT || 0);
+      holdCruise(w);
       for (const s of w.ships) {
          if (s.side !== 'player' || human(s) || s.type === 'TR' || !s.ai) continue;
          s.ai.passive = !free;
@@ -473,6 +480,7 @@ export function eastMissions(H) {
          update(w, dt, S) {
             const left = S.conv.map(id => live(w, id)).filter(Boolean);
             runRipples(w, S);
+            holdCruise(w);
             clock(w, S, 'Konvoiführer', (t) => `Noch ${t}, dann schließt sich die Blockade vor dem Zielraum. Bleiben Sie dicht bei uns, damit wir Fahrt halten.`);
             // the freighters only run while a human captain is close to the leading ship
             const lead = left[0];
