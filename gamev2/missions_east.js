@@ -51,12 +51,15 @@ export const EAST_TUNE = {
       // surface run, three acts: air defence -> drone (`drone` s) finds the command bunker and the launcher
       // fires at the group (`fuse` s to the detonation, at the latest `strikeAt` s into the mission, again
       // every `again` s while the bunker stands) -> `drone2` s later the drone has the launcher
+      // co-op: the group shares the `tlam` cruise missiles of the flagship plus `coopTlam` (see coop() of the
+      // mission). Measured on 60 runs with 2/3/4 captains: normal 0 -> 55/55/57 %, 1 -> 70/73/73 %;
+      // hard 0 -> 12/13/17 %, 1 -> 22/17/28 %, 2 -> 30/33/52 %; easy 0 -> 100 % (30 runs)
       easy: { ally: 0.6, time: 720, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1,
-         drone: 50, fuse: 100, drone2: 65, again: 0, strikeAt: 330, bunkHp: 7000 },
+         drone: 50, fuse: 100, drone2: 65, again: 0, strikeAt: 330, bunkHp: 7000, coopTlam: 0 },
       normal: { ally: 0.5, time: 690, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3,
-         drone: 60, fuse: 85, drone2: 80, again: 170, strikeAt: 300, bunkHp: 9000 },
+         drone: 60, fuse: 85, drone2: 80, again: 170, strikeAt: 300, bunkHp: 9000, coopTlam: 0 },
       hard: { ally: 0.4, time: 660, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4,
-         drone: 60, fuse: 75, drone2: 80, again: 140, strikeAt: 270, bunkHp: 10000 },
+         drone: 60, fuse: 75, drone2: 80, again: 140, strikeAt: 270, bunkHp: 10000, coopTlam: 1 },
       // the clock of a submarine run (the German boat is the slower one)
       ship: { U212: (t, k) => ({ subTime: t.subTime + 60 + (k === 'normal' ? 15 : 0) }), Virginia: (t, k) => ({ subTime: t.subTime - (k === 'normal' ? 15 : 0) }) },
    },
@@ -695,6 +698,17 @@ export function eastMissions(H) {
             if (S.surface) holdLine(w, S, 14, 'Verbandsführer', 'Die Geleitschiffe warten auf Ihre Freigabe: Sie eröffnen das Feuer erst, wenn das Flaggschiff schießt.');
             later(S, 22, () => radio(w, 'Luftlage', 'Start von der Insel erkannt. Flugbahn führt in das geräumte Sperrgebiet im Norden – kein Schiff, kein Land in der Nähe.', 'warn'));
             later(S, 34, () => { S.warnId = addBlast(w, { x: S.test.x, y: S.test.y, r: { destroyed: 700, heavy: 1700, shock: 3200 }, delay: 8, label: 'Detonation im Sperrgebiet' }).id; });
+         },
+         // co-op (net/setup.js, on every peer): the mission's allotment of cruise missiles (`tlam`, plus `coopTlam`
+         // once for a group with several captains) belongs to the group. It is dealt evenly over the surface
+         // captains with cruise-missile cells (what is left over one each, flagship first); the other magazines
+         // stay full. With the full load of every class (46 to 70 missiles) the air defence decided nothing.
+         coop(w, S, humans) {
+            const T = tune(w, 'countdown');
+            const cells = humans.filter(h => h.cfg.weapons.cruise && !h.sub);
+            if (cells.length < 2 && cells[0] === humans[0]) return;      // only the flagship: its load is set in setup
+            const total = T.tlam + (T.coopTlam || 0), each = Math.floor(total / Math.max(1, cells.length));
+            cells.forEach((h, i) => { h.mag[h.cfg.weapons.cruise.type] = Math.min(h.cfg.weapons.cruise.n, each + (i < total - each * cells.length ? 1 : 0)); });
          },
          update(w, dt, S) {
             coordinate(w, S, {});

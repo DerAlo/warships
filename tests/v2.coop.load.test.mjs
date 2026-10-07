@@ -2,11 +2,13 @@
 // allied bot. Missions strip those bots (east: empty cruise-missile cells, Red Sea: a thin air-defence
 // magazine, reduced damage) so that the bots do not decide the battle; a captain gets the full load
 // of his class, on every peer, and the AI holds the cruise missiles back again when he leaves.
+// Exception: in the countdown the group shares the mission's allotment of cruise missiles.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { MISSIONS, getMission } from '../gamev2/missions.js';
 import { SHIPS } from '../gamev2/config.js';
+import { EAST_TUNE } from '../gamev2/missions_east.js';
 import { makeRoom, ready, shipOf, DT } from './v2.netutil.mjs';
 
 const EAST = ['barents', 'reefs', 'strait', 'philsea', 'countdown'];
@@ -25,8 +27,18 @@ test('co-op operations: every further captain sails with the full magazines of h
       for (const difficulty of ['easy', 'normal', 'hard']) {
          const w = build(def.id, n, 0, difficulty);
          assert.equal(w.net.humans.length, n, def.id);
+         // countdown: the group shares the mission's allotment of cruise missiles (coop() of the mission), dealt
+         // evenly over the captains with cells; every other magazine is the full one of the class
+         const shared = def.id === 'countdown' ? w.net.humans.filter(h => cruise(h) != null) : [];
+         if (shared.length) {
+            const T = EAST_TUNE.countdown[difficulty], sum = shared.reduce((a, h) => a + cruise(h), 0);
+            assert.equal(sum, T.tlam + T.coopTlam, `countdown ${difficulty}: cruise missiles of the group`);
+            for (const h of shared) assert.ok(cruise(h) >= Math.floor(sum / shared.length) && cruise(h) <= Math.ceil(sum / shared.length) && cruise(h) > 0, `countdown ${difficulty}: share of captain ${h.slot}: ${cruise(h)}`);
+         }
          for (const h of w.net.humans.slice(1)) {
-            assert.deepEqual(h.mag, { ...(SHIPS[h.cls].mag || {}) }, `${def.id} ${difficulty}: ${h.cls} of captain ${h.slot}`);
+            const full = { ...(SHIPS[h.cls].mag || {}) };
+            if (shared.includes(h)) full[h.cfg.weapons.cruise.type] = cruise(h);
+            assert.deepEqual(h.mag, full, `${def.id} ${difficulty}: ${h.cls} of captain ${h.slot}`);
             assert.equal(h.dmgMult, 1, `${def.id} ${difficulty}: damage of ${h.cls}`);
             assert.equal(h.maxHP, SHIPS[h.cls].hp, `${def.id} ${difficulty}: hull of ${h.cls}`);
             if (cruise(h) != null) cells++;
