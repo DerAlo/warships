@@ -19,6 +19,7 @@ const _Y = new THREE.Vector3(0, 1, 0);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 // marker colours (linear, additive): open amber, team at work white-hot pulse, done green
 const COL_OPEN = [1.5, 0.95, 0.25], COL_BUSY = [1.7, 1.5, 1.0], COL_DONE = [0.25, 1.0, 0.45];
+const TOW_PTS = 13;               // points of the tow line
 
 export class OpsFX {
    constructor(scene, fx, terrain) {
@@ -60,6 +61,7 @@ export class OpsFX {
       this.lastSeq = -1; this.dips = 0; this.splashes = 0;
       this.ring.count = this.beam.count = this.boat.count = 0;
       this.ring.visible = this.beam.visible = this.boat.visible = false;
+      if (this.tow) this.tow.visible = false;
    }
 
    update(world, dt, time, camera) {
@@ -67,6 +69,34 @@ export class OpsFX {
       this._helos(world, dt, time);
       this._markers(world, time, camera);
       this._teams(world, dt, time);
+      const z = world.mission && world.mission.zones && world.mission.zones[0];
+      if (z && z.tow) this._tow(world, z.tow);
+      else if (this.tow) this.tow.visible = false;
+   }
+
+   // A tow line (mission.zones[0].tow = [tug id, towed id, length m]): one thin line from the tug's stern to the
+   // bow of the towed ship that sags while slack. Built on first use, so no other mission pays for it.
+   _tow(world, tow) {
+      const a = world.shipById(tow[0]), b = world.shipById(tow[1]);
+      if (!a || !b || !a.alive || !b.alive) { if (this.tow) this.tow.visible = false; return; }
+      if (!this.tow) {
+         const g = new THREE.BufferGeometry();
+         g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TOW_PTS * 3), 3).setUsage(THREE.DynamicDrawUsage));
+         this.tow = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xd9d2bd }));
+         this.tow.frustumCulled = false;
+         this.scene.add(this.tow);
+      }
+      const la = a.cfg.hull.L * 0.45, lb = b.cfg.hull.L * 0.5;
+      const ax = a.pos.x - Math.cos(a.heading) * la, az = a.pos.y - Math.sin(a.heading) * la;
+      const bx = b.pos.x + Math.cos(b.heading) * lb, bz = b.pos.y + Math.sin(b.heading) * lb;
+      const d = Math.hypot(bx - ax, bz - az), sag = Math.max(1.5, Math.sqrt(0.375 * d * Math.max(0, tow[2] - d)));
+      const p = this.tow.geometry.attributes.position;
+      for (let i = 0; i < TOW_PTS; i++) {
+         const t = i / (TOW_PTS - 1);
+         p.setXYZ(i, ax + (bx - ax) * t, Math.max(0.3, 3.5 + 5 * t - sag * 4 * t * (1 - t)), az + (bz - az) * t);
+      }
+      p.needsUpdate = true;
+      this.tow.visible = true;
    }
 
    _events(world) {

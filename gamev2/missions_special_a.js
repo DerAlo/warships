@@ -7,6 +7,7 @@
 // a value for the difficulty. The mission ticks allocate nothing per frame.
 import { addSite } from './sites.js';
 import { addTaskPoint } from './seal.js';
+import { obstacleT } from './utils.js';
 
 // Balance knobs per mission and difficulty (tests/v2.missions.speciala.test.mjs measures them with a bot captain).
 // cable: `cable` s the seabed cable holds while the anchor drags, `ships` merchants in the area, `look` s
@@ -33,6 +34,16 @@ export const SPECIAL_A_TUNE = {
       normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.38, teams: 2, board: 30, post: 6, salvo: 2, every: 34 },
       hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.2, teams: 2, board: 40, post: 8, salvo: 2, every: 28 },
    },
+   // rescue: `drift` m/s the merchant drifts toward the cliffs, `lines` tow lines on board, `pass` s it takes to pass one,
+   // `swell` share by which the seas raise the line load on every crest, `boats` armed boats that come for the tug when the
+   // first line is fast, `wave2` more of them `gap` s later, at `boatKn` knots.
+   // Bot captain, 30 runs per cell: easy 100 %, normal 57 %, hard 27 % (every loss: the tug is sunk by the boats; the
+   // bot never parts a line). The rate is steep in boatDmg: normal 2.2 -> 80 %, 2.6 -> 37 %.
+   rescue: {
+      easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6 },
+      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4 },
+      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7 },
+   },
 };
 // rig: the platform (x, y) and the radius in which any shell or warhead counts as a hit on it (r); a boat leaves its
 // mooring when a warship is inside `sortie` (the guards: `guard`); a team goes over from a warship inside `launch` that
@@ -42,6 +53,32 @@ export const RIG = { x: 600, y: 200, r: 110, sortie: 5000, guard: 2200, launch: 
 // cable: how close a ship / a helicopter has to be to make out a merchant's anchor gear at night (m),
 // boarding distance (m) and the share of its top speed a boarding ship may run at most
 export const CABLE = { visShip: 1800, visHelo: 1300, boardDist: 500, boardSpeed: 0.5, cover: 900, damaged: 0.7 };
+
+// rescue: the tow line is `len` m long and is passed to a ship within `pass` m of the merchant's bow that runs at no more
+// than `slow` of its top speed. Beyond `len` the line stretches: `stretch` m of stretch are 100 % load on a straight pull and
+// move the merchant at `pull` m/s; a line that leads off the tug's keel line carries more (factor 1 + side * (1 - cos angle)),
+// and the swell (period 2 pi / swellW s) adds its share. `turn` rad/s is how fast the bow comes round to the line. The drift
+// runs along (dx, dy); `start` is where the merchant lies at first, `zone` the anchorage, `room` the distance to the cliffs
+// of the optional objective, `warn` the load from which the deck crew calls out.
+export const TOW = { len: 380, pass: 350, slow: 0.3, stretch: 150, pull: 40, side: 3, swellW: 0.9, turn: 0.06, warn: 0.8, room: 500,
+   dx: 0, dy: -1, start: { x: 1400, y: -1700 }, zone: { x: 2400, y: 600, r: 1100 } };
+
+const _pt = { x: 0, y: 0 };
+// rescue: way (m, up to 6 km) from (x, y) along the drift until the coast of an island
+function toCoast(w, x, y) {
+   const land = (d) => {
+      _pt.x = x + TOW.dx * d; _pt.y = y + TOW.dy * d;
+      for (const o of w.obstacles) if (o.kind === 'island' && obstacleT(o, _pt) < 1) return true;
+      return false;
+   };
+   let d = 0;
+   while (d < 6000 && !land(d)) d += 100;
+   if (d === 0 || d >= 6000) return d;
+   for (d -= 100; !land(d); d += 10);
+   return d;
+}
+// a distance for an objective text, coarse on purpose: quarter kilometres from 1 km on, 100 m steps below
+const far = (d) => d >= 1000 ? String(Math.round(d / 250) / 4).replace('.', ',') + ' km' : Math.max(0, Math.round(d / 100) * 100) + ' m';
 
 export function specialMissionsA(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, islands, combatants } = H;
@@ -378,6 +415,191 @@ export function specialMissionsA(H) {
             else radio(w, 'Operationszentrale', ship.name + ' ist ausgefallen. Die Besatzung wird geborgen.', 'warn');
          },
          timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – die Besetzer haben die Ventile geöffnet.'); },
+      },
+
+      // ========================================================= Nordmeer – Havarist
+      // A merchant without engines drifts onto the cliffs in a storm (the mission displaces it every frame; its own
+      // AI lies stopped). A captain's warship passes a tow line by staying within TOW.pass of its bow at no more than
+      // TOW.slow of its top speed for `pass` seconds. The line runs from the tug's stern to the merchant's bow and is a
+      // spring: beyond TOW.len its stretch pulls the merchant after the tug and is the line load, which grows with the
+      // angle between line and keel (TOW.side) and with the swell. At 100 % the line parts and has to be passed again;
+      // the mission is lost with the last line, when the merchant touches ground or sinks, or with the group. It is
+      // won when the merchant is inside the anchorage (TOW.zone). Armed boats come for the tug once the line is fast.
+      // The line itself is drawn by ops3d.js from mission.zones[0].tow = [tug id, merchant id, length] (replicated).
+      {
+         id: 'rescue', group: 'ops', name: 'Nordmeer – Havarist', subtitle: 'Sturm · Havaristen in Schlepp nehmen und von den Klippen ziehen',
+         briefing: 'Der Frachter MV Nordkap Star treibt nach einer Explosion im Maschinenraum ohne Antrieb im Sturm auf die Skarvklippen zu – in wenigen Minuten sitzt er auf. ' +
+            'Kein Bergungsschlepper ist rechtzeitig da: Nehmen Sie ihn in Schlepp. Gehen Sie auf 350 m vor seinen Bug und nehmen Sie die Fahrt heraus (höchstens Viertelfahrt), bis die Leine übergeben ist. ' +
+            'Dann ziehen Sie ihn nach Nordosten in das markierte Ankergebiet, dort hält sein Anker. Die Leine verträgt nur begrenzten Zug: Die Leinenlast steigt mit der Fahrt, gegen die See und in jeder Drehung – ' +
+            'bei 100 % bricht die Leine, und Sie müssen neu anlaufen. Sie haben nur wenige Leinen. Die Explosion war vermutlich kein Unfall: Bewaffnete Boote ohne Kennung stehen im Gebiet und dürfen bekämpft werden, ' +
+            'wenn sie angreifen – wer im Schlepp hart ausweicht, verliert aber die Leine. Verloren ist der Einsatz, wenn der Frachter auf die Klippen läuft oder sinkt, wenn die letzte Leine bricht oder Ihr Verband ausfällt.',
+         debrief: 'Die Nordkap Star liegt vor Anker, ihre Besatzung ist in Sicherheit. Entschieden hat die ruhige Hand: früh die Leine übergeben, mit wenig Fahrt und in weiten Bögen schleppen ' +
+            'und die Boote dem Geschütz und der Korvette überlassen, statt ihnen auszuweichen.',
+         fleet: { own: 'Fregatte oder Zerstörer, 1 Korvette · 2–4 Schleppleinen', foe: '2–7 bewaffnete Boote ohne Kennung · 1 Frachter (zu schützen)' },
+         env: { time: 'day', weather: 'storm' }, type: 'ops', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
+         arena: 12000, timeLimit: 10 * 60, stars: 2,
+         setup(w, shipKey) {
+            const S = w._script, T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal;
+            islands(w, [
+               { c: P(1800, -5600), r: 1500, height: 150, seed: 181, lobes: 6, elong: 2.6, rot: 0, rough: 0.5, name: 'Skarvklippen' },
+               { c: P(8600, -1500), r: 600, height: 60, seed: 187, lobes: 4, elong: 1.4, rot: 0.6, rough: 0.5, name: 'Lille Skarv' },
+            ]);
+            const p = add(w, shipKey, 'player', P(-9300, -300), 0, { isPlayer: true });
+            S.allyId = add(w, 'Braunschweig', 'player', P(-10400, 1300), 0, { name: 'Oldenburg', dmgMult: 0.6, ai: { escortId: p.id } }).id;
+            // the merchant: beam on to the sea, bow east or west with the seed; its AI lies stopped, the mission moves it
+            const m = civilian(add(w, 'Container', 'player', P(TOW.start.x + (rnd(w, 1) - 0.5) * 700, TOW.start.y), (rnd(w, 2) < 0.5 ? 0 : Math.PI) + (rnd(w, 3) - 0.5) * 0.7,
+               { name: 'MV Nordkap Star', telegraph: 0, speedFrac: 0, ai: { passive: true, anchored: true } }));
+            S.merchId = m.id; S.name = m.name;
+            zone(w, TOW.zone.x, TOW.zone.y, TOW.zone.r, 'Ankergebiet', 'goal');
+            S.lines = T.lines; S.tugId = null; S.passT = 0; S.load = 0; S.crest = 0; S.parted = 0; S.boats = []; S.wave = 0;
+            S.tick = 0; S.said = 0; S.whyT = -99; S.warnT = -99; S.close = false; S.done = false;
+            S.rocks = S.rocks0 = this.rocks(w, m);
+            objective(w, 'tow', this.text(w, S, T));
+            objective(w, 'line', 'Keine Schleppleine bricht', { optional: true });
+            objective(w, 'room', `Der Frachter kommt den Klippen nie näher als ${TOW.room} m`, { optional: true });
+            objective(w, 'boats', `Schalten Sie alle bewaffneten Boote aus (0/${T.boats + T.wave2})`, { optional: true });
+            w.score = { kind: 'count', player: 100, enemy: 0, target: 100 };
+            radio(w, 'Lagezentrum', `${m.name} treibt ohne Maschine auf die Skarvklippen, in etwa ${Math.round(S.rocks0 / T.drift / 60)} Minuten sitzt sie auf. Kein Schlepper ist rechtzeitig da – nehmen Sie sie in Schlepp und ziehen Sie sie ins Ankergebiet im Nordosten.`, 'warn');
+            later(S, 12, () => radio(w, 'Wachoffizier', `Zum Übergeben der Leine auf ${TOW.pass} m vor ihren Bug und höchstens Viertelfahrt – ${T.pass} Sekunden so bleiben, dann ist die Leine fest.`));
+            later(S, 28, () => radio(w, 'Wachoffizier', `Im Schlepp nur Viertelfahrt und weite Bögen: Bei 100 % Leinenlast bricht die Leine. Wir haben ${T.lines} Leinen an Bord.`));
+            later(S, 46, () => radio(w, 'Operationszentrale', 'Schnelle Kontakte ohne Kennung im Nordosten, noch auf Abstand. Greifen sie an: Freigabe zur Bekämpfung – der Frachter darf nicht getroffen werden.', 'warn'));
+         },
+         // distance (m) the hull still has to the coast in the direction of the drift (bow, midships, stern)
+         rocks(w, m) {
+            const c = Math.cos(m.heading) * m.cfg.hull.L * 0.46, s = Math.sin(m.heading) * m.cfg.hull.L * 0.46;
+            return Math.min(toCoast(w, m.pos.x, m.pos.y), toCoast(w, m.pos.x + c, m.pos.y + s), toCoast(w, m.pos.x - c, m.pos.y - s));
+         },
+         // the main objective. Numbers are kept coarse so the text changes rarely (a phone shows the band after each change)
+         text(w, S, T) {
+            const rocks = `Klippen in ${far(S.rocks)}`, left = `${S.lines} ${S.lines === 1 ? 'Leine' : 'Leinen'}`;
+            if (S.tugId != null) {
+               const pct = S.crest < TOW.warn ? Math.round(S.crest * 10) * 10 : Math.round(S.crest * 20) * 5;
+               return `Schleppen Sie ${S.name} ins Ankergebiet: Leinenlast ${pct} % (${left})` + (S.rocks < 1500 ? ' · ' + rocks : '');
+            }
+            if (S.passT > 0) return `Leine wird übergeben – Abstand und Fahrt halten (${Math.min(T.pass, Math.floor(S.passT))}/${T.pass} s) · ${rocks}`;
+            return `Nehmen Sie ${S.name} in Schlepp: ${TOW.pass} m vor den Bug, höchstens Viertelfahrt (${left}) · ${rocks}`;
+         },
+         update(w, dt, S) {
+            if (S.done) return;
+            const m = w.shipById(S.merchId);
+            if (!m || !m.alive) return;
+            const T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal;
+            // every frame: the drift, and the line as a spring between the tug's stern and the merchant's bow
+            // (the hull is pushed back off the coast at once, so the touch is latched here and judged below)
+            if (m.grounded) S.aground = true;
+            m.pos.x += TOW.dx * T.drift * dt; m.pos.y += TOW.dy * T.drift * dt;
+            const hl = m.cfg.hull.L * 0.5;
+            const bx = m.pos.x + Math.cos(m.heading) * hl, by = m.pos.y + Math.sin(m.heading) * hl;
+            if (S.tugId != null) {
+               const tug = w.shipById(S.tugId);
+               if (!tug || !tug.alive) this.part(w, S, 0);
+               else {
+                  const tc = Math.cos(tug.heading), ts = Math.sin(tug.heading), tl = tug.cfg.hull.L * 0.45;
+                  let ux = tug.pos.x - tc * tl - bx, uy = tug.pos.y - ts * tl - by;
+                  const d = Math.sqrt(ux * ux + uy * uy) || 1;
+                  ux /= d; uy /= d;
+                  const x = Math.max(0, d - TOW.len) / TOW.stretch;
+                  const k = x * (1 + TOW.side * (1 - (tc * ux + ts * uy)));      // 1 - cos: the line leads off the keel line
+                  S.crest = k * (1 + T.swell);
+                  S.load = k * (1 + T.swell * Math.sin(w.time * TOW.swellW));
+                  if (x > 0) {
+                     const v = x * TOW.pull * dt, e = Math.atan2(uy, ux) - m.heading;
+                     m.pos.x += ux * v; m.pos.y += uy * v;
+                     m.heading += Math.max(-1, Math.min(1, Math.atan2(Math.sin(e), Math.cos(e)))) * TOW.turn * Math.min(1, x * 2) * dt;
+                  }
+                  if (S.load >= 1) this.part(w, S, tc * ux + ts * uy < 0.85 ? 2 : 1);
+               }
+               if (S.done) return;
+            }
+            if ((S.tick -= dt) > 0) return;
+            const step = 0.5; S.tick += step;
+            if (S.aground) { S.done = true; setObj(w, 'tow', 'failed'); setObj(w, 'room', 'failed'); w.end(false, `${S.name} ist auf die Skarvklippen gelaufen.`); return; }
+            if (hyp(m.pos, TOW.zone) < TOW.zone.r) {
+               S.done = true;
+               w.mission.zones[0].tow = null;
+               setObj(w, 'tow', 'done', `${S.name} liegt im Ankergebiet`);
+               if (!S.parted) setObj(w, 'line', 'done');
+               if (!S.close) setObj(w, 'room', 'done');
+               radio(w, 'MV Nordkap Star', 'Anker ist gefallen und hält. Danke – das war knapp.');
+               w.end(true, `${S.name} liegt sicher vor Anker.`);
+               return;
+            }
+            const rocks = S.rocks = this.rocks(w, m);
+            w.score.player = Math.max(0, Math.min(100, Math.round(rocks / S.rocks0 * 100)));
+            if (rocks < TOW.room && !S.close) { S.close = true; setObj(w, 'room', 'failed'); }
+            if (rocks < 1000 && S.said < 1) { S.said = 1; radio(w, 'Ausguck', `${S.name} steht noch einen Kilometer vor den Klippen!`, 'warn'); }
+            if (rocks < 400 && S.said < 2) { S.said = 2; radio(w, 'Ausguck', `Noch 400 m bis zur Brandung – ${S.tugId != null ? 'jetzt ziehen, aber die Leine muss halten!' : 'die Leine muss jetzt hinüber!'}`, 'warn'); }
+            if (S.tugId != null) {
+               if (S.crest >= TOW.warn && w.time - S.warnT > 12) { S.warnT = w.time; radio(w, 'Decksmannschaft', `Leinenlast über ${Math.round(TOW.warn * 100)} % – Fahrt herausnehmen oder weicher drehen!`, 'warn'); }
+            } else {
+               // passing the line: a captain's ship close ahead of the bow at low speed
+               let who = null, fast = false;
+               const hs = w.net ? w.net.humans : null;
+               for (let i = 0, n = hs ? hs.length : 1; i < n; i++) {
+                  const s = hs ? hs[i] : w.player;
+                  if (!s || !s.alive || s.depth > 0 || Math.hypot(s.pos.x - bx, s.pos.y - by) > TOW.pass) continue;
+                  if (Math.abs(s.speed) > s.maxSpeed * TOW.slow) { fast = true; continue; }
+                  who = s; break;
+               }
+               if (who) {
+                  if (S.passT === 0 && w.time - S.whyT > 8) { S.whyT = w.time; radio(w, 'Decksmannschaft', `Leinenverbindung wird hergestellt – Abstand und Fahrt halten, ${T.pass} Sekunden.`); }
+                  if ((S.passT += step) >= T.pass) this.fast(w, S, T, who, m);
+               } else {
+                  if ((S.passT > 0 || fast) && w.time - S.whyT > 15) { S.whyT = w.time; radio(w, 'Decksmannschaft', fast ? 'Zu schnell für die Leine! Höchstens Viertelfahrt.' : `Abstand zu groß – auf ${TOW.pass} m vor den Bug und dort bleiben.`, 'warn'); }
+                  S.passT = Math.max(0, S.passT - step * 0.5);
+               }
+            }
+            objText(w, 'tow', this.text(w, S, T));
+         },
+         // the line is fast: the boats come for the tug
+         fast(w, S, T, tug, m) {
+            S.tugId = tug.id; S.passT = 0; S.load = S.crest = 0;
+            w.mission.zones[0].tow = [tug.id, m.id, TOW.len];
+            radio(w, 'Decksmannschaft', `Leine ist fest auf ${tug.name}! Langsam anziehen und Kurs auf das Ankergebiet – Leinenlast im Auge behalten.`);
+            if (S.wave) return;
+            S.wave = 1;
+            later(S, w.time + 4, () => this.boats(w, S, T, T.boats));
+            if (T.wave2) later(S, w.time + T.gap, () => this.boats(w, S, T, T.wave2));
+         },
+         boats(w, S, T, n) {
+            if (w.phase !== 'playing' || S.done) return;
+            let lead = S.tugId != null ? w.shipById(S.tugId) : null;
+            if (!lead || !lead.alive) lead = [w.player, ...(w.net ? w.net.humans : [])].find(s => s && s.alive) || w.shipById(S.allyId);
+            if (!lead || !lead.alive) return;
+            for (let i = 0; i < n; i++) {
+               const k = S.boats.length;
+               S.boats.push(add(w, 'Boghammar', 'enemy', P(10600 - (k % 2) * 500, 3200 + k * 650), Math.PI, { name: 'Boot ohne Kennung ' + (k + 1), minDist: 9000, speedKn: T.boatKn, hpMult: T.boatHp, dmgMult: T.boatDmg,
+                  ai: { huntId: lead.id, press: true, aggro: 1.3 } }).id);
+            }
+            S.wave++;
+            radio(w, 'Operationszentrale', S.boats.length > n ? `Weitere ${n} Boote laufen von Nordosten an. Kurs und Fahrt halten – die Leine geht vor.`
+               : `${n} bewaffnete Boote ohne Kennung laufen von Nordosten auf uns zu. Freigabe zur Bekämpfung – und nicht hart ausweichen, sonst bricht die Leine.`, 'warn');
+         },
+         // why: 1 = too much pull, 2 = the line led too far off the keel line (turn), 0 = the tug is lost
+         part(w, S, why) {
+            S.tugId = null; S.load = S.crest = 0; S.passT = 0; S.lines--; S.parted++; S.whyT = w.time;
+            w.mission.zones[0].tow = null;
+            setObj(w, 'line', 'failed');
+            if (w.phase !== 'playing') return;
+            if (S.lines <= 0) { S.done = true; setObj(w, 'tow', 'failed'); w.end(false, `Die letzte Schleppleine ist gebrochen – ${S.name} treibt auf die Klippen.`); return; }
+            radio(w, 'Decksmannschaft', (why === 2 ? 'Leine gebrochen – zu hart gedreht!' : why === 1 ? 'Leine gebrochen – zu viel Zug!' : 'Die Leine ist verloren!') +
+               ` Noch ${S.lines === 1 ? 'eine Leine' : S.lines + ' Leinen'}: neu anlaufen, ${TOW.pass} m vor den Bug, Viertelfahrt.`, 'warn');
+         },
+         onSink(w, ship, killer, S) {
+            if (ship.id === S.merchId) { S.done = true; w.end(false, ship.name + ' ist gesunken – der Frachter durfte nicht zu Schaden kommen.'); return; }
+            if (S.boats.includes(ship.id)) {
+               const T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal, all = T.boats + T.wave2;
+               let n = 0;
+               for (let i = 0; i < S.boats.length; i++) { const b = w.shipById(S.boats[i]); if (!b || !b.alive) n++; }
+               objText(w, 'boats', `Schalten Sie alle bewaffneten Boote aus (${n}/${all})`);
+               if (n >= all) { setObj(w, 'boats', 'done'); radio(w, 'Operationszentrale', 'Alle Boote sind ausgeschaltet. Der Schleppzug ist ungestört.'); }
+               return;
+            }
+            if (ship.side !== 'player' || S.done) return;
+            if (!combatants(w, 'player').length) w.end(false, 'Ihr Verband ist ausgefallen – niemand kann den Frachter mehr schleppen.');
+            else radio(w, 'Operationszentrale', ship.name + ' ist ausgefallen. Die Besatzung wird geborgen.', 'warn');
+         },
+         timeout(w, S) { w.end(false, `Die Zeit ist abgelaufen – der Sturm nimmt zu, ${S.name} ist nicht mehr zu halten.`); },
       },
    ];
 }

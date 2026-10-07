@@ -5,14 +5,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../gamev2/state.js';
 import { MISSIONS } from '../gamev2/missions.js';
-import { SPECIAL_A_TUNE, CABLE, RIG } from '../gamev2/missions_special_a.js';
+import { SPECIAL_A_TUNE, CABLE, RIG, TOW } from '../gamev2/missions_special_a.js';
 import { impactOnSites, damageSite } from '../gamev2/sites.js';
 import { islandReliefAt } from '../gamev2/utils.js';
 import { missionSlots, missionRoles } from '../gamev2/net/setup.js';
 import { sendHelo, heloOf } from '../gamev2/helo.js';
 import { captain, play } from './v2.missions.speciala.captain.mjs';
 
-const IDS = ['cable', 'rig'];
+const IDS = ['cable', 'rig', 'rescue'];
 const DIFFS = ['easy', 'normal', 'hard'];
 const def = (id) => MISSIONS.find(m => m.id === id);
 const mk = (id, o = {}) => new World(o.diff || 'normal', { mission: id, ship: o.ship || def(id).recommendedShip, seed: o.seed ?? 4711 });
@@ -333,5 +333,173 @@ test('special A/rig: co-op takes a second captain on the corvette; a bot captain
    assert.equal(w.phase, 'won', w.result && w.result.reason);
    assert.ok(w.time < def('rig').timeLimit);
    const res = [1000, 8919, 16838, 24757, 32676, 40595].map(seed => play('rig', 'hard', seed).phase);
+   assert.ok(res.includes('lost'), 'hard is not a walkover: ' + res);
+});
+
+// ---------------------------------------------------------------- rescue
+const RT = SPECIAL_A_TUNE.rescue;
+const bowOf = (m) => ({ x: m.pos.x + Math.cos(m.heading) * m.cfg.hull.L / 2, y: m.pos.y + Math.sin(m.heading) * m.cfg.hull.L / 2 });
+// put ship s `d` m off the merchant's bow on the side of the anchorage, stopped, bow to the anchorage
+const offBow = (w, s, d) => {
+   const b = bowOf(w.shipById(w._script.merchId)), a = Math.atan2(TOW.zone.y - b.y, TOW.zone.x - b.x);
+   s.pos.x = b.x + Math.cos(a) * d; s.pos.y = b.y + Math.sin(a) * d; s.heading = a; s.speed = 0; s.setTelegraph(0); s.setRudder(0);
+};
+const takeTow = (w) => { offBow(w, w.player, 120); step(w, RT[w.difficultyKey].pass + 1.5); };
+
+test('special A/rescue: the merchant drifts toward the cliffs in a storm, nobody aims at it, the losses are announced', () => {
+   const d = def('rescue');
+   for (const part of ['auf die Klippen läuft oder sinkt', 'die letzte Leine bricht', 'Ihr Verband ausfällt', 'bei 100 % bricht die Leine']) assert.ok(d.briefing.includes(part), 'briefing: ' + part);
+   for (const diff of DIFFS) for (const seed of [1, 77, 4711]) {
+      const w = mk('rescue', { diff, seed }), S = w._script, T = RT[diff], m = w.shipById(S.merchId);
+      assert.equal(w.env.weather, 'storm');
+      assert.equal(m.type, 'TR');
+      assert.equal(w.ships.filter(s => s.side === 'enemy').length, 0, 'the boats come later');
+      assert.equal(S.lines, T.lines);
+      assert.ok(S.rocks0 > 2000 && S.rocks0 < 3200, 'way to the cliffs ' + S.rocks0);
+      assert.ok(S.rocks0 / T.drift < d.timeLimit - 120, 'the merchant is aground long before the clock runs out');
+      assert.ok(dist(m.pos, TOW.zone) > TOW.zone.r + 1000, 'the merchant starts well outside the anchorage');
+      assert.ok(!w.mission.zones[0].tow, 'no line yet');
+      const y0 = m.pos.y, x0 = m.pos.x;
+      w.player.setTelegraph(0);
+      step(w, 10);
+      assert.ok(Math.abs(m.pos.y - (y0 + TOW.dy * T.drift * 10)) < 1 && Math.abs(m.pos.x - x0) < 1, 'drift of ' + T.drift + ' m/s');
+      assert.ok(S.rocks < S.rocks0);
+   }
+   // the last metres: warnings, the optional objective, then the loss
+   const w = mk('rescue'), S = w._script, m = w.shipById(S.merchId), out = said(w);
+   w.player.setTelegraph(0);
+   m.pos.y += TOW.dy * (S.rocks0 - 450); step(w, 2);
+   assert.equal(obj(w, 'room').state, 'failed');
+   assert.ok(out.some(t => t.includes('einen Kilometer vor den Klippen')));
+   assert.equal(w.phase, 'playing');
+   step(w, 450 / RT.normal.drift + 20);
+   assert.equal(w.phase, 'lost');
+   assert.match(w.result.reason, /auf die Skarvklippen gelaufen/);
+   assert.equal(obj(w, 'tow').state, 'failed');
+});
+
+test('special A/rescue: the line is passed only to a captain\'s ship close ahead of the bow at low speed; then the boats come', () => {
+   const T = RT.normal;
+   // too far, too fast, or only the corvette: no line
+   let w = mk('rescue'), S = w._script;
+   offBow(w, w.player, TOW.pass + 150); step(w, T.pass + 3);
+   assert.equal(S.tugId, null, 'too far off');
+   w = mk('rescue'); S = w._script;
+   const out = said(w);
+   offBow(w, w.player, 200); w.player.heading += Math.PI / 2;
+   for (let i = 0; i < 4; i++) { offBow(w, w.player, 200); w.player.speed = w.player.maxSpeed * 0.5; step(w, 0.6); }
+   assert.equal(S.passT, 0, 'too fast');
+   assert.ok(out.some(t => t.includes('Zu schnell für die Leine')));
+   w = mk('rescue'); S = w._script;
+   w.player.setTelegraph(0);
+   const ally = w.shipById(S.allyId);
+   for (let i = 0; i < 30; i++) { offBow(w, ally, 200); step(w, 0.5); }
+   assert.equal(S.tugId, null, 'the corvette\'s bot captain does not take the line');
+   // close and slow for the tune's time
+   w = mk('rescue'); S = w._script;
+   offBow(w, w.player, 250); step(w, T.pass - 2);
+   assert.equal(S.tugId, null, 'not yet');
+   assert.match(obj(w, 'tow').text, /Leine wird übergeben/);
+   step(w, 3.5);
+   assert.equal(S.tugId, w.player.id);
+   assert.deepEqual(w.mission.zones[0].tow, [w.player.id, S.merchId, TOW.len], 'the renderer and the co-op clients get the line with the zone');
+   assert.match(obj(w, 'tow').text, /Leinenlast \d+ %/);
+   assert.equal(S.boats.length, 0);
+   step(w, 5);
+   assert.equal(S.boats.length, T.boats);
+   for (const id of S.boats) {
+      const b = w.shipById(id);
+      assert.ok(b.side === 'enemy' && b.cls === 'Boghammar' && b.ai.huntId === w.player.id, 'the boats hunt the tug');
+      assert.ok(dist(b.pos, w.player.pos) >= 8500 && !onLand(w, b.pos), 'boat appears ' + Math.round(dist(b.pos, w.player.pos)) + ' m away');
+   }
+   step(w, T.gap + 1);
+   assert.equal(S.boats.length, T.boats + T.wave2);
+   for (const id of S.boats) w.shipById(id).takeDamage(1e9, w.player, 'test');
+   w.update(1 / 60);
+   assert.equal(obj(w, 'boats').state, 'done');
+   assert.equal(w.phase, 'playing');
+});
+
+test('special A/rescue: the line is a spring - quarter speed pulls the merchant clear, half speed or a hard turn parts it', () => {
+   for (const diff of DIFFS) {
+      // quarter speed straight ahead: the load settles below the warning, the merchant follows
+      let w = mk('rescue', { diff }), S = w._script, m = w.shipById(S.merchId), p = w.player;
+      takeTow(w);
+      assert.equal(S.tugId, p.id, diff);
+      const r0 = S.rocks;
+      p.setTelegraph(1);
+      let top = 0;
+      step(w, 45, () => { top = Math.max(top, S.load); });
+      assert.equal(w.phase, 'playing');
+      assert.equal(S.parted, 0, diff + ': quarter speed holds');
+      assert.ok(top > 0.5 && top < 0.95, diff + ': load at quarter speed ' + top.toFixed(2));
+      assert.ok(S.rocks > r0 + 150, diff + ': the merchant comes clear, ' + Math.round(S.rocks - r0) + ' m');
+      assert.ok(Math.hypot(m.pos.x - p.pos.x, m.pos.y - p.pos.y) < TOW.len + TOW.stretch + 300, 'the merchant follows the tug');
+      // half speed: the line parts, a line is gone and has to be passed again
+      const out = said(w), n = S.lines;
+      p.setTelegraph(2);
+      step(w, 40);
+      assert.equal(S.parted, 1, diff + ': half speed parts the line');
+      assert.equal(S.tugId, null);
+      assert.ok(!w.mission.zones[0].tow);
+      assert.equal(obj(w, 'line').state, 'failed');
+      if (n > 1) { assert.equal(S.lines, n - 1); assert.equal(w.phase, 'playing'); assert.ok(out.some(t => t.includes('zu viel Zug'))); }
+      // a hard turn under tow
+      w = mk('rescue', { diff }); S = w._script; p = w.player;
+      const out2 = said(w);
+      takeTow(w);
+      p.setTelegraph(1);
+      step(w, 30);
+      assert.equal(S.parted, 0);
+      p.setRudder(2);
+      step(w, 60);
+      assert.equal(S.parted, 1, diff + ': a hard turn parts the line');
+      assert.ok(out2.some(t => t.includes('zu hart gedreht')), diff + ': the deck crew names the cause');
+   }
+});
+
+test('special A/rescue: lose paths - the last line, the merchant sunk, the group lost; won inside the anchorage', () => {
+   // the last line
+   let w = mk('rescue', { diff: 'hard' }), S = w._script;
+   for (let k = RT.hard.lines; k > 0; k--) {
+      assert.equal(w.phase, 'playing');
+      takeTow(w);
+      assert.equal(S.tugId, w.player.id);
+      w.player.setTelegraph(3);
+      step(w, 40);
+      assert.equal(S.lines, k - 1);
+   }
+   assert.equal(w.phase, 'lost');
+   assert.match(w.result.reason, /letzte Schleppleine ist gebrochen/);
+   // the merchant sunk
+   w = mk('rescue');
+   w.shipById(w._script.merchId).takeDamage(1e9, null, 'test'); w.update(1 / 60);
+   assert.equal(w.phase, 'lost');
+   assert.match(w.result.reason, /gesunken/);
+   // every warship of the group gone
+   w = mk('rescue');
+   for (const s of w.ships.filter(x => x.side === 'player' && x.type !== 'TR')) s.takeDamage(1e9, null, 'test');
+   w.update(1 / 60);
+   assert.equal(w.phase, 'lost');
+   // won: the merchant inside the anchorage
+   w = mk('rescue'); S = w._script;
+   takeTow(w);
+   const m = w.shipById(S.merchId);
+   m.pos.x = TOW.zone.x; m.pos.y = TOW.zone.y - TOW.zone.r + 50; offBow(w, w.player, 120);
+   step(w, 1);
+   assert.equal(w.phase, 'won');
+   assert.equal(obj(w, 'tow').state, 'done');
+   assert.equal(obj(w, 'line').state, 'done');
+   assert.equal(obj(w, 'room').state, 'done');
+   assert.ok(!w.mission.zones[0].tow);
+});
+
+test('special A/rescue: co-op takes a second captain on the corvette; a bot captain wins on easy and can lose on hard', () => {
+   assert.equal(missionSlots('rescue'), 2);
+   assert.deepEqual(missionRoles('rescue').map(r => r.cls), ['Sachsen', 'Braunschweig']);
+   const w = play('rescue', 'easy', 1000);
+   assert.equal(w.phase, 'won', w.result && w.result.reason);
+   assert.ok(w.time < def('rescue').timeLimit);
+   const res = [1000, 8919, 16838, 24757, 32676, 40595].map(seed => play('rescue', 'hard', seed).phase);
    assert.ok(res.includes('lost'), 'hard is not a walkover: ' + res);
 });
