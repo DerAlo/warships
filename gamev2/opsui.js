@@ -194,7 +194,7 @@ export class OpsUi {
          case 'aswTorp':
             if (mine && e.heloId != null) { hud.msg('Hubschrauber: U-Jagd-Torpedo im Wasser!', 'good', 3.5); A.radio?.(); }
             break;
-         case 'teamOut': if (mine) { hud.msg('Trupp ist von Bord – Kurs auf den Einsatzpunkt', 'radio', 4.5); A.radio?.(); } break;
+         case 'teamOut': if (mine && !e.quiet) { hud.msg('Trupp ist von Bord – Kurs auf den Einsatzpunkt', 'radio', 4.5); A.radio?.(); } break;
          case 'teamWork': if (mine) { hud.msg('Trupp am Ziel – Arbeit läuft' + (e.workTime ? ' (' + Math.round(e.workTime) + ' s)' : ''), 'radio', 4.5); A.radio?.(); } break;
          case 'teamDone': if (mine) { hud.msg('Auftrag ausgeführt – Trupp kehrt zurück, Aufnahme vorbereiten', 'good', 5); A.radio?.(); } break;
          case 'teamRecovered': if (mine) { hud.msg('Trupp wieder an Bord', 'good', 4); A.radio?.(); } break;

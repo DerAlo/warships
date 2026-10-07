@@ -163,7 +163,7 @@ for (const view of views) {
             hold();
          }));
          const text = await ev(() => document.body.innerText);
-         check(`${view} rig: radio traffic says what happens at that moment`, /Boardingteam: Wir setzen von/.test(text), (text.match(/Boardingteam: .{0,90}/) || [''])[0]);
+         check(`${view} rig: radio traffic says what happens at that moment, once`, /Boardingteam: Wir setzen von/.test(text) && !/Trupp ist von Bord/.test(text), (text.match(/Boardingteam: .{0,90}/) || [''])[0]);
          await shot(id + '-boarding');
          check(`${view} rig: stopped in the circle with no boat at the platform, the team goes over`, res.phase === 'playing' && res.model === 'platform' && res.hidden && res.hp && res.teams[0] === 'out' && /setzt über/.test(res.board), res);
          const objs = await ev(() => [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent).join(' | '));

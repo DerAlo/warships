@@ -77,14 +77,17 @@ function toCoast(w, x, y) {
    for (d -= 100; !land(d); d += 10);
    return d;
 }
-// a distance for an objective text, coarse on purpose: quarter kilometres from 1 km on, 100 m steps below
-const far = (d) => d >= 1000 ? String(Math.round(d / 250) / 4).replace('.', ',') + ' km' : Math.max(0, Math.round(d / 100) * 100) + ' m';
+// a distance for an objective text, coarse on purpose: quarter kilometres down to 500 m, 100 m steps below
+const far = (d) => d >= 1000 ? String(Math.round(d / 250) / 4).replace('.', ',') + ' km' : d >= 500 ? Math.round(d / 250) * 250 + ' m' : Math.max(0, Math.round(d / 100) * 100) + ' m';
 
 export function specialMissionsA(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, islands, combatants } = H;
    const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const objState = (w, id) => (w.mission.objectives.find(o => o.id === id) || {}).state;
    const clock = (t) => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+   // the clock of an objective text: steps of 10 s until the last minute, so the text changes rarely (a phone shows the
+   // objectives band for some seconds after every change and would never fade it with a clock that ticks every second)
+   const coarse = (t) => clock(t > 60 ? Math.ceil(t / 10) * 10 : t);
    const rnd = (w, salt) => { const x = Math.sin((w.seed % 100000) * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x); };
    // The opponent's sensors and weapons leave a merchant alone: it is never 'detected' for the other
    // side (World.canSee), so no bot aims at it and no missile is launched at it.
@@ -141,7 +144,7 @@ export function specialMissionsA(H) {
             }
             S.total = T.cable; S.cable = T.cable; S.need = T.board; S.board = 0; S.tick = 0; S.found = false; S.said = 0; S.whyT = -99; S.half = false; S.done = false;
             objective(w, 'find', `Klären Sie die Handelsschiffe auf: Welches schleppt den Anker? (0/${n} geprüft)`);
-            objective(w, 'stop', `Stoppen Sie den Ankerschlepper durch Boarding, bevor das Kabel reißt (hält noch ${clock(S.cable)})`);
+            objective(w, 'stop', `Stoppen Sie den Ankerschlepper durch Boarding, bevor das Kabel reißt (hält noch ${coarse(S.cable)})`);
             objective(w, 'cable50', 'Das Kabel behält mindestens die Hälfte seiner Tragfähigkeit', { optional: true });
             objective(w, 'boats', `Schalten Sie alle bewaffneten Boote aus (0/${T.boats})`, { optional: true });
             w.score = { kind: 'count', player: 100, enemy: 0, target: 100 };
@@ -208,7 +211,7 @@ export function specialMissionsA(H) {
                w.end(false, S.found ? `Das Seekabel ist durchtrennt – ${S.susName} wurde nicht rechtzeitig gestoppt.` : 'Das Seekabel ist durchtrennt – der Ankerschlepper wurde nicht gefunden.');
                return;
             }
-            if (!S.found) { objText(w, 'stop', `Stoppen Sie den Ankerschlepper durch Boarding, bevor das Kabel reißt (hält noch ${clock(S.cable)})`); return; }
+            if (!S.found) { objText(w, 'stop', `Stoppen Sie den Ankerschlepper durch Boarding, bevor das Kabel reißt (hält noch ${coarse(S.cable)})`); return; }
             // boarding: a warship of the group alongside at low speed, no armed boat beside the merchant
             let why = 1, covered = false;      // 1 = nobody alongside, 2 = too fast, 3 = covered by a boat, 0 = boarding
             for (let i = 0; i < S.boats.length; i++) { const b = w.shipById(S.boats[i]); if (b && b.alive && hyp(b.pos, sus.pos) < CABLE.cover) { covered = true; break; } }
@@ -229,7 +232,7 @@ export function specialMissionsA(H) {
                }
                S.board = Math.max(0, S.board - step * 0.5);
             }
-            objText(w, 'stop', `Stoppen Sie ${S.susName} durch Boarding: auf 500 m längsseits, höchstens halbe Fahrt (${Math.min(S.need, Math.floor(S.board))}/${S.need} s) – Kabel hält noch ${clock(S.cable)}`);
+            objText(w, 'stop', `Stoppen Sie ${S.susName} durch Boarding: auf 500 m längsseits, höchstens halbe Fahrt (${Math.min(S.need, Math.floor(S.board))}/${S.need} s) – Kabel hält noch ${coarse(S.cable)}`);
             if (S.board < S.need) return;
             S.done = true;
             delete sus.ai.route; sus.ai.anchored = true;
@@ -310,7 +313,7 @@ export function specialMissionsA(H) {
             S.noFire = (b, aim) => b.side === 'player' && Math.hypot(aim.x - RIG.x, aim.y - RIG.y) < RIG.safe;
             S.onTaskDone = (ww, task) => { if (task.id === S.taskId) this.secured(ww, S); };
             S.onTeamLost = (ww, team) => { if (team.id === S.teamId) this.teamLost(ww, S); };
-            objective(w, 'board', `Bringen Sie ein Boardingteam auf die Plattform, bevor die Ventile geöffnet werden (noch ${clock(S.valves)})`);
+            objective(w, 'board', `Bringen Sie ein Boardingteam auf die Plattform, bevor die Ventile geöffnet werden (noch ${coarse(S.valves)})`);
             objective(w, 'post', 'Schalten Sie den Flugkörperstarter auf dem Riff aus', { optional: true });
             objective(w, 'boats', `Schalten Sie alle Boote der Besetzer aus (0/${T.boats})`, { optional: true });
             objective(w, 'team', 'Kein Boardingteam muss abdrehen', { optional: true });
@@ -364,8 +367,8 @@ export function specialMissionsA(H) {
             // the team
             let team = null;
             if (S.teamId != null) for (const t of w.teams) if (t.id === S.teamId) { team = t; break; }
-            if (team && team.state === 'working') { objText(w, 'board', `Boardingteam ist auf der Plattform und sichert die Leitstände (${Math.max(0, Math.ceil(team.workT))} s) – Ventile in ${clock(S.valves)}`); return; }
-            if (team && team.state === 'out') { objText(w, 'board', `Boardingteam setzt über – halten Sie die Boote von ihm fern (Ventile in ${clock(S.valves)})`); return; }
+            if (team && team.state === 'working') { objText(w, 'board', `Boardingteam ist auf der Plattform und sichert die Leitstände (${Math.max(0, Math.ceil(team.workT))} s) – Ventile in ${coarse(S.valves)}`); return; }
+            if (team && team.state === 'out') { objText(w, 'board', `Boardingteam setzt über – halten Sie die Boote von ihm fern (Ventile in ${coarse(S.valves)})`); return; }
             S.relT = Math.max(0, S.relT - step);
             const why = !from ? (fast ? 2 : 1) : close ? 3 : S.relT > 0 ? 4 : 0;      // 1 = too far, 2 = too fast, 3 = boats at the platform, 4 = next team gets ready
             if (why === 0) {
@@ -374,7 +377,7 @@ export function specialMissionsA(H) {
                const task = w.taskPoints.find(x => x.id === S.taskId);
                w.teams.push(t); S.teamId = t.id; S.teamsLeft--;
                if (task) { task.state = 'busy'; task.teamId = t.id; }
-               w.pushEvent('teamOut', { srcId: from.id, teamId: t.id, taskId: S.taskId, pos: { x: t.x, y: t.y }, text: 'Boardingteam setzt über: Dogger Alpha' });
+               w.pushEvent('teamOut', { srcId: from.id, teamId: t.id, taskId: S.taskId, pos: { x: t.x, y: t.y }, text: 'Boardingteam setzt über: Dogger Alpha', quiet: true });      // quiet: the mission's own radio says it
                radio(w, 'Boardingteam', `Wir setzen von ${from.name} über. Halten Sie uns die Boote vom Leib – ${T.board} Sekunden brauchen wir an Bord.`);
                return;
             }
@@ -383,7 +386,7 @@ export function specialMissionsA(H) {
                radio(w, 'Boardingteam', why === 3 ? (moored ? 'Es liegen noch Boote an der Plattform – so können wir nicht hinüber. Näher heran, dann laufen sie aus.' : 'Ein Boot steht noch an der Plattform – erst abdrängen oder bekämpfen, sobald es frei ist.')
                   : why === 2 ? 'Zu schnell zum Aussetzen! Höchstens Viertelfahrt.' : 'Noch zu weit weg – in den markierten Kreis, 1,5 km um die Plattform.', 'warn');
             }
-            objText(w, 'board', `Bringen Sie ein Boardingteam auf die Plattform: im Kreis höchstens Viertelfahrt, kein Boot an der Anlage (${S.teamsLeft} ${S.teamsLeft === 1 ? 'Team' : 'Teams'}) – Ventile in ${clock(S.valves)}`);
+            objText(w, 'board', `Bringen Sie ein Boardingteam auf die Plattform: im Kreis höchstens Viertelfahrt, kein Boot an der Anlage (${S.teamsLeft} ${S.teamsLeft === 1 ? 'Team' : 'Teams'}) – Ventile in ${coarse(S.valves)}`);
          },
          secured(w, S) {
             S.done = true;
