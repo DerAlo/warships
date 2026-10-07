@@ -9,6 +9,8 @@ import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { MISSIONS, getMission } from '../gamev2/missions.js';
 import { SHIPS } from '../gamev2/config.js';
 import { EAST_TUNE } from '../gamev2/missions_east.js';
+import { WEST_TUNE } from '../gamev2/missions_west.js';
+import { damageSite, siteById } from '../gamev2/sites.js';
 import { makeRoom, ready, shipOf, DT } from './v2.netutil.mjs';
 
 const EAST = ['barents', 'reefs', 'strait', 'philsea', 'countdown'];
@@ -116,4 +118,65 @@ test('co-op reefs over the net: the clients see the full cells; a captain who le
    room.run(1);
    assert.equal(gone.human, true);
    assert.equal(shipOf(g.world, gone.id).mag.tomahawk, before);
+});
+
+// Balance levers of the co-op game: each is nothing for one captain (tests/v2.coop.balance.mjs measures them).
+const heard = (w, re, until) => {
+   let at = null;
+   const say = w.message.bind(w);
+   w.message = (text, level) => { if (at == null && re.test(text)) at = w.time; return say(text, level); };
+   for (let i = 0; i < until / DT && w.phase === 'playing' && at == null; i++) w.update(DT);
+   return at;
+};
+
+test('co-op philsea: the escorts of the Shandong fire earlier at a group of three or more captains', () => {
+   for (const difficulty of ['normal', 'hard']) {
+      const T = EAST_TUNE.philsea[difficulty];
+      assert.ok(T.coopEarly > 0 && T.coopEarly < T.salvoAt - 60, difficulty);
+      for (const n of [1, 2, 3, 4]) {
+         const at = heard(build('philsea', n, 0, difficulty), /Salve vom Verband der Shandong/, T.salvoAt + 5);
+         assert.ok(at != null, `${difficulty}, ${n} captains: the salvo came`);
+         assert.ok(Math.abs(at - (T.salvoAt - (n >= 3 ? T.coopEarly : 0))) < 1, `${difficulty}, ${n} captains: salvo at ${at}`);
+      }
+   }
+});
+
+test('co-op reefs: the relief group grows by coopFrig frigates at most, by none for one captain', () => {
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = EAST_TUNE.reefs[difficulty];
+      assert.ok(T.coopFrig >= 0 && T.coopFrig <= 2 && T.coopFrigHp > 0 && T.coopFrigHp <= 1, difficulty);
+      for (const n of [1, 2, 3, 4]) {
+         const w = build('reefs', n, 0, difficulty), S = w._script;
+         for (const id of [S.radarId, ...S.bat]) { const site = siteById(w, id); damageSite(w, site, site.hp + 1, w.player, 'test'); }
+         const group = S.relief.map(id => w.shipById(id)), extra = group.slice(T.relief.length);
+         assert.equal(extra.length, Math.min(T.coopFrig, n - 1), `${difficulty}, ${n} captains: frigates with the relief group`);
+         assert.deepEqual(group.slice(0, T.relief.length).map(s => s.cls), T.relief);
+         for (const s of extra) { assert.equal(s.cls, 'Typ054A'); assert.ok(s.maxHP < SHIPS.Typ054A.hp * (T.coopFrigHp + 0.01) * w.difficulty.botHP + 1); }
+      }
+   }
+});
+
+test('co-op barents: the battle cruiser has a coopHp hull against three or more captains only', () => {
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = EAST_TUNE.barents[difficulty], hull = (n) => { const w = build('barents', n, 0, difficulty), pj = w.shipById(w._script.pjId); assert.equal(pj.hp, pj.maxHP); return pj.maxHP; };
+      assert.ok(T.coopHp > 0.5 && T.coopHp <= 1.5, difficulty);
+      const solo = hull(1);
+      assert.equal(hull(2), solo, difficulty + ': two captains');
+      for (const n of [3, 4]) assert.equal(hull(n), Math.round(solo * T.coopHp), `${difficulty}: ${n} captains`);
+   }
+   assert.ok(EAST_TUNE.barents.normal.coopHp < 1);
+});
+
+test('co-op redsea: from wave coopFrom on every launcher fires one missile more at a destroyer with a captain', () => {
+   // missiles a wave puts into the launch queue
+   const queued = (n, difficulty, k) => { const w = build('redsea', n, 0, difficulty), S = w._script; S.queue.length = 0; S.def.wave(w, S, k); return S.queue.length; };
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = WEST_TUNE.redsea[difficulty];
+      assert.ok(difficulty === 'easy' ? T.coopFrom >= 9 : T.coopFrom >= 0 && T.coopFrom < 9, difficulty);
+      for (let k = 0; k < 9; k++) {
+         const solo = queued(1, difficulty, k);
+         assert.ok(solo >= 6, `${difficulty}, wave ${k}: ${solo} missiles for one captain`);
+         assert.equal(queued(2, difficulty, k) - solo, k >= T.coopFrom ? 3 : 0, `${difficulty}, wave ${k}`);
+      }
+   }
 });

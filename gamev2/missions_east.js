@@ -20,18 +20,27 @@ import { setRadar } from './sensors.js';
 export const EAST_TUNE = {
    window: 120,              // s the allied bots keep firing after a human captain's last launch or hit
    barents: {
-      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0 },
-      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4 },
-      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6 },
+      // co-op: `coopHp` scales the battle cruiser's hull against three or more captains, who sink it less often
+      // before its second salvo than two do. Measured on 60 runs with 2/3/4 captains: normal 1 -> 63/48/52 %,
+      // 0.85 -> ./50/63 %, 0.75 -> ./58/67 %, 0.7 -> ./60/68 %; hard 1 -> 23/22/20 %; easy 1 -> 100/./97 % (30 runs)
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0, coopHp: 1 },
+      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4, coopHp: 0.75 },
+      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6, coopHp: 1 },
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6 },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12 },
+      // co-op: one frigate (Typ054A, hull `coopFrigHp`) joins the relief group per further captain, `coopFrig` at
+      // most. Each one shoots down the missiles meant for the relief group's main unit, which then lives to fire its
+      // salvo at the flagship: with two frigates three and four captains won less often than two. Measured with
+      // 2/3/4 captains: normal 2 -> 57/43/47 % (30 runs), 1 -> 58/55/58 % (60 runs), 0 -> 67/80/57 % (30 runs);
+      // hard 2 -> 17/7/13 % (30), 1 -> 17/28/23 % (60), 0 -> 20/37/43 % (30); easy 2 -> 100 %.
+      // The hull does little: hard, 0.25 instead of 0.5 -> 18/28/25 % (60)
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6, coopFrig: 2, coopFrigHp: 0.5 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
       // hard: with 13 rounds per air-defence site the flagship's 24 cruise missiles ran dry with a battery standing
       // and the mission waited for the clock (8 of 20 losses); 11 rounds and a tougher relief group keep the
       // win rate and let the relief group decide (2 of 20)
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
@@ -41,9 +50,13 @@ export const EAST_TUNE = {
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
-      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0 },
-      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75 },
-      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70 },
+      // co-op: `coopEarly` s the escorts' salvo on the Ford (`salvoAt`) comes earlier against three or more
+      // captains, who else sink the escorts before it. Measured on 60 runs with 3/4 captains:
+      // normal 0 -> 80/87 % (30 runs), 135 -> 68/68 %, 150 -> 63/63 %, 165 -> 60/62 %;
+      // hard 0 -> 67/60 % (30 runs), 110 -> 25/27 %, 125 -> 12/22 %. Two captains: normal 67 %, hard 37 %
+      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0, coopEarly: 0 },
+      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75, coopEarly: 150 },
+      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70, coopEarly: 110 },
       // an escort captain relies on the carrier bot: it hits harder and the Shandong stops flying earlier
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
@@ -306,6 +319,12 @@ export function eastMissions(H) {
                w.end(true, 'Der Schlachtkreuzer ist ausgeschaltet, der Träger ist einsatzbereit.');
             }
          },
+         // co-op (net/setup.js): against three or more captains the battle cruiser's hull is scaled by `coopHp`
+         coop(w, S, humans) {
+            const k = tune(w, 'barents').coopHp, pj = w.shipById(S.pjId);
+            if (humans.length < 3 || k === 1 || !pj) return;
+            pj.hp = Math.round(pj.hp * k); pj.maxHP = Math.round(pj.maxHP * k);
+         },
          timeout(w) { w.end(false, 'Der gegnerische Verband hat sich abgesetzt – der Gegenschlag kam zu spät.'); },
       },
 
@@ -387,10 +406,9 @@ export function eastMissions(H) {
             // radar and batteries are out: a relief group comes in from the east
             if (S.blind && dead(S.bat) >= 2 && !S.relief) {
                const T = tune(w, 'reefs'), own = S.own.map(id => live(w, id)).filter(Boolean);
-               // co-op: a half-strength frigate joins the relief group per further human captain (two at most:
-               // measured with three, four captains ran out of time)
-               S.relief = T.relief.concat(Array(Math.min(2, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
-                  { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : 0.5) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
+               // co-op: a frigate with a weak hull joins the relief group per further human captain (`coopFrig` at most)
+               S.relief = T.relief.concat(Array(Math.min(T.coopFrig, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
+                  { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : T.coopFrigHp) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
                // the relief group does not wait for the clock: `again` s after it appears its main units fire a
@@ -555,7 +573,7 @@ export function eastMissions(H) {
             holdLine(w, S, 14, 'Verbandsführer', 'Der Verband hält Feuerdisziplin: Die Geleitschiffe schießen erst, wenn das Flaggschiff den Angriff eröffnet – ein früher Schuss würde unsere Position verraten.');
             // the escorts of the Shandong do not let the clock decide: late in the operation they fire what they
             // have reloaded at the Ford (salvo missiles per ship still afloat)
-            later(S, T.salvoAt - 35, () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); });
+            const warn = () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); };
             const salvo = () => {
                if (w.phase !== 'playing') return;
                const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
@@ -564,7 +582,13 @@ export function eastMissions(H) {
                if (n) radio(w, 'Luftlage', 'Flugkörperalarm. Salve vom Verband der Shandong, Ziel Träger.', 'warn');
                if (n && T.again) later(S, w.time + T.again, salvo);
             };
-            later(S, T.salvoAt, salvo);
+            // co-op: three or more captains sink the escorts before they have reloaded, so against such a group
+            // the escorts fire `coopEarly` s earlier (the captains are seated after setup: asked at the event)
+            const many = () => extraCaptains(w) >= 2;
+            for (const [t, on] of [[T.salvoAt - T.coopEarly, true], [T.salvoAt, false]]) {
+               later(S, t - 35, () => { if (many() === on) warn(); });
+               later(S, t, () => { if (many() === on) salvo(); });
+            }
             later(S, 70, () => {
                if (S.found) return;
                const n = S.area.y < -6000 ? 'Südost' : S.area.y > 6000 ? 'Nordost' : 'Ost';
