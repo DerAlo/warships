@@ -41,9 +41,13 @@ export const EAST_TUNE = {
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
-      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0 },
-      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75 },
-      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70 },
+      // co-op: `coopEarly` s the escorts' salvo on the Ford (`salvoAt`) comes earlier against three or more
+      // captains, who else sink the escorts before it. Measured on 60 runs with 3/4 captains:
+      // normal 0 -> 80/87 % (30 runs), 135 -> 68/68 %, 150 -> 63/63 %, 165 -> 60/62 %;
+      // hard 0 -> 67/60 % (30 runs), 110 -> 25/27 %, 125 -> 12/22 %. Two captains: normal 67 %, hard 37 %
+      easy: { ally: 0.6, auto: 260, surprise: 70, out: 0.75, frig: 1, dd: 0, salvoAt: 540, salvo: 5, again: 0, coopEarly: 0 },
+      normal: { ally: 0.5, auto: 200, surprise: 55, out: 0.5, frig: 1, dd: 0, salvoAt: 450, salvo: 10, again: 75, coopEarly: 150 },
+      hard: { ally: 0.4, auto: 150, surprise: 40, out: 0.5, frig: 1, dd: 0, salvoAt: 400, salvo: 14, again: 70, coopEarly: 110 },
       // an escort captain relies on the carrier bot: it hits harder and the Shandong stops flying earlier
       ship: Object.fromEntries(['Burke', 'Ticonderoga', 'Daring'].map(k => [k, t => ({ ally: t.ally * 1.6, out: Math.min(0.9, t.out + 0.15) })])),
    },
@@ -555,7 +559,7 @@ export function eastMissions(H) {
             holdLine(w, S, 14, 'Verbandsführer', 'Der Verband hält Feuerdisziplin: Die Geleitschiffe schießen erst, wenn das Flaggschiff den Angriff eröffnet – ein früher Schuss würde unsere Position verraten.');
             // the escorts of the Shandong do not let the clock decide: late in the operation they fire what they
             // have reloaded at the Ford (salvo missiles per ship still afloat)
-            later(S, T.salvoAt - 35, () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); });
+            const warn = () => { if (S.foes.some(id => id !== S.sdId && live(w, id))) radio(w, 'Aufklärung', 'Die Geleitschiffe der Shandong drehen auf uns ein – eine Flugkörpersalve auf die Ford steht bevor.', 'warn'); };
             const salvo = () => {
                if (w.phase !== 'playing') return;
                const at = () => { const F = live(w, S.fordId); return F ? { x: F.pos.x, y: F.pos.y } : null; };
@@ -564,7 +568,13 @@ export function eastMissions(H) {
                if (n) radio(w, 'Luftlage', 'Flugkörperalarm. Salve vom Verband der Shandong, Ziel Träger.', 'warn');
                if (n && T.again) later(S, w.time + T.again, salvo);
             };
-            later(S, T.salvoAt, salvo);
+            // co-op: three or more captains sink the escorts before they have reloaded, so against such a group
+            // the escorts fire `coopEarly` s earlier (the captains are seated after setup: asked at the event)
+            const many = () => extraCaptains(w) >= 2;
+            for (const [t, on] of [[T.salvoAt - T.coopEarly, true], [T.salvoAt, false]]) {
+               later(S, t - 35, () => { if (many() === on) warn(); });
+               later(S, t, () => { if (many() === on) salvo(); });
+            }
             later(S, 70, () => {
                if (S.found) return;
                const n = S.area.y < -6000 ? 'Südost' : S.area.y > 6000 ? 'Nordost' : 'Ost';

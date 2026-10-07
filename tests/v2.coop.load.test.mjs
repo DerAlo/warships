@@ -117,3 +117,24 @@ test('co-op reefs over the net: the clients see the full cells; a captain who le
    assert.equal(gone.human, true);
    assert.equal(shipOf(g.world, gone.id).mag.tomahawk, before);
 });
+
+// Balance levers of the co-op game: each is nothing for one captain (tests/v2.coop.balance.mjs measures them).
+const heard = (w, re, until) => {
+   let at = null;
+   const say = w.message.bind(w);
+   w.message = (text, level) => { if (at == null && re.test(text)) at = w.time; return say(text, level); };
+   for (let i = 0; i < until / DT && w.phase === 'playing' && at == null; i++) w.update(DT);
+   return at;
+};
+
+test('co-op philsea: the escorts of the Shandong fire earlier at a group of three or more captains', () => {
+   for (const difficulty of ['normal', 'hard']) {
+      const T = EAST_TUNE.philsea[difficulty];
+      assert.ok(T.coopEarly > 0 && T.coopEarly < T.salvoAt - 60, difficulty);
+      for (const n of [1, 2, 3, 4]) {
+         const at = heard(build('philsea', n, 0, difficulty), /Salve vom Verband der Shandong/, T.salvoAt + 5);
+         assert.ok(at != null, `${difficulty}, ${n} captains: the salvo came`);
+         assert.ok(Math.abs(at - (T.salvoAt - (n >= 3 ? T.coopEarly : 0))) < 1, `${difficulty}, ${n} captains: salvo at ${at}`);
+      }
+   }
+});
