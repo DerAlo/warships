@@ -120,7 +120,11 @@ const enemyAhead = S => S.ev(() => {
    const w = window.__world(), p = w.player;
    const T = w.ships.find(s => s.alive && s.side !== p.side && !s.sub && !s.cfg?.submarine && !(s.depth > 0));
    if (!T) return null;
-   const put = () => { T.pos.x = p.pos.x + Math.cos(p.heading) * 5000; T.pos.y = p.pos.y + Math.sin(p.heading) * 5000; T.detected = true; T.visible = true; T.spotted = true; };
+   // The sim writes T.spotted on every tick from what the player's side really sees (a boat that starts deep,
+   // like the U212 of "pipeline", sees nothing). Setting the flag from a timer loses that race on some
+   // frames, and the lock card is hidden on exactly those. So the flags are pinned: the sim's writes are dropped.
+   for (const k of ['spotted', 'detected', 'visible']) Object.defineProperty(T, k, { get: () => true, set() {}, configurable: true });
+   const put = () => { T.pos.x = p.pos.x + Math.cos(p.heading) * 5000; T.pos.y = p.pos.y + Math.sin(p.heading) * 5000; };
    put(); clearInterval(window.__keep); window.__keep = setInterval(() => { if (T.alive && p.alive) put(); }, 50);
    window.__setAim(0, 5000);
    return T.name || T.id;
