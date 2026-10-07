@@ -28,7 +28,10 @@ export const EAST_TUNE = {
    reefs: {
       easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6 },
       normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12 },
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 13, relief: ['Typ055'], reliefHp: 1, again: 120, salvo: 12 },
+      // hard: with 13 rounds per air-defence site the flagship's 24 cruise missiles ran dry with a battery standing
+      // and the mission waited for the clock (8 of 20 losses); 11 rounds and a tougher relief group keep the
+      // win rate and let the relief group decide (2 of 20)
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {

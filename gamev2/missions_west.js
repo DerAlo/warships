@@ -25,7 +25,7 @@ export const WEST_TUNE = {
    hormus: {
       easy: { boats: 4, coopBoats: 0 },
       normal: { boats: 5, coopBoats: -1 },
-      hard: { boats: 5, coopBoats: 0 },
+      hard: { boats: 5, coopBoats: -2 },      // measured, two captains on 60 runs: 0 -> 13 %, -1 -> 17 %, -2 -> 25 % (one captain: 23 %)
    },
    blacksea: {
       easy: { out: 480, coopHp: 1 },
