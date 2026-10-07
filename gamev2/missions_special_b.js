@@ -41,20 +41,25 @@ export const SPECIAL_B_TUNE = {
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
-      // a sonar holds the boat / while it is sighted · noise: % per s for running loud near a listener · cool: % per s it
-      // falls when nothing hears · listen / listenFor: s between two checks astern and their length · frig: speed of the
-      // frigates (kn) · guard: a hunter boat patrols the way out · hunt: share of the trail at which the hunter floods
-      // its tubes and weapons are released against it (0 = never)
-      easy: { trail: 60, kn: 6, held: 5, seen: 9, noise: 1.5, cool: 3, listen: 70, listenFor: 12, warn: 9, frig: 10, guard: 0, hunt: 0 },
-      normal: { trail: 80, kn: 6, held: 8, seen: 14, noise: 2.5, cool: 2, listen: 55, listenFor: 16, warn: 7, frig: 12, guard: 1, hunt: 0 },
-      hard: { trail: 100, kn: 6, held: 11, seen: 18, noise: 3.5, cool: 1.5, listen: 45, listenFor: 18, warn: 6, frig: 14, guard: 1, hunt: 0.5 },
+      // a sonar holds the boat / while it is sighted · caught: % per s while she hears it during a check astern · noise: %
+      // per s for running loud near a listener · cool: % per s it falls when nothing hears (slow: mistakes add up) ·
+      // listen / listenFor: s between two checks astern and their length · warn: s the sonar team announces a check
+      // ahead · frig: speed of the frigates (kn) · guard: a hunter boat patrols before the way out · hunt: share of the
+      // trail at which the hunter picks up the trail and weapons are released against it (0 = never)
+      easy: { trail: 60, kn: 6, held: 5, caught: 8, seen: 9, noise: 1.5, cool: 1, listen: 70, listenFor: 12, warn: 8, frig: 10, guard: 0, hunt: 0 },
+      normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0 },
+      hard: { trail: 100, kn: 6, held: 11, caught: 16, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5 },
    },
 };
 // Shadowing (bastion): the trailing position lies min..max m from the missile boat inside arc rad either side of dead
 // astern (its own sonar is deaf there). Its sonar reaches bow m ahead and abeam and aft m astern, scaled with the
-// shadower's noise; while it checks astern the blind arc is gone and only a boat at creepKn or less stays unheard.
-// hear: m at which the sonar team classifies it · loudKn: speed from which a boat near a listener (near m) is loud.
-export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creepKn: 4, hear: 5000, loudKn: 11, near: 6500, frig: 3000, sub: 2200 };
+// shadower's noise; while it checks astern the blind arc is gone and only a boat at telegraph 1/4 or less stays unheard.
+// hear: m at which the sonar team classifies it. The speed rules follow the telegraph, so they read the same in both
+// boats (share of the boat's top speed submerged): creep = up to 1/4, fast = more than 1/2, both also at periscope depth, where a boat runs faster (loud near a listener, near m).
+export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creep: 0.33, hear: 5000, fast: 0.62, near: 6500, frig: 3000, sub: 2200 };
+// why the detection meter rises, as shown in the objective
+const WHY = { listen: 'sie horcht, Sie sind zu schnell', close: 'zu dicht am Heck', bow: 'vor ihrem Sonar, nicht achteraus', fast: 'zu schnell im Kielwasser',
+   held: 'ein Wachschiff hört Sie', ping: 'das Jagd-U-Boot hält Sie im Sonar', seen: 'Sehrohr gesichtet', noise: 'zu laut nahe der Wachschiffe' };
 // Evacuation (evac): a lift is loaded while a captain's ship lies inside the pickup zone (r m) at no more
 // than slowKn kn and no armed boat stands within clear m of it; people per lift, people the ferry takes.
 export const EVAC = { r: 800, slowKn: 6, clear: 1500, people: 40, ferry: 320 };
@@ -408,13 +413,15 @@ export function specialMissionsB(H) {
          briefing: 'An der Eiskante liegt das geschützte Patrouillengebiet eines Raketen-U-Boots – die Bastion. Fregatten mit Schleppsonar ' +
             'und ein Jagd-U-Boot decken es. Spüren Sie den Raketenträger Wolchow auf und beschatten Sie ihn: getaucht, ' +
             '1,2 bis 2,8 Kilometer genau achteraus – dort ist sein eigenes Sonar taub. Halten Sie die Position, bis genug Geräuschdaten ' +
-            'aufgezeichnet sind, und laufen Sie dann zum Ablaufpunkt. Die Ortungsgefahr steht im Auftrag: Sie steigt, wenn ein Sonar Sie hält, ' +
-            'wenn Sie in der Nähe der Wachschiffe schnell laufen, wenn Ihr Sehrohr gesichtet wird – und wenn der Raketenträger nach achtern ' +
-            'horcht und Sie dabei mehr als 4 Knoten laufen. Bei 100 % sind Sie geortet, der Einsatz ist verloren. ' +
+            'aufgezeichnet sind, und laufen Sie dann zum Ablaufpunkt. Die Ortungsgefahr steht im Auftrag, mit dem Grund, warum sie steigt: ' +
+            'vor oder neben dem Raketenträger hört Sie sein Sonar, die Wachschiffe hören Sie auf bis zu 3 Kilometer, mit mehr als ' +
+            'halber Fahrt sind Sie in ihrer Nähe zu laut, und am Sehrohr werden Sie gesichtet. Von Zeit zu Zeit horcht der ' +
+            'Raketenträger nach achtern – das Sonar meldet es vorher: Dann höchstens Fahrtstufe 1/4, bis er fertig ist. ' +
+            'Bei 100 % sind Sie geortet, der Einsatz ist verloren. ' +
             'Waffen sind gesperrt: Ein Schuss ohne Freigabe beendet den Einsatz. Der Raketenträger ist niemals ein Ziel.',
          debrief: 'Die Geräuschsignatur der Wolchow ist aufgezeichnet, in der Bastion hat niemand etwas bemerkt. ' +
             'Entschieden hat nicht eine Waffe, sondern die Fahrtstufe: langsam genug, um unhörbar zu bleiben, schnell genug, um dranzubleiben.',
-         fleet: { own: '1 Jagd-U-Boot', foe: 'Raketen-U-Boot Wolchow (kein Ziel), 2 Fregatten, 1 Jagd-U-Boot' },
+         fleet: { own: '1 Jagd-U-Boot · 1 Schwesterboot als Sicherung am Ablaufpunkt', foe: 'Raketen-U-Boot Wolchow (kein Ziel), 2 Fregatten, 1 Jagd-U-Boot' },
          env: { time: 'dusk', weather: 'fog' }, type: 'stealth', playableShips: ['U212', 'Virginia'], recommendedShip: 'U212',
          arena: 15000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
@@ -424,7 +431,11 @@ export function specialMissionsB(H) {
                { c: P(-2500, -12200), r: 2300, height: 22, seed: 151, lobes: 5, elong: 3.2, rot: 0.08, rough: 0.35, name: 'Eiskante' },
                { c: P(9800, -10800), r: 1700, height: 18, seed: 157, lobes: 4, elong: 2.4, rot: -0.3, rough: 0.35, name: 'Eiskante Ost' },
             ]);
-            add(w, shipKey, 'player', P(-10500, 8500), -0.6, { isPlayer: true, depth: 2, telegraph: 3 });
+            // the captain starts on her quarter, south of her track (the frigates run north of it), the way out behind him
+            S.exit = zone(w, 1200, 8600, 1500, 'Ablaufpunkt');
+            add(w, shipKey, 'player', P(3600, 6600), -2.8, { isPlayer: true, depth: 2, telegraph: 2 });
+            // the sister boat lies stopped at the way out and never fires (co-op: the second captain's boat)
+            add(w, shipKey, 'player', P(2100, 8900), -2.8, { name: shipKey === 'U212' ? 'U 32' : 'USS Texas', depth: 2, telegraph: 0, ai: { anchored: true } });
             // the missile boat: west along the ice edge, then north-west; never fights, never listens with the engine's
             // sonar (the script models its sonar with the blind arc astern)
             // she zigzags down her first leg (drawn from the seed), then turns north-west for the ice
@@ -434,17 +445,18 @@ export function specialMissionsB(H) {
                { name: 'Wolchow', depth: 2, speedKn: T.kn / 0.85, hpMult: 2, telegraph: 4, ai: { passive: true, route } });
             t.noTarget = true; t.sonarDeafT = 1e9;
             S.tgtId = t.id;
-            const loop = (name, pts, kn) => add(w, 'Gorschkow', 'enemy', pts[0], Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x),
-               { name, speedKn: kn, telegraph: 4, ai: { passive: true, patrol: pts, patrolIdx: 1 } });
+            // (where a frigate stands on its first leg is drawn from the seed)
+            const loop = (name, pts, kn, k = w.rng()) => add(w, 'Gorschkow', 'enemy', P(pts[0].x + (pts[1].x - pts[0].x) * k, pts[0].y + (pts[1].y - pts[0].y) * k),
+               Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x), { name, speedKn: kn, telegraph: 4, ai: { passive: true, patrol: pts, patrolIdx: 1 } });
             // two racetracks north of her track: Bravo 3.5 km off it, Alfa beyond
             S.frig = [loop('Fregatte Alfa', [P(500, -4300), P(-7500, -4900), P(-7500, -6100), P(500, -5500)], T.frig).id,
                loop('Fregatte Bravo', [P(-900, -1900), P(-6200, 1000), P(-6600, 300), P(-1300, -2600)], T.frig).id];
             // the hunter boat circles between the track and the way out
-            S.guardLoop = [P(-7800, -3600), P(-7400, 1600), P(-9800, 200)];
-            S.guardId = T.guard ? add(w, 'Kilo', 'enemy', S.guardLoop[0], 1.4, { name: 'Jagd-U-Boot Ladoga', depth: 2, speedKn: 7, ai: { passive: true, route: [S.guardLoop[1], S.guardLoop[2], S.guardLoop[0]] } }).id : 0;
-            S.area = zone(w, -3200, 2200, 4200, 'Patrouillengebiet');
-            S.exit = zone(w, -9600, 7900, 1500, 'Ablaufpunkt');
-            S.stage = 0; S.meter = 0; S.peak = 0; S.trail = 0; S.tick = 0; S.shown = ''; S.listenAt = 0; S.listenEnd = 0; S.released = false; S.sunk = 0;
+            S.guardLoop = [P(-4600, 6400), P(-900, 5600), P(-1900, 9600)];
+            const gk = w.rng(), g0 = P(S.guardLoop[0].x + (S.guardLoop[1].x - S.guardLoop[0].x) * gk, S.guardLoop[0].y + (S.guardLoop[1].y - S.guardLoop[0].y) * gk);
+            S.guardId = T.guard ? add(w, 'Kilo', 'enemy', g0, -0.2, { name: 'Jagd-U-Boot Ladoga', depth: 2, speedKn: 7, ai: { passive: true, route: [S.guardLoop[1], S.guardLoop[2], S.guardLoop[0]] } }).id : 0;
+            S.area = zone(w, -2600, 3000, 4200, 'Patrouillengebiet');
+            S.stage = 0; S.why = ''; S.whyT = 0; S.meter = 0; S.peak = 0; S.trail = 0; S.tick = 0; S.shown = ''; S.listenAt = 0; S.listenEnd = 0; S.released = false; S.sunk = 0;
             objective(w, 'find', 'Spüren Sie den Raketenträger Wolchow im Patrouillengebiet auf' + lim(w));
             objective(w, 'trail', this.trailText(S, T));
             objective(w, 'exit', 'Laufen Sie danach unentdeckt zum Ablaufpunkt ab');
@@ -453,17 +465,18 @@ export function specialMissionsB(H) {
             w.score = { kind: 'count', player: 0, enemy: 0, target: 100 };
             later(S, 4, () => radio(w, 'Flottenkommando', `Sie stehen am Rand der Bastion. Der Raketenträger Wolchow läuft mit ${T.kn} Knoten nach Südwesten durch das Patrouillengebiet. Finden Sie ihn, hängen Sie sich ${T.trail} Sekunden achteraus an – und lassen Sie sich nicht orten.`));
             later(S, 14, () => radio(w, 'Flottenkommando', 'Waffen sind gesperrt. Ein Schuss ohne Freigabe beendet den Einsatz, und der Raketenträger ist niemals ein Ziel.', 'warn'));
-            later(S, 26, () => radio(w, 'Sonar', `Zwei Fregatten mit Schleppsonar laufen Streife. Gestoppt hören sie uns auf ${String(TRAIL.frig / 2000).replace('.', ',')} Kilometer, bei voller Fahrt auf ${TRAIL.frig / 1000} – Abstand halten, und über ${TRAIL.loudKn} Knoten in ihrer Nähe steigt die Ortungsgefahr ohnehin.`));
+            later(S, 26, () => radio(w, 'Sonar', `Zwei Fregatten mit Schleppsonar laufen nördlich ihres Kurses Streife${T.guard ? ', ein Jagd-U-Boot kreist vor dem Ablaufpunkt' : ''}. Gestoppt hören uns die Fregatten auf ${String(TRAIL.frig / 2000).replace('.', ',')} Kilometer, bei voller Fahrt auf ${TRAIL.frig / 1000} – Abstand halten. Mit mehr als halber Fahrt sind wir in ihrer Nähe ohnehin zu laut.`));
          },
          trailText(S, T) {
             const m = Math.floor(S.meter / 10) * 10, sec = Math.min(T.trail, Math.floor(S.trail / 10) * 10);
-            return `Beschatten Sie ihn getaucht, ${String(TRAIL.min / 1000).replace('.', ',')}–${String(TRAIL.max / 1000).replace('.', ',')} km achteraus: ${sec}/${T.trail} s · Ortungsgefahr ${S.meter >= 100 ? 100 : m} %` +
-               (S.listenEnd > 0 && S.listening ? ` · ER HORCHT – höchstens ${TRAIL.creepKn} kn!` : '');
+            return `Beschatten Sie die Wolchow getaucht,${String(TRAIL.min / 1000).replace('.', ',')}–${String(TRAIL.max / 1000).replace('.', ',')} km achteraus: ${sec}/${T.trail} s · Ortungsgefahr ${S.meter >= 100 ? 100 : m} %` +
+               (S.why ? ` – steigt: ${WHY[S.why]}` : '') + (S.listening ? ` · SIE HORCHT – höchstens Fahrtstufe 1/4!` : '');
          },
          update(w, dt, S) {
             if (S.stage >= 3) return;
             const T = tune(w, 'bastion'), t = live(w, S.tgtId);
-            const boats = w.ships.filter(b => b.alive && b.side === 'player' && b.sub);
+            // the captains' boats (the sister boat at the way out counts only once a second captain sails it)
+            const boats = w.ships.filter(b => b.alive && b.side === 'player' && b.sub && human(b));
             // co-op: the boats of the other captains (placed after setup) start deep as well
             if (!S.init) { S.init = true; S.shots = {}; for (const b of boats) { if (w.time < 2) b.depthTarget = b.depthF = b.depth = 2; } }
             // the rule of the weapons: any shot before the release ends the mission
@@ -493,36 +506,41 @@ export function specialMissionsB(H) {
             }
             if (S.stage === 1 && !S.warnedListen && S.listenAt - w.time <= T.warn) {
                S.warnedListen = true;
-               radio(w, 'Sonar', `Die Wolchow dreht ihr Sonar nach achtern – in wenigen Sekunden horcht sie ${T.listenFor} Sekunden lang. Fahrt auf höchstens ${TRAIL.creepKn} Knoten!`, 'warn');
+               radio(w, 'Sonar', `Die Wolchow dreht ihr Sonar nach achtern – in ${T.warn} Sekunden horcht sie ${T.listenFor} Sekunden lang. Höchstens Fahrtstufe 1/4, bis sie fertig ist!`, 'warn');
             }
             // ---- who hears the boats: the worst case over all captains feeds the meter
             const hx = Math.cos(t.heading), hy = Math.sin(t.heading);
             let rate = -T.cool, why = '', inBand = false, nearest = Infinity;
             for (const b of boats) {
-               const kn = Math.abs(b.speed) / KN, d = dist(b.pos, t.pos);
+               const f = Math.abs(b.speed) / KN / (b.maxSpeedKn * b.sub.deepSpeed), d = dist(b.pos, t.pos);      // speed as a share of the telegraph
                const cosA = d > 1 ? ((b.pos.x - t.pos.x) * hx + (b.pos.y - t.pos.y) * hy) / d : 1, astern = cosA < -Math.cos(TRAIL.arc);
-               const loud = 0.5 + 0.5 * Math.min(1, kn / (b.maxSpeedKn * b.sub.deepSpeed));
+               const loud = 0.5 + 0.5 * Math.min(1, f);
                nearest = Math.min(nearest, d);
                let r = -T.cool, y = '';
-               if (S.listening ? d < TRAIL.bow * Math.min(1, Math.max(0, (kn - TRAIL.creepKn + 1) / 6)) || d < TRAIL.aft * loud : d < (astern && kn <= TRAIL.loudKn ? TRAIL.aft : TRAIL.bow) * loud) { r = T.held; y = S.listening ? 'listen' : !astern ? 'bow' : kn > TRAIL.loudKn ? 'fast' : 'close'; }
-               else if (hunters.some(o => dist(o.pos, b.pos) < (o.id === S.guardId ? TRAIL.sub : TRAIL.frig) * loud) || w.time - b.pingT < 1.2) { r = T.held; y = 'held'; }
-               else if (kn > TRAIL.loudKn && w.ships.some(o => o.alive && o.side === 'enemy' && o !== t && dist(o.pos, b.pos) < TRAIL.near)) { r = T.noise * Math.min(2, (kn - TRAIL.loudKn) / 4 + 0.5); y = 'noise'; }
-               if (b.detected && b.depth < 2) { r = T.seen; y = 'seen'; }
+               if (S.listening ? d < TRAIL.bow * Math.min(1, Math.max(0, (f - TRAIL.creep) / 0.15)) || d < TRAIL.aft * loud : d < (astern && f <= TRAIL.fast ? TRAIL.aft : TRAIL.bow) * loud) { r = S.listening ? T.caught : T.held; y = S.listening ? 'listen' : !astern ? 'bow' : f > TRAIL.fast ? 'fast' : 'close'; }
+               else if (hunters.some(o => !(S.released && o.id === S.guardId) && dist(o.pos, b.pos) < (o.id === S.guardId ? TRAIL.sub : TRAIL.frig) * loud)) { r = T.held; y = 'held'; }
+               else if (w.time - b.pingT < 1.2) { r = T.held; y = 'ping'; }      // the released hunter boat pings (hard)
+               else if (f > TRAIL.fast && w.ships.some(o => o.alive && o.side === 'enemy' && o !== t && dist(o.pos, b.pos) < TRAIL.near)) { r = T.noise * Math.min(2, (f - TRAIL.fast) / 0.25 + 0.5); y = 'noise'; }
+               // a periscope is sighted from a frigate's bridge, not by the boat that hunts it
+               if (b.detected && b.depth < 2 && S.frig.some(i => { const o = live(w, i); return o && dist(o.pos, b.pos) < TRAIL.frig; })) { r = T.seen; y = 'seen'; }
                if (r > rate) { rate = r; why = y; }
                if (astern && d >= TRAIL.min && d <= TRAIL.max && b.depth > 0) inBand = true;
             }
             S.meter = Math.max(0, Math.min(100, S.meter + rate * step));
             S.peak = Math.max(S.peak, S.meter);
             w.score.player = Math.round(S.meter);
+            // the reason stays in the objective for a few seconds after the meter stops rising (no flicker at a limit)
+            if (!(why && rate > 0) && S.why && w.time > S.whyT) S.why = '';
             if (why && rate > 0) {
-               S.why = why;
-               nag(w, S, 'nag_' + why, 25, 'Sonar', why === 'listen' ? `Sie hört uns! Fahrt heraus – höchstens ${TRAIL.creepKn} Knoten, solange sie horcht.`
+               S.why = why; S.whyT = w.time + 4;
+               nag(w, S, 'nag_' + why, 25, 'Sonar', why === 'listen' ? 'Sie hört uns! Fahrt heraus – höchstens Fahrtstufe 1/4, solange sie horcht.'
                   : why === 'close' ? 'Zu dicht – wir laufen ihr in die Schraube. Abstand über einen Kilometer!'
                   : why === 'bow' ? 'Wir stehen vor ihrem Sonar. Nur genau achteraus ist sie taub – zurück ins Kielwasser!'
-                  : why === 'fast' ? `Zu schnell – über ${TRAIL.loudKn} Knoten hört sie uns auch im Kielwasser.`
+                  : why === 'fast' ? 'Zu schnell – mit mehr als halber Fahrt hört sie uns auch im Kielwasser.'
                   : why === 'held' ? 'Ein Wachschiff hält uns im Sonar. Fahrt heraus und Abstand gewinnen!'
+                  : why === 'ping' ? 'Das Jagd-U-Boot hält uns im Sonar! Auf Sehrohrtiefe und Torpedos los, bevor es uns meldet – oder abhängen.'
                   : why === 'seen' ? 'Sehrohr gesichtet! Sofort tief gehen.'
-                  : `Wir sind zu laut. Unter ${TRAIL.loudKn} Knoten bleiben, solange Wachschiffe in der Nähe stehen.`, 'warn');
+                  : 'Wir sind zu laut. Höchstens halbe Fahrt, solange Wachschiffe in der Nähe stehen.', 'warn');
             }
             if (S.peak >= 50 && !S.half) { S.half = true; setObj(w, 'ghost', 'failed'); radio(w, 'Sonar', 'Ortungsgefahr über 50 % – die Wachschiffe suchen bereits. Bei 100 % haben sie uns.', 'warn'); }
             if (S.meter >= 100) {
@@ -549,7 +567,7 @@ export function specialMissionsB(H) {
                // hard: the hunter boat picks up the trail and floods its tubes – weapons are released against it alone
                if (T.hunt && g && !S.released && S.trail >= T.trail * T.hunt) {
                   S.released = true;
-                  g.sonarDeafT = 0; g.ai.passive = false; g.ai.route = null; g.ai.huntId = boats[0] ? boats[0].id : null; g.ai.press = true;
+                  g.sonarDeafT = 0; g.ai.passive = false; g.ai.route = null; g.ai.huntId = boats.length ? boats.reduce((a, b) => dist(b.pos, g.pos) < dist(a.pos, g.pos) ? b : a).id : null; g.ai.press = true;
                   objText(w, 'fire', 'Waffen frei gegen das Jagd-U-Boot Ladoga – nur gegen dieses, der Raketenträger ist nie ein Ziel');
                   radio(w, 'Sonar', 'Torpedorohre werden geflutet – das Jagd-U-Boot Ladoga hat unsere Spur!', 'warn');
                   radio(w, 'Flottenkommando', 'Waffen frei gegen das Jagd-U-Boot – nur gegen dieses. Der Raketenträger und die Fregatten bleiben gesperrt.', 'warn');

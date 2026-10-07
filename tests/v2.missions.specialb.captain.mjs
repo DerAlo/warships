@@ -7,7 +7,7 @@
 //    play(id, o)            one seeded run to the end: o = { diff, seed, ship, n (captains), mode }
 import { World } from '../gamev2/state.js';
 import { getMission } from '../gamev2/missions.js';
-import { BOARD, TRAIL } from '../gamev2/missions_special_b.js';
+import { BOARD, TRAIL, SPECIAL_B_TUNE } from '../gamev2/missions_special_b.js';
 import { buildNetWorld } from '../gamev2/net/setup.js';
 import { updateBots } from '../gamev2/ai.js';
 
@@ -41,51 +41,71 @@ function hijackHelm(w, p) {
    };
 }
 
-// bastion: no AI at the helm (it would shoot). The captain stays deep, lets the missile boat pass at a distance,
-// falls in astern and holds the middle of the band; he stops for every check astern, creeps while a frigate is
-// near, and leaves for the exit once the trail is recorded. `k` shifts a second boat within the band.
+// bastion: no AI at the helm (it would shoot). The captain stays deep and never runs louder than the listeners
+// around him allow. He comes in from the quarter, enters the blind arc astern outside the reach of the missile
+// boat's sonar, holds the middle of the band, goes to 1/4 for every check astern (after a reaction time drawn
+// from the mission's own random listening times, up to REACT s: the bot is otherwise deterministic), falls back
+// and leaves for the exit once the trail is recorded. `k` shifts a second boat within the band.
+export const REACT = 12;
+const FIRE = +process.env.BASTION_FIRE || 4500;      // m at which he turns on the hunter boat and fires
 function bastionHelm(w, b, k = 0) {
    const S = w._script, t = w.shipById(S.tgtId);
    if (!b.alive || !t || !t.alive) return;
-   if (b.depthTarget !== 2) b.depthTarget = 2;
-   const kn = (tel) => b.maxSpeedKn * b.sub.deepSpeed * [0, 0.25, 0.5, 0.75, 1][tel];
-   const foe = Math.min(...w.ships.filter(o => o.alive && o.side === 'enemy' && o !== t).map(o => hyp(o.pos, b.pos)), 1e9);
-   const cap = (tel) => { while (tel > 1 && foe < TRAIL.near + 300 && kn(tel) > TRAIL.loudKn) tel--; while (tel > 0 && foe < 3600 && kn(tel) > 6) tel--; return tel; };
-   // a hunter coming close: step off its track at a right angle, quietly
-   const near = w.ships.filter(o => o.alive && o.side === 'enemy' && o !== t && hyp(o.pos, b.pos) < 5200 && !(S.released && o.id === S.guardId)).sort((a, c) => hyp(a.pos, b.pos) - hyp(c.pos, b.pos))[0];
-   if (near) {
-      const fx = Math.cos(near.heading), fy = Math.sin(near.heading), rx = b.pos.x - near.pos.x, ry = b.pos.y - near.pos.y;
-      const side = rx * -fy + ry * fx >= 0 ? 1 : -1, closing = rx * fx + ry * fy > -400;
-      const dn = hyp(near.pos, b.pos), lat = Math.abs(rx * -fy + ry * fx);
-      const hear = near.cfg.sonar ? TRAIL.frig : TRAIL.sub;
-      if (closing && lat < hear * 0.8) { turn(b, Math.atan2(fx * side, -fy * side)); b.setTelegraph(dn < hear * 0.625 + 150 ? 0 : dn < hear * 0.75 + 150 ? 1 : 2); return; }
+   // hard, weapons released against the hunter boat: up to periscope depth, bow on its lead, a spread, down again
+   const g = S.released && S.guardId ? w.shipById(S.guardId) : null;
+   if (g && g.alive && hyp(g.pos, b.pos) < FIRE &&b.torps.launchers.some(l => l.reload <= 0)) {
+      const tt = hyp(g.pos, b.pos) / (b.cfg.torp.speedKn * 2.6);
+      const brg = Math.atan2(g.pos.y + Math.sin(g.heading) * g.speed * tt - b.pos.y, g.pos.x + Math.cos(g.heading) * g.speed * tt - b.pos.x);
+      b.depthTarget = 1; turn(b, brg); b.setTelegraph(1);
+      if (b.depth === 1 && Math.abs(Math.atan2(Math.sin(brg - b.heading), Math.cos(brg - b.heading))) < 0.05) b.fireTorpedoes(w, brg);
+      return;
    }
-   if (S.stage >= 2) { turn(b, Math.atan2(S.exit.y - b.pos.y, S.exit.x - b.pos.x)); b.setTelegraph(hyp(b.pos, S.exit) < 600 ? 0 : cap(4)); return; }
+   b.depthTarget = g && g.alive ? 1 : 2;      // he waits for it at periscope depth (no launch from deep water)
+   const frac = [0, 0.25, 0.5, 0.75, 1], kn = (tel) => b.maxSpeedKn * b.sub.deepSpeed * frac[tel], loud = (tel) => 0.5 + 0.5 * frac[tel];
+   const foes = w.ships.filter(o => o.alive && o.side === 'enemy' && o !== t);
+   const reach = (o) => o.id === S.guardId ? TRAIL.sub : TRAIL.frig;
    const hx = Math.cos(t.heading), hy = Math.sin(t.heading), d = hyp(b.pos, t.pos);
-   const want = (TRAIL.min + TRAIL.max) / 2 - 250 + k * 500;
-   const ahead = ((b.pos.x - t.pos.x) * hx + (b.pos.y - t.pos.y) * hy) / Math.max(1, d) > -Math.cos(TRAIL.arc);
-   const st = { x: t.pos.x - hx * want, y: t.pos.y - hy * want }, ds = hyp(b.pos, st);
-   const listen = S.stage === 1 && (S.listening || (S.warnedListen && w.time < S.listenEnd));
-   if (listen && d < TRAIL.bow + 400) { b.setTelegraph(0); return; }
-   const loud = (tel) => 0.5 + 0.5 * [0, 0.25, 0.5, 0.75, 1][tel];
-   if (ahead) {
-      // before its beam: lie 1.9 km off its track (the side we are on) and let it pass; the station then comes to us
-      const lat = (b.pos.x - t.pos.x) * -hy + (b.pos.y - t.pos.y) * hx, side = lat >= 0 ? 1 : -1, off = 2500;
-      const al = (b.pos.x - t.pos.x) * hx + (b.pos.y - t.pos.y) * hy;
-      const fw = Math.max(0, Math.min(al - 600, al * 0.3));
-      const wp = { x: t.pos.x + hx * fw - hy * side * off, y: t.pos.y + hy * fw + hx * side * off };
-      turn(b, Math.atan2(wp.y - b.pos.y, wp.x - b.pos.x));
-      let tel = cap(hyp(b.pos, wp) > 2500 ? 4 : hyp(b.pos, wp) > 500 ? 2 : hyp(b.pos, wp) > 150 ? 1 : 0);
-      while (tel > 0 && d < TRAIL.bow * loud(tel) + 150) tel--;
-      if (Math.abs(lat) < off - 250 && d < 4200) { turn(b, Math.atan2(hx * side, -hy * side)); tel = d > TRAIL.bow * loud(2) + 150 ? 2 : 1; }
-      b.setTelegraph(tel); return;
+   const al = (b.pos.x - t.pos.x) * hx + (b.pos.y - t.pos.y) * hy, lat = (b.pos.x - t.pos.x) * -hy + (b.pos.y - t.pos.y) * hx;
+   const astern = al / Math.max(1, d) < -Math.cos(TRAIL.arc - 0.06);
+   // the highest telegraph up to `tel` at which neither an escort nor the missile boat hears the boat
+   const quiet = (tel, inArc = astern) => {
+      while (tel > 0 && foes.some(o => hyp(o.pos, b.pos) < reach(o) * loud(tel) + 250)) tel--;
+      while (tel > 2 && foes.some(o => hyp(o.pos, b.pos) < TRAIL.near + 300)) tel--;
+      while (tel > 0 && (inArc && tel <= 2 ? d < TRAIL.aft + 100 : d < TRAIL.bow * loud(tel) + 150)) tel--;
+      return tel;
+   };
+   // an escort about to hear us: turn away from where it is going
+   const near = foes.filter(o => !(S.released && o.id === S.guardId) && hyp(o.pos, b.pos) < reach(o) * 0.75 + 700).sort((p, q) => hyp(p.pos, b.pos) - hyp(q.pos, b.pos))[0];
+   if (near) {
+      const fx = near.pos.x + Math.cos(near.heading) * near.speed * 40, fy = near.pos.y + Math.sin(near.heading) * near.speed * 40;
+      turn(b, Math.atan2(b.pos.y - fy, b.pos.x - fx)); b.setTelegraph(Math.max(1, quiet(2))); return;
    }
-   // abaft its beam: meet the station where it will be
-   let tau = 0; for (let i = 0; i < 4; i++) tau = Math.min(240, hyp(b.pos, { x: st.x + hx * t.speed * tau, y: st.y + hy * t.speed * tau }) / Math.max(1, kn(2) * 2.6));
-   const m = { x: st.x + hx * t.speed * tau, y: st.y + hy * t.speed * tau };
+   if (S.stage >= 2) {
+      const e = { x: S.exit.x + k * 500, y: S.exit.y + k * 300 };
+      turn(b, Math.atan2(e.y - b.pos.y, e.x - b.pos.x)); b.setTelegraph(hyp(b.pos, e) < 500 ? 0 : quiet(4, false)); return;
+   }
+   // the check astern: 1/4 from the warning (plus the reaction time) until it is over
+   if (S.stage === 1 && d < TRAIL.bow + 400) {
+      const r = Math.abs(Math.sin(S.listenAt * 12.9898 + b.id * 78.233) * 43758.5453) % 1;
+      const from = S.listenAt - SPECIAL_B_TUNE.bastion[w.difficultyKey].warn + r * REACT;
+      if (w.time >= from && w.time < S.listenEnd) { turn(b, t.heading); b.setTelegraph(Math.min(1, quiet(1))); return; }
+   }
+   const side = lat >= 0 ? 1 : -1;
+   const meet = (off, across, tel) => {      // where a point of her wake (off m astern, across m to our side) will be when we get there
+      let tau = 0, m;
+      for (let i = 0; i < 4; i++) { m = { x: t.pos.x + hx * (t.speed * tau - off) - hy * side * across, y: t.pos.y + hy * (t.speed * tau - off) + hx * side * across }; tau = Math.min(300, hyp(b.pos, m) / Math.max(1, kn(tel) * 2.6)); }
+      return m;
+   };
+   if (!astern) {
+      // outside the blind arc: make for its outer end, never inside the reach of her sonar
+      const m = meet(2700, 1300, 2);
+      turn(b, Math.atan2(m.y - b.pos.y, m.x - b.pos.x)); b.setTelegraph(quiet(4)); return;
+   }
+   const want = (TRAIL.min + TRAIL.max) / 2 - 150 + k * 450, m = meet(want, 0, 2);
+   const st = { x: t.pos.x - hx * want, y: t.pos.y - hy * want }, ds = hyp(b.pos, st);
    turn(b, ds < 250 ? t.heading : Math.atan2(m.y - b.pos.y, m.x - b.pos.x));
    const along = (st.x - b.pos.x) * hx + (st.y - b.pos.y) * hy;      // + = the station is ahead of us
-   b.setTelegraph(cap(ds > 400 ? 2 : along > 150 ? 2 : along > -250 ? 1 : 0));
+   b.setTelegraph(quiet(ds > 400 && along > 0 ? 2 : along > 150 ? 2 : along > -250 ? 1 : 0));
 }
 
 export function captain(w, mode = 'bot') {
