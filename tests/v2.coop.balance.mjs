@@ -2,7 +2,7 @@
 // game), all sailed by the bot captain, seeded runs per mission, win rate and end reasons. Not a test.
 //    RUNS=30 N=2 DIFF=normal ONLY=strait,giuk WHY=1 SLOTS=1 node tests/v2.coop.balance.mjs
 import { getMission } from '../gamev2/missions.js';
-import { buildNetWorld } from '../gamev2/net/setup.js';
+import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { updateBots } from '../gamev2/ai.js';
 import { orderDepth } from '../gamev2/submarine.js';
 import { launchTeam, teamStatus } from '../gamev2/seal.js';
@@ -139,6 +139,10 @@ if (process.env.SLOTS) {
 
 for (const id of only) {
    const def = getMission(id), east = EAST.includes(id);
+   // the lobby admits missionSlots captains; beyond that buildNetWorld would add ships the mission does not
+   // have (giuk with four captains: two extra destroyers with helicopters), which no game can reach
+   // (FORCE=1 measures it anyway)
+   if (N > missionSlots(id) && !process.env.FORCE) { console.log(`${id.padEnd(10)} ${String(N).padStart(2)}  ${DIFF.padEnd(6)} skipped: the mission takes ${missionSlots(id) || 'no'} captains in co-op`); continue; }
    let wins = 0, tSum = 0, tMax = 0, slotsMin = 99, slotsMax = 0;
    const why = {}, per = [];
    for (let i = 0; i < RUNS; i++) {
