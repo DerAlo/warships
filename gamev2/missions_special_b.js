@@ -2,6 +2,8 @@
 // present-day scenarios):
 //    hijack     Golf von Aden – Entführt: stop a hijacked gas tanker by boarding it alongside; it must
 //               not take heavy hits (it explodes, blast.js)
+//    evac       Evakuierung: hold a station off the pier of a harbour town, slow, while boats bring people
+//               out in lifts with a time window each; then escort the ferry with the rest out past the mole
 // Each definition has the shape of missions.js DEFS; H = missionHelpers. Everything a mission keeps
 // between ticks lives in world._script (S) as plain data and refers to ships by id (co-op swaps bot
 // hulls for human captains after setup, world.replaceShip keeps the id).
@@ -12,6 +14,7 @@
 // measures them with the bot captain of tests/v2.missions.specialb.captain.mjs).
 import { addSite } from './sites.js';
 import { addBlast } from './blast.js';
+import { obstacleRadiusAt } from './utils.js';
 
 export const SPECIAL_B_TUNE = {
    hijack: {
@@ -24,7 +27,20 @@ export const SPECIAL_B_TUNE = {
       normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500 },
       hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 8, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500 },
    },
+   evac: {
+      // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
+      // win: s a window stays open · load: s on station a lift takes · gap: s between two windows · waves: boats that
+      // come down the coast when lift 1, 2, 3 opens · fin: boats that go for the ferry when it casts off · msl: how many
+      // boats of each pack carry Kowsar missiles · batN / batSalvo / batInt: the shore battery (missiles, per salvo,
+      // s between salvos) · batAt: lift at whose opening it goes live · ferry: hull factor of the ferry
+      easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3 },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.9 },
+      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 1.04 },
+   },
 };
+// Evacuation (evac): a lift is loaded while a captain's ship lies inside the pickup zone (r m) at no more
+// than slowKn kn and no armed boat stands within clear m of it; people per lift, people the ferry takes.
+export const EVAC = { r: 800, slowKn: 6, clear: 1500, people: 40, ferry: 320 };
 // Boarding alongside (hijack): within NEAR m of the tanker, speed within DV kn of its own, no armed
 // boat within CLEAR m of it. The tanker's blast when it is hit too hard.
 export const BOARD = { near: 500, dv: 5, clear: 1500, hint: 3000 };
@@ -213,6 +229,156 @@ export function specialMissionsB(H) {
             if (S.sunk >= S.total && w.time > tune(w, 'hijack').waveAt) setObj(w, 'boats', 'done');
          },
          timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – die LNG Castor ist in den Hoheitsgewässern verschwunden.'); },
+      },
+      // --------------------------------------------------------------------- Evakuierung
+      // The rule: people come aboard only while a captain's ship lies in the pickup zone off the pier, slow,
+      // and no armed boat is near. Every lift has a window; a window that closes before the lift is aboard is a
+      // missed lift. S.stage: 0 waiting for the next window, 1 window open, 2 the ferry is under way, 3 over.
+      {
+         id: 'evac', group: 'ops', name: 'Evakuierung', subtitle: 'Sondereinsatz · Station halten am Pier, Fähre hinausgeleiten',
+         briefing: 'Die Hafenstadt Porto Calvera liegt unter Beschuss aus dem Hinterland, am Pier warten Hunderte Zivilisten. ' +
+            'Beiboote bringen sie in drei Transporten zu Ihnen hinaus – aber nur, solange Ihr Schiff in der Aufnahmezone vor dem Pier liegt, ' +
+            'höchstens 6 Knoten läuft und kein bewaffnetes Boot in der Nähe steht. Jeder Transport hat ein Zeitfenster: Ist es zu, bevor alle an Bord sind, ' +
+            'gilt er als verpasst. Zwischen den Transporten greifen Schnellboote entlang der Küste an, eine Küstenbatterie im Hinterland schießt Flugkörper ' +
+            'auf alles, was am Pier liegt – wehren Sie sie ab oder schalten Sie die Stellung aus. Die Übrigen nimmt die Fähre Calvera Star auf: ' +
+            'Geleiten Sie sie zuletzt an der Mole vorbei auf die offene See. Verloren ist der Einsatz, wenn zu viele Transporte verpasst werden, ' +
+            'die Fähre sinkt oder Ihr Schiff verloren geht.',
+         debrief: 'Die Calvera Star hat die offene See erreicht, die Menschen von Porto Calvera sind in Sicherheit. ' +
+            'Entschieden hat die Geduld auf Station: stillliegen, während ringsum geschossen wird.',
+         fleet: { own: 'Flaggschiff, 1 Korvette · Fähre Calvera Star (zu schützen)', foe: 'Schnellbootrudel, 1 Küstenbatterie' },
+         env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Sachsen', 'Braunschweig', 'Burke', 'Daring'],
+         recommendedShip: 'Sachsen', arena: 14000, timeLimit: 720, stars: 2,
+         setup(w, shipKey) {
+            const S = w._script, T = tune(w, 'evac');
+            islands(w, [{ c: P(12200, 0), r: 3600, height: 420, seed: 131, lobes: 6, elong: 2, rot: Math.PI / 2, rough: 0.5, name: 'Porto Calvera' }]);
+            const isl = w.obstacles[0], cx = isl.c.x - obstacleRadiusAt(isl, Math.PI);      // the coast west of the town
+            islands(w, [{ c: P(cx - 700, -2900), r: 380, height: 14, seed: 137, lobes: 3, elong: 3, rot: 0, rough: 0.2, name: 'Mole' }]);
+            S.zone = zone(w, cx - 1500, 0, EVAC.r, 'Aufnahmezone');
+            S.exit = zone(w, cx - 8200, -2600, 1300, 'Offene See');
+            const flag = add(w, shipKey, 'player', P(cx - 6200, 1500), 0, { isPlayer: true, telegraph: 3 });
+            const corv = add(w, shipKey === 'Braunschweig' ? 'Sachsen' : 'Braunschweig', 'player', P(cx - 7000, 2600), 0,
+               { name: shipKey === 'Braunschweig' ? 'Hessen' : 'Magdeburg', dmgMult: T.ally, telegraph: 3 });
+            const ferry = add(w, 'Container', 'player', P(cx - 650, 900), Math.PI, { name: 'Calvera Star', speedKn: 17, hpMult: T.ferry, telegraph: 0, ai: { passive: true, anchored: true } });
+            corv.ai.escortId = ferry.id;
+            S.own = [flag.id, corv.id]; S.ferryId = ferry.id; S.ferryHP = ferry.maxHP;
+            S.route = [P(cx - 3600, -700), P(S.exit.x, S.exit.y)];
+            S.stage = 0; S.lift = 0; S.nextAt = T.first; S.winEnd = 0; S.load = 0; S.done = 0; S.missed = 0; S.aboard = 0; S.shown = '';
+            S.boats = []; S.sunk = 0; S.total = 0; S.hurt = false;
+            // the shore battery up the coast: silent and not located until its lift
+            S.batId = addSite(w, 'battery', 'enemy', P(isl.c.x - 300, isl.c.y + 520),      // sites.js moves it out to the north-western coast
+               { name: 'Küstenbatterie Calvera', hidden: true, radarOn: false, delay: 1e9, salvo: T.batSalvo, interval: T.batInt, ssm: { type: 'noor', n: T.batN } }).id;
+            objective(w, 'lifts', this.liftText(w, S, T));
+            objective(w, 'ferry', 'Geleiten Sie die Fähre Calvera Star an der Mole vorbei auf die offene See – sie darf nicht sinken');
+            objective(w, 'all', 'Kein Transport wird verpasst', { optional: true });
+            objective(w, 'hull', 'Die Fähre verliert höchstens ein Fünftel ihres Rumpfes', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: T.lifts * EVAC.people + EVAC.ferry };
+            later(S, 4, () => radio(w, 'Flottenkommando', `Porto Calvera wird geräumt. Laufen Sie in die Aufnahmezone vor dem Pier: Der erste von ${T.lifts} Transporten legt in ${Math.round((T.first - 4) / 10) * 10} Sekunden ab.`));
+            later(S, 14, () => radio(w, 'Hafenkapitän', `Die Boote kommen nur zu Ihnen, wenn Sie in der Zone liegen und höchstens ${EVAC.slowKn} Knoten laufen. Jedes Fenster bleibt ${T.win} Sekunden offen, ein Transport braucht ${T.load}. ${T.miss ? 'Mehr als einen Transport dürfen wir nicht verpassen' : 'Wir dürfen keinen einzigen Transport verpassen'} – und die Fähre darf nicht sinken.`, 'warn'));
+         },
+         liftText(w, S, T) {
+            const n = Math.min(T.lifts, S.lift + (S.stage === 1 ? 0 : 1)), left = S.stage === 1 ? Math.max(0, S.winEnd - w.time) : Math.max(0, S.nextAt - w.time);
+            const head = S.stage === 1 ? `Transport ${n}/${T.lifts}: ${Math.min(EVAC.people, Math.floor(S.load / T.load * EVAC.people))}/${EVAC.people} an Bord, Fenster noch ${mmss(left)}`
+               : S.stage === 0 ? `Transport ${n}/${T.lifts} legt in ${mmss(left)} ab` : `${S.done}/${T.lifts} Transporte an Bord`;
+            return `Nehmen Sie die Transporte auf: in der Aufnahmezone, höchstens ${EVAC.slowKn} kn – ${head} · verpasst ${S.missed} (erlaubt ${T.miss})` + lim(w);
+         },
+         // a pack of boats down the coast, alternately from the north and the south, at the ferry
+         wave(w, S, n, T, text) {
+            n += extraCaptains(w);
+            const side = (S.waveN = (S.waveN || 0) + 1) % 2 ? 1 : -1;
+            for (let i = 0; i < n; i++) {
+               const b = add(w, 'Boghammar', 'enemy', P(S.zone.x - 1800 - i * 450, side * (10800 + (i % 2) * 500)), -side * Math.PI / 2,
+                  { minDist: 6500, telegraph: 4, ai: { huntId: i % 2 ? S.own[0] : S.ferryId, press: true } });
+               if (i >= T.msl) b.mag.kowsar = 0;
+               S.boats.push(b.id);
+            }
+            S.total += n;
+            radio(w, 'Lagezentrum', `${n === 1 ? 'Ein Schnellboot läuft' : n + ' Schnellboote laufen'} von ${side > 0 ? 'Norden' : 'Süden'} die Küste herunter${text || ''}.`, 'warn');
+         },
+         update(w, dt, S) {
+            if (S.stage >= 3) return;
+            const T = tune(w, 'evac'), f = live(w, S.ferryId);
+            if (!f) return;
+            if (!S.hurt && f.hp < S.ferryHP * 0.8) { S.hurt = true; setObj(w, 'hull', 'failed'); radio(w, 'Calvera Star', 'Wir nehmen Treffer! Halten Sie uns die Boote und die Flugkörper vom Leib.', 'warn'); }
+            if (S.stage === 2) {
+               if (inZone(f, S.exit)) {
+                  S.stage = 3;
+                  setObj(w, 'ferry', 'done');
+                  if (!S.missed) setObj(w, 'all', 'done');
+                  if (!S.hurt) setObj(w, 'hull', 'done');
+                  radio(w, 'Calvera Star', 'Wir sind frei von der Küste. Danke für das Geleit.');
+                  w.end(true, `Porto Calvera ist geräumt: ${S.aboard} Menschen bei Ihnen an Bord, ${EVAC.ferry} auf der Fähre.`);
+               }
+               return;
+            }
+            if (S.stage === 0) {
+               if (w.time >= S.nextAt) {
+                  S.stage = 1; S.lift++; S.load = 0; S.winEnd = w.time + T.win; S.said = 0;
+                  radio(w, 'Hafenkapitän', `Transport ${S.lift} legt ab – ${EVAC.people} Menschen. Das Fenster ist ${T.win} Sekunden offen.`);
+                  if (T.waves[S.lift - 1]) this.wave(w, S, T.waves[S.lift - 1], T);
+                  if (S.lift === T.batAt) {
+                     const b = w.sites.find(x => x.id === S.batId);
+                     if (b && b.alive) {
+                        b.radarOn = true; b.detected = b.targetable = true; b.nextT = 14;
+                        later(S, w.time + 5, () => radio(w, 'Luftlage', 'Eine Küstenbatterie nördlich der Stadt geht auf Sendung und nimmt den Pier unter Feuer. Abwehr frei – oder schalten Sie die Stellung mit Geschütz oder Marschflugkörpern aus.', 'warn'));
+                     }
+                  }
+               }
+            } else {
+               // on station? a captain's ship in the zone, slow, and no armed boat near the pier
+               let inside = null, slow = null, boats = 0;
+               for (const s of w.ships) {
+                  if (!s.alive) continue;
+                  if (s.side !== 'player') { if (dist(s.pos, S.zone) < EVAC.clear) boats++; continue; }
+                  if (!human(s) || s.sub || !inZone(s, S.zone)) continue;
+                  inside = s;
+                  if (Math.abs(s.speed) <= EVAC.slowKn * KN) slow = s;
+               }
+               if (slow && !boats) {
+                  if (S.load === 0) radio(w, 'Hafenkapitän', 'Die Boote sind bei Ihnen längsseits. Bleiben Sie so liegen.');
+                  S.load += dt;
+               } else if (boats) nag(w, S, 'nagBoats', 15, 'Hafenkapitän', `${boats === 1 ? 'Ein bewaffnetes Boot steht' : boats + ' bewaffnete Boote stehen'} vor dem Pier – so können unsere Boote nicht übersetzen. Versenken Sie ${boats === 1 ? 'es' : 'sie'}!`, 'warn');
+               else if (inside) nag(w, S, 'nagFast', 12, 'Hafenkapitän', `Zu schnell – die Boote kommen nicht längsseits. Höchstens ${EVAC.slowKn} Knoten.`, 'warn');
+               else if (w.time > S.winEnd - T.win + 12) nag(w, S, 'nagFar', 20, 'Hafenkapitän', 'Die Boote warten: Wir brauchen Sie in der Aufnahmezone vor dem Pier.', 'warn');
+               const full = S.load >= T.load;
+               if (!full && S.winEnd - w.time <= 20 && !S.said) { S.said = 1; radio(w, 'Hafenkapitän', 'Noch 20 Sekunden, dann müssen die Boote zurück an den Pier!', 'warn'); }
+               if (full || w.time >= S.winEnd) {
+                  const got = full ? EVAC.people : Math.floor(S.load / T.load * EVAC.people);
+                  S.aboard += got; w.score.player = S.aboard;
+                  if (full) { S.done++; radio(w, 'Wachoffizier', `Transport ${S.lift} ist an Bord – ${S.aboard} Menschen insgesamt.`); }
+                  else {
+                     S.missed++; setObj(w, 'all', 'failed');
+                     if (S.missed > T.miss) {
+                        S.stage = 3; setObj(w, 'lifts', 'failed');
+                        w.end(false, `Zu viele Transporte verpasst (${S.missed} von ${T.lifts}) – die Menschen am Pier konnten nicht mehr geholt werden.`);
+                        return;
+                     }
+                     radio(w, 'Hafenkapitän', `Transport ${S.lift} verpasst – die Boote mussten umkehren${got ? ', nur ' + got + ' Menschen sind bei Ihnen' : ''}. ${T.miss - S.missed ? 'Noch einen dürfen wir verlieren.' : 'Einen weiteren dürfen wir nicht verlieren!'}`, 'warn');
+                  }
+                  S.stage = 0; S.nextAt = w.time + T.gap;
+                  if (S.lift >= T.lifts) {
+                     // the ferry casts off with the rest
+                     S.stage = 2;
+                     setObj(w, 'lifts', 'done');
+                     f.ai.anchored = false; f.ai.convoy = true; f.ai.route = S.route.map(p => P(p.x, p.y)); f.ai.routeIdx = 0; f.setTelegraph(4);
+                     w.score.player = S.aboard + EVAC.ferry;
+                     radio(w, 'Calvera Star', `Wir haben die letzten ${EVAC.ferry} an Bord und werfen los. Bringen Sie uns an der Mole vorbei auf die offene See.`);
+                     this.wave(w, S, T.fin, T, ' – sie wollen die Fähre vor der Mole abfangen');
+                  }
+               }
+            }
+            const txt = this.liftText(w, S, T);
+            if (txt !== S.shown) { S.shown = txt; objText(w, 'lifts', txt); }
+         },
+         onSiteDestroyed(w, site, by, S) { if (site.id === S.batId) radio(w, 'Lagezentrum', 'Die Küstenbatterie ist ausgeschaltet.'); },
+         onSink(w, ship, killer, S) {
+            if (ship.id === S.ferryId) { S.stage = 3; setObj(w, 'ferry', 'failed'); w.end(false, 'Die Fähre Calvera Star ist gesunken.'); return; }
+            if (ship.side === 'player') {
+               if (!w.ships.some(s => s.alive && s.side === 'player' && human(s) && !s.sub)) w.end(false, 'Ihr Schiff ist verloren – niemand kann die Menschen von Porto Calvera mehr aufnehmen.');
+               return;
+            }
+            S.sunk++;
+         },
+         timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – die Fähre hat die offene See nicht erreicht.'); },
       },
    ];
    return defs;
