@@ -12,7 +12,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URLV2 || 'http://localhost:8871/index-v2.html';
 const OUT = process.env.OUT || 'tests/shots';
 const RUN_S = Number(process.env.RUN_S) || 30;
-const ids = (process.env.MISSIONS || 'cable,rig').split(',');
+const ids = (process.env.MISSIONS || 'cable,rig,rescue').split(',');
 const VIEWS = { desktop: { width: 1440, height: 810, touch: false }, phone: { width: 844, height: 390, touch: true } };
 const views = (process.env.VIEWS || 'desktop,phone').split(',');
 const SHOTS = process.env.SHOTS !== '0';
@@ -163,11 +163,41 @@ for (const view of views) {
             hold();
          }));
          const text = await ev(() => document.body.innerText);
-         check(`${view} rig: radio traffic says what happens at that moment`, /Boardingteam: Wir setzen von/.test(text), (text.match(/Boardingteam: .{0,90}/) || [''])[0]);
+         check(`${view} rig: radio traffic says what happens at that moment, once`, /Boardingteam: Wir setzen von/.test(text) && !/Trupp ist von Bord/.test(text), (text.match(/Boardingteam: .{0,90}/) || [''])[0]);
          await shot(id + '-boarding');
          check(`${view} rig: stopped in the circle with no boat at the platform, the team goes over`, res.phase === 'playing' && res.model === 'platform' && res.hidden && res.hp && res.teams[0] === 'out' && /setzt über/.test(res.board), res);
          const objs = await ev(() => [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent).join(' | '));
          check(`${view} rig: the objective shows the crossing and the valve clock`, /setzt über/.test(objs) && /Ventile in/.test(objs), objs.slice(0, 200));
+      }
+      if (id === 'rescue') {
+         // the special moment: the ship lies stopped close ahead of the merchant's bow until the line is fast (the test
+         // holds it there), then goes ahead at quarter speed and the merchant comes after it on the line
+         const res = await ev(() => new Promise(done => {
+            const w = window.__world(), S = w._script, p = w.player, m = w.shipById(S.merchId);
+            const t0 = performance.now();
+            let t1 = 0, r1 = 0, heard = false;
+            const msg = w.message.bind(w);
+            w.message = (t, l) => { if (/Leine ist fest/.test(t)) heard = true; return msg(t, l); };
+            const z = w.mission.zones[0];
+            const hold = () => {
+               const hl = m.cfg.hull.L / 2, bx = m.pos.x + Math.cos(m.heading) * hl, by = m.pos.y + Math.sin(m.heading) * hl, a = Math.atan2(z.y - by, z.x - bx);
+               if (S.tugId == null) { p.pos.x = bx + Math.cos(a) * 120; p.pos.y = by + Math.sin(a) * 120; p.heading = a; p.speed = 0; p.setTelegraph(0); p.setRudder(0); }
+               else {
+                  if (!t1) { t1 = performance.now(); r1 = S.rocks; }
+                  p.setTelegraph(1); p.setRudder(0);      // the controls of the page would order the old speed again
+                  if (p.speed > p.maxSpeed * 0.25) p.speed = p.maxSpeed * 0.25;
+               }
+               if (window.__setAim) window.__setAim(Math.PI * 0.92, 420);      // the view astern on the merchant
+               if (w.phase === 'playing' && performance.now() - t0 < 80000 && !(t1 && performance.now() - t1 > 26000)) requestAnimationFrame(hold);
+               else done({ heard, tug: S.tugId === p.id, tow: z.tow, load: S.crest, r1, r2: S.rocks, lines: S.lines, parted: S.parted, weather: w.env.weather, phase: w.phase });
+            };
+            hold();
+         }));
+         await shot(id + '-tow');
+         check(`${view} rescue: stopped ahead of the bow the line is passed, radio says so`, res.tug && Array.isArray(res.tow) && res.heard, { tug: res.tug, tow: res.tow, heard: res.heard });
+         check(`${view} rescue: at quarter speed the line takes load and holds in the storm`, res.phase === 'playing' && res.parted === 0 && res.load > 0.3 && res.load < 1 && res.weather === 'storm', res);
+         const objs = await ev(() => [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent).join(' | '));
+         check(`${view} rescue: the objective shows the line load and the lines left`, /Leinenlast \d+ %/.test(objs) && /Leinen?\)/.test(objs), objs.slice(0, 200));
       }
       check(`${view} ${id}: no console errors`, errors.length === e0, errors.slice(e0, e0 + 4));
    }

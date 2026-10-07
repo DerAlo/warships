@@ -7,19 +7,19 @@
 // Balance table:  node tests/v2.missions.speciala.captain.mjs [mission] [runs]   (prints wins per difficulty and the loss causes)
 import { World } from '../gamev2/state.js';
 import { sendHelo, heloOf } from '../gamev2/helo.js';
-import { CABLE, RIG } from '../gamev2/missions_special_a.js';
+import { CABLE, RIG, TOW } from '../gamev2/missions_special_a.js';
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // The captain takes the helm of ship p while the ship's AI keeps fighting: the AI's own rudder and
-// telegraph orders are replaced by the captain's. Returns steerTo(point, telegraph).
+// telegraph orders are replaced by the captain's. Returns steerTo(point, telegraph, soft): soft = never more than half rudder.
 function takeHelm(p) {
    const rudder = p.setRudder.bind(p), telegraph = p.setTelegraph.bind(p);
    let r = 0, tel = 3;
    p.setRudder = () => rudder(r);
    p.setTelegraph = () => telegraph(tel);
-   return (q, t) => {
+   return (q, t, soft) => {
       const want = Math.atan2(q.y - p.pos.y, q.x - p.pos.x), e = Math.atan2(Math.sin(want - p.heading), Math.cos(want - p.heading));
-      r = Math.abs(e) < 0.03 ? 0 : e > 0 ? (Math.abs(e) > 0.3 ? 2 : 1) : (Math.abs(e) > 0.3 ? -2 : -1);
+      r = Math.abs(e) < 0.03 ? 0 : e > 0 ? (Math.abs(e) > 0.3 && !soft ? 2 : 1) : (Math.abs(e) > 0.3 && !soft ? -2 : -1);
       tel = t;
    };
 }
@@ -80,6 +80,27 @@ export function captain(w, mode = 'bot') {
          else steerTo({ x: RIG.x, y: RIG.y }, d < 700 ? -1 : 0);
       };
    }
+   if (id === 'rescue') {
+      // Run in on a point just up-drift of the merchant's bow, take the way off there until the line is fast, then
+      // tow toward the anchorage at quarter speed with half rudder at most and stop the engines when the load nears
+      // its limit. The ship's AI keeps fighting the boats; the captain does not dodge them.
+      const steerTo = takeHelm(p);
+      return () => {
+         if (!p.alive || w.phase !== 'playing') return;
+         const m = w.shipById(S.merchId);
+         if (!m || !m.alive) return;
+         if (S.tugId === p.id) { steerTo(TOW.zone, S.crest > 0.9 ? 0 : 1, S.crest > 0.4); return; }
+         const hl = m.cfg.hull.L / 2, bow = { x: m.pos.x + Math.cos(m.heading) * hl, y: m.pos.y + Math.sin(m.heading) * hl };
+         const d = hyp(bow, p.pos), lead = Math.min(d / 60, 40), zd = hyp(bow, TOW.zone) || 1;
+         // the point 250 m off the bow on the side of the anchorage, led by the drift seen so far
+         const q = { x: bow.x + (TOW.zone.x - bow.x) / zd * 250 + m.vel.x * 0 + TOW.dx * 8 * lead, y: bow.y + (TOW.zone.y - bow.y) / zd * 250 + TOW.dy * 8 * lead };
+         const v = Math.abs(p.speed) / p.maxSpeed;
+         if (d > 1500) steerTo(q, 4);
+         else if (d > 650) steerTo(q, v > 0.55 ? 0 : 2);
+         else if (d > 320) steerTo(q, v > 0.28 ? 0 : 1);
+         else steerTo(TOW.zone, v > 0.12 ? 0 : 1);
+      };
+   }
    return () => {};
 }
 
@@ -91,7 +112,7 @@ export function play(id, diff, seed, mode = 'bot', ship = null) {
    return w;
 }
 if (process.argv[1] && process.argv[1].endsWith('v2.missions.speciala.captain.mjs')) {
-   const ids = process.argv[2] && process.argv[2] !== 'all' ? process.argv[2].split(',') : ['cable', 'rig'];
+   const ids = process.argv[2] && process.argv[2] !== 'all' ? process.argv[2].split(',') : ['cable', 'rig', 'rescue'];
    const runs = Number(process.argv[3]) || 30, diffs = (process.argv[4] || 'easy,normal,hard').split(',');
    for (const id of ids) for (const diff of diffs) {
       let wins = 0, t = 0; const why = {}, times = [];
