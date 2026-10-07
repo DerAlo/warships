@@ -108,8 +108,10 @@ export function buildNetWorld(o) {
       const old = pvp ? takeNearest(bots[side], cls) : bots[side].shift();
       let ship;
       // historical: the very ship the mission script knows. Missions cut the damage of allied bots
-      // so they do not fight the player's battle for him; a captain fights at full strength.
-      if (old && fixed) { ship = old; ship.dmgMult = 1; }
+      // so they do not fight the player's battle for him, and empty or thin out their magazines (east:
+      // no cruise missiles, Red Sea: few air-defence missiles); a captain fights at full strength, with
+      // the load of his class. An operation that wants another load sets it in its coop() below.
+      if (old && fixed) { ship = old; ship.dmgMult = 1; ship.mag = { ...(ship.cfg.mag || {}) }; }
       // the AI keeps the ship when its captain leaves: a carrier needs the carrier role (ai.js)
       else if (old) ship = w.replaceShip(old, cls, { cfg, ai: { ...(old.ai || {}), role: SHIPS[cls].ai?.role || old.ai?.role } });
       // no bot left to replace (fleet roll smaller than expected): an extra ship abeam of the host

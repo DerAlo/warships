@@ -9,16 +9,15 @@ import { canLaunch, launchSquadron } from '../gamev2/air.js';
 import { SEAL, launchTeam } from '../gamev2/seal.js';
 import { orderDepth } from '../gamev2/submarine.js';
 
-export function captain(w, mode = 'bot') {
-   const p = w.player, S = w._script, id = w.mission.id;
-   if (mode !== 'bot') { p.setTelegraph(0); return () => {}; }
-   w.autoPlayer = true;
-   p.ai = p.ai || {};
-   p.setTelegraph(3);
+// Cruise missiles of ship p in the order of the briefing instead of the AI's own choice (reefs, countdown;
+// null for the other missions). Every captain of a co-op group fires by it: the missiles already on the
+// way to a site count whoever launched them. Returns a per-step function.
+export function cruiseOrders(w, p) {
+   const S = w._script, id = w.mission.id;
    const site = (sid) => w.sites.find(s => s.id === sid && s.alive);
-   // cruise missiles in the order of the briefing instead of the AI's own choice
    const strike = (order) => {
-      p.ai.crT = 1e9;
+      if (!p.alive) return;
+      (p.ai || (p.ai = {})).crT = 1e9;
       const cw = p.cfg.weapons.cruise;
       if (!cw || !(p.mag[cw.type] > 0)) return;
       const tgt = order.map(site).find(Boolean);
@@ -29,6 +28,18 @@ export function captain(w, mode = 'bot') {
       if (!cruiseBlock(w, p, { siteId: tgt.id })) launchCruise(w, p, { siteId: tgt.id });
    };
    if (id === 'reefs') return () => strike([S.radarId, ...S.bat, ...S.sam]);
+   if (id === 'countdown') return () => { if (w.time > 20) strike([S.radarId, ...S.sam, ...(site(S.launcherId)?.targetable ? [S.launcherId] : [])]); };
+   return null;
+}
+
+export function captain(w, mode = 'bot') {
+   const p = w.player, S = w._script, id = w.mission.id;
+   if (mode !== 'bot') { p.setTelegraph(0); return () => {}; }
+   w.autoPlayer = true;
+   p.ai = p.ai || {};
+   p.setTelegraph(3);
+   const strike = cruiseOrders(w, p);
+   if (id === 'reefs') return strike;
    if (id === 'countdown' && p.sub && p.cfg.sub.seal) {
       // the boat goes in deep, slows down and stops while a surface ship is near, comes up to periscope
       // depth short of the task point and puts the team ashore
@@ -67,7 +78,7 @@ export function captain(w, mode = 'bot') {
       };
    }
    if (id === 'countdown') return () => {
-      if (w.time > 20) strike([S.radarId, ...S.sam, ...(site(S.launcherId)?.targetable ? [S.launcherId] : [])]);
+      strike();
       // the launcher's strike at the group: straight out of the danger zone at full speed, then back to the fight
       const b = S.strikeId && w.blasts.find(x => x.id === S.strikeId && x.state === 'armed');
       if (b && Math.hypot(p.pos.x - b.x, p.pos.y - b.y) < b.r.shock + 900) {
