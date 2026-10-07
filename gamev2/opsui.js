@@ -242,6 +242,9 @@ export class OpsUi {
       // ---- helicopter plate
       if (d) setCls(d.helo.root, 'hidden', !hasH || !alive);
       if (hasH && alive) {
+         // the tooltip in the words of the device (the touch overlay comes on after this plate is built)
+         const tch = touch();
+         if (d && d.tipTouch !== tch) { d.tipTouch = tch; d.helo.root.title = slotTip('helo', p.cfg); }
          const st = heloStatus(world, p), h = st.helo;
          u.heloId = h ? h.id : null;
          const air = !!h;

@@ -167,6 +167,12 @@ export class Hud {
       d._t = setTimeout(() => this._fade(d), ms);
    }
    _fade(d) { d.classList.add('fade'); setTimeout(() => d.remove(), 500); }
+   // Takes the notices of one class off the screen at once (guide.js: a tip gives way to the chart).
+   clear(cls) {
+      const box = this.el.msgs;
+      if (!box) return;
+      for (const d of [...box.children]) if (d.classList.contains(cls)) { clearTimeout(d._t); d.remove(); }
+   }
 
    ribbon(kind, name, count) {
       const box = this.el.ribbons;

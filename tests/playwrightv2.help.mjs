@@ -160,6 +160,25 @@ const chartHint = S => S.ev(async () => {
    return { text, mapOpen: window.__ctl().mapOpen, sel: window.__weaponSel(), x0: Math.round(x0), size: Math.round(size), end: Math.round(x0 + w), width: innerWidth, font: g.font };
 });
 
+// ------------------------------------------------------------------ words: a touch player reads no key, a desktop player no button
+// Stand-alone key names (X, V, T ... as a word of their own; "S-300F", "U-Boot", "U-Jagd" are no keys) and mouse words.
+const KEY_WORDS ='(^|[^A-Za-zÄÖÜäöüß0-9„\\-])(X|V|T|R|I|G|K|E|F|N|J|Y|U|M|P|Leertaste|Linksklick|Klick|anklicken|Taste|Strg)(?![A-Za-zÄÖÜäöüß0-9\\-])';
+const TOUCH_WORDS = 'antippen|tippen|Knopf „|Feld „';
+const keysIn = (list) => list.filter(s => new RegExp(KEY_WORDS).test(s)).map(s => (s.match(new RegExp(KEY_WORDS)) || [])[0].trim() + ' in: ' + s.slice(0, 60));
+// every text of the open sheet, the tooltips of the weapon slots and of the helicopter plate
+const sheetWords = S => S.ev(([K, TW]) => {
+   const key = new RegExp(K), tw = new RegExp(TW), keys = [], taps = [], es = [...document.querySelectorAll('#guide .gd-e')];
+   for (const e of es) {
+      for (const n of e.querySelectorAll('.gd-k, p')) {
+         const s = n.textContent, m = s.match(key);
+         if (m) keys.push(e.dataset.g + ': ' + m[0].trim() + ' in "' + s.slice(Math.max(0, m.index - 20), m.index + 24) + '"');
+         if (n.tagName === 'P' && tw.test(s)) taps.push(e.dataset.g + ': ' + s.match(tw)[0]);
+      }
+   }
+   return { n: es.length, keys, taps, controls: es.filter(e => e.querySelector('.gd-k')).length, numbers: es.filter(e => /undefined|NaN|null|Infinity/.test(e.textContent)).map(e => e.dataset.g) };
+}, [KEY_WORDS, TOUCH_WORDS]);
+const titles = S => S.ev(() => [...document.querySelectorAll('#weapons .wslot')].filter(e => window.__rect(e)).map(e => e.title).concat(window.__rect('#ops-panel .ops-helo') ? document.querySelector('#ops-panel .ops-helo').title : []).filter(Boolean));
+
 // ------------------------------------------------------------------ menu: the sheet from the ship panel and the how-to card
 if (want('menu')) {
    const S = await open('menu', { w: 1600, h: 900 }), T = 'menu: ';
@@ -170,6 +189,8 @@ if (want('menu')) {
    await S.tap('[data-act="guide"]');
    let G = await sheet(S);
    check(T + 'the button opens the sheet', G.open && G.btn, { open: G.open });
+   const W = await sheetWords(S);
+   check(T + 'desktop: no text of the sheet names a touch button, every number is filled in', W.n > 10 && !W.taps.length && !W.numbers.length, { n: W.n, taps: W.taps, numbers: W.numbers });
    check(T + 'the sheet has an entry for every id of GUIDE, none empty', sameSet(G.ids, G.all) && !G.empty.length, { n: G.ids.length, missing: G.all.filter(x => !G.ids.includes(x)), empty: G.empty });
    check(T + 'Sachsen: Seezielflugkörper, Luftabwehr and Bordhubschrauber are "an Bord"', ['ssm', 'sam', 'helo'].every(x => G.on.includes(x)) && !G.on.includes('cruise') && !G.on.includes('torp') && /Sachsen/.test(G.secs[0] || ''), { on: G.on, secs: G.secs });
    check(T + 'the entries on board come first', G.ids.slice(0, G.on.length).every(x => G.on.includes(x)), G.ids.slice(0, G.on.length + 1));
@@ -292,6 +313,97 @@ if (want('battle')) {
    await S.ctx.close();
 }
 
+// ------------------------------------------------------------------ first-use tips: every one of them, on the ship that has the weapon
+// [ship, weapon slot to select or null, the tips that must come (in this order), what they say on a touch device]
+const FIRST_USE = [
+   ['Boghammar', '4', [/^Raketen: ungelenkte Salve/], null],
+   ['U212', null, [/^U-Boot: getaucht unsichtbar/, /^Torpedos: bis \d/], /„▼ Tiefer“ und „▲ Auf“/],
+   ['Ford', null, [/^Träger: /], /Jet-Feld unten antippen, dann „Start“/],
+   ['Sachsen', '2', [/gegen Schiffe außerhalb der Geschützreichweite/, /^Hubschrauber: jagt nur U-Boote/], /Erst „Ziel“, dann „Start“/],
+];
+async function firstUse(dev, { w, h, touch }) {
+   for (const [ship, slot, wants, touchSays] of FIRST_USE) {
+      if (ONLY && !want(dev) && !want(dev + '-' + ship)) continue;
+      const e0 = errors.length, S = await open(dev + '-' + ship, { w, h, touch }), T = dev + ' ' + ship + ': ';
+      await S.start('training', ship);
+      await S.waitFor(() => window.__world().time > 1, 15000);
+      if (slot) { if (touch) await S.tap(`#weapons .wslot[data-key="${slot}"]`); else await S.key('Digit' + slot); }
+      // each tip in its turn; the layout is measured while it stands
+      let ok = true, lay = [];
+      for (const re of wants) {
+         const got = await S.waitFor(src => window.__tips().some(m => new RegExp(src).test(m.textContent)), 20000, re.source);
+         ok = ok && got;
+         await S.wait(300);
+         if (got) { const L = await tipLayout(S); lay.push(L); if (touch || ship !== 'Sachsen') await S.shot('first-' + ship + '-' + lay.length + '-' + w + 'x' + h); }
+      }
+      let log = await S.ev(() => window.__tipLog);
+      check(T + 'the first-use tips of this ship appear: ' + wants.map(r => r.source.slice(0, 22)).join(' · '), ok && wants.every((re, i) => re.test(log.seen[i] || '')), log.seen.map(t => t.slice(0, 40)));
+      check(T + 'each tip is whole and clear of the controls and plates', lay.length === wants.length && lay.every(tipOk), lay.map(L => ({ tip: L.tip, hits: L.hits, clipped: L.clipped, cut: L.cut, n: L.n })));
+      if (touch) check(T + 'touch: the tips name no key' + (touchSays ? ' and say which button' : ''), !keysIn(log.seen).length && (!touchSays || log.seen.some(t => touchSays.test(t))), keysIn(log.seen).length ? keysIn(log.seen) : log.seen.map(t => t.slice(0, 60)));
+      else check(T + 'desktop: the tips name no touch button', !log.seen.some(t => new RegExp(TOUCH_WORDS).test(t)), log.seen.map(t => t.slice(0, 60)));
+      const tt = await titles(S);
+      if (touch) check(T + 'touch: the tooltips name no key', !keysIn(tt).length, keysIn(tt));
+      // a full gap later: nothing else came (no tip of a weapon this ship does not carry)
+      await S.waitFor(() => document.querySelectorAll('#msgs .msg.tip').length === 0, 14000);
+      await S.wait(15500);
+      log = await S.ev(() => window.__tipLog);
+      check(T + 'no tip for a weapon the ship does not carry, never two at once', log.seen.length === wants.length && log.max === 1, { max: log.max, seen: log.seen.map(t => t.slice(0, 24)) });
+      check(T + 'no console errors', errors.length === e0, errors.slice(e0, e0 + 3));
+      await S.ctx.close();
+   }
+}
+if (want('first') || ONLY?.some(k => k.startsWith('first-'))) await firstUse('first', { w: 1600, h: 900, touch: false });
+if (want('firstphone') || ONLY?.some(k => k.startsWith('firstphone-'))) await firstUse('firstphone', { w: 844, h: 390, touch: true });
+
+// ------------------------------------------------------------------ a tip gives way to the chart
+// A tip on screen goes at once when the chart opens. Seen for less than 6 s it comes back after the chart
+// is closed; seen for longer it counts as read.
+async function chartTip(dev, { w, h, touch }) {
+   const e0 = errors.length, S = await open(dev, { w, h, touch }), T = dev + ': ';
+   const chart = async (on) => {
+      if (await S.ev(() => window.__ctl().mapOpen) === on) return true;
+      if (!touch) await S.key('KeyM'); else await S.tap(on ? '#minimap-wrap' : '#tu-chartx');
+      return S.waitFor(o => window.__ctl().mapOpen === o, 3000, on);
+   };
+   const nTips = () => S.ev(() => document.querySelectorAll('#msgs .msg.tip').length);
+   await S.start('training', 'Burke');
+   await S.waitFor(() => window.__world().time > 1, 15000);
+   if (touch) await S.tap('#weapons .wslot[data-key="2"]'); else await S.key('Digit2');
+   const early = await S.ev(() => window.__tipLog.seen.length);
+   const got = await S.waitFor(() => window.__tips().some(m => /Harpoon/.test(m.textContent)), 9000);
+   await S.wait(1200);
+   const opened = await chart(true);
+   const goneAt = await S.waitFor(() => document.querySelectorAll('#msgs .msg.tip').length === 0, 600);
+   check(T + 'no tip in the first seconds; a tip on screen goes at once when the chart opens', !early && got && opened && goneAt, { early, got, opened, tips: await nTips() });
+   await S.wait(2500);
+   check(T + 'no tip comes while the chart is open', await nTips() === 0);
+   await S.shot('chart-notip-' + w + 'x' + h);
+   const shut = await chart(false), t0 = Date.now();
+   const back = await S.waitFor(() => window.__tips().some(m => /Harpoon/.test(m.textContent)), 4000);
+   const backMs = Date.now() - t0;
+   await S.wait(300);
+   let L = await tipLayout(S);
+   check(T + 'barely seen (under 6 s): the same tip comes back once the chart is closed', shut && back && L.n === 1 && tipOk(L), { backMs, text: (L.text || '').slice(0, 30), hits: L.hits });
+   await S.shot('chart-tipback-' + w + 'x' + h);
+   // now it stands long enough to be read, then the chart again
+   await S.wait(6500);
+   const still = await S.ev(() => window.__tips().some(m => /Harpoon/.test(m.textContent)));
+   await chart(true);
+   const gone2 = await S.waitFor(() => document.querySelectorAll('#msgs .msg.tip').length === 0, 600);
+   await S.wait(600);
+   await chart(false);
+   await S.wait(3500);
+   const log = await S.ev(() => window.__tipLog);
+   check(T + 'seen for more than 6 s: it goes for the chart and does not come back', still && gone2 && log.seen.filter(t => /Harpoon/.test(t)).length === 2 && !(await S.ev(() => window.__tips().some(m => /Harpoon/.test(m.textContent)))), { still, gone2, seen: log.seen.map(t => t.slice(0, 16)) });
+   // the next one (the helicopter) still comes by itself
+   const helo = await S.waitFor(() => window.__tips().some(m => /Hubschrauber/.test(m.textContent)), 16000);
+   check(T + 'the next tip still comes by itself, never two at once', helo && (await S.ev(() => window.__tipLog.max)) === 1, await S.ev(() => window.__tipLog.seen.map(t => t.slice(0, 16))));
+   check(T + 'no console errors', errors.length === e0, errors.slice(e0, e0 + 3));
+   await S.ctx.close();
+}
+if (want('chart')) await chartTip('chart', { w: 1600, h: 900, touch: false });
+if (want('chartphone')) await chartTip('chartphone', { w: 844, h: 390, touch: true });
+
 // ------------------------------------------------------------------ phones: the notices and the plate against the controls
 for (const [w, h] of [[844, 390], [667, 375]]) {
    if (!want('phone' + w)) continue;
@@ -314,7 +426,10 @@ for (const [w, h] of [[844, 390], [667, 375]]) {
    let G = await sheet(S);
    check(T + 'menu: a tap opens the sheet, every entry is there', G.open && sameSet(G.ids, G.all) && G.on.includes('helo'), { open: G.open, n: G.ids.length });
    const tapTxt = await S.ev(() => ({ helo: document.querySelector('#guide [data-g="helo"] .gd-k')?.textContent || '', lock: document.querySelector('#guide [data-g="lock"] .gd-k')?.textContent || '' }));
-   check(T + 'the sheet names the touch controls, not the keys', /antippen/.test(tapTxt.helo) && /Knopf Ziel/.test(tapTxt.lock) && !/Taste/.test(tapTxt.helo + tapTxt.lock), tapTxt);
+   check(T + 'the sheet names the touch controls, not the keys', /antippen/.test(tapTxt.helo) && /Knopf „Ziel“/.test(tapTxt.lock) && !/Taste/.test(tapTxt.helo + tapTxt.lock), tapTxt);
+   const W = await sheetWords(S);
+   check(T + 'no text of the sheet names a key: a touch player reads touch controls only', W.n > 10 && !W.keys.length && W.taps.length > 3, { n: W.n, keys: W.keys, taps: W.taps.length });
+   check(T + 'every number in the sheet is filled in', !W.numbers.length, W.numbers);
    await S.shot('guide-top-' + sz);
    let sc = await sheetScroll(S);
    check(T + 'the sheet scrolls and its close button is reached at the end', sc.h[0] > sc.h[1] + 50 && sc.moved && sc.inView && sc.onTop && sc.size[1] >= 40, sc);
