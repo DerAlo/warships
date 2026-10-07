@@ -12,6 +12,7 @@ import { addSite } from './sites.js';
 import { westMissions } from './missions_west.js';
 import { eastMissions } from './missions_east.js';
 import { specialMissionsA } from './missions_special_a.js';
+import { specialMissionsB } from './missions_special_b.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -315,9 +316,10 @@ function timeoutByHP(w) {
 export const missionHelpers = { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, scatter, combatants, spawnTeam,
    teamHPFrac, annihilationSink, timeoutByHP, safePos, SHIPS };
 
-// The ten operations: missions_west.js (1-5), missions_east.js (6-10)
+// The operations: missions_west.js (1-5), missions_east.js (6-10), then the special sets
 DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
 DEFS.push(...specialMissionsA(missionHelpers));      // special operations, set A
+DEFS.push(...specialMissionsB(missionHelpers));
 
 // ---------------------------------------------------------------- public API
 const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
