@@ -26,12 +26,18 @@ export const EAST_TUNE = {
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6 },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12 },
+      // co-op: one frigate (Typ054A, hull `coopFrigHp`) joins the relief group per further captain, `coopFrig` at
+      // most. Each one shoots down the missiles meant for the relief group's main unit, which then lives to fire its
+      // salvo at the flagship: with two frigates three and four captains won less often than two. Measured with
+      // 2/3/4 captains: normal 2 -> 57/43/47 % (30 runs), 1 -> 58/55/58 % (60 runs), 0 -> 67/80/57 % (30 runs);
+      // hard 2 -> 17/7/13 % (30), 1 -> 17/28/23 % (60), 0 -> 20/37/43 % (30); easy 2 -> 100 %.
+      // The hull does little: hard, 0.25 instead of 0.5 -> 18/28/25 % (60)
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6, coopFrig: 2, coopFrigHp: 0.5 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
       // hard: with 13 rounds per air-defence site the flagship's 24 cruise missiles ran dry with a battery standing
       // and the mission waited for the clock (8 of 20 losses); 11 rounds and a tougher relief group keep the
       // win rate and let the relief group decide (2 of 20)
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
@@ -391,10 +397,9 @@ export function eastMissions(H) {
             // radar and batteries are out: a relief group comes in from the east
             if (S.blind && dead(S.bat) >= 2 && !S.relief) {
                const T = tune(w, 'reefs'), own = S.own.map(id => live(w, id)).filter(Boolean);
-               // co-op: a half-strength frigate joins the relief group per further human captain (two at most:
-               // measured with three, four captains ran out of time)
-               S.relief = T.relief.concat(Array(Math.min(2, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
-                  { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : 0.5) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
+               // co-op: a frigate with a weak hull joins the relief group per further human captain (`coopFrig` at most)
+               S.relief = T.relief.concat(Array(Math.min(T.coopFrig, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
+                  { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : T.coopFrigHp) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
                // the relief group does not wait for the clock: `again` s after it appears its main units fire a

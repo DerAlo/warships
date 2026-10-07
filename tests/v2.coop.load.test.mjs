@@ -9,6 +9,7 @@ import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { MISSIONS, getMission } from '../gamev2/missions.js';
 import { SHIPS } from '../gamev2/config.js';
 import { EAST_TUNE } from '../gamev2/missions_east.js';
+import { damageSite, siteById } from '../gamev2/sites.js';
 import { makeRoom, ready, shipOf, DT } from './v2.netutil.mjs';
 
 const EAST = ['barents', 'reefs', 'strait', 'philsea', 'countdown'];
@@ -135,6 +136,21 @@ test('co-op philsea: the escorts of the Shandong fire earlier at a group of thre
          const at = heard(build('philsea', n, 0, difficulty), /Salve vom Verband der Shandong/, T.salvoAt + 5);
          assert.ok(at != null, `${difficulty}, ${n} captains: the salvo came`);
          assert.ok(Math.abs(at - (T.salvoAt - (n >= 3 ? T.coopEarly : 0))) < 1, `${difficulty}, ${n} captains: salvo at ${at}`);
+      }
+   }
+});
+
+test('co-op reefs: the relief group grows by coopFrig frigates at most, by none for one captain', () => {
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = EAST_TUNE.reefs[difficulty];
+      assert.ok(T.coopFrig >= 0 && T.coopFrig <= 2 && T.coopFrigHp > 0 && T.coopFrigHp <= 1, difficulty);
+      for (const n of [1, 2, 3, 4]) {
+         const w = build('reefs', n, 0, difficulty), S = w._script;
+         for (const id of [S.radarId, ...S.bat]) { const site = siteById(w, id); damageSite(w, site, site.hp + 1, w.player, 'test'); }
+         const group = S.relief.map(id => w.shipById(id)), extra = group.slice(T.relief.length);
+         assert.equal(extra.length, Math.min(T.coopFrig, n - 1), `${difficulty}, ${n} captains: frigates with the relief group`);
+         assert.deepEqual(group.slice(0, T.relief.length).map(s => s.cls), T.relief);
+         for (const s of extra) { assert.equal(s.cls, 'Typ054A'); assert.ok(s.maxHP < SHIPS.Typ054A.hp * (T.coopFrigHp + 0.01) * w.difficulty.botHP + 1); }
       }
    }
 });
