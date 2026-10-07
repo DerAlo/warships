@@ -9,6 +9,7 @@ import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { MISSIONS, getMission } from '../gamev2/missions.js';
 import { SHIPS } from '../gamev2/config.js';
 import { EAST_TUNE } from '../gamev2/missions_east.js';
+import { WEST_TUNE } from '../gamev2/missions_west.js';
 import { damageSite, siteById } from '../gamev2/sites.js';
 import { makeRoom, ready, shipOf, DT } from './v2.netutil.mjs';
 
@@ -151,6 +152,20 @@ test('co-op reefs: the relief group grows by coopFrig frigates at most, by none 
          assert.equal(extra.length, Math.min(T.coopFrig, n - 1), `${difficulty}, ${n} captains: frigates with the relief group`);
          assert.deepEqual(group.slice(0, T.relief.length).map(s => s.cls), T.relief);
          for (const s of extra) { assert.equal(s.cls, 'Typ054A'); assert.ok(s.maxHP < SHIPS.Typ054A.hp * (T.coopFrigHp + 0.01) * w.difficulty.botHP + 1); }
+      }
+   }
+});
+
+test('co-op redsea: from wave coopFrom on every launcher fires one missile more at a destroyer with a captain', () => {
+   // missiles a wave puts into the launch queue
+   const queued = (n, difficulty, k) => { const w = build('redsea', n, 0, difficulty), S = w._script; S.queue.length = 0; S.def.wave(w, S, k); return S.queue.length; };
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = WEST_TUNE.redsea[difficulty];
+      assert.ok(difficulty === 'easy' ? T.coopFrom >= 9 : T.coopFrom >= 0 && T.coopFrom < 9, difficulty);
+      for (let k = 0; k < 9; k++) {
+         const solo = queued(1, difficulty, k);
+         assert.ok(solo >= 6, `${difficulty}, wave ${k}: ${solo} missiles for one captain`);
+         assert.equal(queued(2, difficulty, k) - solo, k >= T.coopFrom ? 3 : 0, `${difficulty}, wave ${k}`);
       }
    }
 });

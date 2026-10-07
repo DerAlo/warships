@@ -19,6 +19,9 @@ import { addTaskPoint } from './seal.js';
 // giuk: the second captain sails the corvette, which cannot fight a boat (measured: two captains won as
 // often as one). `coopHelo`: helicopter sorties the corvette embarks under a human captain (0 = none),
 // `coopHp`: hull factor of the boats that meet the two helicopters.
+// redsea: a second captain sails the destroyer with full magazines instead of the bot's thin ones (measured: the
+// group then wins more often than intended). From wave `coopFrom` on (counted from 0, 99 = never) every launcher
+// fires one missile more at such a group.
 // hormus: `boats` in the first wave; `coopBoats` is added once a second captain sails the corvette
 // (measured: the co-op group wins less often than one captain against the same boats).
 export const WEST_TUNE = {
@@ -26,6 +29,11 @@ export const WEST_TUNE = {
       easy: { boats: 4, coopBoats: 0 },
       normal: { boats: 5, coopBoats: -1 },
       hard: { boats: 5, coopBoats: -2 },      // measured, two captains on 60 runs: 0 -> 13 %, -1 -> 17 %, -2 -> 25 % (one captain: 23 %)
+   },
+   redsea: {
+      easy: { coopFrom: 99 },
+      normal: { coopFrom: 2 },      // measured, two captains on 60 runs: 99 -> 80 %, 7 -> 77 %, 5 -> 73 %, 3 -> 68 %, 2 -> 62 %, 1 -> 57 %, 0 -> 52 %
+      hard: { coopFrom: 4 },        // 99 -> 37 %, 7 -> 33 %, 5 -> 32 %, 4 -> 27 %, 3 -> 22 %
    },
    blacksea: {
       easy: { out: 480, coopHp: 1 },
@@ -205,7 +213,7 @@ export function westMissions(H) {
             const live = S.launchers.filter(L => L.alive);
             if (!live.length || S.arrived + S.lost >= S.convoy.length) return;
             S.wave++;
-            const n = by(w, 2, 2, 2) + (k >= by(w, 3, 2, 3) ? 1 : 0) + (k >= by(w, 99, 5, 6) ? 1 : 0);
+            const n = by(w, 2, 2, 2) + (k >= by(w, 3, 2, 3) ? 1 : 0) + (k >= by(w, 99, 5, 6) ? 1 : 0) + (k >= (S.coopFrom ?? 99) ? 1 : 0);
             radio(w, 'Operationszentrale', `Flugkörperstart an der Ostküste, Welle ${S.wave}. Anflug aus Ost.`, 'warn');
             for (const L of live) for (let i = 0; i < n; i++)
                S.queue.push({ L, t: w.time + S.launchers.indexOf(L) * 2.5 + i * 1.3, type: k >= 4 && i === 0 && w.difficultyKey !== 'easy' ? 'oniks' : 'kh35', tries: 0 });
@@ -243,6 +251,11 @@ export function westMissions(H) {
                setObj(w, 'convoy', 'done');
                w.end(true, S.lost ? 'Das Geleit ist durch die Meerenge – ein Schiff ging verloren.' : 'Alle Containerschiffe haben die Meerenge sicher passiert.');
             } else w.end(false, 'Zu viele Schiffe gingen verloren.');
+         },
+         // co-op (net/setup.js): a captain on the destroyer fights with full magazines, so from wave `coopFrom`
+         // (counted from 0; 99 = never) every launcher fires one missile more
+         coop(w, S, humans) {
+            if (humans.includes(S.ally)) S.coopFrom = (WEST_TUNE.redsea[w.difficultyKey] || WEST_TUNE.redsea.normal).coopFrom;
          },
          onSiteDestroyed(w, site, by_, S) {
             if (site === S.radar) { radio(w, 'Operationszentrale', 'Radarstation zerstört. Die Rampen feuern jetzt ohne Zieldaten – deutlich ungenauer.'); return; }
