@@ -94,7 +94,7 @@ function pickTarget(b, w) {
    let best = null, bestS = 0;
    const cur = b.ai.target;
    for (const e of w.ships) {
-      if (!e.alive || e.side === b.side || !w.canSee(b.side, e)) continue;
+      if (!e.alive || e.side === b.side || e.noTarget || !w.canSee(b.side, e)) continue;   // noTarget: a protected ship (missions)
       const dd = Math.sqrt(dist2(b.pos, e.pos));
       if (dd > b.cfg.main.range * 1.35) continue;
       let s = (e.cfg.ai.value || 40) * (1.8 - e.hp / e.maxHP * 0.8) / (1 + dd / 7000);

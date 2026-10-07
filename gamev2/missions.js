@@ -11,6 +11,7 @@ import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { addSite } from './sites.js';
 import { westMissions } from './missions_west.js';
 import { eastMissions } from './missions_east.js';
+import { specialMissionsB } from './missions_special_b.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -316,6 +317,7 @@ export const missionHelpers = { P, add, objective, setObj, objText, later, radio
 
 // The ten operations: missions_west.js (1-5), missions_east.js (6-10)
 DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
+DEFS.push(...specialMissionsB(missionHelpers));
 
 // ---------------------------------------------------------------- public API
 const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));

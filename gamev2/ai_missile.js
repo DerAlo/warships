@@ -73,7 +73,7 @@ export function salvoFor(T) {
 function pickSsmTarget(b, w, c, call) {
    let best = null, bestS = 0;
    for (const e of w.ships) {
-      if (!e.alive || e.side === b.side || !e.targetable || e.depth > 0) continue;
+      if (!e.alive || e.side === b.side || e.noTarget || !e.targetable || e.depth > 0) continue;
       const d = Math.hypot(e.pos.x - b.pos.x, e.pos.y - b.pos.y);
       if (d > c.range * 0.92 || d < 1500) continue;
       if (c.skim && w.losBlocked(b.pos, e.pos)) continue;
