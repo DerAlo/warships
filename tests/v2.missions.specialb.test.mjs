@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../gamev2/state.js';
 import { MISSIONS } from '../gamev2/missions.js';
-import { SPECIAL_B_TUNE, BOARD, EVAC } from '../gamev2/missions_special_b.js';
+import { SPECIAL_B_TUNE, BOARD, EVAC, TRAIL } from '../gamev2/missions_special_b.js';
 import { islandReliefAt } from '../gamev2/utils.js';
 import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { captain, play } from './v2.missions.specialb.captain.mjs';
@@ -43,7 +43,8 @@ for (const id of IDS) {
          assert.ok(main.some(o => /Zeitlimit \d+:\d\d/.test(o.text)), `${id}: the objective names the time limit`);
          for (const s of w.ships) {
             assert.ok(!onLand(w, s.pos), `${id}: ${s.name} stands on land`);
-            if (s.side === 'enemy') assert.ok(dist(s.pos, w.player.pos) >= 12000, `${id}: ${s.name} starts ${Math.round(dist(s.pos, w.player.pos))} m from the player`);
+            // bastion: nobody there fires; the boat starts on the missile boat's quarter, outside every sonar of the script
+            if (s.side === 'enemy') assert.ok(dist(s.pos, w.player.pos) >= (id === 'bastion' ? 5000 : 12000), `${id}: ${s.name} starts ${Math.round(dist(s.pos, w.player.pos))} m from the player`);
          }
          for (const s of w.sites) assert.ok(onLand(w, s), `${id}: ${s.name} stands in the water`);
          for (const z of w.mission.zones) assert.ok(!onLand(w, z), `${id}: zone ${z.label} lies on land`);
@@ -212,6 +213,72 @@ test('specialb/evac: after the last lift the ferry sails and the mission is won 
 test('specialb/evac: the bot captain wins on easy', () => {
    const w = play('evac', { diff: 'easy', seed: 1000 });
    assert.equal(w.phase, 'won', w.result && w.result.reason);
+});
+
+
+// ---------------------------------------------------------------------------------------- bastion
+const boat = (w) => w.shipById(w._script.tgtId);
+// hold the player `off` m from the missile boat, `ang` rad off dead astern, stopped and deep (the test's helm)
+const hold = (w, off, ang = 0) => () => {
+   const t = boat(w), p = w.player, a = t.heading + Math.PI + ang;
+   p.pos.x = t.pos.x + Math.cos(a) * off; p.pos.y = t.pos.y + Math.sin(a) * off; p.heading = t.heading; p.speed = 0; p.setTelegraph(0);
+};
+test('specialb/bastion: the meter rises before her sonar and names the reason, falls astern, and the trail counts only in the band', () => {
+   const w = mk('bastion'), S = w._script;
+   step(w, 1);
+   assert.equal(S.meter, 0, 'nothing hears the boat at the start');
+   step(w, 4, hold(w, 1500, Math.PI));
+   assert.ok(S.meter > 10 && S.why === 'bow', 'ahead of her: heard');
+   assert.match(obj(w, 'trail').text, /Ortungsgefahr \d+ % – steigt: vor ihrem Sonar/);
+   assert.equal(obj(w, 'find').state, 'done');
+   assert.ok(w.mission.zones.some(z => z.label === 'Folgeposition'), 'the trailing position is marked on the chart');
+   const m = S.meter;
+   step(w, 12, hold(w, 2000));
+   assert.ok(S.meter < m && S.trail > 8 && !S.why, 'astern in the band: falling, trail running');
+   const tr = S.trail;
+   step(w, 4, hold(w, TRAIL.max + 400));
+   assert.ok(S.trail <= tr + 0.5, 'too far astern: no trail');
+   step(w, 4, hold(w, 900, 0));
+   assert.ok(S.trail <= tr + 0.5, 'too close: no trail');
+   const far = mk('bastion'); step(far, 30);
+   assert.equal(far._script.meter, 0, 'the sister boat at the way out feeds no meter');
+   assert.ok(said(w, 'Wolchow'));
+});
+test('specialb/bastion: a shot before the release loses; located at 100 % loses; sinking a frigate loses', () => {
+   let w = mk('bastion'); step(w, 1);
+   w.player.lastTorpFire = w.time; step(w, 0.2);
+   assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /Schuss ohne Freigabe/);
+   w = mk('bastion'); step(w, 1); step(w, 30, hold(w, 1500, Math.PI));
+   assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /geortet/);
+   w = mk('bastion'); step(w, 1);
+   const fr = w.shipById(w._script.frig[0]); fr.takeDamage ? fr.takeDamage(1e9, w.player) : (fr.hp = 0); step(w, 1);
+   if (!fr.alive) { assert.equal(w.phase, 'lost'); assert.match(w.result.reason, /alarmiert/); }
+});
+test('specialb/bastion: the trail astern and the run to the exit win; a check astern catches a boat that is not slow', () => {
+   const w = mk('bastion', { diff: 'easy' }), S = w._script, T = SPECIAL_B_TUNE.bastion.easy;
+   step(w, 1);
+   step(w, T.trail + 30, () => { if (S.stage < 2) hold(w, 2000)(); });
+   assert.equal(S.stage, 2); assert.equal(obj(w, 'trail').state, 'done'); assert.equal(S.meter, 0, 'stopped astern nothing hears, checks included');
+   step(w, 3, () => { w.player.pos.x = S.exit.x; w.player.pos.y = S.exit.y; w.player.speed = 0; });
+   assert.equal(w.phase, 'won'); assert.equal(obj(w, 'ghost').state, 'done');
+   const v = mk('bastion'), V = v._script; step(v, 1);
+   step(v, 200, () => { hold(v, 2000)(); if (V.listening) v.player.speed = v.player.maxSpeedKn * 2.6 * 0.5; });
+   assert.ok(V.peak > 20, 'half speed during a check astern is heard'); assert.ok(said(v, 'Fahrtstufe 1/4'), 'the check is announced');
+});
+test('specialb/bastion: hard releases the weapons against the hunter boat at half the trail, and only then a shot is allowed', () => {
+   const w = mk('bastion', { diff: 'hard' }), S = w._script, T = SPECIAL_B_TUNE.bastion.hard;
+   step(w, 1);
+   step(w, T.trail * T.hunt + 6, hold(w, 2000));
+   assert.ok(S.released, 'released'); assert.match(obj(w, 'fire').text, /Waffen frei gegen das Jagd-U-Boot/);
+   w.player.lastTorpFire = w.time; step(w, 0.5, hold(w, 2000));
+   assert.equal(w.phase, 'playing');
+   assert.equal(SPECIAL_B_TUNE.bastion.normal.hunt, 0);
+});
+test('specialb/bastion: co-op takes two captains, both boats count and the bot captains win on easy', { timeout: 0 }, () => {
+   assert.equal(missionSlots('bastion'), 2);
+   const w = play('bastion', { diff: 'easy', n: 2, seed: 1000 });
+   assert.equal(w.phase, 'won', w.result && w.result.reason);
+   assert.equal(play('bastion', { diff: 'easy', seed: 1000 }).phase, 'won');
 });
 
 if (process.env.SPECIALB_BALANCE) {
