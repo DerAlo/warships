@@ -4,6 +4,8 @@
 //               not take heavy hits (it explodes, blast.js)
 //    evac       Evakuierung: hold a station off the pier of a harbour town, slow, while boats bring people
 //               out in lifts with a time window each; then escort the ferry with the rest out past the mole
+//    bastion    Arktis – Bastion: find a ballistic-missile submarine in its guarded patrol area, shadow it from astern
+//               without being located (detection meter), then leave; weapons stay locked unless the mission releases them
 // Each definition has the shape of missions.js DEFS; H = missionHelpers. Everything a mission keeps
 // between ticks lives in world._script (S) as plain data and refers to ships by id (co-op swaps bot
 // hulls for human captains after setup, world.replaceShip keeps the id).
@@ -14,7 +16,7 @@
 // measures them with the bot captain of tests/v2.missions.specialb.captain.mjs).
 import { addSite } from './sites.js';
 import { addBlast } from './blast.js';
-import { obstacleRadiusAt } from './utils.js';
+import { obstacleRadiusAt, obstacleT } from './utils.js';
 
 export const SPECIAL_B_TUNE = {
    hijack: {
@@ -34,10 +36,25 @@ export const SPECIAL_B_TUNE = {
       // boats of each pack carry Kowsar missiles · batN / batSalvo / batInt: the shore battery (missiles, per salvo,
       // s between salvos) · batAt: lift at whose opening it goes live · ferry: hull factor of the ferry
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3 },
-      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.9 },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.93 },
       hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 1.04 },
    },
+   bastion: {
+      // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
+      // a sonar holds the boat / while it is sighted · noise: % per s for running loud near a listener · cool: % per s it
+      // falls when nothing hears · listen / listenFor: s between two checks astern and their length · frig: speed of the
+      // frigates (kn) · guard: a hunter boat patrols the way out · hunt: share of the trail at which the hunter floods
+      // its tubes and weapons are released against it (0 = never)
+      easy: { trail: 60, kn: 6, held: 5, seen: 9, noise: 1.5, cool: 3, listen: 70, listenFor: 12, warn: 9, frig: 10, guard: 0, hunt: 0 },
+      normal: { trail: 80, kn: 6, held: 8, seen: 14, noise: 2.5, cool: 2, listen: 55, listenFor: 16, warn: 7, frig: 12, guard: 1, hunt: 0 },
+      hard: { trail: 100, kn: 6, held: 11, seen: 18, noise: 3.5, cool: 1.5, listen: 45, listenFor: 18, warn: 6, frig: 14, guard: 1, hunt: 0.5 },
+   },
 };
+// Shadowing (bastion): the trailing position lies min..max m from the missile boat inside arc rad either side of dead
+// astern (its own sonar is deaf there). Its sonar reaches bow m ahead and abeam and aft m astern, scaled with the
+// shadower's noise; while it checks astern the blind arc is gone and only a boat at creepKn or less stays unheard.
+// hear: m at which the sonar team classifies it · loudKn: speed from which a boat near a listener (near m) is loud.
+export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creepKn: 4, hear: 5000, loudKn: 11, near: 6500, frig: 3000, sub: 2200 };
 // Evacuation (evac): a lift is loaded while a captain's ship lies inside the pickup zone (r m) at no more
 // than slowKn kn and no armed boat stands within clear m of it; people per lift, people the ferry takes.
 export const EVAC = { r: 800, slowKn: 6, clear: 1500, people: 40, ferry: 320 };
@@ -252,20 +269,24 @@ export function specialMissionsB(H) {
             const S = w._script, T = tune(w, 'evac');
             islands(w, [{ c: P(12200, 0), r: 3600, height: 420, seed: 131, lobes: 6, elong: 2, rot: Math.PI / 2, rough: 0.5, name: 'Porto Calvera' }]);
             const isl = w.obstacles[0], cx = isl.c.x - obstacleRadiusAt(isl, Math.PI);      // the coast west of the town
-            islands(w, [{ c: P(cx - 700, -2900), r: 380, height: 14, seed: 137, lobes: 3, elong: 3, rot: 0, rough: 0.2, name: 'Mole' }]);
+            // (sim y grows south.) The coast is not straight: the mole and the ferry's berth are measured from the coast at their own y
+            const coastX = (y) => { const q = P(isl.c.x, y); while (obstacleT(isl, q) < 1) q.x -= 20; return q.x; };
+            islands(w, [{ c: P(coastX(-2900) - 320, -2900), r: 380, height: 14, seed: 137, lobes: 3, elong: 3, rot: 0, rough: 0.2, name: 'Mole' }]);
             S.zone = zone(w, cx - 1500, 0, EVAC.r, 'Aufnahmezone');
             S.exit = zone(w, cx - 8200, -2600, 1300, 'Offene See');
             const flag = add(w, shipKey, 'player', P(cx - 6200, 1500), 0, { isPlayer: true, telegraph: 3 });
             const corv = add(w, shipKey === 'Braunschweig' ? 'Sachsen' : 'Braunschweig', 'player', P(cx - 7000, 2600), 0,
                { name: shipKey === 'Braunschweig' ? 'Hessen' : 'Magdeburg', dmgMult: T.ally, telegraph: 3 });
             const ferry = add(w, 'Container', 'player', P(cx - 650, 900), Math.PI, { name: 'Calvera Star', speedKn: 17, hpMult: T.ferry, telegraph: 0, ai: { passive: true, anchored: true } });
+            // her berth: bow to the sea, 450 m off the pier just south of the pickup zone (add() keeps ships a kilometre off a coast)
+            ferry.pos.y = 1150; ferry.pos.x = coastX(1150) - 450;
             corv.ai.escortId = ferry.id;
             S.own = [flag.id, corv.id]; S.ferryId = ferry.id; S.ferryHP = ferry.maxHP;
             S.route = [P(cx - 3600, -700), P(S.exit.x, S.exit.y)];
             S.stage = 0; S.lift = 0; S.nextAt = T.first; S.winEnd = 0; S.load = 0; S.done = 0; S.missed = 0; S.aboard = 0; S.shown = '';
             S.boats = []; S.sunk = 0; S.total = 0; S.hurt = false;
             // the shore battery up the coast: silent and not located until its lift
-            S.batId = addSite(w, 'battery', 'enemy', P(isl.c.x - 300, isl.c.y + 520),      // sites.js moves it out to the north-western coast
+            S.batId = addSite(w, 'battery', 'enemy', P(isl.c.x - 300, isl.c.y + 520),      // sites.js moves it out to the south-western coast
                { name: 'Küstenbatterie Calvera', hidden: true, radarOn: false, delay: 1e9, salvo: T.batSalvo, interval: T.batInt, ssm: { type: 'noor', n: T.batN } }).id;
             objective(w, 'lifts', this.liftText(w, S, T));
             objective(w, 'ferry', 'Geleiten Sie die Fähre Calvera Star an der Mole vorbei auf die offene See – sie darf nicht sinken');
@@ -292,7 +313,7 @@ export function specialMissionsB(H) {
                S.boats.push(b.id);
             }
             S.total += n;
-            radio(w, 'Lagezentrum', `${n === 1 ? 'Ein Schnellboot läuft' : n + ' Schnellboote laufen'} von ${side > 0 ? 'Norden' : 'Süden'} die Küste herunter${text || ''}.`, 'warn');
+            radio(w, 'Lagezentrum', `${n === 1 ? 'Ein Schnellboot läuft' : n + ' Schnellboote laufen'} von ${side > 0 ? 'Süden' : 'Norden'} die Küste herunter${text || ''}.`, 'warn');
          },
          update(w, dt, S) {
             if (S.stage >= 3) return;
@@ -319,7 +340,7 @@ export function specialMissionsB(H) {
                      const b = w.sites.find(x => x.id === S.batId);
                      if (b && b.alive) {
                         b.radarOn = true; b.detected = b.targetable = true; b.nextT = 14;
-                        later(S, w.time + 5, () => radio(w, 'Luftlage', 'Eine Küstenbatterie nördlich der Stadt geht auf Sendung und nimmt den Pier unter Feuer. Abwehr frei – oder schalten Sie die Stellung mit Geschütz oder Marschflugkörpern aus.', 'warn'));
+                        later(S, w.time + 5, () => radio(w, 'Luftlage', 'Eine Küstenbatterie südlich der Stadt geht auf Sendung und nimmt den Pier unter Feuer. Abwehr frei – oder schalten Sie die Stellung mit Geschütz oder Marschflugkörpern aus.', 'warn'));
                      }
                   }
                }
@@ -379,6 +400,186 @@ export function specialMissionsB(H) {
             S.sunk++;
          },
          timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – die Fähre hat die offene See nicht erreicht.'); },
+      },
+      // --------------------------------------------------------------------- Arktis – Bastion
+      // S.stage: 0 searching, 1 contact (shadowing), 2 enough data (leave), 3 over. S.meter 0..100: located at 100.
+      {
+         id: 'bastion', group: 'ops', name: 'Arktis – Bastion', subtitle: 'Sondereinsatz · Raketen-U-Boot beschatten, unentdeckt bleiben',
+         briefing: 'An der Eiskante liegt das geschützte Patrouillengebiet eines Raketen-U-Boots – die Bastion. Fregatten mit Schleppsonar ' +
+            'und ein Jagd-U-Boot decken es. Spüren Sie den Raketenträger Wolchow auf und beschatten Sie ihn: getaucht, ' +
+            '1,2 bis 2,8 Kilometer genau achteraus – dort ist sein eigenes Sonar taub. Halten Sie die Position, bis genug Geräuschdaten ' +
+            'aufgezeichnet sind, und laufen Sie dann zum Ablaufpunkt. Die Ortungsgefahr steht im Auftrag: Sie steigt, wenn ein Sonar Sie hält, ' +
+            'wenn Sie in der Nähe der Wachschiffe schnell laufen, wenn Ihr Sehrohr gesichtet wird – und wenn der Raketenträger nach achtern ' +
+            'horcht und Sie dabei mehr als 4 Knoten laufen. Bei 100 % sind Sie geortet, der Einsatz ist verloren. ' +
+            'Waffen sind gesperrt: Ein Schuss ohne Freigabe beendet den Einsatz. Der Raketenträger ist niemals ein Ziel.',
+         debrief: 'Die Geräuschsignatur der Wolchow ist aufgezeichnet, in der Bastion hat niemand etwas bemerkt. ' +
+            'Entschieden hat nicht eine Waffe, sondern die Fahrtstufe: langsam genug, um unhörbar zu bleiben, schnell genug, um dranzubleiben.',
+         fleet: { own: '1 Jagd-U-Boot', foe: 'Raketen-U-Boot Wolchow (kein Ziel), 2 Fregatten, 1 Jagd-U-Boot' },
+         env: { time: 'dusk', weather: 'fog' }, type: 'stealth', playableShips: ['U212', 'Virginia'], recommendedShip: 'U212',
+         arena: 15000, timeLimit: 720, stars: 3,
+         setup(w, shipKey) {
+            const S = w._script, T = tune(w, 'bastion');
+            // (sim y grows south.) the ice edge in the north: two low, flat barriers
+            islands(w, [
+               { c: P(-2500, -12200), r: 2300, height: 22, seed: 151, lobes: 5, elong: 3.2, rot: 0.08, rough: 0.35, name: 'Eiskante' },
+               { c: P(9800, -10800), r: 1700, height: 18, seed: 157, lobes: 4, elong: 2.4, rot: -0.3, rough: 0.35, name: 'Eiskante Ost' },
+            ]);
+            add(w, shipKey, 'player', P(-10500, 8500), -0.6, { isPlayer: true, depth: 2, telegraph: 3 });
+            // the missile boat: west along the ice edge, then north-west; never fights, never listens with the engine's
+            // sonar (the script models its sonar with the blind arc astern)
+            // she zigzags down her first leg (drawn from the seed), then turns north-west for the ice
+            const start = P(800, 1200), zig = (k) => P(800 - 7300 * k + 0.48 * (w.rng() - 0.5) * 1500, 1200 + 4000 * k + 0.88 * (w.rng() - 0.5) * 1500);
+            const route = [zig(0.35), zig(0.62), zig(0.85), P(-6500, 5200), P(-9200, 0)];
+            const t = add(w, 'Kilo', 'enemy', start, Math.atan2(route[0].y - start.y, route[0].x - start.x),
+               { name: 'Wolchow', depth: 2, speedKn: T.kn / 0.85, hpMult: 2, telegraph: 4, ai: { passive: true, route } });
+            t.noTarget = true; t.sonarDeafT = 1e9;
+            S.tgtId = t.id;
+            const loop = (name, pts, kn) => add(w, 'Gorschkow', 'enemy', pts[0], Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x),
+               { name, speedKn: kn, telegraph: 4, ai: { passive: true, patrol: pts, patrolIdx: 1 } });
+            // two racetracks north of her track: Bravo 3.5 km off it, Alfa beyond
+            S.frig = [loop('Fregatte Alfa', [P(500, -4300), P(-7500, -4900), P(-7500, -6100), P(500, -5500)], T.frig).id,
+               loop('Fregatte Bravo', [P(-900, -1900), P(-6200, 1000), P(-6600, 300), P(-1300, -2600)], T.frig).id];
+            // the hunter boat circles between the track and the way out
+            S.guardLoop = [P(-7800, -3600), P(-7400, 1600), P(-9800, 200)];
+            S.guardId = T.guard ? add(w, 'Kilo', 'enemy', S.guardLoop[0], 1.4, { name: 'Jagd-U-Boot Ladoga', depth: 2, speedKn: 7, ai: { passive: true, route: [S.guardLoop[1], S.guardLoop[2], S.guardLoop[0]] } }).id : 0;
+            S.area = zone(w, -3200, 2200, 4200, 'Patrouillengebiet');
+            S.exit = zone(w, -9600, 7900, 1500, 'Ablaufpunkt');
+            S.stage = 0; S.meter = 0; S.peak = 0; S.trail = 0; S.tick = 0; S.shown = ''; S.listenAt = 0; S.listenEnd = 0; S.released = false; S.sunk = 0;
+            objective(w, 'find', 'Spüren Sie den Raketenträger Wolchow im Patrouillengebiet auf' + lim(w));
+            objective(w, 'trail', this.trailText(S, T));
+            objective(w, 'exit', 'Laufen Sie danach unentdeckt zum Ablaufpunkt ab');
+            objective(w, 'fire', 'Waffen gesperrt – kein Schuss ohne Freigabe, der Raketenträger ist nie ein Ziel');
+            objective(w, 'ghost', 'Die Ortungsgefahr bleibt unter 50 %', { optional: true });
+            w.score = { kind: 'count', player: 0, enemy: 0, target: 100 };
+            later(S, 4, () => radio(w, 'Flottenkommando', `Sie stehen am Rand der Bastion. Der Raketenträger Wolchow läuft mit ${T.kn} Knoten nach Südwesten durch das Patrouillengebiet. Finden Sie ihn, hängen Sie sich ${T.trail} Sekunden achteraus an – und lassen Sie sich nicht orten.`));
+            later(S, 14, () => radio(w, 'Flottenkommando', 'Waffen sind gesperrt. Ein Schuss ohne Freigabe beendet den Einsatz, und der Raketenträger ist niemals ein Ziel.', 'warn'));
+            later(S, 26, () => radio(w, 'Sonar', `Zwei Fregatten mit Schleppsonar laufen Streife. Gestoppt hören sie uns auf ${String(TRAIL.frig / 2000).replace('.', ',')} Kilometer, bei voller Fahrt auf ${TRAIL.frig / 1000} – Abstand halten, und über ${TRAIL.loudKn} Knoten in ihrer Nähe steigt die Ortungsgefahr ohnehin.`));
+         },
+         trailText(S, T) {
+            const m = Math.floor(S.meter / 10) * 10, sec = Math.min(T.trail, Math.floor(S.trail / 10) * 10);
+            return `Beschatten Sie ihn getaucht, ${String(TRAIL.min / 1000).replace('.', ',')}–${String(TRAIL.max / 1000).replace('.', ',')} km achteraus: ${sec}/${T.trail} s · Ortungsgefahr ${S.meter >= 100 ? 100 : m} %` +
+               (S.listenEnd > 0 && S.listening ? ` · ER HORCHT – höchstens ${TRAIL.creepKn} kn!` : '');
+         },
+         update(w, dt, S) {
+            if (S.stage >= 3) return;
+            const T = tune(w, 'bastion'), t = live(w, S.tgtId);
+            const boats = w.ships.filter(b => b.alive && b.side === 'player' && b.sub);
+            // co-op: the boats of the other captains (placed after setup) start deep as well
+            if (!S.init) { S.init = true; S.shots = {}; for (const b of boats) { if (w.time < 2) b.depthTarget = b.depthF = b.depth = 2; } }
+            // the rule of the weapons: any shot before the release ends the mission
+            if (!S.released) for (const b of boats) {
+               if (S.shots[b.id] === undefined) S.shots[b.id] = b.lastTorpFire;
+               if (b.lastTorpFire !== S.shots[b.id] || (w.missiles || []).some(m => m.ownerId === b.id)) {
+                  S.stage = 3; setObj(w, 'fire', 'failed');
+                  w.end(false, 'Schuss ohne Freigabe – die Bastion ist alarmiert, der Einsatz ist gescheitert.');
+                  return;
+               }
+            }
+            if (!t) return;
+            const hunters = [...S.frig, S.guardId].map(i => i && live(w, i)).filter(Boolean);
+            for (const o of hunters) if (!(S.released && o.id === S.guardId)) o.sonarDeafT = 1e9;
+            t.battery = 1; t.pingT = -999; t.noTarget = true;      // it neither tires nor reacts to being heard
+            const g = S.guardId ? live(w, S.guardId) : null;
+            if (g) {
+               g.battery = 1;
+               if (!S.released) { g.pingT = -999; if (g.ai.route && g.ai.routeIdx >= g.ai.route.length - 1 && dist(g.pos, g.ai.route[g.ai.route.length - 1]) < 800) g.ai.routeIdx = 0; }
+            }
+            if ((S.tick -= dt) > 0) return;
+            const step = 0.5; S.tick += step;
+            // ---- the check astern: announced, then for listenFor s the blind arc is gone
+            S.listening = S.stage === 1 && w.time >= S.listenAt && w.time < S.listenEnd;
+            if (S.stage === 1 && w.time >= S.listenEnd) {
+               S.listenAt = w.time + T.listen * (0.75 + 0.5 * w.rng()); S.listenEnd = S.listenAt + T.listenFor; S.warnedListen = false;
+            }
+            if (S.stage === 1 && !S.warnedListen && S.listenAt - w.time <= T.warn) {
+               S.warnedListen = true;
+               radio(w, 'Sonar', `Die Wolchow dreht ihr Sonar nach achtern – in wenigen Sekunden horcht sie ${T.listenFor} Sekunden lang. Fahrt auf höchstens ${TRAIL.creepKn} Knoten!`, 'warn');
+            }
+            // ---- who hears the boats: the worst case over all captains feeds the meter
+            const hx = Math.cos(t.heading), hy = Math.sin(t.heading);
+            let rate = -T.cool, why = '', inBand = false, nearest = Infinity;
+            for (const b of boats) {
+               const kn = Math.abs(b.speed) / KN, d = dist(b.pos, t.pos);
+               const cosA = d > 1 ? ((b.pos.x - t.pos.x) * hx + (b.pos.y - t.pos.y) * hy) / d : 1, astern = cosA < -Math.cos(TRAIL.arc);
+               const loud = 0.5 + 0.5 * Math.min(1, kn / (b.maxSpeedKn * b.sub.deepSpeed));
+               nearest = Math.min(nearest, d);
+               let r = -T.cool, y = '';
+               if (S.listening ? d < TRAIL.bow * Math.min(1, Math.max(0, (kn - TRAIL.creepKn + 1) / 6)) || d < TRAIL.aft * loud : d < (astern && kn <= TRAIL.loudKn ? TRAIL.aft : TRAIL.bow) * loud) { r = T.held; y = S.listening ? 'listen' : !astern ? 'bow' : kn > TRAIL.loudKn ? 'fast' : 'close'; }
+               else if (hunters.some(o => dist(o.pos, b.pos) < (o.id === S.guardId ? TRAIL.sub : TRAIL.frig) * loud) || w.time - b.pingT < 1.2) { r = T.held; y = 'held'; }
+               else if (kn > TRAIL.loudKn && w.ships.some(o => o.alive && o.side === 'enemy' && o !== t && dist(o.pos, b.pos) < TRAIL.near)) { r = T.noise * Math.min(2, (kn - TRAIL.loudKn) / 4 + 0.5); y = 'noise'; }
+               if (b.detected && b.depth < 2) { r = T.seen; y = 'seen'; }
+               if (r > rate) { rate = r; why = y; }
+               if (astern && d >= TRAIL.min && d <= TRAIL.max && b.depth > 0) inBand = true;
+            }
+            S.meter = Math.max(0, Math.min(100, S.meter + rate * step));
+            S.peak = Math.max(S.peak, S.meter);
+            w.score.player = Math.round(S.meter);
+            if (why && rate > 0) {
+               S.why = why;
+               nag(w, S, 'nag_' + why, 25, 'Sonar', why === 'listen' ? `Sie hört uns! Fahrt heraus – höchstens ${TRAIL.creepKn} Knoten, solange sie horcht.`
+                  : why === 'close' ? 'Zu dicht – wir laufen ihr in die Schraube. Abstand über einen Kilometer!'
+                  : why === 'bow' ? 'Wir stehen vor ihrem Sonar. Nur genau achteraus ist sie taub – zurück ins Kielwasser!'
+                  : why === 'fast' ? `Zu schnell – über ${TRAIL.loudKn} Knoten hört sie uns auch im Kielwasser.`
+                  : why === 'held' ? 'Ein Wachschiff hält uns im Sonar. Fahrt heraus und Abstand gewinnen!'
+                  : why === 'seen' ? 'Sehrohr gesichtet! Sofort tief gehen.'
+                  : `Wir sind zu laut. Unter ${TRAIL.loudKn} Knoten bleiben, solange Wachschiffe in der Nähe stehen.`, 'warn');
+            }
+            if (S.peak >= 50 && !S.half) { S.half = true; setObj(w, 'ghost', 'failed'); radio(w, 'Sonar', 'Ortungsgefahr über 50 % – die Wachschiffe suchen bereits. Bei 100 % haben sie uns.', 'warn'); }
+            if (S.meter >= 100) {
+               S.stage = 3; setObj(w, S.trail >= T.trail ? 'exit' : 'trail', 'failed');
+               w.end(false, 'Das Boot wurde geortet – die Bastion ist alarmiert, der Einsatz ist gescheitert.');
+               return;
+            }
+            // ---- the chain: find, shadow, leave
+            if (S.stage === 0 && nearest < TRAIL.hear) {
+               S.stage = 1; setObj(w, 'find', 'done');
+               S.listenAt = w.time + T.listen * (0.75 + 0.5 * w.rng()); S.listenEnd = S.listenAt + T.listenFor;
+               S.tz = zone(w, t.pos.x, t.pos.y, 800, 'Folgeposition');
+               radio(w, 'Sonar', `Kontakt: ein großes Boot, sieben Blätter, ${T.kn} Knoten – das ist die Wolchow. Die Folgeposition steht auf der Karte: genau achteraus, ${String(TRAIL.min / 1000).replace('.', ',')} bis ${String(TRAIL.max / 1000).replace('.', ',')} Kilometer.`);
+            }
+            if (S.tz) {      // the marked trailing position follows the boat (coarse steps: co-op sends zones on change)
+               const k = (TRAIL.min + TRAIL.max) / 2;
+               S.tz.x = Math.round((t.pos.x - hx * k) / 50) * 50; S.tz.y = Math.round((t.pos.y - hy * k) / 50) * 50;
+            }
+            if (S.stage === 1) {
+               if (inBand) {
+                  if (!S.onStation) { S.onStation = true; radio(w, 'Sonar', 'Wir stehen in ihrem Kielwasser. Aufzeichnung läuft – Position halten.'); }
+                  S.trail += step;
+               }
+               // hard: the hunter boat picks up the trail and floods its tubes – weapons are released against it alone
+               if (T.hunt && g && !S.released && S.trail >= T.trail * T.hunt) {
+                  S.released = true;
+                  g.sonarDeafT = 0; g.ai.passive = false; g.ai.route = null; g.ai.huntId = boats[0] ? boats[0].id : null; g.ai.press = true;
+                  objText(w, 'fire', 'Waffen frei gegen das Jagd-U-Boot Ladoga – nur gegen dieses, der Raketenträger ist nie ein Ziel');
+                  radio(w, 'Sonar', 'Torpedorohre werden geflutet – das Jagd-U-Boot Ladoga hat unsere Spur!', 'warn');
+                  radio(w, 'Flottenkommando', 'Waffen frei gegen das Jagd-U-Boot – nur gegen dieses. Der Raketenträger und die Fregatten bleiben gesperrt.', 'warn');
+               }
+               if (S.trail >= T.trail) {
+                  S.stage = 2; setObj(w, 'trail', 'done');
+                  w.mission.zones.splice(w.mission.zones.indexOf(S.tz), 1); S.tz = null;
+                  radio(w, 'Sonar', 'Genug Daten, die Signatur ist im Kasten. Fallen Sie zurück und laufen Sie leise zum Ablaufpunkt.');
+               }
+            } else if (S.stage === 2 && boats.length && boats.every(b => inZone(b, S.exit))) {
+               S.stage = 3;
+               setObj(w, 'exit', 'done'); setObj(w, 'fire', 'done');
+               if (S.peak < 50) setObj(w, 'ghost', 'done');
+               w.end(true, S.peak < 50 ? 'Die Wolchow ist vermessen – in der Bastion hat niemand etwas bemerkt.' : 'Die Wolchow ist vermessen. Die Wachschiffe ahnen allerdings, dass jemand hier war.');
+               return;
+            }
+            const txt = this.trailText(S, T);
+            if (txt !== S.shown) { S.shown = txt; objText(w, 'trail', txt); }
+         },
+         onSink(w, ship, killer, S) {
+            if (S.stage >= 3) return;
+            if (ship.side === 'player') {
+               if (!w.ships.some(b => b.alive && b.side === 'player' && human(b))) { S.stage = 3; w.end(false, 'Ihr Boot ist verloren.'); }
+               return;
+            }
+            if (ship.id === S.guardId && S.released) { S.sunk++; radio(w, 'Sonar', 'Das Jagd-U-Boot ist versenkt. Weiter – leise.'); return; }
+            S.stage = 3; setObj(w, 'fire', 'failed');
+            w.end(false, ship.id === S.tgtId ? 'Der Raketenträger Wolchow ist gesunken – das war nie der Auftrag.' : `${ship.name} ist versenkt worden – die Bastion ist alarmiert, der Einsatz ist gescheitert.`);
+         },
+         timeout(w) { w.end(false, 'Die Zeit ist abgelaufen – das Boot hat den Ablaufpunkt nicht erreicht.'); },
       },
    ];
    return defs;
