@@ -10,7 +10,7 @@ import { islandReliefAt } from '../gamev2/utils.js';
 import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { captain, play } from './v2.missions.specialb.captain.mjs';
 
-const IDS = ['hijack', 'evac'];
+const IDS = ['hijack', 'evac', 'bastion'];
 const DIFFS = ['easy', 'normal', 'hard'];
 const def = (id) => MISSIONS.find(m => m.id === id);
 const mk = (id, o = {}) => new World(o.diff || 'normal', { mission: id, ship: o.ship || def(id).recommendedShip, seed: o.seed ?? 4711 });

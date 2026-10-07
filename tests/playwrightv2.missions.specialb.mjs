@@ -2,7 +2,7 @@
 // Every mission is started from the menu (mission card -> AUSLAUFEN -> briefing -> AUSLAUFEN) on a
 // desktop (1440x810) and on a phone held sideways (844x390), runs 30 s and must show its objectives
 // without a single console error; then the mission's special rule is triggered (hijack: alongside the
-// tanker the boarding clock runs). The operations list of the menu is checked for reach with all entries.
+// tanker the boarding clock runs; evac: lying in the pickup zone the lift counter runs). The operations list of the menu is checked for reach with all entries.
 // Screenshots: tests/shots/v2-specialb-<mission>-<view>.png (+ briefing, menu, rule).
 //
 // Run:  node server.js 8831   then   node tests/playwrightv2.missions.specialb.mjs
@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 const URL = process.env.URLV2 || 'http://localhost:8831/index-v2.html';
 const OUT = process.env.OUT || 'tests/shots';
 const RUN_S = +(process.env.RUN_S || 30);
-const IDS = (process.env.ONLY || 'hijack').split(',');
+const IDS = (process.env.ONLY || 'hijack,evac').split(',');
 const VIEWS = { desktop: { w: 1440, h: 810, touch: false }, phone: { w: 844, h: 390, touch: true } };
 const ONLY_VIEWS = (process.env.VIEWS || 'desktop,phone').split(',');
 mkdirSync(OUT, { recursive: true });
@@ -92,6 +92,7 @@ for (const view of ONLY_VIEWS) {
             world: w.mission.objectives.map(x => x.text),
             box: r ? { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } : null,
             shown: !!(r && r.width > 20 && r.height > 8 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.2 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1),
+            threat: !!document.querySelector('body.touch #mx-threat:not(.hidden)'),      // a phone gives the band to an incoming salvo (touch3d.js)
             radio: w.events.filter(e => e.type === 'objective').length };
       });
       await wait(2500);
@@ -100,7 +101,7 @@ for (const view of ONLY_VIEWS) {
       await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}.png` });
       await wait(Math.max(0, RUN_S * 1000 - 6000));
       const late = await measure();
-      const hud = { ...late, shown: early.shown || late.shown, box: early.box, objs: early.objs.length ? early.objs : late.objs };
+      const hud = { ...late, shown: early.shown || late.shown || ((early.threat || late.threat) && !!early.box), box: early.box, objs: early.objs.length ? early.objs : late.objs };
       check(`${tag}: sim ran ${RUN_S} s`, hud.t > RUN_S * 0.5 && hud.phase === 'playing', { t: hud.t, phase: hud.phase });
       check(`${tag}: objectives text visible`, hud.shown && hud.objs.length >= 2 && hud.objs.every(t => t && !/undefined|NaN/.test(t)), { box: hud.box, objs: hud.objs });
       check(`${tag}: radio message arrived`, hud.radio >= 1, hud.radio);
@@ -117,6 +118,24 @@ for (const view of ONLY_VIEWS) {
             return { board: +S.board.toFixed(1), text: w.mission.objectives.find(o => o.id === 'board').text, hud: [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent.trim())[0] || '' };
          });
          check(`${tag}: alongside the tanker the boarding clock runs`, rule.board >= 3 && /Entern/.test(rule.text), rule);
+         await wait(400);
+         await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-rule.png` });
+      }
+      if (id === 'evac') {
+         // a window is open, the ship lies stopped in the pickup zone, no boat near: the lift counter runs
+         const rule = await ev(async () => {
+            const w = window.__world(), S = w._script, p = w.player, f = w.shipById(S.ferryId);
+            for (const s of w.ships.slice()) if (s.alive && s.side === 'enemy') w.removeShip(s, 'test');
+            const put = () => { p.pos.x = S.zone.x - 250; p.pos.y = S.zone.y - 350; p.heading = 0.5; p.speed = 0; p.setTelegraph(0); };
+            S.nextAt = Math.min(S.nextAt, w.time);
+            const t0 = performance.now();
+            while (performance.now() - t0 < 8000 && S.load < 4) { put(); await new Promise(r => setTimeout(r, 50)); }
+            const obst = w.obstacles.map(o => ({ name: o.name, x: Math.round(o.c.x), y: Math.round(o.c.y), r: Math.round(o.r) }));
+            return { stage: S.stage, load: +S.load.toFixed(1), text: w.mission.objectives.find(o => o.id === 'lifts').text, hud: [...document.querySelectorAll('#objectives .obj')].map(e => e.textContent.trim())[0] || '',
+               ferry: f ? { x: Math.round(f.pos.x), y: Math.round(f.pos.y), kn: +(f.speed / 2.6).toFixed(1), d: Math.round(Math.hypot(f.pos.x - p.pos.x, f.pos.y - p.pos.y)) } : null, zone: S.zone, obst };
+         });
+         check(`${tag}: in the pickup zone the lift counter runs`, rule.stage === 1 && rule.load >= 4 && /Transport 1\/\d: [1-9]\d*\/\d+ an Bord/.test(rule.text), rule);
+         check(`${tag}: the ferry lies at its berth`, !!rule.ferry && Math.abs(rule.ferry.kn) < 0.5, rule.ferry);
          await wait(400);
          await page.screenshot({ path: `${OUT}/v2-specialb-${id}-${view}-rule.png` });
       }
