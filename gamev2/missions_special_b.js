@@ -57,12 +57,14 @@ export const SPECIAL_B_TUNE = {
       // coopWave boats more in every pack per further captain, coopFerry scales the ferry's hull (see coop()) · ship:
       // knobs for one flagship class. Measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/30 %,
       // Daring 100/59/30 % (hard without its row 37 %), Burke 100/55/31 % (normal without 68 %), Braunschweig
-      // 100/63/29 % (without 100/69/38 %)
+      // 100/63/29 % (without 100/69/38 %). Two captains, 120 runs, normal/hard (coopFerry of the row -> rate): Sachsen
+      // 61/29 % and Daring 57/33 % on the row's own 1.2/1.34; Braunschweig normal 1.2 -> 67 %, 1.17 -> 63 %, hard 1.34
+      // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
       normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
-         ship: { Braunschweig: { ferry: 0.85 }, Burke: { ferry: 0.85, coopFerry: 1.3 } } },
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { ferry: 0.85, coopFerry: 1.27 } } },
       hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
-         ship: { Braunschweig: { ferry: 0.85 }, Daring: { ferry: 0.92 } } },
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.2 }, Daring: { ferry: 0.92 }, Burke: { coopFerry: 1.15 } } },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
