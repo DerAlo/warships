@@ -27,12 +27,15 @@ import { obstacleT } from './utils.js';
 // host's boarding decides), normal: 0 -> 48 / 48 / 45 %, 6 -> 62 / 62 / 57 %; hard without it 23 / 27 / 30 %.
 // Daring (30 kn, alongside sooner): normal 68 % with the Sachsen's cable, 60 % with 215 s; hard 32 %. With a second
 // captain: normal 67 % with the 6 s, 62 % with 3 s (240 seeds: 63 / 60 %, and 51 % with none); hard 28 %.
+// Since the freighters hold their column (Sachsen, one captain, 240 runs): normal cable 220 -> 42 %, 224 -> 50 %,
+// 228 -> 60 %; hard 232 -> 8 %, 236 -> 12 %, 244 -> 16 %, 252 -> 19 %, 262 -> 25 %. Two captains, 120 runs: normal 228
+// without coopCable 62 %, hard 262 -> 29 %. Not measured again: the Daring row and three or four captains.
 export const SPECIAL_A_TUNE = {
    cable: {
       easy: { cable: 450, ships: 4, look: 2, board: 14, boats: 2, boatHp: 0.7, boatDmg: 0.7, corvette: 0, hint: true, decoys: 0, coopCable: [0, 0, 0] },
-      normal: { cable: 220, ships: 5, look: 3, board: 20, boats: 3, boatHp: 1, boatDmg: 1, corvette: 120, hint: false, decoys: 1, coopCable: [6, 6, 6],
+      normal: { cable: 228, ships: 5, look: 3, board: 20, boats: 3, boatHp: 1, boatDmg: 1, corvette: 120, hint: false, decoys: 1, coopCable: [0, 0, 0],
          ship: { Daring: { cable: 215, coopCable: [3, 6, 6] } } },
-      hard: { cable: 232, ships: 5, look: 4, board: 26, boats: 4, boatHp: 1.2, boatDmg: 1.2, corvette: 90, hint: false, decoys: 2, coopCable: [0, 0, 0] },
+      hard: { cable: 262, ships: 5, look: 4, board: 26, boats: 4, boatHp: 1.2, boatDmg: 1.2, corvette: 90, hint: false, decoys: 2, coopCable: [0, 0, 0] },
    },
    // rig: `valves` s until the occupiers open the valves, `boats` armed boats moored at the platform of which `guards`
    // stay there until a warship is inside RIG.guard, `teams` boarding teams on board, `board` s a team needs on the

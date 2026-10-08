@@ -29,21 +29,24 @@ export const SPECIAL_B_TUNE = {
       // one flagship class (the Daring's air defence shrugs off the pack of the others)
       // measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/31 %, Daring 100/61/31 %, Burke 100/57/23 %
       // (without its row 100/76/42 %), Braunschweig 100/58/28 % (without 100/0/3 %: all missiles of the pack go for the
-      // flagship within 20 s, two RAM channels stop two, and four hits sink a corvette); two captains normal/hard:
-      // Sachsen 58/33 %, Braunschweig 64/33 %; Burke and Daring stay far below (the rocket boats, not the missiles)
-      // co-op knobs without a value yet (see coop(): coopDmg = damage factor of every boat, coopBoats = negative, boats
-      // of the pack that never sail). Two captains, 40 runs each, normal/hard, since the freighters hold their column:
-      // Burke as it is 3/0 % (60 runs), coopDmg 0.7 -> 15/10 %, 0.5 -> 25/20 %; Daring as it is 5/0 %, 0.7 -> 13/15 %,
-      // 0.5 -> 30/23 %; Burke normal: coopMsl 12 -> 8 %, coopMsl 12 with coopDmg 0.6 -> 20 %, coopBoats -4 -> 25 %,
-      // -7 -> 35 %, -4 with coopDmg 0.6 -> 33 %, without its ship row 13 % (Daring 8 %). None reaches the band: the
-      // flagship lies alongside with boats still within BOARD.clear of the tanker (2.5 of those sent at it, 1.3 guards
-      // at 240 s; Sachsen and one captain: none) and is worn down before the party can cross, while the second
-      // captain's corvette fights from 9 km off instead of keeping at the flagship as the AI's corvette does
+      // flagship within 20 s, two RAM channels stop two, and four hits sink a corvette)
+      // co-op knobs (see coop()): coopDmg = damage factor of every boat, coopBoats = negative, boats of the pack that
+      // never sail (no value yet). What decides two captains is where the second one fights. A boat is a destroyer to
+      // the AI (role dd): it breaks contact while two ships have it inside gun range, and it keeps outside its own
+      // sighting range of a frigate or corvette but closes to 1500 m on a destroyer hull (Burke, Daring). So with the
+      // second captain 9 km off (the bot captain until now, HIJACK_2ND=hunt) the boats circle a Burke or Daring
+      // alongside, stand within BOARD.clear of the tanker and the party never crosses: Burke 3/0 %, Daring 5/0 % (40-60
+      // runs; coopDmg 0.5 -> 25/20 % and 30/23 %, coopBoats -7 -> 35 % normal), Sachsen 58/33 %, Braunschweig 64/33 %.
+      // With the second captain within 3-4 km of the flagship (the bot captain now, as the AI corvette of one captain)
+      // the boats break off. Two captains, 120 runs, normal/hard, old values coopMsl 1.3/2.5: Sachsen 76/58 %, Burke
+      // 82/57 %, Daring 79/58 %, Braunschweig 59/33 % (its own row, unchanged). Now: normal coopMsl 0 -> Sachsen 59 %,
+      // Burke 63 %, Daring 66 % (coopDmg 1.12 -> 42 %, 1.03 -> 59 %); hard coopMsl 0 -> Sachsen 12 %, Burke 30 %, Daring
+      // 40 % (coopDmg 1.12 -> 23 %, 1.06 -> 32 %); Sachsen hard coopMsl 1.5 -> 44 %, 1 -> 35 %, 0.7 -> 25 %
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
-      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 1.3, coopWave: 2,
-         ship: { Daring: { boats: 13, msl: 13 }, Burke: { boats: 12, msl: 12 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
-      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 2.5, coopWave: 2,
-         ship: { Daring: { boats: 11, msl: 10 }, Burke: { msl: 10 }, Braunschweig: { boats: 8, msl: 3, coopMsl: 0 } } },
+      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 0, coopWave: 2,
+         ship: { Daring: { boats: 13, msl: 13, coopDmg: 1.03 }, Burke: { boats: 12, msl: 12 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
+      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 0.7, coopWave: 2,
+         ship: { Daring: { boats: 11, msl: 10, coopMsl: 0, coopDmg: 1.06 }, Burke: { msl: 10, coopMsl: 0 }, Braunschweig: { boats: 8, msl: 3, coopMsl: 0 } } },
    },
    evac: {
       // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
@@ -54,12 +57,14 @@ export const SPECIAL_B_TUNE = {
       // coopWave boats more in every pack per further captain, coopFerry scales the ferry's hull (see coop()) · ship:
       // knobs for one flagship class. Measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/30 %,
       // Daring 100/59/30 % (hard without its row 37 %), Burke 100/55/31 % (normal without 68 %), Braunschweig
-      // 100/63/29 % (without 100/69/38 %)
+      // 100/63/29 % (without 100/69/38 %). Two captains, 120 runs, normal/hard (coopFerry of the row -> rate): Sachsen
+      // 61/29 % and Daring 57/33 % on the row's own 1.2/1.34; Braunschweig normal 1.2 -> 67 %, 1.17 -> 63 %, hard 1.34
+      // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
       normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
-         ship: { Braunschweig: { ferry: 0.85 }, Burke: { ferry: 0.85, coopFerry: 1.3 } } },
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { ferry: 0.85, coopFerry: 1.27 } } },
       hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
-         ship: { Braunschweig: { ferry: 0.85 }, Daring: { ferry: 0.92 } } },
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.2 }, Daring: { ferry: 0.92 }, Burke: { coopFerry: 1.15 } } },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
