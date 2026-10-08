@@ -23,11 +23,13 @@ import { addTaskPoint } from './seal.js';
 // group then wins more often than intended). From wave `coopFrom` on (counted from 0, 99 = never) every launcher
 // fires one missile more at such a group.
 // hormus: `boats` in the first wave; `coopBoats` is added once a second captain sails the corvette
-// (measured: the co-op group wins less often than one captain against the same boats).
+// (measured: the co-op group wins less often than one captain against the same boats); a whole boat moves the win
+// rate by some 20 points, so `coopDmg` scales the damage the boats of that wave deal to such a group.
 export const WEST_TUNE = {
    hormus: {
       easy: { boats: 4, coopBoats: 0 },
-      normal: { boats: 5, coopBoats: -1 },
+      // two captains on 240 runs: -1 -> 71 %, on 120 runs: 0 -> 48 %, -1 with coopDmg 1.25 -> 59 %, 1.5 -> 53 %, 2 -> 39 %
+      normal: { boats: 5, coopBoats: -1, coopDmg: 1.2 },
       hard: { boats: 5, coopBoats: -2 },      // measured, two captains on 60 runs: 0 -> 13 %, -1 -> 17 %, -2 -> 25 % (one captain: 23 %)
    },
    redsea: {
@@ -38,11 +40,13 @@ export const WEST_TUNE = {
    blacksea: {
       easy: { out: 480, coopHp: 1 },
       normal: { out: 420, coopHp: 0.85 },
-      hard: { out: 360, coopHp: 0.8 },
+      // hard, 2/3/4 captains: 0.8 -> 18/20 % (240 runs) / 25 % (120), 0.7 -> 26/29 % (240) / 34 % (120)
+      hard: { out: 360, coopHp: 0.7 },
    },
    giuk: {
       easy: { coopHelo: 2, coopHp: 1 },
-      normal: { coopHelo: 2, coopHp: 1.45 },
+      // two captains on 240 runs: 1.45 -> 54 %, 1.4 -> 55 %, 1.385 -> 57 %, 1.37 -> 64 %, 1.35 -> 65 %, 1.3 -> 71 %
+      normal: { coopHelo: 2, coopHp: 1.38 },
       hard: { coopHelo: 2, coopHp: 1.05 },
    },
 };
@@ -120,17 +124,17 @@ export function westMissions(H) {
             objective(w, 'sub', 'Versenken Sie das Kleinst-U-Boot', { optional: true });
             w.score = { kind: 'count', player: 0, enemy: 0, target: 3 };
             radio(w, 'Geleitführer', 'Geleit läuft mit 18 Knoten an. Halten Sie Position am Geleit, Radar an.');
-            const wave = (n0, from, hunt, text) => {
+            const wave = (n0, from, hunt, text, dmg = 1) => {
                const n = n0 + extra;
                radio(w, 'Ausguck', text, 'warn');
                for (let i = 0; i < n; i++) {
                   const a = (i - (n - 1) / 2) * 420;
-                  add(w, 'Boghammar', 'enemy', P(from.x + a, from.y + Math.abs(a) * 0.4), Math.atan2(-from.y, -from.x), { minDist: 6500, speedKn: 38, hpMult: 0.7, dmgMult: by(w, 1, 1.1, 1.25), ai: { huntId: hunt.id, aggro: 1.5 } });
+                  add(w, 'Boghammar', 'enemy', P(from.x + a, from.y + Math.abs(a) * 0.4), Math.atan2(-from.y, -from.x), { minDist: 6500, speedKn: 38, hpMult: 0.7, dmgMult: by(w, 1, 1.1, 1.25) * dmg, ai: { huntId: hunt.id, aggro: 1.5 } });
                }
                S.boats += n;
             };
             const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
-            later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0], 'Schnellboote von Süden, schnell näher kommend. Geschütz klar!'));
+            later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0], 'Schnellboote von Süden, schnell näher kommend. Geschütz klar!', S.coopDmg || 1));
             later(S, 215, () => wave(by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
             later(S, by(w, 345, 315, 285), () => {
                radio(w, 'Operationszentrale', 'Feuerleitradar von der Südküste! Die Küstenbatterien schalten auf. Flugkörperabwehr klar, Täuschkörper bereithalten.', 'warn');
@@ -139,10 +143,11 @@ export function westMissions(H) {
             later(S, 410, () => wave(by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Nordosten, hinter dem Riff hervor.'));
             later(S, 130, () => radio(w, 'Operationszentrale', 'Hinweis: Ein Kleinst-U-Boot wird im Fahrwasser voraus vermutet. Sonar besetzen, Bordhubschrauber bereithalten.'));
          },
-         // co-op (net/setup.js): with a captain on the corvette the first wave changes by `coopBoats`
+         // co-op (net/setup.js): with a captain on the corvette the first wave changes by `coopBoats`, the damage
+         // its boats deal by the factor `coopDmg`
          coop(w, S, humans) {
             const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
-            if (humans.includes(S.escort)) S.coopBoats = T.coopBoats || 0;
+            if (humans.includes(S.escort)) { S.coopBoats = T.coopBoats || 0; S.coopDmg = T.coopDmg || 1; }
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;
