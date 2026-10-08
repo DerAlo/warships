@@ -139,13 +139,16 @@ export function captain(w, mode = 'bot') {
    };
    if (id === 'hijack') return () => {
       if (w.phase !== 'playing') return;
-      // a second captain goes for the boats nearest to the tanker
-      const t = w.shipById(S.tankId);
+      // a second captain keeps with the flagship (the station of the AI's escort, 1-4 km off) and shoots at the boats
+      // nearest to the tanker. That is what holds the pack off a destroyer lying alongside: the boats break contact
+      // while two ships have them inside gun range (see the hijack tune table). HIJACK_2ND=hunt: the captain of the
+      // earlier tables, who went for those boats on his own and fought them from about 9 km off the tanker
+      const t = w.shipById(S.tankId), hunt = process.env.HIJACK_2ND === 'hunt';
       for (const e of extras) {
          if (!e.alive || !t) continue;
          let best = null, bd = Infinity;
          for (const s of w.ships) { if (!s.alive || s.side !== 'enemy' || s === t) continue; const d = hyp(s.pos, t.pos); if (d < bd) { bd = d; best = s; } }
-         e.ai.escortId = null; e.ai.huntId = best ? best.id : null; e.ai.press = true;
+         e.ai.escortId = !hunt && p.alive ? p.id : null; e.ai.huntId = best ? best.id : null; e.ai.press = true;
       }
       think(hijackHelm(w, p));
    };
