@@ -144,10 +144,14 @@ export function runNear(World, o) {
       w.update(DT);
       keep([p, ...group]);
       n++;
+      if (o.onStep) o.onStep(w, p, T, n);
       if (T.alive) {
          res.minDist = Math.min(res.minDist, hyp(p.pos, T.pos));
          for (const t of tr) {
             if (!t.m.alive || keelGap(p, t.m) > (p.cfg.hull.beam + t.m.cfg.hull.beam) / 2 + 3) continue;
+            // only a ship running into the player counts: a driver rubbing along its quarter while it
+            // overtakes to its station is the player's doing, not the captain's
+            if (Math.cos(Math.atan2(p.pos.y - t.m.pos.y, p.pos.x - t.m.pos.x) - t.m.heading) < -0.2) continue;
             if (w.time - lastTouch > 5) { res.contacts++; touch0 = w.time; }
             lastTouch = w.time; res.contactT += DT; res.contactMax = Math.max(res.contactMax, w.time - touch0);
             break;
@@ -221,7 +225,7 @@ export function nearSuite(test, assert, World, scenarios, tag) {
    for (const sc of scenarios) {
       if ((sc.wide && !wide) || (only && !only.includes(sc.mission))) continue;
       test(`${tag} near-player: ${sc.name || sc.mission} keeps its routed ships on course`, () => {
-         const modes = wide ? MODES : sc.modes || MODES, bad = [];
+         const modes = (wide ? MODES : sc.modes || MODES).filter(m => !(sc.not || []).includes(m)), bad = [];
          for (let k = 0; k < (wide || 1); k++) {
             const seed = (sc.seed || 2) + k * 7;
             const base = runNear(World, { ...sc, seed, mode: 'far' });

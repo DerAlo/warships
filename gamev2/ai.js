@@ -602,13 +602,33 @@ function insideTurn(b, pt) {
    return (pt.x - b.pos.x - nx) ** 2 + (pt.y - b.pos.y - ny) ** 2 < lim || (pt.x - b.pos.x + nx) ** 2 + (pt.y - b.pos.y + ny) ** 2 < lim;
 }
 
+// A column ship holds its lane against an escort under way, but a friendly hull lying stopped on its
+// track is shoved along broadside for minutes: it lays its course past the nearer end instead.
+// Returns the heading change (0: the hull is under way, astern, far off or clear of the track).
+function roundStopped(b, o, want) {
+   if (Math.abs(o.speed) > 0.3 * b.maxSpeed) return 0;
+   const dx = o.pos.x - b.pos.x, dy = o.pos.y - b.pos.y, d = Math.hypot(dx, dy);
+   if (d < 1 || d > Math.max(600, Math.abs(b.speed) * 30) + (b.cfg.hull.L + o.cfg.hull.L) / 2) return 0;
+   const rel = angleDelta(want, Math.atan2(dy, dx)), lat = d * Math.sin(rel);
+   const clear = o.cfg.hull.L * 0.55 + b.cfg.hull.beam + 40;
+   if (Math.cos(rel) <= 0 || Math.abs(lat) > clear) { if (b.ai.roundO === o) b.ai.roundO = null; return 0; }
+   // the side stays as picked while the same hull is in the way: shoved along it swings across the bow,
+   // and re-picking the nearer end every decision kept the bow planted in its side
+   if (b.ai.roundO !== o) { b.ai.roundO = o; b.ai.roundK = lat >= 0 ? -1 : 1; }
+   const k = b.ai.roundK, a = want + k * Math.PI / 2;
+   const to = Math.atan2(o.pos.y + Math.sin(a) * clear - b.pos.y, o.pos.x + Math.cos(a) * clear - b.pos.x);
+   // close aboard a gentle sidestep only shoves it along diagonally: turn right along its side
+   const lim = d < (b.cfg.hull.L + o.cfg.hull.L) / 2 + 60 ? 1.4 : 0.6;
+   return clamp(angleDelta(want, to), -lim, lim);
+}
+
 // Keep ~800 m between friendly hulls so the AI does not stack into one torpedo lane.
 function separation(b, w, want) {
-   let px = 0, py = 0;
+   let px = 0, py = 0, round = 0;
    for (const o of w.ships) {
       if (o === b || !o.alive || o.side !== b.side) continue;
       // a freighter keeps station in its column; the escorts give way to it, not the reverse
-      if (column(b) && !column(o)) continue;
+      if (column(b) && !column(o)) { if (!round && !o.depth) round = roundStopped(b, o, want); continue; }
       const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y;
       const d2 = dx * dx + dy * dy;
       const R = 650 + (b.cfg.hull.L + o.cfg.hull.L);
@@ -616,12 +636,12 @@ function separation(b, w, want) {
       const k = (R - Math.sqrt(d2)) / R;
       px += dx / Math.sqrt(d2) * k; py += dy / Math.sqrt(d2) * k;
    }
-   if (!px && !py) return want;
+   if (!px && !py) return want + round;
    const m = Math.hypot(px, py);
    const ax = Math.cos(want) + px / m * Math.min(1.2, m * 2), ay = Math.sin(want) + py / m * Math.min(1.2, m * 2);
    const out = Math.atan2(ay, ax);
    // a slow freighter swinging 60 deg out of line only rams the next column
-   return column(b) ? want + clamp(angleDelta(want, out), -0.5, 0.5) : out;
+   return column(b) ? want + clamp(angleDelta(want, out), -0.5, 0.5) + round : out;
 }
 
 // Pick the candidate heading nearest to `want` whose look-ahead line is clear of land and the
