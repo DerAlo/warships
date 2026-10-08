@@ -24,14 +24,21 @@ import { addTaskPoint } from './seal.js';
 // fires one missile more at such a group.
 // hormus: `boats` in the first wave; `coopBoats` is added once a second captain sails the corvette
 // (measured: the co-op group wins less often than one captain against the same boats); a whole boat moves the win
-// rate by some 20 points, so `coopDmg` scales the damage the boats of that wave deal to such a group.
+// rate by some 20 points, so `coopDmg` scales the damage the boats of that wave deal to such a group. `bat`: missiles
+// of the two shore batteries (Felseninsel, Süd; without it 4/6/8 by difficulty), `coopBat`: more in each of them for such
+// a group. Both are scaled for the better-armed flagships like the batteries themselves.
 export const WEST_TUNE = {
    hormus: {
       easy: { boats: 4, coopBoats: 0 },
       // two captains on 240 runs: -1 -> 71 %, on 120 runs: 0 -> 48 %, -1 with coopDmg 1.25 -> 59 %, 1.5 -> 53 %, 2 -> 39 %
       // since the freighters hold their column (no more circles): coopDmg 1.2 -> 76 %, 1.6 -> 65 %, 1.9 -> 58 % (120 runs)
       normal: { boats: 5, coopBoats: -1, coopDmg: 1.9 },
-      hard: { boats: 5, coopBoats: -2 },      // measured, two captains on 60 runs: 0 -> 13 %, -1 -> 17 %, -2 -> 25 % (one captain: 23 %)
+      // hard, since the freighters hold their column: the boats no longer decide it (one captain, 200 runs: as it was 19 %,
+      // their damage x 0.93 -> 23 %, x 0.9 -> 22 %, their hull x 0.8 -> 21 %; two captains, 120 runs: coopBoats 0 / -1 / -2 ->
+      // 47 / 49 / 48 % with bat [7, 7]), the batteries do. bat [8, 8] (as it was) -> 19 %, [8, 7] -> 19 %, [7, 8] -> 27 %,
+      // [7, 7] -> 31 %. Two captains, 120 runs: bat [8, 8] -> 39 %, [7, 7] -> 48 %, with coopBat 1 -> 37 %, 2 -> 34 %;
+      // bat [7, 8] with coopBat 1 -> 37 %, 2 -> 33 %
+      hard: { boats: 5, coopBoats: -2, bat: [7, 8], coopBat: 2 },
    },
    redsea: {
       easy: { coopFrom: 99 },
@@ -113,12 +120,13 @@ export function westMissions(H) {
             S.escort.ai.escortId = S.convoy[2].id;
             S.goal = zone(w, 9800, 0, 1800, 'Golf von Oman');
             S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.boats = 0;
+            const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
             const extra = { Burke: 2 }[shipKey] || 0;      // one more boat per wave for the strongest escort
-            const gun = { Burke: 2, Daring: 1.5 }[shipKey] || 1;      // the better-armed escorts meet heavier batteries
+            const gun = { Burke: 2, Daring: 1.5 }[shipKey] || 1; S.gun = gun;      // the better-armed escorts meet heavier batteries
             // the batteries stay silent (radar off, not yet located) until the convoy is deep in the strait
             S.batteries = [
-               addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
-               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Süd', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round(by(w, 4, 6, 8) * gun) } }),
+               addSite(w, 'battery', 'enemy', P(5600, 6000), { name: 'Küstenbatterie Felseninsel', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round((T.bat ? T.bat[0] : by(w, 4, 6, 8)) * gun) } }),
+               addSite(w, 'battery', 'enemy', P(10500, 14500), { name: 'Küstenbatterie Süd', hidden: true, radarOn: false, delay: 1e9, ssm: { type: 'noor', n: Math.round((T.bat ? T.bat[1] : by(w, 4, 6, 8)) * gun) } }),
             ];
             S.sub = add(w, 'Ghadir', 'enemy', P(4200, -2600), Math.PI, { depth: 1, telegraph: 1, ai: { huntId: S.convoy[0].id } });
             objective(w, 'convoy', 'Geleiten Sie die Tanker durch die Meerenge (0/3 am Ziel, mindestens 2)');
@@ -135,7 +143,6 @@ export function westMissions(H) {
                }
                S.boats += n;
             };
-            const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
             later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0], 'Schnellboote von Süden, schnell näher kommend. Geschütz klar!', S.coopDmg || 1));
             later(S, 215, () => wave(by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
             later(S, by(w, 345, 315, 285), () => {
@@ -149,7 +156,9 @@ export function westMissions(H) {
          // its boats deal by the factor `coopDmg`
          coop(w, S, humans) {
             const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
-            if (humans.includes(S.escort)) { S.coopBoats = T.coopBoats || 0; S.coopDmg = T.coopDmg || 1; }
+            if (!humans.includes(S.escort)) return;
+            S.coopBoats = T.coopBoats || 0; S.coopDmg = T.coopDmg || 1;
+            if (T.coopBat) for (const b of S.batteries) b.mag.noor += Math.round(T.coopBat * S.gun);
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;
