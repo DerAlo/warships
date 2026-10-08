@@ -24,20 +24,26 @@ export const SPECIAL_B_TUNE = {
       // msl: how many of them carry Kowsar missiles (the others, the guard and the wave: rockets and guns) ·
       // guard: boats that stay at the tanker · wave/waveAt: second pack from the coast · boom: share of the
       // tanker's hull that may be lost before it explodes · board: s alongside · batN/batAt: missiles of the
-      // shore battery and the tanker's distance to the anchorage (m) at which it opens fire
-      easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500 },
-      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500 },
-      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 8, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500 },
+      // shore battery and the tanker's distance to the anchorage (m) at which it opens fire · co-op: coopMsl boats
+      // lose their missile (see coop()), coopWave boats more in the second pack per further captain · ship: knobs for
+      // one flagship class (the Daring's air defence shrugs off the pack of the others)
+      // measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/31 %, Daring 100/61/31 %
+      easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
+      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 1.3, coopWave: 2,
+         ship: { Daring: { boats: 13, msl: 13 } } },
+      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 2.5, coopWave: 2,
+         ship: { Daring: { boats: 11, msl: 10 } } },
    },
    evac: {
       // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
       // win: s a window stays open · load: s on station a lift takes · gap: s between two windows · waves: boats that
       // come down the coast when lift 1, 2, 3 opens · fin: boats that go for the ferry when it casts off · msl: how many
       // boats of each pack carry Kowsar missiles · batN / batSalvo / batInt: the shore battery (missiles, per salvo,
-      // s between salvos) · batAt: lift at whose opening it goes live · ferry: hull factor of the ferry
-      easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3 },
-      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.93 },
-      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 1.04 },
+      // s between salvos) · batAt: lift at whose opening it goes live · ferry: hull factor of the ferry · co-op:
+      // coopWave boats more in every pack per further captain, coopFerry scales the ferry's hull (see coop())
+      easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2 },
+      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34 },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
@@ -45,10 +51,11 @@ export const SPECIAL_B_TUNE = {
       // per s for running loud near a listener · cool: % per s it falls when nothing hears (slow: mistakes add up) ·
       // listen / listenFor: s between two checks astern and their length · warn: s the sonar team announces a check
       // ahead · frig: speed of the frigates (kn) · guard: a hunter boat patrols before the way out · hunt: share of the
-      // trail at which the hunter picks up the trail and weapons are released against it (0 = never)
-      easy: { trail: 60, kn: 6, held: 5, caught: 8, seen: 9, noise: 1.5, cool: 1, listen: 70, listenFor: 12, warn: 8, frig: 10, guard: 0, hunt: 0 },
-      normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0 },
-      hard: { trail: 100, kn: 6, held: 11, caught: 16, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5 },
+      // trail at which the hunter picks up the trail and weapons are released against it (0 = never) · coop: share the
+      // meter rises faster per further captain (two captains, normal, 120 runs: 0 -> 49 %, -0.1 -> 55 %, -0.15 -> 60 %, -0.2 -> 70 %)
+      easy: { trail: 60, kn: 6, held: 5, caught: 8, seen: 9, noise: 1.5, cool: 1, listen: 70, listenFor: 12, warn: 8, frig: 10, guard: 0, hunt: 0, coop: 0 },
+      normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0, coop: -0.15 },
+      hard: { trail: 100, kn: 6, held: 11, caught: 16, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5, coop: 0 },
    },
 };
 // Shadowing (bastion): the trailing position lies min..max m from the missile boat inside arc rad either side of dead
@@ -56,7 +63,7 @@ export const SPECIAL_B_TUNE = {
 // shadower's noise; while it checks astern the blind arc is gone and only a boat at telegraph 1/4 or less stays unheard.
 // hear: m at which the sonar team classifies it. The speed rules follow the telegraph, so they read the same in both
 // boats (share of the boat's top speed submerged): creep = up to 1/4, fast = more than 1/2, both also at periscope depth, where a boat runs faster (loud near a listener, near m).
-export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creep: 0.33, hear: 5000, fast: 0.62, near: 6500, frig: 3000, sub: 2200, coop: 0.08 };
+export const TRAIL = { min: 1200, max: 2800, arc: 50 * Math.PI / 180, bow: 3600, aft: 700, creep: 0.33, hear: 5000, fast: 0.62, near: 6500, frig: 3000, sub: 2200 };
 // why the detection meter rises, as shown in the objective
 const WHY = { listen: 'sie horcht, Sie sind zu schnell', close: 'zu dicht am Heck', bow: 'vor ihrem Sonar, nicht achteraus', fast: 'zu schnell im Kielwasser',
    held: 'ein Wachschiff hört Sie', ping: 'das Jagd-U-Boot hält Sie im Sonar', seen: 'Sehrohr gesichtet', noise: 'zu laut nahe der Wachschiffe' };
@@ -72,7 +79,12 @@ const GAS_R = { destroyed: 600, heavy: 1300, shock: 2400 };
 
 export function specialMissionsB(H) {
    const { P, add, objective, setObj, objText, later, radio, zone, inZone, islands, SHIPS } = H;
-   const tune = (w, id) => { const T = SPECIAL_B_TUNE[id]; return T[w.difficultyKey] || T.normal; };
+   // (a row may carry `ship`: { class: knobs } for the flagship's class, merged over the row once per world)
+   const tune = (w, id) => {
+      const T = SPECIAL_B_TUNE[id], row = T[w.difficultyKey] || T.normal, S = w._script, o = row.ship && S && row.ship[S.shipKey];
+      if (!o) return row;
+      return S.tuneRow && S.tuneOf === row ? S.tuneRow : (S.tuneOf = row, S.tuneRow = { ...row, ...o });
+   };
    const human = (s) => !!(s && (s.isPlayer || s.human));
    // co-op: human captains beyond the first (world.net is set after setup, so ask at the event, not in setup)
    const noMsl = (b) => { b.mag.kowsar = 0; return b; };
@@ -148,7 +160,7 @@ export function specialMissionsB(H) {
             later(S, T.waveAt, () => {
                const t = live(w, S.tankId);
                if (!t || S.phase >= 2) return;
-               const n = T.wave + extraCaptains(w) * 2, made = [];
+               const n = T.wave + extraCaptains(w) * T.coopWave, made = [];
                for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, ai: { huntId: S.own[i % S.own.length], press: true } })).id);
                S.boats.push(...made); S.total += n;
                objText(w, 'boats', `Versenken Sie alle Schnellboote (${S.sunk}/${S.total})`);
@@ -157,10 +169,12 @@ export function specialMissionsB(H) {
             // arrival of the tanker, measured along its route (the radio and the objective name it)
             S.eta = (dist(start, mid) + dist(mid, S.goal) - S.goal.r) / (T.kn * KN);
          },
-         // co-op: the flagship must survive and two ships draw the pack, so one boat less carries missiles
+         // co-op: the flagship must survive and two ships draw the pack, so `coopMsl` boats fewer carry missiles
+         // (one boat is a coarse step: the fraction is the chance, drawn from the seed, of one boat more)
          coop(w, S, humans) {
             if (humans.length < 2) return;
-            for (let i = S.boats.length - 1; i >= 0; i--) { const b = live(w, S.boats[i]); if (b && b.mag.kowsar) { b.mag.kowsar = 0; break; } }
+            const k = tune(w, 'hijack').coopMsl; let n = Math.floor(k) + (w.rng() < k % 1 ? 1 : 0);
+            for (let i = S.boats.length - 1; i >= 0 && n > 0; i--) { const b = live(w, S.boats[i]); if (b && b.mag.kowsar) { b.mag.kowsar = 0; n--; } }
          },
          update(w, dt, S) {
             const t = live(w, S.tankId), T = tune(w, 'hijack');
@@ -273,7 +287,7 @@ export function specialMissionsB(H) {
          env: { time: 'dusk', weather: 'overcast' }, type: 'ops', playableShips: ['Sachsen', 'Braunschweig', 'Burke', 'Daring'],
          recommendedShip: 'Sachsen', arena: 14000, timeLimit: 720, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'evac');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'evac');
             islands(w, [{ c: P(12200, 0), r: 3600, height: 420, seed: 131, lobes: 6, elong: 2, rot: Math.PI / 2, rough: 0.5, name: 'Porto Calvera' }]);
             const isl = w.obstacles[0], cx = isl.c.x - obstacleRadiusAt(isl, Math.PI);      // the coast west of the town
             // (sim y grows south.) The coast is not straight: the mole and the ferry's berth are measured from the coast at their own y
@@ -303,6 +317,12 @@ export function specialMissionsB(H) {
             later(S, 4, () => radio(w, 'Flottenkommando', `Porto Calvera wird geräumt. Laufen Sie in die Aufnahmezone vor dem Pier: Der erste von ${T.lifts} Transporten legt in ${Math.round((T.first - 4) / 10) * 10} Sekunden ab.`));
             later(S, 14, () => radio(w, 'Hafenkapitän', `Die Boote kommen nur zu Ihnen, wenn Sie in der Zone liegen und höchstens ${EVAC.slowKn} Knoten laufen. Jedes Fenster bleibt ${T.win} Sekunden offen, ein Transport braucht ${T.load}. ${T.miss ? 'Mehr als einen Transport dürfen wir nicht verpassen' : 'Wir dürfen keinen einzigen Transport verpassen'} – und die Fähre darf nicht sinken.`, 'warn'));
          },
+         // co-op: the corvette leaves the ferry's side for a captain's own plans, so her hull is scaled by `coopFerry`
+         coop(w, S, humans) {
+            const k = tune(w, 'evac').coopFerry, f = live(w, S.ferryId);
+            if (humans.length < 2 || !f || k === 1) return;
+            f.maxHP = Math.round(f.maxHP * k); f.hp = f.maxHP; S.ferryHP = f.maxHP;
+         },
          liftText(w, S, T) {
             // (clocks in steps of 10 s until the last 30 s, people in tens: the phone's band fades while nothing changes)
             const n = Math.min(T.lifts, S.lift + (S.stage === 1 ? 0 : 1)), exact = S.stage === 1 ? Math.max(0, S.winEnd - w.time) : Math.max(0, S.nextAt - w.time);
@@ -313,7 +333,7 @@ export function specialMissionsB(H) {
          },
          // a pack of boats down the coast, alternately from the north and the south, at the ferry
          wave(w, S, n, T, text) {
-            n += extraCaptains(w);
+            n += Math.round(T.coopWave * extraCaptains(w));
             const side = (S.waveN = (S.waveN || 0) + 1) % 2 ? 1 : -1;
             for (let i = 0; i < n; i++) {
                const b = add(w, 'Boghammar', 'enemy', P(S.zone.x - 1800 - i * 450, side * (10800 + (i % 2) * 500)), -side * Math.PI / 2,
@@ -430,7 +450,7 @@ export function specialMissionsB(H) {
          env: { time: 'dusk', weather: 'fog' }, type: 'stealth', playableShips: ['U212', 'Virginia'], recommendedShip: 'U212',
          arena: 15000, timeLimit: 720, stars: 3,
          setup(w, shipKey) {
-            const S = w._script, T = tune(w, 'bastion');
+            const S = w._script; S.shipKey = shipKey; const T = tune(w, 'bastion');
             // (sim y grows south.) the ice edge in the north: two low, flat barriers
             islands(w, [
                { c: P(-2500, -12200), r: 2300, height: 22, seed: 151, lobes: 5, elong: 3.2, rot: 0.08, rough: 0.35, name: 'Eiskante' },
@@ -536,8 +556,9 @@ export function specialMissionsB(H) {
                if (r > rate) { rate = r; why = y; }
                if (astern && d >= TRAIL.min && d <= TRAIL.max && b.depth > 0) inBand = true;
             }
-            // co-op: two boats are two sources of noise, the meter rises faster per captain beyond the first
-            S.meter = Math.max(0, Math.min(100, S.meter + (rate > 0 ? rate * (1 + TRAIL.coop * extraCaptains(w)) : rate) * step));
+            // co-op: the worst boat feeds the meter, so two captains are caught more often than one; `coop` scales its
+            // rise per captain beyond the first (below 0: slower)
+            S.meter = Math.max(0, Math.min(100, S.meter + (rate > 0 ? rate * (1 + T.coop * extraCaptains(w)) : rate) * step));
             S.peak = Math.max(S.peak, S.meter);
             w.score.player = Math.round(S.meter);
             // the reason stays in the objective for a few seconds after the meter stops rising (no flicker at a limit)

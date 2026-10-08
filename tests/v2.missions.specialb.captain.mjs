@@ -179,16 +179,28 @@ export function play(id, o = {}) {
 }
 export { BOARD, TRAIL };
 
-// Balance table:   node tests/v2.missions.specialb.captain.mjs <id> [runs = 30] [captains = 1]
+// Balance table:   node tests/v2.missions.specialb.captain.mjs <id> [runs = 30] [captains = 1] [ship] [difficulties]
+//    ship           the host's ship (default: the recommended one), e.g. Daring
+//    difficulties   comma-separated (default easy,normal,hard)
+//    TUNE (env)     JSON merged over the tune tables for a trial without editing them, e.g.
+//                   TUNE='{"hijack":{"normal":{"coopWave":3}},"TRAIL":{"coop":0.1}}'
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop()) && process.argv[2]) {
-   const id = process.argv[2], runs = +process.argv[3] || 30, n = +process.argv[4] || 1;
-   for (const diff of ['easy', 'normal', 'hard']) {
+   const id = process.argv[2], runs = +process.argv[3] || 30, n = +process.argv[4] || 1, ship = process.argv[5] && process.argv[5] !== '-' ? process.argv[5] : undefined;
+   const diffs = (process.argv[6] || 'easy,normal,hard').split(',');
+   if (process.env.TUNE) {
+      const over = JSON.parse(process.env.TUNE);
+      for (const m in over) {
+         if (m === 'TRAIL') { Object.assign(TRAIL, over[m]); continue; }
+         for (const d in over[m]) Object.assign(SPECIAL_B_TUNE[m][d], over[m][d]);
+      }
+   }
+   for (const diff of diffs) {
       let wins = 0, t = 0; const why = {};
       for (let i = 0; i < runs; i++) {
-         const w = play(id, { diff, seed: 1000 + i * 7919, n });
+         const w = play(id, { diff, seed: 1000 + i * 7919, n, ship });
          t += w.time;
          if (w.phase === 'won') wins++; else { const r = (w.result ? w.result.reason : 'no end').slice(0, 44); why[r] = (why[r] || 0) + 1; }
       }
-      console.log(`${id.padEnd(8)} ${diff.padEnd(6)} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg ${Math.round(t / runs)} s  ${JSON.stringify(why)}`);
+      console.log(`${id.padEnd(8)} ${diff.padEnd(6)} n=${n} ${ship || 'default'} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg ${Math.round(t / runs)} s  ${JSON.stringify(why)}${process.env.TUNE ? '  ' + process.env.TUNE : ''}`);
    }
 }

@@ -180,3 +180,33 @@ test('co-op redsea: from wave coopFrom on every launcher fires one missile more 
       }
    }
 });
+
+test('co-op special operations (second set): missile boats of the hijack pack, the hull of the ferry, the bastion meter; nothing for one captain', async () => {
+   const { SPECIAL_B_TUNE: B } = await import('../gamev2/missions_special_b.js');
+   const { World } = await import('../gamev2/state.js');
+   const { buildNetWorld } = await import('../gamev2/net/setup.js');
+   const net = (mission, difficulty, seed) => buildNetWorld({ mission, difficulty, seed, classes: ['Sachsen', 'Braunschweig'], loadouts: [null, null], self: 0 });
+   const armed = (w) => w._script.boats.filter(id => w.shipById(id).mag.kowsar > 0).length;
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const H = B.hijack[difficulty], E = B.evac[difficulty], T = B.bastion[difficulty];
+      assert.ok(H.coopMsl >= 0 && H.coopMsl <= H.msl && H.coopWave >= 0, 'hijack ' + difficulty);
+      assert.ok(E.coopWave >= 0 && E.coopFerry >= 1 && E.coopFerry <= 1.5, 'evac ' + difficulty);
+      assert.ok(T.coop > -0.5 && T.coop < 0.5, 'bastion ' + difficulty);
+      for (const seed of [3, 77, 4711]) {
+         const solo = new World(difficulty, { mission: 'hijack', ship: 'Sachsen', seed }), duo = net('hijack', difficulty, seed);
+         assert.equal(armed(solo), Math.min(H.msl, H.boats), `hijack ${difficulty}: one captain meets every missile boat`);
+         const less = armed(solo) - armed(duo);
+         assert.ok(less === Math.floor(H.coopMsl) || less === Math.ceil(H.coopMsl), `hijack ${difficulty}: ${less} boats lose their missile`);
+         const hull = (w) => w.shipById(w._script.ferryId).maxHP, e1 = new World(difficulty, { mission: 'evac', ship: 'Sachsen', seed });
+         assert.equal(hull(net('evac', difficulty, seed)), Math.round(hull(e1) * E.coopFerry), `evac ${difficulty}: hull of the ferry`);
+         assert.equal(e1._script.ferryHP, hull(e1));
+      }
+   }
+   // the ship row: only the named flagship class, only inside the table
+   for (const difficulty of ['normal', 'hard']) {
+      const H = B.hijack[difficulty], n = (ship) => new World(difficulty, { mission: 'hijack', ship, seed: 5 })._script.boats.length;
+      assert.equal(n('Sachsen'), H.boats); assert.equal(n('Burke'), H.boats);
+      assert.equal(n('Daring'), H.ship.Daring.boats);
+      assert.ok(H.ship.Daring.boats - H.boats <= 2 && Object.keys(H.ship).length === 1, difficulty);
+   }
+});
