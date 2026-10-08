@@ -31,6 +31,14 @@ export const SPECIAL_B_TUNE = {
       // (without its row 100/76/42 %), Braunschweig 100/58/28 % (without 100/0/3 %: all missiles of the pack go for the
       // flagship within 20 s, two RAM channels stop two, and four hits sink a corvette); two captains normal/hard:
       // Sachsen 58/33 %, Braunschweig 64/33 %; Burke and Daring stay far below (the rocket boats, not the missiles)
+      // co-op knobs without a value yet (see coop(): coopDmg = damage factor of every boat, coopBoats = negative, boats
+      // of the pack that never sail). Two captains, 40 runs each, normal/hard, since the freighters hold their column:
+      // Burke as it is 3/0 % (60 runs), coopDmg 0.7 -> 15/10 %, 0.5 -> 25/20 %; Daring as it is 5/0 %, 0.7 -> 13/15 %,
+      // 0.5 -> 30/23 %; Burke normal: coopMsl 12 -> 8 %, coopMsl 12 with coopDmg 0.6 -> 20 %, coopBoats -4 -> 25 %,
+      // -7 -> 35 %, -4 with coopDmg 0.6 -> 33 %, without its ship row 13 % (Daring 8 %). None reaches the band: the
+      // flagship lies alongside with boats still within BOARD.clear of the tanker (2.5 of those sent at it, 1.3 guards
+      // at 240 s; Sachsen and one captain: none) and is worn down before the party can cross, while the second
+      // captain's corvette fights from 9 km off instead of keeping at the flagship as the AI's corvette does
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
       normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 1.3, coopWave: 2,
          ship: { Daring: { boats: 13, msl: 13 }, Burke: { boats: 12, msl: 12 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
@@ -184,6 +192,7 @@ export function specialMissionsB(H) {
                if (!t || S.phase >= 2) return;
                const n = T.wave + extraCaptains(w) * T.coopWave, made = [];
                for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, ai: { huntId: S.own[i % S.own.length], press: true } })).id);
+               if (S.coopDmg) for (const id of made) w.shipById(id).dmgMult *= S.coopDmg;
                S.boats.push(...made); S.total += n;
                objText(w, 'boats', `Versenken Sie alle Schnellboote (${S.sunk}/${S.total})`);
                radio(w, 'Lagezentrum', `${n} weitere Schnellboote laufen von der Küste aus, dem Tanker entgegen.`, 'warn');
@@ -192,9 +201,20 @@ export function specialMissionsB(H) {
             S.eta = (dist(start, mid) + dist(mid, S.goal) - S.goal.r) / (T.kn * KN);
          },
          // co-op: the flagship must survive and two ships draw the pack, so `coopMsl` boats fewer carry missiles
-         // (one boat is a coarse step: the fraction is the chance, drawn from the seed, of one boat more)
+         // (one boat is a coarse step: the fraction is the chance, drawn from the seed, of one boat more). `coopDmg`
+         // scales what every boat deals (pack, guard and second pack): the fine knob, per flagship class
          coop(w, S, humans) {
             if (humans.length < 2) return;
+            // `coopBoats` (negative): that many boats of the pack never sail. The boats that go for the flagship lie
+            // around it at the tanker and keep the boarding party back, which hits the big destroyers hardest
+            for (let i = -(tune(w, 'hijack').coopBoats || 0); i > 0 && S.boats.length > 1; i--) {
+               const b = w.shipById(S.boats.pop());
+               w.removeShip(b, 'absent'); S.total--;
+               for (const list of [w.roster, w.bots]) { const j = list ? list.indexOf(b) : -1; if (j >= 0) list.splice(j, 1); }
+            }
+            objText(w, 'boats', `Versenken Sie alle Schnellboote (0/${S.total})`);
+            S.coopDmg = tune(w, 'hijack').coopDmg || 1;
+            if (S.coopDmg !== 1) for (const id of [...S.boats, ...S.guards]) { const b = live(w, id); if (b) b.dmgMult *= S.coopDmg; }
             const k = tune(w, 'hijack').coopMsl; let n = Math.floor(k) + (w.rng() < k % 1 ? 1 : 0);
             for (let i = S.boats.length - 1; i >= 0 && n > 0; i--) { const b = live(w, S.boats[i]); if (b && b.mag.kowsar) { b.mag.kowsar = 0; n--; } }
          },
