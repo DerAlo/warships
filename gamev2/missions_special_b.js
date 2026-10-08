@@ -27,9 +27,10 @@ export const SPECIAL_B_TUNE = {
       // shore battery and the tanker's distance to the anchorage (m) at which it opens fire · co-op: coopMsl boats
       // lose their missile (see coop()), coopWave boats more in the second pack per further captain · ship: knobs for
       // one flagship class (the Daring's air defence shrugs off the pack of the others)
-      // measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/31 %, Daring 100/61/31 %, Burke 100/57/23 %
-      // (without its row 100/76/42 %), Braunschweig 100/58/28 % (without 100/0/3 %: all missiles of the pack go for the
-      // flagship within 20 s, two RAM channels stop two, and four hits sink a corvette)
+      // measured on 240 runs (one captain easy/normal/hard; easy 120 runs): Sachsen 100/54/27 %, Daring 100/60/28 %, Burke
+      // 100/58/25 % (120 runs without its row 100/76/42 %), Braunschweig 100/60/24 % (hard: boats 8 -> 34 %, 9 -> 24 %,
+      // guard 4 -> 17 %, wave 5 -> 35 %, board 50 -> 33 %; 120 runs without its row 100/0/3 %: all missiles of the pack go
+      // for the flagship within 20 s, two RAM channels stop two, and four hits sink a corvette)
       // co-op knobs (see coop()): coopDmg = damage factor of every boat, coopBoats = negative, boats of the pack that
       // never sail (no value yet). What decides two captains is where the second one fights. A boat is a destroyer to
       // the AI (role dd): it breaks contact while two ships have it inside gun range, and it keeps outside its own
@@ -42,11 +43,20 @@ export const SPECIAL_B_TUNE = {
       // 82/57 %, Daring 79/58 %, Braunschweig 59/33 % (its own row, unchanged). Now: normal coopMsl 0 -> Sachsen 59 %,
       // Burke 63 %, Daring 66 % (coopDmg 1.12 -> 42 %, 1.03 -> 59 %); hard coopMsl 0 -> Sachsen 12 %, Burke 30 %, Daring
       // 40 % (coopDmg 1.12 -> 23 %, 1.06 -> 32 %); Sachsen hard coopMsl 1.5 -> 44 %, 1 -> 35 %, 0.7 -> 25 %
+      // Since the boats keep off every flagship (ai.shy) they no longer stand in the boarding party's way of a Burke or
+      // Daring whose second captain hunts far off: every loss there is now the flagship sunk by the missiles it draws
+      // alone. Two captains, 120 runs, normal/hard, second captain escorting | hunting (HIJACK_2ND=hunt), with the
+      // values of the paragraph above: Sachsen 59/25 | 32/13 %, Burke 63/30 | 39/8 %, Daring 59/31 | 36/6 %, Braunschweig
+      // 59/33 | 64/42 % (a corvette is better off with the second ship drawing boats away). The rows now sit in the
+      // upper half of the band for the escorting captain, so that the hunting one keeps a chance. Now, same layout:
+      // Sachsen coopMsl 0.3 / 1.1 -> 64/36 | 38/18 %; Burke coopMsl 0.2 / 0.3 -> 65/38 | 43/7 % (hard 0.5 -> 41 | 9 %);
+      // Daring coopDmg 1.01 / 1.02 -> 64/34 | 37/8 %; Braunschweig normal unchanged 59 | 64 %, hard with boats 9 and
+      // coopDmg 1 -> 16 | 36 %, 0.97 -> 22 | 44 %, 0.94 -> 30 | 45 %, 0.92 -> 29 | 46 %
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
-      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 0, coopWave: 2,
-         ship: { Daring: { boats: 13, msl: 13, coopDmg: 1.03 }, Burke: { boats: 12, msl: 12 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
-      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 0.7, coopWave: 2,
-         ship: { Daring: { boats: 11, msl: 10, coopMsl: 0, coopDmg: 1.06 }, Burke: { msl: 10, coopMsl: 0 }, Braunschweig: { boats: 8, msl: 3, coopMsl: 0 } } },
+      normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 0.3, coopWave: 2,
+         ship: { Daring: { boats: 13, msl: 13, coopMsl: 0, coopDmg: 1.01 }, Burke: { boats: 12, msl: 12, coopMsl: 0.2 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
+      hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 1.1, coopWave: 2,
+         ship: { Daring: { boats: 11, msl: 10, coopMsl: 0, coopDmg: 1.02 }, Burke: { msl: 10, coopMsl: 0.3 }, Braunschweig: { boats: 9, msl: 3, coopMsl: 0, coopDmg: 0.94 } } },
    },
    evac: {
       // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
@@ -60,6 +70,7 @@ export const SPECIAL_B_TUNE = {
       // 100/63/29 % (without 100/69/38 %). Two captains, 120 runs, normal/hard (coopFerry of the row -> rate): Sachsen
       // 61/29 % and Daring 57/33 % on the row's own 1.2/1.34; Braunschweig normal 1.2 -> 67 %, 1.17 -> 63 %, hard 1.34
       // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
+      // One captain again on 240 runs (recommended ship, unchanged values): 100/62/33 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
       normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
          ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { ferry: 0.85, coopFerry: 1.27 } } },
@@ -78,6 +89,7 @@ export const SPECIAL_B_TUNE = {
       normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0, coop: -0.15 },
       // fish: s the released hunter boat must hold a boat in its sonar before it fires a torpedo (see FISH; 0 = never)
       // hard, 120 runs: one captain 23 %, two captains 33 % (caught 16 with the torpedo: 15 % and 23 %)
+      // one captain on 240 runs (easy/normal/hard): 100/62/24 %
       hard: { trail: 100, kn: 6, held: 11, caught: 14, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5, coop: 0, fish: 6 },
    },
 };

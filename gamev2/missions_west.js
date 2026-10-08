@@ -38,6 +38,10 @@ export const WEST_TUNE = {
       // 47 / 49 / 48 % with bat [7, 7]), the batteries do. bat [8, 8] (as it was) -> 19 %, [8, 7] -> 19 %, [7, 8] -> 27 %,
       // [7, 7] -> 31 %. Two captains, 120 runs: bat [8, 8] -> 39 %, [7, 7] -> 48 %, with coopBat 1 -> 37 %, 2 -> 34 %;
       // bat [7, 8] with coopBat 1 -> 37 %, 2 -> 33 %
+      // Measured again with these values (one captain 200 runs, normal/hard): Sachsen 65/27 %, Burke 71/25 %, Daring
+      // 75/24 %; two captains (Sachsen, 120 runs) 58/33 %. Normal is too easy for the two destroyers and the batteries
+      // do not reach the Burke there: 12 (as it is), 13 or 15 missiles each -> 71 % every time; Daring 9 (as it is) ->
+      // 75 %, 10 -> 69 %, 11 -> 65 % (200 runs, tried with a factor per class in place of the fixed 2 / 1.5, not kept)
       hard: { boats: 5, coopBoats: -2, bat: [7, 8], coopBat: 2 },
    },
    redsea: {
