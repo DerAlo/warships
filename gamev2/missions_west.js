@@ -29,7 +29,8 @@ export const WEST_TUNE = {
    hormus: {
       easy: { boats: 4, coopBoats: 0 },
       // two captains on 240 runs: -1 -> 71 %, on 120 runs: 0 -> 48 %, -1 with coopDmg 1.25 -> 59 %, 1.5 -> 53 %, 2 -> 39 %
-      normal: { boats: 5, coopBoats: -1, coopDmg: 1.2 },
+      // since the freighters hold their column (no more circles): coopDmg 1.2 -> 76 %, 1.6 -> 65 %, 1.9 -> 58 % (120 runs)
+      normal: { boats: 5, coopBoats: -1, coopDmg: 1.9 },
       hard: { boats: 5, coopBoats: -2 },      // measured, two captains on 60 runs: 0 -> 13 %, -1 -> 17 %, -2 -> 25 % (one captain: 23 %)
    },
    redsea: {
@@ -46,8 +47,9 @@ export const WEST_TUNE = {
    giuk: {
       easy: { coopHelo: 2, coopHp: 1 },
       // two captains on 240 runs: 1.45 -> 54 %, 1.4 -> 55 %, 1.385 -> 57 %, 1.37 -> 64 %, 1.35 -> 65 %, 1.3 -> 71 %
-      normal: { coopHelo: 2, coopHp: 1.38 },
-      hard: { coopHelo: 2, coopHp: 1.05 },
+      normal: { coopHelo: 2, coopHp: 1.48 },
+      // two captains on 120 runs: 0.98 -> 54 %, 1.06 -> 47 %, 1.3 -> 26 %
+      hard: { coopHelo: 2, coopHp: 1.3 },
    },
 };
 
@@ -611,7 +613,7 @@ export function westMissions(H) {
                const friends = w.ships.filter(s => s.alive && s.side === 'player');
                for (let k = 0; k < 12 && friends.some(f => hyp(f.pos, pos) < 10500); k++) pos = P(Math.min(pos.x + 900, 17500), pos.y + Math.sign(side || 1) * 700);
                // the boat lies in ambush beside the track and creeps towards it; the script fires its tubes (see update)
-               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 1.05, 0.9) * (S.coopHp || 1), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
+               const s = add(w, cls, 'enemy', pos, Math.PI, { depth: 1, speedKn: 5, hpMult: by(w, 0.8, 0.98, 0.96) * (S.coopHp || 1), dmgMult: by(w, 0.6, 1, 1), ai: { route: [P(pos.x - 600, pos.y * 0.75)] } });
                for (const k of Object.keys(s.mag || {})) s.mag[k] = 0;      // torpedoes only
                // the report is a datum, not a fix: a red area on the map that contains the boat somewhere
                const o = (((w.seed >>> 0) * 31 + S.subs.length * 977) % 1000) / 1000 * Math.PI * 2;
