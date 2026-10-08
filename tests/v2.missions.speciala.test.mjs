@@ -544,9 +544,56 @@ test('special A: the ship knobs change the tuning only for a host in that class'
       if (!D) { assert.equal(w._script.T, T); continue; }
       seen++;
       assert.deepEqual(Object.keys(T.ship), ['Daring']);
-      for (const k in D) { assert.equal(w._script.T[k], D[k]); assert.ok(D[k] / T[k] > 0.9 && D[k] / T[k] < 1.7, `${id} ${diff} ${k}: ${D[k]} against ${T[k]}`); }
+      for (const k in D) {
+         assert.equal(w._script.T[k], D[k]);
+         if (Array.isArray(D[k])) assert.equal(D[k].length, 3, `${id} ${diff} ${k}: a co-op knob of the class is a list like the row's`);
+         else assert.ok(D[k] / T[k] > 0.9 && D[k] / T[k] < 1.7, `${id} ${diff} ${k}: ${D[k]} against ${T[k]}`);
+      }
       if (D.cable) assert.equal(w._script.cable, D.cable);
+      // a co-op knob of the class counts when that class hosts, whatever the second captain sails
+      if (D.coopCable) { assert.equal(net(id, 2, diff, 'Daring')._script.cable, D.cable + D.coopCable[0]); assert.equal(net(id, 2, diff)._script.cable, T.cable + T.coopCable[0]); }
       if (D.boatDmg && id === 'rig') assert.ok(Math.abs(boatDmg(w) / boatDmg(mk(id, { diff })) - D.boatDmg / T.boatDmg) < 1e-9);
    }
    assert.ok(seen >= 3);
+});
+
+test('special A/rescue: how well a wave is armed differs with the seed by no more than boatVar, the same for every boat of it', () => {
+   for (const diff of DIFFS) {
+      const T = RT[diff], seen = new Set();
+      assert.ok(T.boatVar > 0 && T.boatVar <= 0.5, `${diff} boatVar ${T.boatVar}`);
+      for (let seed = 1; seed <= 40; seed++) {
+         const w = mk('rescue', { diff, seed }), S = w._script, d = S.def;
+         S.tugId = w.player.id;
+         d.boats(w, S, S.T, T.boats);
+         if (T.wave2) d.boats(w, S, S.T, T.wave2);
+         assert.equal(S.boats.length, T.boats + T.wave2);
+         const f = S.boats.map(id => w.shipById(id).dmgMult / T.boatDmg);
+         for (const x of f) assert.ok(x >= 1 - T.boatVar - 1e-9 && x <= 1 + T.boatVar + 1e-9, `${diff} seed ${seed}: factor ${x}`);
+         for (let i = 1; i < T.boats; i++) assert.equal(f[i], f[0], 'one wave, one armament');
+         if (T.wave2) assert.notEqual(f[T.boats], f[0], 'the second wave is armed for itself');
+         const again = mk('rescue', { diff, seed }); again._script.tugId = again.player.id; d.boats(again, again._script, again._script.T, T.boats);
+         assert.equal(boatDmg(again), boatDmg(w), 'the same seed arms the wave the same way (net replay)');
+         seen.add(f[0].toFixed(2));
+      }
+      assert.ok(seen.size > 20, `${diff}: the armament spreads over the seeds (${seen.size} values)`);
+   }
+});
+
+test('special A: the opponent in the mission card counts the boats one or two captains can meet', () => {
+   // the lobby seats two captains; the card names the range over the three difficulties
+   const range = (id) => def(id).fleet.foe.match(/(\d+)–(\d+) bewaffnete Boote/).slice(1).map(Number);
+   for (const id of IDS) {
+      const ns = [];
+      for (const diff of DIFFS) for (const n of [1, 2]) {
+         const T = SPECIAL_A_TUNE[id][diff], more = n > 1 && T.coopBoats ? T.coopBoats[0] : 0;
+         const w = n > 1 ? net(id, n, diff) : mk(id, { diff });
+         if (id === 'rescue') { ns.push(T.boats + T.wave2 + more * (T.wave2 ? 2 : 1)); assert.ok(obj(w, 'boats').text.includes('0/' + ns[ns.length - 1])); }
+         else { ns.push(T.boats + more); assert.equal(w._script.boats.length, ns[ns.length - 1], `${id} ${diff}, ${n} captains`); }
+      }
+      assert.deepEqual(range(id), [Math.min(...ns), Math.max(...ns)], `${id}: ${def(id).fleet.foe}`);
+   }
+   const own = (id, re) => def(id).fleet.own.match(re).slice(1).map(Number);
+   const span = (a) => [Math.min(...a), Math.max(...a)];
+   assert.deepEqual(own('rig', /(\d+)–(\d+) Boardingteams/), span(DIFFS.map(k => SPECIAL_A_TUNE.rig[k].teams)));
+   assert.deepEqual(own('rescue', /(\d+)–(\d+) Schleppleinen/), span(DIFFS.map(k => RT[k].lines)));
 });

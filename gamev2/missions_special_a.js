@@ -13,7 +13,9 @@ import { obstacleT } from './utils.js';
 // Co-op knobs are lists [with 2, 3, 4 captains] (net/setup.js seats the second captain on the corvette, further ones
 // sail a ship of their own); `ship` holds what differs when the host sails that class instead of the recommended one.
 // Measured with tests/v2.missions.speciala.captain.mjs, 60 runs per cell (one captain, Sachsen: cable 100 / 52 / 25 %,
-// rig 100 / 63 / 37 %, rescue 100 / 53 / 25 %).
+// rig 100 / 52 / 22 %, rescue 100 / 62 / 32 %). The runner's 60 seeds are a fixed sample and no fair one for every cell:
+// over 240 seeds the same three rows read cable 100 / 47 / 18 %, rig 100 / 60 / 30 %, rescue 100 / 55 / 30 % (rig came out
+// 10 points easier than its first 60 seeds said). Rig and rescue are tuned so that both samples lie in the band.
 // cable: `cable` s the seabed cable holds while the anchor drags, `ships` merchants in the area, `look` s
 // a merchant has to be in sight until it is identified, `board` s alongside until the boarding team has the
 // bridge, `boats` armed boats (`boatHp` / `boatDmg` their hull and damage factors), `corvette` s into the
@@ -23,26 +25,35 @@ import { obstacleT } from './utils.js';
 // boarding, two decoys, four boats), so the cable time is the main knob; hard therefore has the longer cable of the two.
 // Co-op: `coopCable` s the cable holds longer. Bot captains who clear other merchants than the host gain nothing (the
 // host's boarding decides), normal: 0 -> 48 / 48 / 45 %, 6 -> 62 / 62 / 57 %; hard without it 23 / 27 / 30 %.
-// Daring (30 kn, alongside sooner): normal 68 % with the Sachsen's cable, 60 % with 215 s; hard 32 %.
+// Daring (30 kn, alongside sooner): normal 68 % with the Sachsen's cable, 60 % with 215 s; hard 32 %. With a second
+// captain: normal 67 % with the 6 s, 62 % with 3 s (240 seeds: 63 / 60 %, and 51 % with none); hard 28 %.
 export const SPECIAL_A_TUNE = {
    cable: {
       easy: { cable: 450, ships: 4, look: 2, board: 14, boats: 2, boatHp: 0.7, boatDmg: 0.7, corvette: 0, hint: true, decoys: 0, coopCable: [0, 0, 0] },
       normal: { cable: 220, ships: 5, look: 3, board: 20, boats: 3, boatHp: 1, boatDmg: 1, corvette: 120, hint: false, decoys: 1, coopCable: [6, 6, 6],
-         ship: { Daring: { cable: 215 } } },
+         ship: { Daring: { cable: 215, coopCable: [3, 6, 6] } } },
       hard: { cable: 232, ships: 5, look: 4, board: 26, boats: 4, boatHp: 1.2, boatDmg: 1.2, corvette: 90, hint: false, decoys: 2, coopCable: [0, 0, 0] },
    },
    // rig: `valves` s until the occupiers open the valves, `boats` armed boats moored at the platform of which `guards`
    // stay there until a warship is inside RIG.guard, `teams` boarding teams on board, `board` s a team needs on the
    // platform, `post` missiles of the launcher on the reef fired `salvo` at a time every `every` s.
-   // Measured with one bot captain (Sachsen, 30 runs): 100 % / 60 % / 30 %. The captain's team is on the platform after
-   // 210-260 s on every level, so the valves do not decide his runs: he loses his ship to the boats' rockets while he
-   // lies stopped in the circle (number of boats x boatDmg is the knob that moves the win rate).
-   // Co-op: `coopBoats` more boats at the platform, the rockets of every boat times `coopDmg`. Without them 2 / 3 / 4
-   // captains win 72 / 97 / 100 % (normal) and 53 / 83 / 88 % (hard). Normal, two captains: coopDmg 1.1 -> 68 %, 1.2 -> 57 %;
-   // three (2 more boats): 0.9 -> 72 %, 1 -> 48 %; four (2 more): 1 -> 70 %, 1.12 -> 58 %. Hard: two 1.15 -> 32 %,
-   // three with 2 more boats 27 %, four with 2 more boats 62 %, and 1.2 -> 33 %.
-   // Daring (two Phalanx, the tougher hull): 97 % / 85 % with the Sachsen's values. boatDmg normal 1.9 -> 73 %, 2.4 -> 40 %;
-   // hard 1.7 -> 40 %, 1.85 -> 40 %, 1.9 -> 35 %, 1.95 -> 22 %, 2.2 -> 12 %.
+   // The captain's team is on the platform after 210-260 s on every level, so the valves do not decide his runs: he loses
+   // his ship to the boats' rockets and missiles while he lies stopped in the circle (number of boats x boatDmg is the
+   // knob that moves the win rate). One captain, Sachsen, 60 / 240 seeds: normal boatDmg 1.38 -> 63 / 73 %, 1.46 -> 55 / 66 %,
+   // 1.5 -> 50 / 63 %, 1.55 -> 52 / 60 %, 1.6 -> 48 / 56 %; hard 1.2 -> 37 / 50 %, 1.27 -> 28 / 41 %, 1.3 -> 23 / 37 %,
+   // 1.35 -> 22 / 30 %, 1.4 -> 20 / 25 %, 1.5 -> 17 / 22 %.
+   // Co-op: `coopBoats` more boats at the platform, the damage of every boat times `coopDmg` (the factors of the earlier
+   // sweeps below are rebased on today's boatDmg, the boats hit as hard as they did then). Without them 2 / 3 / 4 captains
+   // won 72 / 97 / 100 % (normal) and 53 / 83 / 88 % (hard). Two captains, 60 / 240 seeds: normal 1 -> 62 / 59 %, 1.05 -> 60 / 52 %;
+   // hard 1 -> 38 / 36 %, 1.02 -> 33 / 33 %, 1.05 -> 25 / 27 %. Three (2 more boats): normal 55 %, hard 27 %; four (2 more):
+   // normal 58 %, hard 33 % (60 seeds).
+   // Daring: 97 % / 85 % with the Sachsen's old values. What makes it stronger here (hard, 120 seeds, one property set to the
+   // Sachsen's at a time): 80 % -> 42 % with the Sachsen's air defence missiles, 65 % without the two Phalanx, 64 % with the
+   // Sachsen's hull points; gun, size, speed and signature change nothing. More missiles from the reef are no finer lever:
+   // on normal they change nothing, on hard a third salvo of four takes 91 % to 25 %. So the boats' damage stays the knob,
+   // and over 240 seeds it is no steeper than for the Sachsen (about 1 point per 1 % damage): normal 1.9 -> 74 %, 2.1 -> 62 %,
+   // 2.2 -> 53 %, 2.3 -> 46 %; hard 1.5 -> 62 %, 1.7 -> 42 %, 1.85 -> 31 %, 1.9 -> 28 %, 1.92 -> 24 %, 2.0 -> 18 %.
+   // Daring with a second captain, 60 / 240 seeds: normal 62 / 59 %, hard 32 / 25 %.
    rig: {
       easy: { valves: 480, boats: 3, guards: 1, boatHp: 0.7, boatDmg: 0.6, teams: 3, board: 20, post: 3, salvo: 1, every: 40, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
       normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.55, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1, 0.85, 1],
@@ -53,19 +64,21 @@ export const SPECIAL_A_TUNE = {
    // rescue: `drift` m/s the merchant drifts toward the cliffs, `lines` tow lines on board, `pass` s it takes to pass one,
    // `swell` share by which the seas raise the line load on every crest, `boats` armed boats that come for the tug when the
    // first line is fast, `wave2` more of them `gap` s later, at `boatKn` knots.
-   // Bot captain, 30 runs per cell: easy 100 %, normal 57 %, hard 27 % (every loss: the tug is sunk by the boats; the
-   // bot never parts a line). The rate is steep in boatDmg: normal 2.2 -> 80 %, 2.6 -> 37 %.
-   // `boatVar` (optional, not set): share by which the damage of a wave differs with the seed, either way. Measured at 0.4,
-   // one captain, 60 runs: normal 2.1 -> 78 %, 2.4 -> 62 %, 2.7 -> 48 %; hard 1.5 -> 45 %, 1.7 -> 32 %, 1.9 -> 20 % (half as steep).
-   // Co-op: `coopBoats` more boats per wave, their damage times `coopDmg`. Without them 2 / 3 / 4 captains win 62 / 77 / 97 %
-   // (normal) and 15 / 63 / 90 % (hard). Normal: three with 1 more 62 %; four with 2 more 75 %, and coopDmg 1.25 -> 48 %.
-   // Hard: two 0.92 -> 32 %; three with 1 more 38 %, and 1.05 -> 28 %; four with 2 more 50 %, and 1.25 -> 32 %.
-   // Daring: normal 57 %; hard 18 % with the Sachsen's boatDmg, 28 % at 1.62.
+   // Every loss of the bot captain: the tug is sunk by the boats (he never parts a line). With every wave armed alike the
+   // rate is steep in boatDmg, one captain, 240 seeds: normal 2.2 -> 71 %, 2.3 -> 64 %, 2.4 -> 55 %, 2.5 -> 51 %, 2.6 -> 42 %;
+   // hard 1.5 -> 42 %, 1.6 -> 29 %, 1.7 -> 23 %, 1.8 -> 16 %, 1.9 -> 13 %; two captains hard coopDmg 0.85 -> 47 %, 0.92 -> 33 %, 1 -> 20 %.
+   // `boatVar`: share by which the damage of a wave differs with the seed, either way. At 0.4, 240 seeds: normal 2.3 -> 58 %,
+   // 2.45 -> 51 %, 2.55 -> 48 %, 2.7 -> 44 %, 2.9 -> 35 % (half as steep); hard 1.6 -> 34 %, 1.7 -> 30 %, 1.8 -> 23 %, 1.9 -> 18 %,
+   // 2.0 -> 13 % (two thirds); two captains hard coopDmg 0.88 -> 43 %, 0.92 -> 41 %, 0.96 -> 34 %, 1 -> 29 % (two thirds).
+   // Co-op: `coopBoats` more boats per wave, their damage times `coopDmg`. Two captains, 60 / 240 seeds: normal 65 / 56 %,
+   // hard 28 / 29 %; three with 1 more: 65 / 59 % and 32 / 34 %; four with 2 more: 60 / 59 % and 35 / 35 %.
+   // Daring, 60 / 240 seeds: normal 60 / 67 % with the Sachsen's boatDmg, 62 / 61 % at 2.55, 55 / 57 % at 2.65; hard 27 / 29 %.
+   // With a second captain: normal 65 / 59 %, hard 25 / 27 %.
    rescue: {
-      easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
-      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4, coopBoats: [0, 1, 2], coopDmg: [1, 1, 1.12] },
-      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7, coopBoats: [0, 1, 2], coopDmg: [0.92, 1.05, 1.25],
-         ship: { Daring: { boatDmg: 1.62 } } },
+      easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6, boatVar: 0.4, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
+      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [1, 1, 1.12],
+         ship: { Daring: { boatDmg: 2.55 } } },
+      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [1, 1.05, 1.25] },
    },
 };
 // rig: the platform (x, y) and the radius in which any shell or warhead counts as a hit on it (r); a boat leaves its
