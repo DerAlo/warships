@@ -180,8 +180,11 @@ function decide(b, w, d) {
       want = ai.dodgeHeading; tel = 4;
    } else if (ai.route) {
       const pt = ai.route[Math.min(ai.routeIdx, ai.route.length - 1)];
-      if (dist2(b.pos, pt) < 700 * 700 && ai.routeIdx < ai.route.length - 1) ai.routeIdx++;
-      want = Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x); goal = pt;
+      // a waypoint inside the turning circle cannot be reached, the hull would orbit it for good: an
+      // intermediate one counts as passed, for the last one a freighter runs on until it can turn onto it
+      const inside = insideTurn(b, pt), last = ai.routeIdx >= ai.route.length - 1;
+      if (!last && (inside || dist2(b.pos, pt) < 700 * 700)) ai.routeIdx++;
+      want = last && inside && b.type === 'TR' ? b.heading : Math.atan2(pt.y - b.pos.y, pt.x - b.pos.x); goal = pt;
       if (ai.zigzag) want += Math.sin(w.time / 20 + ai.zigPhase) * 25 * DEG;
       tel = 4;
       if (threat.near && ai.convoy && d.smarts > 0.5) want += clamp(angleDelta(want, threat.away), -0.5, 0.5);
@@ -591,13 +594,21 @@ function navDetour(b, w, want, goal) {
    return Math.atan2(ai.navWp.y - b.pos.y, ai.navWp.x - b.pos.x);
 }
 
+// A freighter on a route sails in its column (flagged as a convoy or not).
+const column = (s) => !!(s.ai && (s.ai.convoy || (s.type === 'TR' && s.ai.route)));
+// Is the point inside one of the hull's two turning circles (full rudder)?
+function insideTurn(b, pt) {
+   const R = b.cfg.turnR || 700, nx = -Math.sin(b.heading) * R, ny = Math.cos(b.heading) * R, lim = R * R * 0.9;
+   return (pt.x - b.pos.x - nx) ** 2 + (pt.y - b.pos.y - ny) ** 2 < lim || (pt.x - b.pos.x + nx) ** 2 + (pt.y - b.pos.y + ny) ** 2 < lim;
+}
+
 // Keep ~800 m between friendly hulls so the AI does not stack into one torpedo lane.
 function separation(b, w, want) {
    let px = 0, py = 0;
    for (const o of w.ships) {
       if (o === b || !o.alive || o.side !== b.side) continue;
       // a freighter keeps station in its column; the escorts give way to it, not the reverse
-      if (b.ai.convoy && !o.ai?.convoy) continue;
+      if (column(b) && !column(o)) continue;
       const dx = b.pos.x - o.pos.x, dy = b.pos.y - o.pos.y;
       const d2 = dx * dx + dy * dy;
       const R = 650 + (b.cfg.hull.L + o.cfg.hull.L);
@@ -610,7 +621,7 @@ function separation(b, w, want) {
    const ax = Math.cos(want) + px / m * Math.min(1.2, m * 2), ay = Math.sin(want) + py / m * Math.min(1.2, m * 2);
    const out = Math.atan2(ay, ax);
    // a slow freighter swinging 60 deg out of line only rams the next column
-   return b.ai.convoy ? want + clamp(angleDelta(want, out), -0.5, 0.5) : out;
+   return column(b) ? want + clamp(angleDelta(want, out), -0.5, 0.5) : out;
 }
 
 // Pick the candidate heading nearest to `want` whose look-ahead line is clear of land and the

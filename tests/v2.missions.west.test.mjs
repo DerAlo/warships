@@ -282,6 +282,25 @@ test('redsea: destroyed ramps stop firing and complete the optional objective, t
    assert.ok(w.time < 640, 'through before the limit: ' + w.time);
    assert.equal(opStars(w), 2);
 });
+// A beta tester's report: with the flagship close alongside, a container ship left its column and went
+// round in circles (it gave way to the flagship, then orbited a waypoint inside its turning circle).
+test('redsea: a freighter keeps its course with the flagship close alongside', () => {
+   for (const seed of [2, 3, 5]) {
+      const w = new World('easy', { mission: 'redsea', ship: 'Burke', seed });
+      const p = w.player, T = w._script.convoy[1];
+      let h = T.heading, acc = 0, most = 0;
+      while (w.phase === 'playing' && w.time < 300 && T.alive) {
+         const side = T.heading - Math.PI / 2;
+         const to = { x: T.pos.x + Math.cos(side) * 220 + Math.cos(T.heading) * 300, y: T.pos.y + Math.sin(side) * 220 + Math.sin(T.heading) * 300 };
+         steerTo(p, to, hyp(p.pos, T.pos) > 600 ? 4 : 3);
+         w.update(DT);
+         acc += Math.atan2(Math.sin(T.heading - h), Math.cos(T.heading - h)); h = T.heading;
+         most = Math.max(most, Math.abs(acc));
+      }
+      assert.ok(most < 1.6, 'seed ' + seed + ': the freighter turned ' + most.toFixed(2) + ' rad off its course');
+   }
+});
+
 test('redsea: two container ships lost = defeat', () => {
    const w = new World('normal', { mission: 'redsea', ship: 'Burke', seed: 4 });
    const S = w._script;
