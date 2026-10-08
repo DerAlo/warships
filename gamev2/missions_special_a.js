@@ -45,9 +45,9 @@ export const SPECIAL_A_TUNE = {
    // hard 1.7 -> 40 %, 1.85 -> 40 %, 1.9 -> 35 %, 1.95 -> 22 %, 2.2 -> 12 %.
    rig: {
       easy: { valves: 480, boats: 3, guards: 1, boatHp: 0.7, boatDmg: 0.6, teams: 3, board: 20, post: 3, salvo: 1, every: 40, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
-      normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.38, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1.15, 0.95, 1.12],
+      normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.55, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1, 0.85, 1],
          ship: { Daring: { boatDmg: 2.1 } } },
-      hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.2, teams: 2, board: 40, post: 8, salvo: 2, every: 28, coopBoats: [0, 2, 2], coopDmg: [1.15, 1, 1.2],
+      hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.35, teams: 2, board: 40, post: 8, salvo: 2, every: 28, coopBoats: [0, 2, 2], coopDmg: [1.02, 0.89, 1.07],
          ship: { Daring: { boatDmg: 1.92 } } },
    },
    // rescue: `drift` m/s the merchant drifts toward the cliffs, `lines` tow lines on board, `pass` s it takes to pass one,
