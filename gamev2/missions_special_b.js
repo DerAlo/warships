@@ -70,6 +70,7 @@ export const SPECIAL_B_TUNE = {
       // 100/63/29 % (without 100/69/38 %). Two captains, 120 runs, normal/hard (coopFerry of the row -> rate): Sachsen
       // 61/29 % and Daring 57/33 % on the row's own 1.2/1.34; Braunschweig normal 1.2 -> 67 %, 1.17 -> 63 %, hard 1.34
       // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
+      // One captain again on 240 runs (recommended ship, unchanged values): 100/62/33 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
       normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
          ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { ferry: 0.85, coopFerry: 1.27 } } },
@@ -88,6 +89,7 @@ export const SPECIAL_B_TUNE = {
       normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0, coop: -0.15 },
       // fish: s the released hunter boat must hold a boat in its sonar before it fires a torpedo (see FISH; 0 = never)
       // hard, 120 runs: one captain 23 %, two captains 33 % (caught 16 with the torpedo: 15 % and 23 %)
+      // one captain on 240 runs (easy/normal/hard): 100/62/24 %
       hard: { trail: 100, kn: 6, held: 11, caught: 14, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5, coop: 0, fish: 6 },
    },
 };
