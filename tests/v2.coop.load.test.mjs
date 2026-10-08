@@ -34,7 +34,10 @@ test('co-op operations: every further captain sails with the full magazines of h
          const shared = def.id === 'countdown' ? w.net.humans.filter(h => cruise(h) != null) : [];
          if (shared.length) {
             const T = EAST_TUNE.countdown[difficulty], sum = shared.reduce((a, h) => a + cruise(h), 0);
-            assert.equal(sum, T.tlam + T.coopTlam, `countdown ${difficulty}: cruise missiles of the group`);
+            // coopTlam: one value or [two, three, four captains]; a fraction is one missile more in that share of the games
+            const c = Array.isArray(T.coopTlam) ? T.coopTlam[n - 2] : T.coopTlam;
+            assert.ok(c >= 0 && c <= 3, `countdown ${difficulty}: coopTlam ${c}`);
+            assert.ok(sum >= T.tlam + Math.floor(c) && sum <= T.tlam + Math.ceil(c), `countdown ${difficulty}: cruise missiles of the group: ${sum}`);
             for (const h of shared) assert.ok(cruise(h) >= Math.floor(sum / shared.length) && cruise(h) <= Math.ceil(sum / shared.length) && cruise(h) > 0, `countdown ${difficulty}: share of captain ${h.slot}: ${cruise(h)}`);
          }
          for (const h of w.net.humans.slice(1)) {
@@ -141,30 +144,46 @@ test('co-op philsea: the escorts of the Shandong fire earlier at a group of thre
    }
 });
 
-test('co-op reefs: the relief group grows by coopFrig frigates at most, by none for one captain', () => {
+test('co-op reefs: the relief group grows by coopFrig frigates at most from coopFrigFrom captains on, by none for one captain', () => {
    for (const difficulty of ['easy', 'normal', 'hard']) {
       const T = EAST_TUNE.reefs[difficulty];
-      assert.ok(T.coopFrig >= 0 && T.coopFrig <= 2 && T.coopFrigHp > 0 && T.coopFrigHp <= 1, difficulty);
+      assert.ok(T.coopFrig >= 0 && T.coopFrig <= 2 && T.coopFrigHp > 0 && T.coopFrigHp <= 1 && T.coopFrigFrom >= 2 && T.coopFrigFrom <= 4, difficulty);
       for (const n of [1, 2, 3, 4]) {
          const w = build('reefs', n, 0, difficulty), S = w._script;
          for (const id of [S.radarId, ...S.bat]) { const site = siteById(w, id); damageSite(w, site, site.hp + 1, w.player, 'test'); }
          const group = S.relief.map(id => w.shipById(id)), extra = group.slice(T.relief.length);
-         assert.equal(extra.length, Math.min(T.coopFrig, n - 1), `${difficulty}, ${n} captains: frigates with the relief group`);
+         assert.equal(extra.length, Math.max(0, Math.min(T.coopFrig, n + 1 - T.coopFrigFrom)), `${difficulty}, ${n} captains: frigates with the relief group`);
          assert.deepEqual(group.slice(0, T.relief.length).map(s => s.cls), T.relief);
          for (const s of extra) { assert.equal(s.cls, 'Typ054A'); assert.ok(s.maxHP < SHIPS.Typ054A.hp * (T.coopFrigHp + 0.01) * w.difficulty.botHP + 1); }
       }
    }
 });
 
-test('co-op barents: the battle cruiser has a coopHp hull against three or more captains only', () => {
+test('co-op barents: the battle cruiser has the coopHp hull of the group (two / three / four captains), a single captain the full one', () => {
    for (const difficulty of ['easy', 'normal', 'hard']) {
       const T = EAST_TUNE.barents[difficulty], hull = (n) => { const w = build('barents', n, 0, difficulty), pj = w.shipById(w._script.pjId); assert.equal(pj.hp, pj.maxHP); return pj.maxHP; };
-      assert.ok(T.coopHp > 0.5 && T.coopHp <= 1.5, difficulty);
+      assert.ok(T.coopHp.length === 3 && T.coopHp.every(k => k > 0.5 && k <= 1.5), difficulty);
       const solo = hull(1);
-      assert.equal(hull(2), solo, difficulty + ': two captains');
-      for (const n of [3, 4]) assert.equal(hull(n), Math.round(solo * T.coopHp), `${difficulty}: ${n} captains`);
+      for (const n of [2, 3, 4]) assert.equal(hull(n), Math.round(solo * T.coopHp[n - 2]), `${difficulty}: ${n} captains`);
    }
-   assert.ok(EAST_TUNE.barents.normal.coopHp < 1);
+   assert.ok(EAST_TUNE.barents.normal.coopHp[1] < 1);
+});
+
+test('co-op strait: the second pack has coopFac boats more against three or more captains only', () => {
+   for (const difficulty of ['easy', 'normal', 'hard']) {
+      const T = EAST_TUNE.strait[difficulty];
+      assert.ok(T.coopFac >= 0 && T.coopFac <= 2, difficulty);
+      const pack = (n) => {
+         const w = build('strait', n, 0, difficulty), boats = () => w.ships.filter(x => x.side === 'enemy' && x.cls === 'Typ022').length;
+         while (w.time < T.w3 - 0.05) w.update(1 / 30);
+         const before = boats();
+         while (w.time < T.w3 + 0.1) w.update(1 / 30);
+         return boats() - before;
+      };
+      for (const n of [1, 2]) assert.equal(pack(n), T.fac2, `${difficulty}, ${n} captains`);
+      assert.equal(pack(3), T.fac2 + T.coopFac, `${difficulty}, 3 captains`);
+   }
+   assert.ok(EAST_TUNE.strait.normal.coopFac > 0);
 });
 
 test('co-op redsea: from wave coopFrom on every launcher fires one missile more at a destroyer with a captain', () => {

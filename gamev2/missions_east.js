@@ -23,9 +23,12 @@ export const EAST_TUNE = {
       // co-op: `coopHp` scales the battle cruiser's hull against three or more captains, who sink it less often
       // before its second salvo than two do. Measured on 60 runs with 2/3/4 captains: normal 1 -> 63/48/52 %,
       // 0.85 -> ./50/63 %, 0.75 -> ./58/67 %, 0.7 -> ./60/68 %; hard 1 -> 23/22/20 %; easy 1 -> 100/./97 % (30 runs)
-      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0, coopHp: 1 },
-      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4, coopHp: 0.75 },
-      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6, coopHp: 1 },
+      // 60 runs proved too few (the next 60 seeds differ by up to 15 points), so on 240 runs, one value per group
+      // [two, three, four captains]: normal 1 / 0.75 / 0.75 -> 61 (120 runs) / 64 / 70 %, four with 0.9 -> 65 %, 0.95 -> 61 %;
+      // hard 1 / 1 / 1 -> 16 / 24 / 27 % (120), two with 0.8 -> 24 % (120), 0.7 -> 30 %, 0.6 -> 40 % (120)
+      easy: { ally: 1, salvoAt: 120, granit: 12, oniks: 4, raids: 1, pjHp: 0.2, corv: 1, close: 8500, again: 540, granit2: 8, oniks2: 0, coopHp: [1, 1, 1] },
+      normal: { ally: 0.8, salvoAt: 120, granit: 20, oniks: 8, raids: 2, pjHp: 0.4, corv: 1, close: 14000, again: 480, granit2: 12, oniks2: 4, coopHp: [1, 0.75, 0.95] },
+      hard: { ally: 0.6, salvoAt: 110, granit: 24, oniks: 10, raids: 3, pjHp: 0.5, corv: 2, close: 13000, again: 460, granit2: 16, oniks2: 6, coopHp: [0.7, 1, 1] },
       ship: { Daring: t => ({ granit: Math.round(t.granit * 1.3), oniks: t.oniks + 2 }) },
    },
    reefs: {
@@ -35,18 +38,22 @@ export const EAST_TUNE = {
       // 2/3/4 captains: normal 2 -> 57/43/47 % (30 runs), 1 -> 58/55/58 % (60 runs), 0 -> 67/80/57 % (30 runs);
       // hard 2 -> 17/7/13 % (30), 1 -> 17/28/23 % (60), 0 -> 20/37/43 % (30); easy 2 -> 100 %.
       // The hull does little: hard, 0.25 instead of 0.5 -> 18/28/25 % (60)
-      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6, coopFrig: 2, coopFrigHp: 0.5 },
-      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
+      // `coopFrigFrom`: captains from which the first frigate joins. Hard, two captains on 240 runs: 2 -> 13 %, 3 -> 30 %
+      // (three and four captains keep their frigate: 26 / 29 % on 120 runs)
+      easy: { ally: 0.6, boats: 3, boatsAt: 300, frig: 2, samCh: 2, blindCh: 1, samN: 8, relief: ['Typ054A'], reliefHp: 0.6, again: 120, salvo: 6, coopFrig: 2, coopFrigHp: 0.5, coopFrigFrom: 2 },
+      normal: { ally: 0.5, boats: 3, boatsAt: 240, frig: 2, samCh: 2, blindCh: 1, samN: 10, relief: ['Typ052D'], reliefHp: 1, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5, coopFrigFrom: 2 },
       // hard: with 13 rounds per air-defence site the flagship's 24 cruise missiles ran dry with a battery standing
       // and the mission waited for the clock (8 of 20 losses); 11 rounds and a tougher relief group keep the
       // win rate and let the relief group decide (2 of 20)
-      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5 },
+      hard: { ally: 0.4, boats: 3, boatsAt: 160, frig: 2, samCh: 3, blindCh: 1, samN: 11, relief: ['Typ055'], reliefHp: 1.25, again: 120, salvo: 12, coopFrig: 1, coopFrigHp: 0.5, coopFrigFrom: 3 },
       ship: { Ticonderoga: t => ({ reliefHp: t.reliefHp * 0.75 }) },
    },
    strait: {
-      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1, again: 420, salvo: 2 },
-      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1, again: 420, salvo: 3 },
-      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 290, raid: 60, sub: 1, again: 480, salvo: 2 },
+      // co-op: `coopFac` boats more in the second pack (`fac2`) against three or more captains. Measured on 240 runs
+      // with 2/3/4 captains: normal 0 -> 66/72/75 %, 1 -> ./64/56 %; hard 0 -> 27/31 (120 runs)/40 %
+      easy: { ally: 0.6, fac1: 3, fac2: 3, dd: 1, w2: 190, w3: 330, raid: 90, sub: 1, again: 420, salvo: 2, coopFac: 0 },
+      normal: { ally: 0.5, fac1: 3, fac2: 3, dd: 1, w2: 160, w3: 300, raid: 70, sub: 1, again: 420, salvo: 3, coopFac: 1 },
+      hard: { ally: 0.4, fac1: 3, fac2: 4, dd: 1, w2: 140, w3: 290, raid: 60, sub: 1, again: 480, salvo: 2, coopFac: 0 },
       ship: { Burke: t => ({ raid: Math.round(t.raid * 1.4), fac1: t.fac1 - 1 }) },
    },
    philsea: {
@@ -67,12 +74,14 @@ export const EAST_TUNE = {
       // co-op: the group shares the `tlam` cruise missiles of the flagship plus `coopTlam` (see coop() of the
       // mission). Measured on 60 runs with 2/3/4 captains: normal 0 -> 55/55/57 %, 1 -> 70/73/73 %;
       // hard 0 -> 12/13/17 %, 1 -> 22/17/28 %, 2 -> 30/33/52 %; easy 0 -> 100 % (30 runs)
+      // On 240 runs: normal 0 -> 54/48/58 % (four: 120 runs), 1 -> 68/67/74 % (120), 0.5 -> 63/57/66 % (a fraction is the
+      // share of the games with one missile more); hard 1 -> 18/21/32 %, 2 -> 25/33/48 % (four: 120), hence [2, 2, 1]
       easy: { ally: 0.6, time: 720, samCh: 2, samN: 16, recon: 40, hp: 9000, corv: 1, boats: 2, sub: 0, work: 30, tlam: 26, asw: 0, subTime: 650, subBoats: 1,
          drone: 50, fuse: 100, drone2: 65, again: 0, strikeAt: 330, bunkHp: 7000, coopTlam: 0 },
       normal: { ally: 0.5, time: 690, samCh: 3, samN: 20, recon: 60, hp: 11000, corv: 2, boats: 3, sub: 0, work: 35, tlam: 22, asw: 0, subTime: 570, subBoats: 3,
-         drone: 60, fuse: 85, drone2: 80, again: 170, strikeAt: 300, bunkHp: 9000, coopTlam: 0 },
+         drone: 60, fuse: 85, drone2: 80, again: 170, strikeAt: 300, bunkHp: 9000, coopTlam: 0.5 },
       hard: { ally: 0.4, time: 660, samCh: 3, samN: 24, recon: 75, hp: 12000, corv: 2, boats: 4, sub: 1, work: 40, tlam: 21, asw: 0, subTime: 545, subBoats: 4,
-         drone: 60, fuse: 75, drone2: 80, again: 140, strikeAt: 270, bunkHp: 10000, coopTlam: 1 },
+         drone: 60, fuse: 75, drone2: 80, again: 140, strikeAt: 270, bunkHp: 10000, coopTlam: [2, 2, 1] },
       // the clock of a submarine run (the German boat is the slower one)
       ship: { U212: (t, k) => ({ subTime: t.subTime + 60 + (k === 'normal' ? 15 : 0) }), Virginia: (t, k) => ({ subTime: t.subTime - (k === 'normal' ? 15 : 0) }) },
    },
@@ -88,6 +97,8 @@ export function eastMissions(H) {
    const human = (s) => !!(s && (s.isPlayer || s.human));
    // co-op: human captains beyond the first (world.net is set after setup, so ask at the event, not in setup)
    const extraCaptains = (w) => Math.max(0, (w.net && w.net.humans ? w.net.humans.length : 1) - 1);
+   // a co-op knob is one value for every group or a list [two, three, four captains]
+   const perCaptains = (v, n) => Array.isArray(v) ? v[Math.max(0, Math.min(n, v.length + 1) - 2)] : v;
    const live = (w, id) => { const s = w.shipById(id); return s && s.alive ? s : null; };
    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
    const hash = (w, salt) => {
@@ -319,10 +330,10 @@ export function eastMissions(H) {
                w.end(true, 'Der Schlachtkreuzer ist ausgeschaltet, der Träger ist einsatzbereit.');
             }
          },
-         // co-op (net/setup.js): against three or more captains the battle cruiser's hull is scaled by `coopHp`
+         // co-op (net/setup.js): the battle cruiser's hull is scaled by `coopHp` (two / three / four captains)
          coop(w, S, humans) {
-            const k = tune(w, 'barents').coopHp, pj = w.shipById(S.pjId);
-            if (humans.length < 3 || k === 1 || !pj) return;
+            const k = perCaptains(tune(w, 'barents').coopHp, humans.length), pj = w.shipById(S.pjId);
+            if (!(k > 0) || k === 1 || !pj) return;
             pj.hp = Math.round(pj.hp * k); pj.maxHP = Math.round(pj.maxHP * k);
          },
          timeout(w) { w.end(false, 'Der gegnerische Verband hat sich abgesetzt – der Gegenschlag kam zu spät.'); },
@@ -406,8 +417,9 @@ export function eastMissions(H) {
             // radar and batteries are out: a relief group comes in from the east
             if (S.blind && dead(S.bat) >= 2 && !S.relief) {
                const T = tune(w, 'reefs'), own = S.own.map(id => live(w, id)).filter(Boolean);
-               // co-op: a frigate with a weak hull joins the relief group per further human captain (`coopFrig` at most)
-               S.relief = T.relief.concat(Array(Math.min(T.coopFrig, extraCaptains(w))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
+               // co-op: a frigate with a weak hull joins the relief group per further human captain (`coopFrig` at most),
+               // the first one against `coopFrigFrom` captains (2 where the knob is not set)
+               S.relief = T.relief.concat(Array(Math.max(0, Math.min(T.coopFrig, extraCaptains(w) + 2 - (T.coopFrigFrom ?? 2)))).fill('Typ054A')).map((cls, i) => add(w, cls, 'enemy', P(17500, (i ? 1 : -1) * 2500 * i - 1500), Math.PI,
                   { minDist: 14000, telegraph: 4, hpMult: (i < T.relief.length ? T.reliefHp : T.coopFrigHp) * w.difficulty.botHP, ai: { huntId: own.length ? own[(i + 1) % own.length].id : null, press: true } }).id);
                objective(w, 'relief', 'Wehren Sie den Entsatzverband ab (0/' + S.relief.length + ')' + lim(w));
                radio(w, 'Lagezentrum', 'Radar und Batterien sind aus. Ein Entsatzverband läuft von Osten an – wehren Sie ihn ab, dann sind die Seewege frei.', 'warn');
@@ -483,7 +495,8 @@ export function eastMissions(H) {
             later(S, 5, () => radio(w, 'Konvoiführer', 'Konvoi ist bereit. Wir halten Kurs Nord und bleiben dicht bei Ihnen.'));
             later(S, 30, () => wave(Array(T.fac1).fill('Typ022'), P(15000, -7000), 'Schnellbootrudel läuft von Osten an.'));
             later(S, T.w2, () => { S.block = wave(['Typ054A', ...(T.dd ? ['Typ052D'] : [])], P(13000, 12000), 'Überwassereinheiten aus Nordost, Kurs auf den Konvoi.') || []; });
-            later(S, T.w3, () => wave(Array(T.fac2).fill('Typ022'), P(-15000, 9000), 'Zweites Schnellbootrudel aus Nordwest.'));
+            // co-op: `coopFac` boats more in the second pack against three or more captains (seated after setup: asked at the event)
+            later(S, T.w3, () => wave(Array(T.fac2 + (extraCaptains(w) >= 2 ? T.coopFac || 0 : 0)).fill('Typ022'), P(-15000, 9000), 'Zweites Schnellbootrudel aus Nordwest.'));
             // late in the passage the blockade ships that are still afloat reload and fire a closed salvo at the leading freighter
             if (T.salvo) {
                const up = () => (S.block || []).map(id => live(w, id)).filter(Boolean);
@@ -731,7 +744,12 @@ export function eastMissions(H) {
             const T = tune(w, 'countdown');
             const cells = humans.filter(h => h.cfg.weapons.cruise && !h.sub);
             if (cells.length < 2 && cells[0] === humans[0]) return;      // only the flagship: its load is set in setup
-            const total = T.tlam + (T.coopTlam || 0), each = Math.floor(total / Math.max(1, cells.length));
+            // `coopTlam`: one value, or one each for two / three / four captains. A fraction is the share of the games
+            // with one missile more (a whole missile moves the win rate by about 15 points); drawn from the seed, so
+            // every peer deals the same
+            const c = perCaptains(T.coopTlam, humans.length) || 0;
+            const extra = Math.floor(c) + ((Math.imul(w.seed, 2654435761) >>> 0) / 4294967296 < c - Math.floor(c) ? 1 : 0);
+            const total = T.tlam + extra, each = Math.floor(total / Math.max(1, cells.length));
             cells.forEach((h, i) => { h.mag[h.cfg.weapons.cruise.type] = Math.min(h.cfg.weapons.cruise.n, each + (i < total - each * cells.length ? 1 : 0)); });
          },
          update(w, dt, S) {
