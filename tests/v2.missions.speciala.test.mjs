@@ -8,7 +8,7 @@ import { MISSIONS } from '../gamev2/missions.js';
 import { SPECIAL_A_TUNE, CABLE, RIG, TOW } from '../gamev2/missions_special_a.js';
 import { impactOnSites, damageSite } from '../gamev2/sites.js';
 import { islandReliefAt } from '../gamev2/utils.js';
-import { missionSlots, missionRoles } from '../gamev2/net/setup.js';
+import { missionSlots, missionRoles, buildNetWorld } from '../gamev2/net/setup.js';
 import { sendHelo, heloOf } from '../gamev2/helo.js';
 import { captain, play } from './v2.missions.speciala.captain.mjs';
 
@@ -502,4 +502,51 @@ test('special A/rescue: co-op takes a second captain on the corvette; a bot capt
    assert.ok(w.time < def('rescue').timeLimit);
    const res = [1000, 8919, 16838, 24757, 32676, 40595].map(seed => play('rescue', 'hard', seed).phase);
    assert.ok(res.includes('lost'), 'hard is not a walkover: ' + res);
+});
+
+// ---------------------------------------------------------------- co-op and ship knobs
+const net = (id, n, diff, ship = 'Sachsen') => { const classes = [ship, ...Array(n - 1).fill('Daring')]; return buildNetWorld({ mission: id, difficulty: diff, seed: 4711, classes, loadouts: classes.map(() => null), self: 0 }); };
+const boatDmg = (w) => w.shipById(w._script.boats[0]).dmgMult;
+
+test('special A: the co-op knobs are lists for 2, 3 and 4 captains and leave a single captain alone', () => {
+   for (const id of IDS) for (const diff of DIFFS) {
+      const T = SPECIAL_A_TUNE[id][diff];
+      for (const k of id === 'cable' ? ['coopCable'] : ['coopBoats', 'coopDmg']) assert.equal(T[k].length, 3, `${id} ${diff} ${k}`);
+      if (id !== 'cable') for (const v of T.coopDmg) assert.ok(v >= 0.8 && v <= 1.3, `${id} ${diff} coopDmg ${v}`);
+      for (const n of [2, 3, 4]) {
+         const solo = mk(id, { diff }), w = net(id, n, diff), S = w._script;
+         assert.equal(w.net.humans.length, n);
+         if (id === 'cable') { assert.equal(S.cable, T.cable + T.coopCable[n - 2], `cable ${diff}, ${n} captains`); assert.equal(S.total, S.cable); assert.equal(solo._script.cable, T.cable); }
+         if (id === 'rig') {
+            assert.equal(S.boats.length, T.boats + T.coopBoats[n - 2], `rig ${diff}, ${n} captains: boats`);
+            assert.equal(solo._script.boats.length, T.boats);
+            for (const b of rigBoats(w)) { assert.ok(b.ai.anchored); assert.ok(Math.abs(b.dmgMult / boatDmg(solo) - T.coopDmg[n - 2]) < 1e-9, `rig ${diff}, ${n} captains: damage`); }
+            assert.ok(obj(w, 'boats').text.includes('0/' + S.boats.length));
+         }
+         if (id === 'rescue') {
+            const all = T.boats + T.wave2 + T.coopBoats[n - 2] * (T.wave2 ? 2 : 1);
+            assert.ok(obj(w, 'boats').text.includes('0/' + all), `rescue ${diff}, ${n} captains: ${obj(w, 'boats').text}`);
+            const d = w._script.def, one = (x, k) => { x._script.tugId = x.player.id; d.boats(x, x._script, x._script.T, k); return x._script.boats.length; };
+            assert.equal(one(w, T.boats), T.boats + T.coopBoats[n - 2]);
+            assert.equal(one(solo, T.boats), T.boats);
+            assert.ok(Math.abs(boatDmg(w) / boatDmg(solo) - T.coopDmg[n - 2]) < 1e-9, `rescue ${diff}, ${n} captains: damage`);
+         }
+      }
+   }
+});
+
+test('special A: the ship knobs change the tuning only for a host in that class', () => {
+   let seen = 0;
+   for (const id of IDS) for (const diff of DIFFS) {
+      const T = SPECIAL_A_TUNE[id][diff], D = T.ship && T.ship.Daring;
+      assert.equal(mk(id, { diff })._script.T, T, `${id} ${diff}: the recommended ship plays the row as it stands`);
+      const w = mk(id, { diff, ship: 'Daring' });
+      if (!D) { assert.equal(w._script.T, T); continue; }
+      seen++;
+      assert.deepEqual(Object.keys(T.ship), ['Daring']);
+      for (const k in D) { assert.equal(w._script.T[k], D[k]); assert.ok(D[k] / T[k] > 0.9 && D[k] / T[k] < 1.7, `${id} ${diff} ${k}: ${D[k]} against ${T[k]}`); }
+      if (D.cable) assert.equal(w._script.cable, D.cable);
+      if (D.boatDmg && id === 'rig') assert.ok(Math.abs(boatDmg(w) / boatDmg(mk(id, { diff })) - D.boatDmg / T.boatDmg) < 1e-9);
+   }
+   assert.ok(seen >= 3);
 });

@@ -4,10 +4,17 @@
 // every world.update.
 //    mode 'bot'      competent captain
 //    mode 'passive'  the player does nothing (engines stopped, no orders)
-// Balance table:  node tests/v2.missions.speciala.captain.mjs [mission] [runs]   (prints wins per difficulty and the loss causes)
+// In a co-op world (play with n > 1: host + n-1 further captains as in a net game) the sim's AI sails the
+// further captains' ships too; they keep station on the host and fight what comes for the group.
+// Balance table:  node tests/v2.missions.speciala.captain.mjs [mission] [runs] [captains]   (prints wins per difficulty and the loss causes)
+//    SHIP=Daring picks the host's ship (default: the mission's recommended one), DIFF=normal,hard the difficulties,
+//    TUNE='{"rig":{"normal":{"boatDmg":1.2}}}' tries other values of the tune table
 import { World } from '../gamev2/state.js';
+import { getMission } from '../gamev2/missions.js';
+import { buildNetWorld } from '../gamev2/net/setup.js';
+import { updateBots } from '../gamev2/ai.js';
 import { sendHelo, heloOf } from '../gamev2/helo.js';
-import { CABLE, RIG, TOW } from '../gamev2/missions_special_a.js';
+import { CABLE, RIG, TOW, SPECIAL_A_TUNE } from '../gamev2/missions_special_a.js';
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // The captain takes the helm of ship p while the ship's AI keeps fighting: the AI's own rudder and
@@ -25,6 +32,29 @@ function takeHelm(p) {
 }
 
 export function captain(w, mode = 'bot') {
+   const helm = hostCaptain(w, mode);
+   const extras = mode === 'bot' && w.net && w.net.humans ? w.net.humans.slice(1) : [];
+   if (!extras.length) return helm;
+   // The sim's AI skips ships flagged human and thinks once per tick (ai.js updateBots): the flag is lifted
+   // while it thinks for the coming tick, update() then finds the tick done.
+   for (const e of extras) { e.ai = e.ai || {}; e.ai.escortId = w.player.id; }
+   const S = w._script;
+   let t = 0;
+   return () => {
+      helm();
+      if (w.phase !== 'playing') return;
+      // cable: the further captains clear other merchants than the host (from the end of the list), then close on the dragging one
+      if (w.mission.id === 'cable' && (t -= 1 / 60) <= 0) {
+         t = 2;
+         const open = S.found ? [] : S.merch.filter((id, i) => S.look[i] >= 0 && w.shipById(id)?.alive);
+         extras.forEach((e, k) => { e.ai.escortId = S.found ? S.susId : open.length ? open[open.length - 1 - k % open.length] : w.player.id; });
+      }
+      for (const e of extras) e.human = false;
+      w.tick++; updateBots(w, 1 / 60); w.tick--;
+      for (const e of extras) e.human = true;
+   };
+}
+function hostCaptain(w, mode) {
    const p = w.player, S = w._script, id = w.mission.id;
    if (mode !== 'bot') { p.setTelegraph(0); return () => {}; }
    w.autoPlayer = true;
@@ -105,22 +135,30 @@ export function captain(w, mode = 'bot') {
 }
 
 // ---------------------------------------------------------------- balance runner
-export function play(id, diff, seed, mode = 'bot', ship = null) {
-   const w = new World(diff, { mission: id, ship, seed });
+// n > 1: a co-op world with n captains (the host in `ship`, the others in the mission's other playable ship)
+export function play(id, diff, seed, mode = 'bot', ship = null, n = 1) {
+   let w;
+   if (n > 1) {
+      const def = getMission(id), own = ship || def.recommendedShip, other = def.playableShips.find(k => k !== own) || own;
+      const classes = [own, ...Array(n - 1).fill(other)];
+      w = buildNetWorld({ mission: id, difficulty: diff, seed, classes, loadouts: classes.map(() => null), self: 0 });
+   } else w = new World(diff, { mission: id, ship, seed });
    const cap = captain(w, mode);
    for (let i = 0; i < 60 * 900 && w.phase === 'playing'; i++) { w.update(1 / 60); cap(); }
    return w;
 }
 if (process.argv[1] && process.argv[1].endsWith('v2.missions.speciala.captain.mjs')) {
+   if (process.env.TUNE) { const o = JSON.parse(process.env.TUNE); for (const id in o) for (const d in o[id]) Object.assign(SPECIAL_A_TUNE[id][d], o[id][d]); }
    const ids = process.argv[2] && process.argv[2] !== 'all' ? process.argv[2].split(',') : ['cable', 'rig', 'rescue'];
-   const runs = Number(process.argv[3]) || 30, diffs = (process.argv[4] || 'easy,normal,hard').split(',');
+   const runs = Number(process.argv[3]) || 30, n = Number(process.argv[4]) || 1, ship = process.env.SHIP || null;
+   const diffs = (process.env.DIFF || (Number(process.argv[4]) ? '' : process.argv[4]) || 'easy,normal,hard').split(',');
    for (const id of ids) for (const diff of diffs) {
       let wins = 0, t = 0; const why = {}, times = [];
       for (let k = 0; k < runs; k++) {
-         const w = play(id, diff, 1000 + k * 7919);
+         const w = play(id, diff, 1000 + k * 7919, 'bot', ship, n);
          if (w.phase === 'won') { wins++; t += w.time; times.push(Math.round(w.time)); }
          else { const r = (w.result?.reason || 'no result').replace(/^(MV|MT|LNG) [^ ]+ [^ ]+ /, '<Schiff> ').slice(0, 44); why[r] = (why[r] || 0) + 1; }
       }
-      console.log(`${id.padEnd(8)} ${diff.padEnd(6)} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg win ${wins ? Math.round(t / wins) : '-'} s  losses: ${JSON.stringify(why)}${process.env.TIMES ? '  win times: ' + times.sort((a, b) => a - b).join(' ') : ''}`);
+      console.log(`${id.padEnd(8)} ${diff.padEnd(6)} ${ship || 'default'} x${n} ${wins}/${runs} = ${Math.round(wins / runs * 100)} %  avg win ${wins ? Math.round(t / wins) : '-'} s  losses: ${JSON.stringify(why)}${process.env.TIMES ? '  win times: ' + times.sort((a, b) => a - b).join(' ') : ''}`);
    }
 }
