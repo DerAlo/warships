@@ -224,8 +224,13 @@ test('co-op special operations (second set): missile boats of the hijack pack, t
    // the ship row: only the named flagship class, only inside the table
    for (const difficulty of ['normal', 'hard']) {
       const H = B.hijack[difficulty], n = (ship) => new World(difficulty, { mission: 'hijack', ship, seed: 5 })._script.boats.length;
-      assert.equal(n('Sachsen'), H.boats); assert.equal(n('Burke'), H.boats);
-      assert.equal(n('Daring'), H.ship.Daring.boats);
-      assert.ok(H.ship.Daring.boats - H.boats <= 2 && Object.keys(H.ship).length === 1, difficulty);
+      assert.equal(n('Sachsen'), H.boats); assert.ok(!H.ship.Sachsen, 'the recommended ship is the base row');
+      for (const k of Object.keys(H.ship)) {
+         assert.ok(['Daring', 'Burke', 'Braunschweig'].includes(k), k);
+         assert.equal(n(k), H.ship[k].boats ?? H.boats);
+         assert.ok(Math.abs((H.ship[k].boats ?? H.boats) - H.boats) <= 2, `${difficulty} ${k}`);
+      }
+      // the corvette cannot stop a full salvo (two RAM channels): far fewer missile boats come for it
+      assert.ok(H.ship.Braunschweig.msl <= H.msl / 2, difficulty);
    }
 });
