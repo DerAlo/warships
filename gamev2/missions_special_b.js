@@ -175,7 +175,7 @@ export function specialMissionsB(H) {
             const hdg = tk.heading, c = Math.cos(hdg), s = Math.sin(hdg);
             for (let i = 0; i < T.boats + T.guard; i++) {
                const guard = i < T.guard, f = guard ? 250 - i * 350 : 900 - (i - T.guard) * 300, r = (i % 2 ? 1 : -1) * (guard ? 320 : 650 + i * 60);
-               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, ai: { escortId: tk.id } });
+               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, ai: { shy: true, escortId: tk.id } });
                if (guard || S.msl-- <= 0) b.mag.kowsar = 0;
                (guard ? S.guards : S.boats).push(b.id);
             }
@@ -196,7 +196,7 @@ export function specialMissionsB(H) {
                const t = live(w, S.tankId);
                if (!t || S.phase >= 2) return;
                const n = T.wave + extraCaptains(w) * T.coopWave, made = [];
-               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, ai: { huntId: S.own[i % S.own.length], press: true } })).id);
+               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, ai: { shy: true, huntId: S.own[i % S.own.length], press: true } })).id);
                if (S.coopDmg) for (const id of made) w.shipById(id).dmgMult *= S.coopDmg;
                S.boats.push(...made); S.total += n;
                objText(w, 'boats', `Versenken Sie alle Schnellboote (${S.sunk}/${S.total})`);

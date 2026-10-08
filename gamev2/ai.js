@@ -298,13 +298,15 @@ function engage(b, w, tgt, d, threat) {
    if (ai.role === 'dd') {
       const tr = b.torps ? b.cfg.torp.range * 0.8 : 0;
       const torpReady = b.torps && b.torps.launchers.some(l => l.reload <= 0);
+      // ai.shy (hijack boats): no close duel with destroyers either, every warship is kept at arm's length
+      const duel = tgt.type === 'DD' && !ai.shy;
       // lit up by several ships: break contact and reset detection (unless already in a torpedo run)
-      if (b.detected && d.smarts > 0.4 && exposed(b, w) && !(torpReady && dd <= tr && tgt.type !== 'DD'))
+      if (b.detected && d.smarts > 0.4 && exposed(b, w) && !(torpReady && dd <= tr && !duel))
          return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
-      if (torpReady && tgt.type !== 'DD' && dd > tr) return { want: brg + s * 20 * DEG, tel: 4 };
+      if (torpReady && !duel && dd > tr) return { want: brg + s * 20 * DEG, tel: 4 };
       if (torpReady && dd <= tr) return { want: brg + s * 70 * DEG, tel: 4 };   // present the tubes
       const stealth = b.detectRange * 1.1;
-      if (tgt.type !== 'DD' && dd < stealth) return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
+      if (!duel && dd < stealth) return { want: brg + Math.PI - s * 35 * DEG, tel: 4 };
       if (dd > hi) return { want: brg + s * 25 * DEG, tel: 4 };
       return { want: brg + s * 80 * DEG, tel: 4 };
    }
