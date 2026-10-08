@@ -27,12 +27,15 @@ export const SPECIAL_B_TUNE = {
       // shore battery and the tanker's distance to the anchorage (m) at which it opens fire · co-op: coopMsl boats
       // lose their missile (see coop()), coopWave boats more in the second pack per further captain · ship: knobs for
       // one flagship class (the Daring's air defence shrugs off the pack of the others)
-      // measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/31 %, Daring 100/61/31 %
+      // measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/31 %, Daring 100/61/31 %, Burke 100/57/23 %
+      // (without its row 100/76/42 %), Braunschweig 100/58/28 % (without 100/0/3 %: all missiles of the pack go for the
+      // flagship within 20 s, two RAM channels stop two, and four hits sink a corvette); two captains normal/hard:
+      // Sachsen 58/33 %, Braunschweig 64/33 %; Burke and Daring stay far below (the rocket boats, not the missiles)
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
       normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 1.3, coopWave: 2,
-         ship: { Daring: { boats: 13, msl: 13 } } },
+         ship: { Daring: { boats: 13, msl: 13 }, Burke: { boats: 12, msl: 12 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
       hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 2.5, coopWave: 2,
-         ship: { Daring: { boats: 11, msl: 10 } } },
+         ship: { Daring: { boats: 11, msl: 10 }, Burke: { msl: 10 }, Braunschweig: { boats: 8, msl: 3, coopMsl: 0 } } },
    },
    evac: {
       // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
@@ -40,10 +43,15 @@ export const SPECIAL_B_TUNE = {
       // come down the coast when lift 1, 2, 3 opens · fin: boats that go for the ferry when it casts off · msl: how many
       // boats of each pack carry Kowsar missiles · batN / batSalvo / batInt: the shore battery (missiles, per salvo,
       // s between salvos) · batAt: lift at whose opening it goes live · ferry: hull factor of the ferry · co-op:
-      // coopWave boats more in every pack per further captain, coopFerry scales the ferry's hull (see coop())
+      // coopWave boats more in every pack per further captain, coopFerry scales the ferry's hull (see coop()) · ship:
+      // knobs for one flagship class. Measured on 120 runs (one captain easy/normal/hard): Sachsen 100/59/30 %,
+      // Daring 100/59/30 % (hard without its row 37 %), Burke 100/55/31 % (normal without 68 %), Braunschweig
+      // 100/63/29 % (without 100/69/38 %)
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
-      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2 },
-      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34 },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
+         ship: { Braunschweig: { ferry: 0.85 }, Burke: { ferry: 0.85, coopFerry: 1.3 } } },
+      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
+         ship: { Braunschweig: { ferry: 0.85 }, Daring: { ferry: 0.92 } } },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
@@ -55,9 +63,18 @@ export const SPECIAL_B_TUNE = {
       // meter rises faster per further captain (two captains, normal, 120 runs: 0 -> 49 %, -0.1 -> 55 %, -0.15 -> 60 %, -0.2 -> 70 %)
       easy: { trail: 60, kn: 6, held: 5, caught: 8, seen: 9, noise: 1.5, cool: 1, listen: 70, listenFor: 12, warn: 8, frig: 10, guard: 0, hunt: 0, coop: 0 },
       normal: { trail: 80, kn: 6, held: 8, caught: 15, seen: 14, noise: 2.5, cool: 0.5, listen: 40, listenFor: 16, warn: 5, frig: 12, guard: 1, hunt: 0, coop: -0.15 },
-      hard: { trail: 100, kn: 6, held: 11, caught: 16, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5, coop: 0 },
+      // fish: s the released hunter boat must hold a boat in its sonar before it fires a torpedo (see FISH; 0 = never)
+      // hard, 120 runs: one captain 23 %, two captains 33 % (caught 16 with the torpedo: 15 % and 23 %)
+      hard: { trail: 100, kn: 6, held: 11, caught: 14, seen: 18, noise: 3.5, cool: 0.4, listen: 40, listenFor: 18, warn: 5, frig: 14, guard: 1, hunt: 0.5, coop: 0, fish: 6 },
    },
 };
+// The hunter boat's torpedo (bastion, rows with `fish`): flood s after "Torpedorohre werden geflutet" before the first
+// shot, reload s between two shots, never from closer than min m. It has a firing solution on a boat within hear m,
+// scaled with the boat's noise like every listener here (stopped: half of it). A homing torpedo (kn, run m, dmg), fired at the point where
+// the boat will be on its present course and speed: it steers (turn rad/s) at that point for as long as the boat runs
+// above telegraph 1/4 within seek m of it (the rule of the check astern: 1/4 or less is unheard); a boat at 1/4 or
+// less it does not hear, runs straight on and misses it once the boat has changed its course or speed. detect m: it is heard and shown from the launch on (torpedo warning of the HUD).
+export const FISH = { flood: 20, reload: 45, hear: 2600, min: 600, kn: 28, run: 3400, dmg: 3300, flooding: 0.3, turn: 0.6, seek: 1500, detect: 3500 };
 // Shadowing (bastion): the trailing position lies min..max m from the missile boat inside arc rad either side of dead
 // astern (its own sonar is deaf there). Its sonar reaches bow m ahead and abeam and aft m astern, scaled with the
 // shadower's noise; while it checks astern the blind arc is gone and only a boat at telegraph 1/4 or less stays unheard.
@@ -86,6 +103,11 @@ export function specialMissionsB(H) {
       return S.tuneRow && S.tuneOf === row ? S.tuneRow : (S.tuneOf = row, S.tuneRow = { ...row, ...o });
    };
    const human = (s) => !!(s && (s.isPlayer || s.human));
+   // bastion, the hunter boat's torpedo: the boat runs above telegraph 1/4 · where it will be when a torpedo from `from` arrives
+   const fishLoud = (b) => Math.abs(b.speed) / 2.6 / (b.maxSpeedKn * b.sub.deepSpeed) > TRAIL.creep;
+   const fishAim = (b, from) => { const k = Math.hypot(b.pos.x - from.x, b.pos.y - from.y) / (FISH.kn * 2.6) * b.speed; return { x: b.pos.x + Math.cos(b.heading) * k, y: b.pos.y + Math.sin(b.heading) * k }; };
+   // bastion: the released hunter boat g has a firing solution on boat b (FISH.hear, scaled with the boat's noise)
+   const fishHears = (g, b) => !!g && g.alive && Math.hypot(g.pos.x - b.pos.x, g.pos.y - b.pos.y) < FISH.hear * (0.5 + 0.5 * Math.min(1, Math.abs(b.speed) / 2.6 / (b.maxSpeedKn * b.sub.deepSpeed)));
    // co-op: human captains beyond the first (world.net is set after setup, so ask at the event, not in setup)
    const noMsl = (b) => { b.mag.kowsar = 0; return b; };
    const extraCaptains = (w) => Math.max(0, (w.net && w.net.humans ? w.net.humans.length : 1) - 1);
@@ -522,6 +544,7 @@ export function specialMissionsB(H) {
                g.battery = 1;
                if (!S.released) { g.pingT = -999; if (g.ai.route && g.ai.routeIdx >= g.ai.route.length - 1 && dist(g.pos, g.ai.route[g.ai.route.length - 1]) < 800) g.ai.routeIdx = 0; }
             }
+            if (S.fish && S.fish.length) this.steerFish(w, dt, S, g);
             if ((S.tick -= dt) > 0) return;
             const step = 0.5; S.tick += step;
             // what the own sonar team holds is shown like any sonar contact (subui.js: ring on the chart, "SONAR x km" in
@@ -608,6 +631,8 @@ export function specialMissionsB(H) {
                   objText(w, 'fire', 'Waffen frei gegen das Jagd-U-Boot Ladoga – nur gegen dieses, die Wolchow ist nie ein Ziel');
                   radio(w, 'Sonar', 'Torpedorohre werden geflutet – das Jagd-U-Boot Ladoga hat unsere Spur!', 'warn');
                   radio(w, 'Flottenkommando', 'Waffen frei gegen das Jagd-U-Boot – nur gegen dieses. Die Wolchow und die Fregatten bleiben gesperrt.', 'warn');
+                  S.fish = []; S.fishAt = w.time + FISH.flood; S.hold = 0;
+                  if (T.fish) later(S, 9, () => radio(w, 'Sonar', `Hört uns das Jagd-U-Boot ein paar Sekunden lang, schießt es – bei voller Fahrt auf ${String(FISH.hear / 1000).replace('.', ',')} Kilometer, gestoppt auf die Hälfte. Sein Torpedo hört uns nur über Fahrtstufe 1/4: Fahrt heraus und hart abdrehen, dann läuft es vorbei.`, 'warn'));
                }
                if (S.trail >= T.trail) {
                   S.stage = 2; setObj(w, 'trail', 'done');
@@ -621,8 +646,40 @@ export function specialMissionsB(H) {
                w.end(true, S.peak < 50 ? 'Die Wolchow ist vermessen – in der Bastion hat niemand etwas bemerkt.' : 'Die Wolchow ist vermessen. Die Wachschiffe ahnen allerdings, dass jemand hier war.');
                return;
             }
+            // hard: the tubes are flooded – once the hunter boat has held a boat for `fish` s (the hold fades at half
+            // the rate while it has lost it), it fires one torpedo at the boat it holds, then reloads
+            if (T.fish && S.released && S.fish && g && S.stage < 3) {
+               const b = boats.filter(b => fishHears(g, b)).sort((p, q) => dist(p.pos, g.pos) - dist(q.pos, g.pos))[0];
+               S.hold = b ? S.hold + step : Math.max(0, S.hold - step / 2);
+               if (b && w.time >= S.fishAt - T.fish) nag(w, S, 'nag_fish', 30, 'Sonar', 'Das Jagd-U-Boot peilt uns ein – Fahrt heraus und Abstand gewinnen, sonst schießt es!', 'warn');
+               if (b && S.hold >= T.fish && w.time >= S.fishAt && dist(b.pos, g.pos) > FISH.min) {
+                  S.hold = 0; S.fishAt = w.time + FISH.reload;
+                  const a = fishAim(b, g.pos), h = Math.atan2(a.y - g.pos.y, a.x - g.pos.x), from = { x: g.pos.x + Math.cos(h) * 40, y: g.pos.y + Math.sin(h) * 40 };
+                  const tp = { id: w._nextId++, pos: { ...from }, start: { ...from }, heading: h, dir: h, speed: FISH.kn * KN, speedKn: FISH.kn,
+                     side: g.side, owner: g.side, ownerId: g.id, dmg: FISH.dmg, flood: FISH.flooding, range: FISH.run, detect: FISH.detect,
+                     traveled: 0, age: 0, alive: true, spotted: false, arm: 120, asw: true, homeId: null, tx: a.x, ty: a.y, locked: true };
+                  w.addTorpedo(tp); S.fish.push({ id: tp.id, tgt: b.id, on: fishLoud(b) });
+                  const brg = String(Math.round(((Math.atan2(g.pos.y - b.pos.y, g.pos.x - b.pos.x) * 180 / Math.PI + 90) % 360 + 360) % 360) % 360).padStart(3, '0');
+                  radio(w, 'Sonar', `Torpedo im Wasser, Peilung ${brg}! Höchstens Fahrtstufe 1/4 und hart abdrehen – darüber hört es uns und läuft nach!`, 'warn');
+               }
+            }
             const txt = this.trailText(S, T);
             if (txt !== S.shown) { S.shown = txt; objText(w, 'trail', txt); }
+         },
+         // The hunter boat's torpedoes (FISH), every tick: steered while the seeker hears the boat, else straight on.
+         steerFish(w, dt, S, g) {
+            for (const q of S.fish) {
+               const t = w.torpedoes.find(x => x.id === q.id && x.alive), b = live(w, q.tgt);
+               if (!t) { q.gone = true; continue; }
+               const on = !!b && fishLoud(b) && dist(b.pos, t.pos) < FISH.seek;
+               if (q.on && !on && !q.told) { q.told = true; radio(w, 'Sonar', 'Das Torpedo hat uns verloren – leise bleiben, es läuft vorbei.'); }
+               q.on = t.locked = on;
+               if (!on) continue;
+               const a = fishAim(b, t.pos); t.tx = a.x; t.ty = a.y;
+               const want = Math.atan2(t.ty - t.pos.y, t.tx - t.pos.x), da = Math.atan2(Math.sin(want - t.heading), Math.cos(want - t.heading)), m = FISH.turn * dt;
+               t.heading += Math.max(-m, Math.min(m, da)); t.dir = t.heading;
+            }
+            S.fish = S.fish.filter(q => !q.gone);
          },
          onSink(w, ship, killer, S) {
             if (S.stage >= 3) return;

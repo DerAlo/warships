@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../gamev2/state.js';
 import { MISSIONS } from '../gamev2/missions.js';
-import { SPECIAL_B_TUNE, BOARD, EVAC, TRAIL } from '../gamev2/missions_special_b.js';
+import { SPECIAL_B_TUNE, BOARD, EVAC, TRAIL, FISH } from '../gamev2/missions_special_b.js';
 import { islandReliefAt } from '../gamev2/utils.js';
 import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { captain, play } from './v2.missions.specialb.captain.mjs';
@@ -277,6 +277,47 @@ test('specialb/bastion: hard releases the weapons against the hunter boat at hal
    w.player.lastTorpFire = w.time; step(w, 0.5, hold(w, 2000));
    assert.equal(w.phase, 'playing');
    assert.equal(SPECIAL_B_TUNE.bastion.normal.hunt, 0);
+});
+// the released hunter boat stands `d` m abeam of the captain, who runs at telegraph `tel`; returns what happened
+const fishRun = (tel, d, onLaunch) => {
+   const w = mk('bastion', { diff: 'hard' }), S = w._script, T = SPECIAL_B_TUNE.bastion.hard, p = w.player;
+   step(w, 1);
+   const keep = hold(w, 2000); let relT = 0;
+   step(w, T.trail * T.hunt + 6, () => { keep(); if (S.released && !relT) relT = w.time; });
+   const g = w.shipById(S.guardId), R = { w, S, seen: [], warned: false, hit: 0, launchD: 0, relT, shotT: 0 };
+   const pe = w.pushEvent.bind(w);
+   w.pushEvent = (t, e = {}) => { if (t === 'torp' && e.dstId === p.id) R.hit++; return pe(t, e); };
+   const put = (m) => { g.pos.x = p.pos.x - Math.sin(p.heading) * m; g.pos.y = p.pos.y + Math.cos(p.heading) * m; };
+   put(7000); p.setTelegraph(tel); p.setRudder(0);
+   step(w, 12, () => { S.meter = 0; });      // the boat settles at its speed, out of the hunter boat's reach
+   assert.equal(w.torpedoes.length, 0, 'no shot without a solution');
+   put(d);
+   step(w, 60, () => {
+      S.meter = 0; p.hp = Math.max(p.hp, 1000);
+      for (const t of w.torpedoes) if (t.side === 'enemy') {
+         if (!R.seen.includes(t.id)) { R.seen.push(t.id); if (!R.shotT) { R.shotT = w.time; R.launchD = dist(t.pos, p.pos); R.torp = { ...t }; if (onLaunch) onLaunch(p); } }
+         if (t.spotted && t.visibleToOpp) R.warned = true;
+      }
+      if (R.shotT && w.time - R.shotT > 40) w.phase = 'stop';
+   });
+   return R;
+};
+test('specialb/bastion: hard – the hunter boat fires a homing torpedo at a boat it hears; it is announced, shown and hits a loud boat', () => {
+   assert.ok(SPECIAL_B_TUNE.bastion.hard.fish > 0); assert.ok(!SPECIAL_B_TUNE.bastion.normal.fish && !SPECIAL_B_TUNE.bastion.easy.fish, 'hard only');
+   const R = fishRun(4, 1900);
+   assert.ok(R.shotT, 'it fires'); assert.ok(R.shotT - R.relT >= FISH.flood, 'not before the tubes are flooded');
+   assert.ok(R.torp.asw && R.torp.side === 'enemy' && R.torp.homeId === null, 'an existing torpedo object, steered by the mission');
+   assert.ok(R.launchD > FISH.min && R.launchD < FISH.hear, `launch distance ${R.launchD}`);
+   assert.ok(said(R.w, 'Torpedorohre werden geflutet') && said(R.w, 'peilt uns ein') && said(R.w, 'Torpedo im Wasser'), 'flooding, solution and launch are announced');
+   assert.ok(R.warned, 'the torpedo is spotted (HUD warning, co-op visibility)');
+   assert.ok(R.hit >= 1, 'a boat at full speed is followed and hit');
+});
+test('specialb/bastion: hard – a boat that goes to 1/4 and turns hard is not heard by the torpedo and is missed', () => {
+   const R = fishRun(2, 1700, (p) => { p.setTelegraph(1); p.setRudder(2); });
+   assert.ok(R.shotT, 'it fires at a boat at half speed'); assert.ok(said(R.w, 'Torpedo im Wasser'));
+   assert.equal(R.hit, 0, 'evaded'); assert.ok(said(R.w, 'hat uns verloren'), 'the sonar team reports the lost torpedo');
+   const Q = fishRun(1, 2400);
+   assert.ok(!Q.shotT, 'a creeping boat beyond its hearing range gets no torpedo');
 });
 test('specialb/bastion: co-op takes two captains, both boats count and the bot captains win on easy', { timeout: 0 }, () => {
    assert.equal(missionSlots('bastion'), 2);

@@ -53,6 +53,15 @@ function bastionHelm(w, b, k = 0) {
    if (!b.alive || !t || !t.alive) return;
    // hard, weapons released against the hunter boat: up to periscope depth, bow on its lead, a spread, down again
    const g = S.released && S.guardId ? w.shipById(S.guardId) : null;
+   // a torpedo of the hunter boat is heard and still coming: 1/4 (it hears nothing slower) and hard off its track
+   // until it has passed. With a tube ready and the hunter boat in reach he shoots first (below): that turn at 1/4
+   // throws the torpedo off as well, and only a sunk hunter boat stops firing.
+   const fish = w.torpedoes.filter(q => q.alive && q.side !== b.side && q.spotted && hyp(q.pos, b.pos) < 2800 && (b.pos.x - q.pos.x) * Math.cos(q.heading) + (b.pos.y - q.pos.y) * Math.sin(q.heading) > 0).sort((p, q) => hyp(p.pos, b.pos) - hyp(q.pos, b.pos))[0];
+   if (fish && process.env.BASTION_EVADE !== '0' && !(g && g.alive && hyp(g.pos, b.pos) < FIRE && b.torps.launchers.some(l => l.reload <= 0))) {
+      const away = Math.atan2(b.pos.y - fish.pos.y, b.pos.x - fish.pos.x), e = Math.atan2(Math.sin(b.heading - away), Math.cos(b.heading - away));
+      turn(b, away + (e >= 0 ? 1.2 : -1.2)); b.setTelegraph(1);
+      return;
+   }
    if (g && g.alive && hyp(g.pos, b.pos) < FIRE &&b.torps.launchers.some(l => l.reload <= 0)) {
       const tt = hyp(g.pos, b.pos) / (b.cfg.torp.speedKn * 2.6);
       const brg = Math.atan2(g.pos.y + Math.sin(g.heading) * g.speed * tt - b.pos.y, g.pos.x + Math.cos(g.heading) * g.speed * tt - b.pos.x);
