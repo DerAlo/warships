@@ -10,6 +10,10 @@ import { addTaskPoint } from './seal.js';
 import { obstacleT } from './utils.js';
 
 // Balance knobs per mission and difficulty (tests/v2.missions.speciala.test.mjs measures them with a bot captain).
+// Co-op knobs are lists [with 2, 3, 4 captains] (net/setup.js seats the second captain on the corvette, further ones
+// sail a ship of their own); `ship` holds what differs when the host sails that class instead of the recommended one.
+// Measured with tests/v2.missions.speciala.captain.mjs, 60 runs per cell (one captain, Sachsen: cable 100 / 52 / 25 %,
+// rig 100 / 63 / 37 %, rescue 100 / 53 / 25 %).
 // cable: `cable` s the seabed cable holds while the anchor drags, `ships` merchants in the area, `look` s
 // a merchant has to be in sight until it is identified, `board` s alongside until the boarding team has the
 // bridge, `boats` armed boats (`boatHp` / `boatDmg` their hull and damage factors), `corvette` s into the
@@ -17,11 +21,15 @@ import { obstacleT } from './utils.js';
 // `decoys` further merchants that run as slowly as the dragging one (engine trouble), so speed alone does not give it away.
 // Measured with one bot captain (Sachsen, 30 runs): the captain needs 195-265 s (normal) and 205-270 s (hard: longer look and
 // boarding, two decoys, four boats), so the cable time is the main knob; hard therefore has the longer cable of the two.
+// Co-op: `coopCable` s the cable holds longer. Bot captains who clear other merchants than the host gain nothing (the
+// host's boarding decides), normal: 0 -> 48 / 48 / 45 %, 6 -> 62 / 62 / 57 %; hard without it 23 / 27 / 30 %.
+// Daring (30 kn, alongside sooner): normal 68 % with the Sachsen's cable, 60 % with 215 s; hard 32 %.
 export const SPECIAL_A_TUNE = {
    cable: {
-      easy: { cable: 450, ships: 4, look: 2, board: 14, boats: 2, boatHp: 0.7, boatDmg: 0.7, corvette: 0, hint: true, decoys: 0 },
-      normal: { cable: 220, ships: 5, look: 3, board: 20, boats: 3, boatHp: 1, boatDmg: 1, corvette: 120, hint: false, decoys: 1 },
-      hard: { cable: 232, ships: 5, look: 4, board: 26, boats: 4, boatHp: 1.2, boatDmg: 1.2, corvette: 90, hint: false, decoys: 2 },
+      easy: { cable: 450, ships: 4, look: 2, board: 14, boats: 2, boatHp: 0.7, boatDmg: 0.7, corvette: 0, hint: true, decoys: 0, coopCable: [0, 0, 0] },
+      normal: { cable: 220, ships: 5, look: 3, board: 20, boats: 3, boatHp: 1, boatDmg: 1, corvette: 120, hint: false, decoys: 1, coopCable: [6, 6, 6],
+         ship: { Daring: { cable: 215 } } },
+      hard: { cable: 232, ships: 5, look: 4, board: 26, boats: 4, boatHp: 1.2, boatDmg: 1.2, corvette: 90, hint: false, decoys: 2, coopCable: [0, 0, 0] },
    },
    // rig: `valves` s until the occupiers open the valves, `boats` armed boats moored at the platform of which `guards`
    // stay there until a warship is inside RIG.guard, `teams` boarding teams on board, `board` s a team needs on the
@@ -29,20 +37,35 @@ export const SPECIAL_A_TUNE = {
    // Measured with one bot captain (Sachsen, 30 runs): 100 % / 60 % / 30 %. The captain's team is on the platform after
    // 210-260 s on every level, so the valves do not decide his runs: he loses his ship to the boats' rockets while he
    // lies stopped in the circle (number of boats x boatDmg is the knob that moves the win rate).
+   // Co-op: `coopBoats` more boats at the platform, the rockets of every boat times `coopDmg`. Without them 2 / 3 / 4
+   // captains win 72 / 97 / 100 % (normal) and 53 / 83 / 88 % (hard). Normal, two captains: coopDmg 1.1 -> 68 %, 1.2 -> 57 %;
+   // three (2 more boats): 0.9 -> 72 %, 1 -> 48 %; four (2 more): 1 -> 70 %, 1.12 -> 58 %. Hard: two 1.15 -> 32 %,
+   // three with 2 more boats 27 %, four with 2 more boats 62 %, and 1.2 -> 33 %.
+   // Daring (two Phalanx, the tougher hull): 97 % / 85 % with the Sachsen's values. boatDmg normal 1.9 -> 73 %, 2.4 -> 40 %;
+   // hard 1.7 -> 40 %, 1.85 -> 40 %, 1.9 -> 35 %, 1.95 -> 22 %, 2.2 -> 12 %.
    rig: {
-      easy: { valves: 480, boats: 3, guards: 1, boatHp: 0.7, boatDmg: 0.6, teams: 3, board: 20, post: 3, salvo: 1, every: 40 },
-      normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.38, teams: 2, board: 30, post: 6, salvo: 2, every: 34 },
-      hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.2, teams: 2, board: 40, post: 8, salvo: 2, every: 28 },
+      easy: { valves: 480, boats: 3, guards: 1, boatHp: 0.7, boatDmg: 0.6, teams: 3, board: 20, post: 3, salvo: 1, every: 40, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
+      normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.38, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1.15, 0.95, 1.12],
+         ship: { Daring: { boatDmg: 2.1 } } },
+      hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.2, teams: 2, board: 40, post: 8, salvo: 2, every: 28, coopBoats: [0, 2, 2], coopDmg: [1.15, 1, 1.2],
+         ship: { Daring: { boatDmg: 1.92 } } },
    },
    // rescue: `drift` m/s the merchant drifts toward the cliffs, `lines` tow lines on board, `pass` s it takes to pass one,
    // `swell` share by which the seas raise the line load on every crest, `boats` armed boats that come for the tug when the
    // first line is fast, `wave2` more of them `gap` s later, at `boatKn` knots.
    // Bot captain, 30 runs per cell: easy 100 %, normal 57 %, hard 27 % (every loss: the tug is sunk by the boats; the
    // bot never parts a line). The rate is steep in boatDmg: normal 2.2 -> 80 %, 2.6 -> 37 %.
+   // `boatVar` (optional, not set): share by which the damage of a wave differs with the seed, either way. Measured at 0.4,
+   // one captain, 60 runs: normal 2.1 -> 78 %, 2.4 -> 62 %, 2.7 -> 48 %; hard 1.5 -> 45 %, 1.7 -> 32 %, 1.9 -> 20 % (half as steep).
+   // Co-op: `coopBoats` more boats per wave, their damage times `coopDmg`. Without them 2 / 3 / 4 captains win 62 / 77 / 97 %
+   // (normal) and 15 / 63 / 90 % (hard). Normal: three with 1 more 62 %; four with 2 more 75 %, and coopDmg 1.25 -> 48 %.
+   // Hard: two 0.92 -> 32 %; three with 1 more 38 %, and 1.05 -> 28 %; four with 2 more 50 %, and 1.25 -> 32 %.
+   // Daring: normal 57 %; hard 18 % with the Sachsen's boatDmg, 28 % at 1.62.
    rescue: {
-      easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6 },
-      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4 },
-      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7 },
+      easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
+      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4, coopBoats: [0, 1, 2], coopDmg: [1, 1, 1.12] },
+      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7, coopBoats: [0, 1, 2], coopDmg: [0.92, 1.05, 1.25],
+         ship: { Daring: { boatDmg: 1.62 } } },
    },
 };
 // rig: the platform (x, y) and the radius in which any shell or warhead counts as a hit on it (r); a boat leaves its
@@ -88,6 +111,14 @@ export function specialMissionsA(H) {
    // the clock of an objective text: steps of 10 s until the last minute, so the text changes rarely (a phone shows the
    // objectives band for some seconds after every change and would never fade it with a clock that ticks every second)
    const coarse = (t) => clock(t > 60 ? Math.ceil(t / 10) * 10 : t);
+   const extraCaptains = (w) => Math.max(0, (w.net && w.net.humans ? w.net.humans.length : 1) - 1);
+   // co-op knob `a` = [with 2, 3, 4 captains]; `one` is its value for a single captain
+   const coopOf = (w, a, one) => { const n = extraCaptains(w); return n && a ? a[Math.min(n, a.length) - 1] : one; };
+   // the tuning of mission `id`: the row of the difficulty, with what its `ship` entry sets for the host's class
+   const tuneOf = (w, id, cls) => {
+      const T = SPECIAL_A_TUNE[id][w.difficultyKey] || SPECIAL_A_TUNE[id].normal, o = T.ship && T.ship[cls];
+      return o ? { ...T, ...o } : T;
+   };
    const rnd = (w, salt) => { const x = Math.sin((w.seed % 100000) * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x); };
    // The opponent's sensors and weapons leave a merchant alone: it is never 'detected' for the other
    // side (World.canSee), so no bot aims at it and no missile is launched at it.
@@ -117,7 +148,7 @@ export function specialMissionsA(H) {
          env: { time: 'night', weather: 'overcast' }, type: 'boarding', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
          arena: 12000, timeLimit: 10 * 60, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = SPECIAL_A_TUNE.cable[w.difficultyKey] || SPECIAL_A_TUNE.cable.normal;
+            const S = w._script, T = S.T = tuneOf(w, 'cable', shipKey);
             islands(w, [
                { c: P(-2500, 11400), r: 1900, height: 70, seed: 141, lobes: 5, elong: 3, rot: 0, rough: 0.4, name: 'Nordufer' },
                { c: P(4200, -11300), r: 1700, height: 60, seed: 147, lobes: 5, elong: 2.6, rot: 0.1, rough: 0.4, name: 'Südufer' },
@@ -165,11 +196,16 @@ export function specialMissionsA(H) {
                radio(w, 'Operationszentrale', 'Eine Korvette läuft von Osten an und hält auf uns zu. Ihre Seezielflugkörper unterscheiden nicht zwischen uns und einem Frachter, neben dem wir stehen: Fangen Sie sie ab, sonst trifft es ein Handelsschiff – oder versenken Sie die Korvette.', 'warn');
             });
          },
+         // co-op (net/setup.js): with several captains the cable holds `coopCable` s longer
+         coop(w, S) {
+            S.total = S.cable = S.T.cable + coopOf(w, S.T.coopCable, 0);
+            objText(w, 'stop', `Stoppen Sie den Ankerschlepper durch Boarding, bevor das Kabel reißt (hält noch ${coarse(S.cable)})`);
+         },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;
             const step = 0.5; S.tick += step;
             if (S.done) return;
-            const T = SPECIAL_A_TUNE.cable[w.difficultyKey] || SPECIAL_A_TUNE.cable.normal;
+            const T = S.T;
             const sus = w.shipById(S.susId);
             // a merchant badly hit: the rule of the briefing
             for (let i = 0; i < S.merch.length; i++) {
@@ -292,7 +328,7 @@ export function specialMissionsA(H) {
          env: { time: 'dusk', weather: 'overcast' }, type: 'boarding', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
          arena: 12000, timeLimit: 10 * 60, stars: 3,
          setup(w, shipKey) {
-            const S = w._script, T = SPECIAL_A_TUNE.rig[w.difficultyKey] || SPECIAL_A_TUNE.rig.normal;
+            const S = w._script, T = S.T = tuneOf(w, 'rig', shipKey);
             islands(w, [{ c: P(-1700, 4700), r: 520, height: 26, seed: 163, lobes: 4, elong: 1.5, rot: 0.4, rough: 0.5, name: 'Doggerriff' }]);
             const p = add(w, shipKey, 'player', P(-9300, -700), 0, { isPlayer: true });
             S.allyId = add(w, 'Braunschweig', 'player', P(-10400, 900), 0, { name: 'Oldenburg', dmgMult: 0.6, ai: { escortId: p.id } }).id;
@@ -304,10 +340,7 @@ export function specialMissionsA(H) {
             zone(w, RIG.x, RIG.y, RIG.launch, 'Dogger Alpha', 'goal');
             // boats: moored round the legs (ai.anchored: the boat does nothing at all until the mission lets it go)
             S.boats = [];
-            for (let i = 0; i < T.boats; i++) {
-               const a = i * 2.4 + 0.7;
-               S.boats.push(add(w, 'Boghammar', 'enemy', P(RIG.x + Math.cos(a) * 75, RIG.y + Math.sin(a) * 75), a, { name: 'Boot der Besetzer ' + (i + 1), hpMult: T.boatHp, dmgMult: T.boatDmg, ai: { anchored: true, aggro: 1.3 } }).id);
-            }
+            for (let i = 0; i < T.boats; i++) this.boat(w, S, T);
             S.total = T.valves; S.valves = T.valves; S.teamsLeft = T.teams; S.teamId = null; S.lost = 0; S.relT = 0; S.tick = 0; S.said = 0; S.whyT = -99; S.out = 0; S.done = false;
             // the group's own bot captains hold their guns while the fall of shot would lie at the platform
             S.noFire = (b, aim) => b.side === 'player' && Math.hypot(aim.x - RIG.x, aim.y - RIG.y) < RIG.safe;
@@ -319,15 +352,28 @@ export function specialMissionsA(H) {
             objective(w, 'team', 'Kein Boardingteam muss abdrehen', { optional: true });
             w.score = { kind: 'count', player: 100, enemy: 0, target: 100 };
             radio(w, 'Lagezentrum', `Dogger Alpha ist besetzt, die Besatzung wird festgehalten. Die Besetzer öffnen in ${Math.round(S.valves / 60)} Minuten die Ventile. Keine schweren Waffen auf die Plattform – ein Treffer dort, und der Einsatz ist verloren.`, 'warn');
-            later(S, 12, () => radio(w, 'Wachoffizier', `${T.boats} Boote liegen an den Plattformbeinen, dort dürfen wir nicht schießen. Wenn wir näher kommen, laufen sie aus – Feuer erst, wenn sie frei von der Plattform sind.`));
+            later(S, 12, () => radio(w, 'Wachoffizier', `${S.boats.length} Boote liegen an den Plattformbeinen, dort dürfen wir nicht schießen. Wenn wir näher kommen, laufen sie aus – Feuer erst, wenn sie frei von der Plattform sind.`));
             later(S, 26, () => { const s = w.sites.find(x => x.id === S.postId); if (s && s.alive) radio(w, 'Operationszentrale', 'Flugkörperstarter auf dem Doggerriff im Nordwesten der Plattform. Er liegt weit genug von ihr entfernt: Freigabe für Geschütz und Flugkörper.', 'warn'); });
             later(S, 44, () => radio(w, 'Boardingteam', `${T.teams} Teams klar. Wir setzen über, sobald kein Boot mehr an der Plattform steht und wir im markierten Kreis höchstens Viertelfahrt laufen.`));
+         },
+         // a boat moored at a leg of the platform
+         boat(w, S, T) {
+            const i = S.boats.length, a = i * 2.4 + 0.7;
+            S.boats.push(add(w, 'Boghammar', 'enemy', P(RIG.x + Math.cos(a) * 75, RIG.y + Math.sin(a) * 75), a, { name: 'Boot der Besetzer ' + (i + 1), hpMult: T.boatHp, dmgMult: T.boatDmg, ai: { anchored: true, aggro: 1.3 } }).id);
+         },
+         // co-op (net/setup.js): against several captains `coopBoats` more boats lie at the platform and the rockets
+         // of every boat hit `coopDmg` times as hard
+         coop(w, S) {
+            const T = S.T, k = coopOf(w, T.coopDmg, 1);
+            for (let i = coopOf(w, T.coopBoats, 0); i > 0; i--) this.boat(w, S, T);
+            for (let i = 0; i < S.boats.length; i++) { const b = w.shipById(S.boats[i]); if (b) b.dmgMult *= k; }
+            objText(w, 'boats', `Schalten Sie alle Boote der Besetzer aus (0/${S.boats.length})`);
          },
          update(w, dt, S) {
             if ((S.tick -= dt) > 0) return;
             const step = 0.5; S.tick += step;
             if (S.done) return;
-            const T = SPECIAL_A_TUNE.rig[w.difficultyKey] || SPECIAL_A_TUNE.rig.normal;
+            const T = S.T;
             let plat = null;
             for (const s of w.sites) if (s.id === S.platId) { plat = s; break; }
             if (!plat) return;
@@ -442,7 +488,7 @@ export function specialMissionsA(H) {
          env: { time: 'day', weather: 'storm' }, type: 'ops', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
          arena: 12000, timeLimit: 10 * 60, stars: 2,
          setup(w, shipKey) {
-            const S = w._script, T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal;
+            const S = w._script, T = S.T = tuneOf(w, 'rescue', shipKey);
             islands(w, [
                { c: P(1800, -5600), r: 1500, height: 150, seed: 181, lobes: 6, elong: 2.6, rot: 0, rough: 0.5, name: 'Skarvklippen' },
                { c: P(8600, -1500), r: 600, height: 60, seed: 187, lobes: 4, elong: 1.4, rot: 0.6, rough: 0.5, name: 'Lille Skarv' },
@@ -467,6 +513,9 @@ export function specialMissionsA(H) {
             later(S, 28, () => radio(w, 'Wachoffizier', `Im Schlepp nur Viertelfahrt und weite Bögen: Bei 100 % Leinenlast bricht die Leine. Wir haben ${T.lines} Leinen an Bord.`));
             later(S, 46, () => radio(w, 'Operationszentrale', 'Schnelle Kontakte ohne Kennung im Nordosten, noch auf Abstand. Greifen sie an: Freigabe zur Bekämpfung – der Frachter darf nicht getroffen werden.', 'warn'));
          },
+         // all the boats that come: against several captains `coopBoats` more per wave (co-op, net/setup.js)
+         all(w, T) { return T.boats + T.wave2 + coopOf(w, T.coopBoats, 0) * (T.wave2 ? 2 : 1); },
+         coop(w, S) { objText(w, 'boats', `Schalten Sie alle bewaffneten Boote aus (0/${this.all(w, S.T)})`); },
          // distance (m) the hull still has to the coast in the direction of the drift (bow, midships, stern)
          rocks(w, m) {
             const c = Math.cos(m.heading) * m.cfg.hull.L * 0.46, s = Math.sin(m.heading) * m.cfg.hull.L * 0.46;
@@ -486,7 +535,7 @@ export function specialMissionsA(H) {
             if (S.done) return;
             const m = w.shipById(S.merchId);
             if (!m || !m.alive) return;
-            const T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal;
+            const T = S.T;
             // every frame: the drift, and the line as a spring between the tug's stern and the merchant's bow
             // (the hull is pushed back off the coast at once, so the touch is latched here and judged below)
             if (m.grounded) S.aground = true;
@@ -569,9 +618,12 @@ export function specialMissionsA(H) {
             let lead = S.tugId != null ? w.shipById(S.tugId) : null;
             if (!lead || !lead.alive) lead = [w.player, ...(w.net ? w.net.humans : [])].find(s => s && s.alive) || w.shipById(S.allyId);
             if (!lead || !lead.alive) return;
+            // how well a wave is armed differs by `boatVar` (share, either way); co-op: `coopBoats` more, damage times `coopDmg`
+            const dmg = T.boatDmg * (1 + (T.boatVar || 0) * (2 * rnd(w, 30 + S.wave) - 1)) * coopOf(w, T.coopDmg, 1);
+            n += coopOf(w, T.coopBoats, 0);
             for (let i = 0; i < n; i++) {
                const k = S.boats.length;
-               S.boats.push(add(w, 'Boghammar', 'enemy', P(10600 - (k % 2) * 500, 3200 + k * 650), Math.PI, { name: 'Boot ohne Kennung ' + (k + 1), minDist: 9000, speedKn: T.boatKn, hpMult: T.boatHp, dmgMult: T.boatDmg,
+               S.boats.push(add(w, 'Boghammar', 'enemy', P(10600 - (k % 2) * 500, 3200 + k * 650), Math.PI, { name: 'Boot ohne Kennung ' + (k + 1), minDist: 9000, speedKn: T.boatKn, hpMult: T.boatHp, dmgMult: dmg,
                   ai: { huntId: lead.id, press: true, aggro: 1.3 } }).id);
             }
             S.wave++;
@@ -591,7 +643,7 @@ export function specialMissionsA(H) {
          onSink(w, ship, killer, S) {
             if (ship.id === S.merchId) { S.done = true; w.end(false, ship.name + ' ist gesunken – der Frachter durfte nicht zu Schaden kommen.'); return; }
             if (S.boats.includes(ship.id)) {
-               const T = SPECIAL_A_TUNE.rescue[w.difficultyKey] || SPECIAL_A_TUNE.rescue.normal, all = T.boats + T.wave2;
+               const all = this.all(w, S.T);
                let n = 0;
                for (let i = 0; i < S.boats.length; i++) { const b = w.shipById(S.boats[i]); if (!b || !b.alive) n++; }
                objText(w, 'boats', `Schalten Sie alle bewaffneten Boote aus (${n}/${all})`);
