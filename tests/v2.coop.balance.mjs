@@ -1,6 +1,9 @@
 // Co-op balance of the ten operations: N human captains (host + N-1 allied ships taken over as in a net
 // game), all sailed by the bot captain, seeded runs per mission, win rate and end reasons. Not a test.
 //    RUNS=30 N=2 DIFF=normal ONLY=strait,giuk WHY=1 SLOTS=1 node tests/v2.coop.balance.mjs
+//    DIFF may be a comma-separated list. The seeds are a fixed sequence (run i: 101 + 37 i east, 1000 + 37 i west),
+//    so a longer table extends a shorter one (FROM=60 RUNS=60: runs 60 to 119 only). TUNE (env): JSON merged over the tune tables for a trial without
+//    editing them, e.g. TUNE='{"reefs":{"hard":{"coopFrig":0}},"redsea":{"hard":{"coopFrom":5}}}'
 import { getMission } from '../gamev2/missions.js';
 import { buildNetWorld, missionSlots } from '../gamev2/net/setup.js';
 import { updateBots } from '../gamev2/ai.js';
@@ -8,10 +11,22 @@ import { orderDepth } from '../gamev2/submarine.js';
 import { launchTeam, teamStatus } from '../gamev2/seal.js';
 import { sendHelo } from '../gamev2/helo.js';
 import { captain, cruiseOrders } from './v2.missions.east.captain.mjs';
+import { EAST_TUNE } from '../gamev2/missions_east.js';
+import { WEST_TUNE } from '../gamev2/missions_west.js';
 
 const EAST = ['barents', 'reefs', 'strait', 'philsea', 'countdown'];
 const WEST = ['hormus', 'redsea', 'pipeline', 'blacksea', 'giuk'];
-const RUNS = +process.env.RUNS || 30, N = +process.env.N || 2, DIFF = process.env.DIFF || 'normal';
+const RUNS = +process.env.RUNS || 30, N = +process.env.N || 2, DIFFS = (process.env.DIFF || 'normal').split(',');
+let DIFF = DIFFS[0];
+const FROM = +process.env.FROM || 0;
+if (process.env.TUNE) {
+   const over = JSON.parse(process.env.TUNE);
+   for (const m in over) {
+      const T = EAST_TUNE[m] || WEST_TUNE[m];
+      if (!T) throw new Error('TUNE: no tune table for ' + m);
+      for (const d in over[m]) Object.assign(T[d] || (T[d] = {}), over[m][d]);
+   }
+}
 const only = process.env.ONLY ? process.env.ONLY.split(',') : [...EAST, ...WEST];
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -142,7 +157,7 @@ if (process.env.SLOTS) {
    process.exit(0);
 }
 
-for (const id of only) {
+for (const id of only) for (DIFF of DIFFS) {
    const def = getMission(id), east = EAST.includes(id);
    // the lobby admits missionSlots captains; beyond that buildNetWorld would add ships the mission does not
    // have (giuk with four captains: two extra destroyers with helicopters), which no game can reach
@@ -151,7 +166,7 @@ for (const id of only) {
    let wins = 0, tSum = 0, tMax = 0, slotsMin = 99, slotsMax = 0;
    const why = {}, per = [];
    for (let i = 0; i < RUNS; i++) {
-      const w = play(id, N, DIFF, (east ? 101 : 1000) + i * 37);
+      const w = play(id, N, DIFF, (east ? 101 : 1000) + (FROM + i) * 37);
       if (w.phase === 'won') wins++;
       tSum += w.time; tMax = Math.max(tMax, w.time);
       const hs = w.net.humans;
@@ -164,7 +179,7 @@ for (const id of only) {
       const r = (w.phase === 'won' ? 'W ' : w.phase === 'lost' ? 'L ' : '? ') + (w.result?.reason || '');
       why[r] = (why[r] || 0) + 1;
    }
-   console.log(`${id.padEnd(10)} ${String(N).padStart(2)}  ${DIFF.padEnd(6)} wins ${String(Math.round(100 * wins / RUNS)).padStart(3)} %   t ${Math.round(tSum / RUNS)} (${Math.round(tMax)}) / ${def.timeLimit}   slots ${slotsMin === slotsMax ? slotsMin : slotsMin + '-' + slotsMax}`);
+   console.log(`${id.padEnd(10)} ${String(N).padStart(2)}  ${DIFF.padEnd(6)} wins ${String(Math.round(100 * wins / RUNS)).padStart(3)} % (${wins}/${RUNS})   t ${Math.round(tSum / RUNS)} (${Math.round(tMax)}) / ${def.timeLimit}   slots ${slotsMin === slotsMax ? slotsMin : slotsMin + '-' + slotsMax}${process.env.TUNE ? '   ' + process.env.TUNE : ''}`);
    if (process.env.WHY) {
       for (const k in why) console.log('      ' + String(why[k]).padStart(3) + ' x ' + k);
       per.forEach((a, k) => console.log(`      captain ${k}: ssmFired ${(a.ssm / a.n).toFixed(1)}  dmg ${Math.round(a.dmg / a.n)}  path ${Math.round(a.path / a.n)} m  alive at end ${a.alive}/${a.n}  human ${a.human}/${a.n}`));
