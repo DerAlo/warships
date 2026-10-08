@@ -76,11 +76,12 @@ for (let m = 1; m <= MINUTES; m++) {
    S.push(await snap('battle 1, min ' + m));
 }
 await page.screenshot({ path: 'tests/shots/v2-leak-10min.png' });
-// Baseline minute 4: a geometry counts from its first draw, and ships and island detail levels come into view
+// Baseline minute 5: a geometry counts from its first draw, and ships and island detail levels come into view
 // during the first minutes (measured over 20 minutes: 54, 72, 79, 86 in minutes 1-4, then 86-88 to the end).
-const a = S[Math.min(3, S.length - 1)], z = S[S.length - 1];
+// Five ten-minute runs (two of them on the previous release) gave 4-7 more between minutes 4 and 10 but only 2-3 from minute 5.
+const a = S[Math.min(4, S.length - 1)], z = S[S.length - 1];
 check(`battle ran ${MINUTES} minutes of game time and was still on`, z.phase === 'playing' && z.t >= MINUTES * 60 - 2, { t: z.t, phase: z.phase });
-check('geometries do not climb (minute 4 -> end)', z.geo <= a.geo + 4, { from: a.geo, to: z.geo });
+check('geometries do not climb (minute 5 -> end)', z.geo <= a.geo + 4, { from: a.geo, to: z.geo });
 check('textures do not climb', z.tex <= a.tex + 1, { from: a.tex, to: z.tex });
 check('shader programs do not climb', z.prog <= a.prog + 2, { from: a.prog, to: z.prog });
 check('scene objects do not climb', z.scene <= a.scene + 12, { from: a.scene, to: z.scene });
@@ -129,12 +130,15 @@ for (let m = 1; m <= 2; m++) {
 }
 // (like with like: minute 2 against minute 2; missiles in flight and notices move the scene and the document a little)
 // (geometries reach the GPU when a ship or an island first comes into view: minute 2 read 65 and 72 in two runs of the same build)
-const x = U[U.length - 1], f = S[Math.min(1, S.length - 1)], dom1 = Math.max(...S.map(s => s.dom));
-check('first mission again: running, no more in it than the first time', x.phase === 'playing' && x.geo <= f.geo + 10 && x.tex <= f.tex + 1 && x.prog <= z.prog + 2 && x.scene <= f.scene + 24 && x.dom <= dom1 + 10,
-   { first: [f.geo, f.tex, z.prog, f.scene, dom1], again: [x.geo, x.tex, x.prog, x.scene, x.dom] });
+// (so the geometry count is held against the highest reading of the whole first battle, not against its minute 2)
+const x = U[U.length - 1], f = S[Math.min(1, S.length - 1)], geo1 = Math.max(...S.map(s => s.geo)), dom1 = Math.max(...S.map(s => s.dom));
+check('first mission again: running, no more in it than the first time', x.phase === 'playing' && x.geo <= geo1 + 10 && x.tex <= f.tex + 1 && x.prog <= z.prog + 2 && x.scene <= f.scene + 24 && x.dom <= dom1 + 10,
+   { first: [geo1, f.tex, z.prog, f.scene, dom1], again: [x.geo, x.tex, x.prog, x.scene, x.dom] });
 check('first mission again: heap not above the first time', x.heapMB <= Math.max(...S.map(s => s.heapMB)) * 1.15 + 3, { first: Math.max(...S.map(s => s.heapMB)), again: x.heapMB });
 const menu3 = await toMenu('menu (after 3)');
-check('menu after three battles: nothing left over compared with the first return', menu3.geo <= Math.max(menu1.geo, menu2.geo) + 2 && menu3.tex <= menu1.tex + 1 && menu3.dom <= menu1.dom + 10 && menu3.scene <= menu1.scene + 4 && menu3.heapMB <= menu1.heapMB * 1.15 + 3,
+// (shared model geometries stay cached once first drawn, in sets of five: the menu read 25, 30 or 35 after a battle in seven runs,
+// never more, and which battle draws a set first differs from run to run; one such set is allowed on top)
+check('menu after three battles: nothing left over compared with the first return', menu3.geo <= Math.max(menu1.geo, menu2.geo) + 6 && menu3.tex <= menu1.tex + 1 && menu3.dom <= menu1.dom + 10 && menu3.scene <= menu1.scene + 4 && menu3.heapMB <= menu1.heapMB * 1.15 + 3,
    { first: [menu1.geo, menu1.tex, menu1.dom, menu1.scene, menu1.heapMB], third: [menu3.geo, menu3.tex, menu3.dom, menu3.scene, menu3.heapMB] });
 
 await browser.close();
