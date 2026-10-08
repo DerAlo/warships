@@ -227,6 +227,20 @@ await shot('02-normal');   // (leaves the 3D render off until the next screensho
    const readyAfter = st3.filter(s => s === 'ready').length;
    check('reloading turrets do not fire again', readyAfter > 0 || f3.shots === f2.shots, { states: st3, shots: f3.shots - f2.shots });
    check('no shot from a non-ready turret', (await ev(() => window.__badFireCount)) === 0);
+   // WoWs fire control: one click = one turret, a double click = the rest of the battery
+   const allReady = () => window.__turrets().filter(t => t.state === 'ready').length >= 2;
+   check('two turrets ready for the single shot', await waitFor(allReady, 60000));
+   await wait(400);                        // well clear of the last click
+   const r0 = (await turrets()).filter(t => t.state === 'ready').length, g0 = await fired();
+   await page.mouse.down(); await page.mouse.up(); await frames(3);
+   const r1 = (await turrets()).filter(t => t.state === 'ready').length, g1 = await fired();
+   check('a single click fires one turret', r1 === r0 - 1 && g1.shots - g0.shots === 2, { ready: [r0, r1], shots: g1.shots - g0.shots });
+   check('two turrets ready for the double click', await waitFor(allReady, 60000));
+   await wait(400);
+   const r2 = (await turrets()).filter(t => t.state === 'ready').length, g2 = await fired();
+   await page.mouse.down(); await page.mouse.up(); await frames(1); await page.mouse.down(); await page.mouse.up(); await frames(3);
+   const r3 = (await turrets()).filter(t => t.state === 'ready').length, g3 = await fired();
+   check('a double click fires every ready turret', r3 === 0 && g3.shots - g2.shots === r2 * 2, { ready: [r2, r3], shots: g3.shots - g2.shots });
    await frames(10);
    await shot('05-after-salvo');
 }
