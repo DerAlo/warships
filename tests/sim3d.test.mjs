@@ -281,6 +281,23 @@ test('engine telegraph and rudder behave like a ship', () => {
    assert.ok(Math.abs(s.speedKn) < 0.5, `disabled engine should stop the ship (${s.speedKn})`);
 });
 
+test('single-turret fire: a capped salvo fires one turret, the next call the rest', () => {
+   const w = blank(6);
+   const bb = w.spawn('Bismarck', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });
+   bb.aimPoint = { x: 8000, y: 9000 };    // off the bow quarter: forward and aft turrets bear
+   const ready = () => bb.turrets.filter(t => t.alive && t.reload <= 0 && t.canBear && t.err <= WORLD.FIRE_TOL);
+   for (let i = 0; i < 60 * 90 && ready().length < bb.turrets.length; i++) bb.update(DT, w);
+   const all = ready().length, guns = ready().reduce((n, t) => n + t.guns, 0);
+   const ready0 = ready()[0].guns;
+   assert.ok(all >= 2, `needs at least two ready turrets (${all})`);
+   const one = bb.fireMain(w, bb.aimPoint, 1);
+   assert.strictEqual(one, ready0, 'one turret worth of shells');
+   assert.strictEqual(ready().length, all - 1, 'the other turrets stay loaded');
+   const rest = bb.fireMain(w, bb.aimPoint);
+   assert.strictEqual(rest, guns - one, 'the full salvo fires the rest');
+   assert.strictEqual(ready().length, 0);
+});
+
 test('controls API: ammo, main battery, torpedoes, consumables', () => {
    const w = blank(6);
    const dd = w.spawn('Z23', 'player', { x: 0, y: 0 }, 0, { isPlayer: true });

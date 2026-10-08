@@ -176,14 +176,14 @@ export function makeHost(world, o) {
          const s = c.ship;
          if (s.alive && c.lastSeq >= 0) { applyCommand(s, c.cmd); if (c.cmd.air) applyAirControl(s, world, c.cmd.air); }
          const rt = c.retry;
-         if (rt.n > 0) { rt.n--; if (!s.alive || s.fireMain(world, rt) > 0) rt.n = 0; }
+         if (rt.n > 0) { rt.n--; if (!s.alive || s.fireMain(world, rt, rt.m) > 0) rt.n = 0; }
          const q = c.queue;
          for (let i = 0; i < q.length; i++) {
             const a = q[i];
             const r = execAction(s, world, a);
             c.nextAct++;
             // the client's turrets were ready a moment before the host's are (traverse / reload lag)
-            if (a[0] === 'f' && !r && s.alive && fin(a[1]) && fin(a[2])) { rt.x = a[1]; rt.y = a[2]; rt.n = RETRY_TICKS; }
+            if (a[0] === 'f' && !r && s.alive && fin(a[1]) && fin(a[2])) { rt.x = a[1]; rt.y = a[2]; rt.m = a[3] >= 1 ? Math.floor(a[3]) : Infinity; rt.n = RETRY_TICKS; }
          }
          q.length = 0;
       }

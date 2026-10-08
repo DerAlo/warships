@@ -136,15 +136,17 @@ export class Ship {
    consumableActive(key) { const c = this.consumable(key); return !!(c && c.active); }
 
    // Fire every loaded turret that bears on the aim point within FIRE_TOL. aim: {x,y} (or a
-   // legacy {pos}). Returns the number of guns fired.
-   fireMain(world = this.world, aim = this.aimPoint) {
+   // legacy {pos}). max: at most that many turrets (single-turret fire). Returns the number of guns fired.
+   fireMain(world = this.world, aim = this.aimPoint, max = Infinity) {
       if (!this.alive || !aim || this.depthF > 0.3) return 0;   // the deck gun is under water
       const a = aim.pos || aim;
       this.aimPoint = { x: a.x, y: a.y };
       const m = this.cfg.main;
-      let n = 0;
+      let n = 0, mounts = 0;
       for (const t of this.turrets) {
+         if (mounts >= max) break;
          if (!t.alive || t.reload > 0 || !t.canBear || t.err > WORLD.FIRE_TOL) continue;
+         mounts++;
          const wp = toWorld(this, t.off);
          const b = this.heading + t.bearing;
          const cb = Math.cos(b), sb = Math.sin(b);

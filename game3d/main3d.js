@@ -862,6 +862,8 @@ function rayHitShip(ax, ay) {
 }
 
 // ------------------------------------------------------------------ per-step control application
+const FIRE_DOUBLE_MS = 320, FIRE_HOLD_MS = 280, FIRE_RIPPLE_MS = 160;
+const fireCtl = { last: -1e9, next: 0 };   // last click and the next shot of a held button (real time)
 function applyControls(dt) {
    const p = P;
    if (!p || !p.alive) return;
@@ -889,12 +891,25 @@ function applyControls(dt) {
    if (phase !== 'playing' || ctl.mapOpen || kc.on || shellcam.blocksFire()) return;
    // clicked covers a press+release inside one frame (low frame rates, quick taps);
    // Ctrl held = secondary target picking, never a salvo
-   if (ctl.mode === 'guns' && (input.mouse.down || click) && !input.down('CTRL')) fireGuns();
+   if (ctl.mode === 'guns' && !input.down('CTRL')) {
+      const now = performance.now();
+      if (input.touchMode) { if (input.mouse.down || click) fireGuns(); }   // the fire button stays a full salvo
+      else if (click) {
+         // WoWs: a click fires one turret, a second click right after it the rest of the battery
+         input.mouse.clicked = false;
+         fireGuns(now - fireCtl.last < FIRE_DOUBLE_MS ? Infinity : 1);
+         fireCtl.last = now; fireCtl.next = now + FIRE_HOLD_MS;
+      } else if (input.mouse.down && now >= fireCtl.next) {
+         // held: turret after turret
+         fireGuns(1); fireCtl.next = now + FIRE_RIPPLE_MS;
+      }
+   }
    if (ctl.mode === 'torp' && click) { input.mouse.clicked = false; fireTorps(); }
    if (simv.oldSecondaries) autoSecondaries();
 }
 
-function fireGuns() {
+// max: how many turrets at most (1 = single-turret fire), default the whole battery
+function fireGuns(max = Infinity) {
    const p = P;
    const st = turretCache;
    if (!st.some(t => t.state === 'ready')) return 0;
@@ -906,7 +921,7 @@ function fireGuns() {
    let n = 0;
    if (simv.newTurrets && !hasData(p, 'fireTimer')) {
       const before = p.turrets.map(t => t.reload || 0);
-      try { n = act(['f', ap.x, ap.y]) || 0; } catch (e) { n = 0; }
+      try { n = act(max < Infinity ? ['f', ap.x, ap.y, max] : ['f', ap.x, ap.y]) || 0; } catch (e) { n = 0; }
       p.turrets.forEach((t, i) => { if ((t.reload || 0) > before[i] + 1e-6 && st[i]?.state !== 'ready') window.__badFireCount++; });
    } else {
       // Old sim: fireMain fires every mount with cd <= 0 along the aim bearing and has a

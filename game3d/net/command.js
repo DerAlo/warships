@@ -5,7 +5,7 @@
 // player's ship. Two parts:
 //   - continuous state (applied every sim step): telegraph, rudder, aim point, locked target
 //   - one-shot actions (executed once): short arrays, first element = kind
-//       ['f', x, y]     fire the main battery at the aim point
+//       ['f', x, y, n?] fire the main battery at the aim point (n: at most n turrets)
 //       ['t', bearing]  launch torpedoes along the absolute bearing (rad), spread as selected
 //       ['c', key]      use a consumable
 //       ['a', type]     ammo type 'HE' | 'AP'
@@ -74,7 +74,7 @@ const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 export function execAction(ship, world, a) {
    if (!ship || !ship.alive || !Array.isArray(a)) return 0;
    switch (a[0]) {
-      case 'f': return fin(a[1]) && fin(a[2]) ? ship.fireMain(world, { x: a[1], y: a[2] }) || 0 : 0;
+      case 'f': return fin(a[1]) && fin(a[2]) ? ship.fireMain(world, { x: a[1], y: a[2] }, a[3] >= 1 ? Math.floor(a[3]) : Infinity) || 0 : 0;
       case 't': return fin(a[1]) ? ship.fireTorpedoes(world, a[1]) || 0 : 0;
       case 'c': return typeof a[1] === 'string' ? !!ship.useConsumable(world, a[1]) : false;
       case 'a': return !!ship.setAmmo(a[1] === 'AP' ? 'AP' : 'HE');
