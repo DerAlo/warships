@@ -294,6 +294,22 @@ await shot('2x');
    check('touchpad out of the scope needs the detent and lands at the closest view', !z.bino && z.tp === 5 && outN >= 14 && outN <= 16, { outN, tp: z.tp });
 }
 
+// ------------------------------------------------------------------ scaled displays: one click is one step
+{
+   // at 200 % scaling (or browser zoom) a wheel click reads 200 px; wheelDelta still says one click
+   const scaled = (dy, wd) => ev(([dy, wd]) => window.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, wheelDeltaY: wd, bubbles: true, cancelable: true })), [dy, wd]);
+   await settled();
+   const before = (await Z()).level;
+   await notch(1, 12); await settled();
+   const seen = [];
+   for (let i = 0; i < 9; i++) { await scaled(-200, 120); await frames(2); const z = await Z(); seen.push(z.bino ? z.zoom + 'x' : z.level); }
+   check('200 px wheel clicks (scaled display) walk every step: tp 1..5, 2x, 4x, 8x, 16x', JSON.stringify(seen) === JSON.stringify([1, 2, 3, 4, 5, '2x', '4x', '8x', '16x']), seen);
+   const back = [];
+   for (let i = 0; i < 3; i++) { await scaled(175, -120); await frames(2); const z = await Z(); back.push(z.zoom + 'x'); }
+   check('175 px clicks back out: 8x, 4x, 2x', JSON.stringify(back) === JSON.stringify(['8x', '4x', '2x']), back);
+   await notch(1, 12); await notch(-1, Math.min(before, 5)); await settled();
+}
+
 // ------------------------------------------------------------------ capture: HUD element, pointer lock off
 {
    await settled();
