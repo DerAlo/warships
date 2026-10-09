@@ -119,6 +119,18 @@ function hitZone(ship, lp, a, prevLp, prevA) {
    return Math.abs(lp.x) <= cit ? 'belt' : 'ends';
 }
 
+// Proximity fuse: an HE main-gun shell that passes a fast boat within this distance bursts beside
+// it. A 13 m hull is far smaller than the dispersion of any gun, so without the fuse a boat could
+// hardly be hit at all (5 to 10 % of perfectly aimed shells).
+const proxRadius = (caliber) => 3 + caliber * 0.04;
+function proxZone(ship, lp, a, s) {
+   const h = ship.cfg.hull;
+   if (h.type !== 'FAC' || s.kind !== 'main' || s.ammo !== 'HE') return false;
+   const m = proxRadius(s.caliber);
+   if (a < 0 || a > h.deckH + (h.sup ? h.sup.h : 0) + m) return false;
+   return insideHull(h, lp, m);
+}
+
 // scratch points for the shell sub-steps: hitZone/resolveHit/addEffect only read (or copy) them,
 // and ~50 shells x 16 sub-steps x every sim step made these the top allocation site
 const _sp = [{ x: 0, y: 0 }, { x: 0, y: 0 }], _lp = { x: 0, y: 0 }, _plp = { x: 0, y: 0 };
@@ -147,8 +159,11 @@ export function resolveShells(world, dt) {
       // only the low part of the flight can hit anything (ships ~<45 m, islands by height)
       if (Math.min(pa, s.alt) < world._maxTerrainH + 5) {
          const segLen = Math.sqrt((s.pos.x - px) ** 2 + (s.pos.y - py) ** 2);
-         const n = Math.max(1, Math.min(16, Math.ceil(segLen / 8)));
          const cand = Math.min(pa, s.alt) < 60 ? nearbyShips(world, s.pos, s.side, segLen + 60) : null;
+         // a boat is narrower than the usual 8 m sample spacing: shells went straight through it
+         let boat = false;
+         if (cand) for (const ship of cand) if (ship.cfg.hull.type === 'FAC') { boat = true; break; }
+         const n = boat ? Math.max(1, Math.min(64, Math.ceil(segLen / 1.2))) : Math.max(1, Math.min(16, Math.ceil(segLen / 8)));
          let prevP = _sp[0], prevA = pa;
          prevP.x = px; prevP.y = py;
          for (let k = 1; k <= n && s.alive; k++) {
@@ -157,12 +172,19 @@ export function resolveShells(world, dt) {
             p.x = px + (s.pos.x - px) * f; p.y = py + (s.pos.y - py) * f;
             const a = arcAlt(s.H, s.h0, pu + (u - pu) * f);
             if (cand) {
+               let near = null;
                for (const ship of cand) {
                   const lp = toLocalInto(ship, p, _lp);
                   const zone = hitZone(ship, lp, a, toLocalInto(ship, prevP, _plp), prevA);
                   if (zone) { resolveHit(world, s, ship, zone, lp, p, a); s.alive = false; break; }
+                  if (boat && proxZone(ship, lp, a, s)) near = ship;
                }
                if (!s.alive) break;
+               // the fuse fires as the shell starts to leave the boat again, a direct hit comes first
+               if (s.prox && s.prox !== near && s.prox.alive) {
+                  resolveHit(world, s, s.prox, 'prox', toLocalInto(s.prox, prevP, _lp), prevP, prevA); s.alive = false; break;
+               }
+               s.prox = near;
             }
             for (const o of world.obstacles) {
                if (o.kind !== 'island' || a > o.height) continue;
@@ -175,6 +197,10 @@ export function resolveShells(world, dt) {
             if (s.alive && a <= 0) break;
             prevP = p; prevA = a;
          }
+      }
+      if (s.alive && u >= 1 && s.prox && s.prox.alive) {
+         s.alive = false;
+         resolveHit(world, s, s.prox, 'prox', toLocalInto(s.prox, s.pos, _lp), s.pos, Math.max(0, s.alt));
       }
       if (s.alive && u >= 1) {
          s.alive = false;
@@ -265,10 +291,11 @@ export function resolveHit(world, s, ship, zone, lp, p, alt) {
       // HE: angle-independent, penetrates if its pen >= the plate it strikes
       if (s.hePen >= plate) { type = 'he'; mult = 1 / 3; } else type = 'shatter';
    }
+   if (zone === 'prox') mult *= 0.5;   // fragments only
    // a boat at periscope depth shows only its tower: half damage (submarine.js)
    const dmg = s.dmg * mult * (ship.depth === 1 ? PERI_SHELL_MULT : 1);
    world.onHit(shooter, ship, type, s);
-   world.pushEvent(type, { srcId: s.ownerId, dstId: ship.id, dmg: Math.round(dmg), pos: { x: p.x, y: p.y }, text: HIT_TEXT[type] });
+   world.pushEvent(type, { srcId: s.ownerId, dstId: ship.id, dmg: Math.round(dmg), pos: { x: p.x, y: p.y }, text: zone === 'prox' ? 'Splitterwirkung' : HIT_TEXT[type] });
    const big = type === 'citadel' || s.caliber >= 280;
    world.addEffect(type === 'ricochet' ? 'ricochet' : type === 'shatter' ? 'shatter' : 'explosion', p, big ? 1.1 : 0.6,
       type === 'citadel' ? 40 : 10 + s.caliber * 0.06, { big, hit: type, shipId: ship.id });
