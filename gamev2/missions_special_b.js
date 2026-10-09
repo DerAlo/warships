@@ -54,9 +54,9 @@ export const SPECIAL_B_TUNE = {
       // coopDmg 1 -> 16 | 36 %, 0.97 -> 22 | 44 %, 0.94 -> 30 | 45 %, 0.92 -> 29 | 46 %
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
       normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 0.3, coopWave: 2,
-         ship: { Daring: { boats: 13, msl: 13, coopMsl: 0, coopDmg: 1.01 }, Burke: { boats: 12, msl: 12, coopMsl: 0.2 }, Braunschweig: { msl: 5, coopMsl: 0.5 } } },
+         ship: { Daring: { boats: 14, msl: 14, coopMsl: 0 }, Burke: { boats: 12, msl: 12, coopMsl: 0, coopDmg: 1.03 }, Braunschweig: { msl: 5, coopMsl: 0 } } },
       hard: { ally: 0.3, kn: 15.5, boats: 10, msl: 9, guard: 3, wave: 4, waveAt: 200, boom: 0.25, board: 47, batN: 12, batAt: 10500, coopMsl: 1.1, coopWave: 2,
-         ship: { Daring: { boats: 11, msl: 10, coopMsl: 0, coopDmg: 1.02 }, Burke: { msl: 10, coopMsl: 0.3 }, Braunschweig: { boats: 9, msl: 3, coopMsl: 0, coopDmg: 0.94 } } },
+         ship: { Daring: { boats: 12, msl: 11, coopMsl: 0, coopDmg: 1.02 }, Burke: { msl: 10, coopMsl: 0.3 }, Braunschweig: { boats: 9, msl: 3, coopMsl: 0, coopDmg: 0.94 } } },
    },
    evac: {
       // lifts: boat lifts to take aboard · miss: lifts that may be missed · first: s until the first window opens ·
@@ -72,10 +72,10 @@ export const SPECIAL_B_TUNE = {
       // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
       // One captain again on 240 runs (recommended ship, unchanged values): 100/62/33 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
-      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [2, 3, 4], fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
-         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { ferry: 0.85, coopFerry: 1.27 } } },
-      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [2, 3, 4], fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
-         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.2 }, Daring: { ferry: 0.92 }, Burke: { coopFerry: 1.15 } } },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [3, 3, 4], boatHp: 1.3, fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { coopFerry: 1.27 } } },
+      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [3, 3, 4], boatHp: 1.3, fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.2 }, Daring: { ferry: 0.92 }, Burke: { ferry: 0.93, coopFerry: 1.15 } } },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
@@ -187,7 +187,7 @@ export function specialMissionsB(H) {
             const hdg = tk.heading, c = Math.cos(hdg), s = Math.sin(hdg);
             for (let i = 0; i < T.boats + T.guard; i++) {
                const guard = i < T.guard, f = guard ? 250 - i * 350 : 900 - (i - T.guard) * 300, r = (i % 2 ? 1 : -1) * (guard ? 320 : 650 + i * 60);
-               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, ai: { shy: true, escortId: tk.id } });
+               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, hpMult: T.boatHp || 1, ai: { shy: true, escortId: tk.id } });
                if (guard || S.msl-- <= 0) b.mag.kowsar = 0;
                (guard ? S.guards : S.boats).push(b.id);
             }
@@ -208,7 +208,7 @@ export function specialMissionsB(H) {
                const t = live(w, S.tankId);
                if (!t || S.phase >= 2) return;
                const n = T.wave + extraCaptains(w) * T.coopWave, made = [];
-               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, ai: { shy: true, huntId: S.own[i % S.own.length], press: true } })).id);
+               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, hpMult: T.boatHp || 1, ai: { shy: true, huntId: S.own[i % S.own.length], press: true } })).id);
                if (S.coopDmg) for (const id of made) w.shipById(id).dmgMult *= S.coopDmg;
                S.boats.push(...made); S.total += n;
                objText(w, 'boats', `Versenken Sie alle Schnellboote (${S.sunk}/${S.total})`);
@@ -396,7 +396,7 @@ export function specialMissionsB(H) {
             const side = (S.waveN = (S.waveN || 0) + 1) % 2 ? 1 : -1;
             for (let i = 0; i < n; i++) {
                const b = add(w, 'Boghammar', 'enemy', P(S.zone.x - 1800 - i * 450, side * (10800 + (i % 2) * 500)), -side * Math.PI / 2,
-                  { minDist: 6500, telegraph: 4, ai: { huntId: i % 2 ? S.own[0] : S.ferryId, press: true } });
+                  { minDist: 6500, telegraph: 4, hpMult: T.boatHp || 1, ai: { huntId: i % 2 ? S.own[0] : S.ferryId, press: true } });
                if (i >= T.msl) b.mag.kowsar = 0;
                S.boats.push(b.id);
             }
