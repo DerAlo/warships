@@ -27,12 +27,15 @@ import { addTaskPoint } from './seal.js';
 // rate by some 20 points, so `coopDmg` scales the damage the boats of that wave deal to such a group. `bat`: missiles
 // of the two shore batteries (Felseninsel, Süd; without it 4/6/8 by difficulty), `coopBat`: more in each of them for such
 // a group. Both are scaled for the better-armed flagships like the batteries themselves.
+// `boatHp` (0.7 without it) / `boatKn` (38) / `boatDmg` (1 / 1.1 / 1.25 by difficulty): hull factor, speed and damage factor of
+// every boat, `wave2` / `wave3`: boats of the later waves (5 / 5 / 6 and 4 / 4 / 6 without them). `ship`: what the row sets
+// differently for a flagship class.
 export const WEST_TUNE = {
    hormus: {
-      easy: { boats: 4, coopBoats: 0 },
+      easy: { boats: 4, coopBoats: 0, boatHp: 1 },
       // two captains on 240 runs: -1 -> 71 %, on 120 runs: 0 -> 48 %, -1 with coopDmg 1.25 -> 59 %, 1.5 -> 53 %, 2 -> 39 %
       // since the freighters hold their column (no more circles): coopDmg 1.2 -> 76 %, 1.6 -> 65 %, 1.9 -> 58 % (120 runs)
-      normal: { boats: 5, coopBoats: -1, coopDmg: 1.9 },
+      normal: { boats: 5, coopBoats: -1, coopDmg: 1.9, boatHp: 1.3, boatKn: 44, ship: { Burke: { boats: 6 }, Daring: { boats: 6 } } },
       // hard, since the freighters hold their column: the boats no longer decide it (one captain, 200 runs: as it was 19 %,
       // their damage x 0.93 -> 23 %, x 0.9 -> 22 %, their hull x 0.8 -> 21 %; two captains, 120 runs: coopBoats 0 / -1 / -2 ->
       // 47 / 49 / 48 % with bat [7, 7]), the batteries do. bat [8, 8] (as it was) -> 19 %, [8, 7] -> 19 %, [7, 8] -> 27 %,
@@ -42,7 +45,15 @@ export const WEST_TUNE = {
       // 75/24 %; two captains (Sachsen, 120 runs) 58/33 %. Normal is too easy for the two destroyers and the batteries
       // do not reach the Burke there: 12 (as it is), 13 or 15 missiles each -> 71 % every time; Daring 9 (as it is) ->
       // 75 %, 10 -> 69 %, 11 -> 65 % (200 runs, tried with a factor per class in place of the fixed 2 / 1.5, not kept)
-      hard: { boats: 5, coopBoats: -2, bat: [7, 8], coopBat: 2 },
+      // Since the guns hit boats (proximity fuse; hull 585 = 2 direct 127 mm or 6 direct 76 mm hits): with the old values one
+      // captain won (normal / hard, 200 runs) Sachsen 75 / 46 %, Burke 89 / 58 %, Daring 92 / 57 %, two captains (120 runs)
+      // 91 / 78 %. The hull alone is a weak lever (120 runs, Sachsen normal boatHp 1 / 1.4 / 1.8 -> 74 / 61 / 64 %, hard 32 / 36 /
+      // 24 %), one boat more in every wave a coarse one (with boatHp 1.3: Sachsen normal 63 %, two more 43 %; hard 18 % and 8 %),
+      // the speed the fine one. boatHp 1.3, 200 runs: normal boatKn 44 -> Sachsen 57 %, Burke 72 % and Daring 78 % (120 runs),
+      // with a sixth boat in the first wave Burke 53 %, Daring 62 %; hard Sachsen boatKn 42 -> 26 %, 43 -> 21 %, 44 -> 19 %
+      // (120 runs), Burke 44 -> 29 %, Daring 44 -> 30 %. Easy with boatHp 1: 100 % for all three.
+      // Two captains (Sachsen, 240 runs): normal 62 %; hard coopBoats -2 -> 38 %, -1 -> 36 %, 0 -> 26 %, -2 with coopBat 3 -> 28 %
+      hard: { boats: 5, coopBoats: 0, bat: [7, 8], coopBat: 2, boatHp: 1.3, boatKn: 42, ship: { Burke: { boatKn: 44 }, Daring: { boatKn: 44 } } },
    },
    redsea: {
       easy: { coopFrom: 99 },
@@ -124,7 +135,8 @@ export function westMissions(H) {
             S.escort.ai.escortId = S.convoy[2].id;
             S.goal = zone(w, 9800, 0, 1800, 'Golf von Oman');
             S.need = 2; S.arrived = 0; S.lost = 0; S.tick = 0; S.boats = 0;
-            const T = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
+            const T0 = WEST_TUNE.hormus[w.difficultyKey] || WEST_TUNE.hormus.normal;
+            const T = T0.ship && T0.ship[shipKey] ? { ...T0, ...T0.ship[shipKey] } : T0;      // what the row's `ship` entry sets for the flagship's class
             const extra = { Burke: 2 }[shipKey] || 0;      // one more boat per wave for the strongest escort
             const gun = { Burke: 2, Daring: 1.5 }[shipKey] || 1; S.gun = gun;      // the better-armed escorts meet heavier batteries
             // the batteries stay silent (radar off, not yet located) until the convoy is deep in the strait
@@ -143,17 +155,17 @@ export function westMissions(H) {
                radio(w, 'Ausguck', text, 'warn');
                for (let i = 0; i < n; i++) {
                   const a = (i - (n - 1) / 2) * 420;
-                  add(w, 'Boghammar', 'enemy', P(from.x + a, from.y + Math.abs(a) * 0.4), Math.atan2(-from.y, -from.x), { minDist: 6500, speedKn: 38, hpMult: 0.7, dmgMult: by(w, 1, 1.1, 1.25) * dmg, ai: { huntId: hunt.id, aggro: 1.5 } });
+                  add(w, 'Boghammar', 'enemy', P(from.x + a, from.y + Math.abs(a) * 0.4), Math.atan2(-from.y, -from.x), { minDist: 6500, speedKn: T.boatKn || 38, hpMult: T.boatHp || 0.7, dmgMult: (T.boatDmg || by(w, 1, 1.1, 1.25)) * dmg, ai: { huntId: hunt.id, aggro: 1.5 } });
                }
                S.boats += n;
             };
             later(S, 40, () => wave(T.boats + (S.coopBoats || 0), P(-6500, 9500), S.convoy[0], 'Schnellboote von Süden, schnell näher kommend. Geschütz klar!', S.coopDmg || 1));
-            later(S, 215, () => wave(by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
+            later(S, 215, () => wave(T.wave2 || by(w, 5, 5, 6), P(3500, 11500), S.convoy[1], 'Zweite Schnellbootgruppe hinter der Felseninsel hervor. Sie halten auf die Tanker zu.'));
             later(S, by(w, 345, 315, 285), () => {
                radio(w, 'Operationszentrale', 'Feuerleitradar von der Südküste! Die Küstenbatterien schalten auf. Flugkörperabwehr klar, Täuschkörper bereithalten.', 'warn');
                for (const b of S.batteries) if (b.alive) { b.radarOn = true; b.detected = b.targetable = true; b.nextT = 10 + S.batteries.indexOf(b) * 12; }
             });
-            later(S, 410, () => wave(by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Nordosten, hinter dem Riff hervor.'));
+            later(S, 410, () => wave(T.wave3 || by(w, 4, 4, 6), P(10500, -11500), S.convoy[2], 'Dritte Gruppe von Nordosten, hinter dem Riff hervor.'));
             later(S, 130, () => radio(w, 'Operationszentrale', 'Hinweis: Ein Kleinst-U-Boot wird im Fahrwasser voraus vermutet. Sonar besetzen, Bordhubschrauber bereithalten.'));
          },
          // co-op (net/setup.js): with a captain on the corvette the first wave changes by `coopBoats`, the damage
