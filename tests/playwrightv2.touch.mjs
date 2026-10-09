@@ -95,7 +95,7 @@ const enemyAhead = S => S.ev(() => {
    const w = window.__world(), p = w.player;
    const foes = w.ships.filter(s => s.alive && s.side !== p.side), T = foes.find(s => !s.sub) || foes[0];   // a surface ship if there is one
    if (!T) return null;
-   const put = () => { T.pos.x = p.pos.x + Math.cos(p.heading) * 5000; T.pos.y = p.pos.y + Math.sin(p.heading) * 5000; T.detected = true; T.visible = true; T.spotted = true;
+   const put = () => { T.pos.x = p.pos.x + Math.cos(p.heading) * 5000; T.pos.y = p.pos.y + Math.sin(p.heading) * 5000; T.detected = true; T.visible = true; T.spotted = true; if (T.maxHP) T.hp = T.maxHP;
       if (T.depth > 0 || T.depthTarget > 0) { T.depth = 0; T.depthTarget = 0; } };   // a boat that dives would drop its marker
    put(); clearInterval(window.__keep); window.__keep = setInterval(() => { if (T.alive && p.alive) put(); }, 50);
    window.__setAim(0, 5000);
@@ -141,6 +141,8 @@ const SEL = `[...document.querySelectorAll('#weapons .wslot')].map(e => e.classN
    await S.wait(700);
    if (mk == null && await S.mid('#tu-lock'))
       await S.act('lock button with no target in view (expected: a visible refusal)', '#tu-lock', `window.__msgs()`, `true`, `window.__msgs() !== b`, { say: true });
+   // the escorts' guns clear the first boats quickly now: wait for the next surface ship rather than lock the midget submarine
+   for (let i = 0; i < 120 && !await S.ev(() => { const w = window.__world(); return w.ships.some(s => s.alive && s.side !== w.player.side && !s.sub); }); i++) await S.wait(2000);
    const tgt = await enemyAhead(S);
    check(`${T}: a hostile ship to lock`, !!tgt, String(tgt));
    await S.wait(900);
