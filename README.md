@@ -1,4 +1,15 @@
-# Bismarck — Offline Naval Combat
+# Bismarck — Naval Combat in 3D, right in your browser
+
+[![The Bismarck firing a full salvo at dusk — in-game screenshot, WebGL, Ultra preset](docs/hero.png)](https://deralo.github.io/warships/index-3d.html)
+
+<p align="center"><b><a href="https://deralo.github.io/warships/index-3d.html">▶&nbsp;PLAY IT HERE — 3D, in your browser</a></b></p>
+
+<p align="center">No install, no account, no download — just open the link. The picture above is an unedited in-game screenshot.<br>
+<a href="https://deralo.github.io/warships/index-v2.html">Modern fleet (V2)</a> · <a href="https://deralo.github.io/warships/">Classic 2D</a></p>
+
+A real-time 3D engine in plain JavaScript and Three.js, no build step: an animated ocean with sun glitter and reflections, time of day and weather, ballistic shells with tracers, muzzle flashes, smoke, fire and wakes — desktop and touch.
+
+## Bismarck — Offline Naval Combat
 
 Kriegsschiffe: a naval combat game with warships of 1939–45 and
 AI-controlled opponents (and allies), offline only. Vanilla JS, no build
