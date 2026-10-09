@@ -32,6 +32,8 @@ import { obstacleT } from './utils.js';
 // without coopCable 62 %, hard 262 -> 29 %. Daring since then (one captain 240 runs | two captains 120 runs): normal
 // cable 215 -> 45 % | 53 % with coopCable 3; 221 -> 55 % | 57 % without; 223 -> 58 % | 57 % without; hard (the row's 262)
 // 32 % | 35 %. Not measured again: three or four captains.
+// Since the guns hit boats (proximity fuse) nothing moved here, the cable decides: Sachsen 100 / 60 / 25 %, Daring 57 / 32 %
+// (240 seeds); two captains (120 seeds) Sachsen 63 / 29 %, Daring 58 / 34 %.
 export const SPECIAL_A_TUNE = {
    cable: {
       easy: { cable: 450, ships: 4, look: 2, board: 14, boats: 2, boatHp: 0.7, boatDmg: 0.7, corvette: 0, hint: true, decoys: 0, coopCable: [0, 0, 0] },
@@ -59,12 +61,20 @@ export const SPECIAL_A_TUNE = {
    // and over 240 seeds it is no steeper than for the Sachsen (about 1 point per 1 % damage): normal 1.9 -> 74 %, 2.1 -> 62 %,
    // 2.2 -> 53 %, 2.3 -> 46 %; hard 1.5 -> 62 %, 1.7 -> 42 %, 1.85 -> 31 %, 1.9 -> 28 %, 1.92 -> 24 %, 2.0 -> 18 %.
    // Daring with a second captain, 60 / 240 seeds: normal 62 / 59 %, hard 32 / 25 %.
+   // Since the guns hit boats (proximity fuse): the old rows (5 / 6 boats, boatHp 1.1 / 1.2, boatDmg 1.55 / 1.35) read 74 / 47 %
+   // (Sachsen, one captain, 240 seeds). The hull alone hardly moves it (120 seeds: normal 1.5 -> 68 %, 2.0 -> 65 %; hard 1.6 ->
+   // 44 %, 2.0 -> 40 %), a boat more is worth some 25 points (normal 6 / 7 boats at the old damage 38 / 13 %, hard 7 / 8 -> 18 / 4 %).
+   // So one boat more with a tougher hull (hard 630 = 3 direct 127 mm or 6 direct 76 mm hits) and less damage each, 240 seeds:
+   // normal boatDmg 1.45 -> 45 %, 1.35 -> 55 %, 1.32 -> 58 %; hard 1.3 -> 22 %, 1.24 -> 28 %, 1.2 -> 33 %. Daring: normal 1.8 ->
+   // 64 %, 1.95 -> 51 %, 1.87 -> 59 %; hard 1.6 -> 31 %, 1.75 -> 20 %, 1.65 -> 25 %. Two captains, 240 seeds: normal 57 %, hard
+   // coopDmg 1.02 -> 37 %, 1.05 -> 30 %, 1.08 -> 25 %; Daring (240 seeds) 55 / 23 %. Three / four captains (120 seeds, not tuned
+   // again): normal 62 / 83 %, hard 41 / 43 %.
    rig: {
       easy: { valves: 480, boats: 3, guards: 1, boatHp: 0.7, boatDmg: 0.6, teams: 3, board: 20, post: 3, salvo: 1, every: 40, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
-      normal: { valves: 330, boats: 5, guards: 2, boatHp: 1.1, boatDmg: 1.55, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1, 0.85, 1],
-         ship: { Daring: { boatDmg: 2.1 } } },
-      hard: { valves: 300, boats: 6, guards: 3, boatHp: 1.2, boatDmg: 1.35, teams: 2, board: 40, post: 8, salvo: 2, every: 28, coopBoats: [0, 2, 2], coopDmg: [1.02, 0.89, 1.07],
-         ship: { Daring: { boatDmg: 1.92 } } },
+      normal: { valves: 330, boats: 6, guards: 2, boatHp: 1.3, boatDmg: 1.32, teams: 2, board: 30, post: 6, salvo: 2, every: 34, coopBoats: [0, 2, 2], coopDmg: [1, 0.85, 1],
+         ship: { Daring: { boatDmg: 1.87 } } },
+      hard: { valves: 300, boats: 7, guards: 3, boatHp: 1.4, boatDmg: 1.24, teams: 2, board: 40, post: 8, salvo: 2, every: 28, coopBoats: [0, 2, 2], coopDmg: [1.05, 0.89, 1.07],
+         ship: { Daring: { boatDmg: 1.65 } } },
    },
    // rescue: `drift` m/s the merchant drifts toward the cliffs, `lines` tow lines on board, `pass` s it takes to pass one,
    // `swell` share by which the seas raise the line load on every crest, `boats` armed boats that come for the tug when the
@@ -79,11 +89,18 @@ export const SPECIAL_A_TUNE = {
    // hard 28 / 29 %; three with 1 more: 65 / 59 % and 32 / 34 %; four with 2 more: 60 / 59 % and 35 / 35 %.
    // Daring, 60 / 240 seeds: normal 60 / 67 % with the Sachsen's boatDmg, 62 / 61 % at 2.55, 55 / 57 % at 2.65; hard 27 / 29 %.
    // With a second captain: normal 65 / 59 %, hard 25 / 27 %.
+   // Since the guns hit boats (proximity fuse): the old rows (3 + 3 / 4 + 3 boats, boatHp 1 / 1.3, boatDmg 2.4 / 1.7) read 87 /
+   // 64 % (240 seeds). The hull alone: normal 1.4 -> 78 %, 1.8 -> 68 %; hard 1.7 -> 59 %, 2.0 -> 47 %; faster boats: normal 42 kn ->
+   // 54 %, hard 44 kn -> 49 % (120 seeds). More boats with a tougher hull (hard 675 = 3 direct 127 mm or 6 direct 76 mm hits),
+   // 240 seeds: normal boatHp 1.3 with 4 + 3 -> 60 %, 4 + 4 at boatDmg 2.3 -> 48 %, 2.2 -> 53 %, 2.15 -> 55 %, 5 + 4 -> 28 % (120);
+   // hard boatHp 1.5 with 5 + 3 -> 39 %, 5 + 4 -> 26 %, 6 + 5 -> 7 % (120). Daring: normal 2.28 -> 62 %, 2.4 -> 59 %, hard 26 %.
+   // Two captains, 240 seeds: normal coopDmg 1 -> 51 %, 0.95 -> 59 %, 0.92 -> 63 %, hard 31 %; Daring (coopDmg 1) normal 63 %,
+   // hard 37 %. Three / four captains (120 seeds, not tuned again): normal 86 / 93 %, hard 57 / 62 %.
    rescue: {
       easy: { drift: 6, lines: 4, pass: 6, swell: 0.05, boats: 2, wave2: 0, gap: 0, boatKn: 30, boatHp: 0.7, boatDmg: 0.6, boatVar: 0.4, coopBoats: [0, 0, 0], coopDmg: [1, 1, 1] },
-      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 3, wave2: 3, gap: 40, boatKn: 36, boatHp: 1, boatDmg: 2.4, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [1, 1, 1.12],
-         ship: { Daring: { boatDmg: 2.55 } } },
-      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 4, wave2: 3, gap: 40, boatKn: 38, boatHp: 1.3, boatDmg: 1.7, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [1, 1.05, 1.25] },
+      normal: { drift: 8, lines: 3, pass: 10, swell: 0.08, boats: 4, wave2: 4, gap: 40, boatKn: 36, boatHp: 1.3, boatDmg: 2.15, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [0.95, 1, 1.12],
+         ship: { Daring: { boatDmg: 2.4, coopDmg: [1, 1, 1.12] } } },
+      hard: { drift: 9, lines: 2, pass: 14, swell: 0.12, boats: 5, wave2: 4, gap: 40, boatKn: 38, boatHp: 1.5, boatDmg: 1.7, boatVar: 0.4, coopBoats: [0, 1, 2], coopDmg: [1, 1.05, 1.25] },
    },
 };
 // rig: the platform (x, y) and the radius in which any shell or warhead counts as a hit on it (r); a boat leaves its
@@ -342,7 +359,7 @@ export function specialMissionsA(H) {
             'Ein Boot, das dem Team zu nahe kommt, zwingt es zum Abdrehen – Sie haben nur wenige Teams. Verloren ist der Einsatz auch, wenn die Ventile geöffnet werden oder Ihr Verband ausfällt.',
          debrief: 'Die Plattform ist gesichert, die Besatzung frei – ohne einen Treffer auf der Anlage. Entschieden hat die Feuerdisziplin: warten, bis die Boote von der Plattform ' +
             'gelöst sind, sie im freien Wasser stellen und erst dann das Team hinüberschicken.',
-         fleet: { own: 'Fregatte oder Zerstörer, 1 Korvette · 2–3 Boardingteams', foe: '3–6 bewaffnete Boote an der Plattform, 1 Flugkörperstarter auf dem Riff' },
+         fleet: { own: 'Fregatte oder Zerstörer, 1 Korvette · 2–3 Boardingteams', foe: '3–7 bewaffnete Boote an der Plattform, 1 Flugkörperstarter auf dem Riff' },
          env: { time: 'dusk', weather: 'overcast' }, type: 'boarding', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
          arena: 12000, timeLimit: 10 * 60, stars: 3,
          setup(w, shipKey) {
@@ -502,7 +519,7 @@ export function specialMissionsA(H) {
             'wenn sie angreifen – wer im Schlepp hart ausweicht, verliert aber die Leine. Verloren ist der Einsatz, wenn der Frachter auf die Klippen läuft oder sinkt, wenn die letzte Leine bricht oder Ihr Verband ausfällt.',
          debrief: 'Die Nordkap Star liegt vor Anker, ihre Besatzung ist in Sicherheit. Entschieden hat die ruhige Hand: früh die Leine übergeben, mit wenig Fahrt und in weiten Bögen schleppen ' +
             'und die Boote dem Geschütz und der Korvette überlassen, statt ihnen auszuweichen.',
-         fleet: { own: 'Fregatte oder Zerstörer, 1 Korvette · 2–4 Schleppleinen', foe: '2–7 bewaffnete Boote ohne Kennung · 1 Frachter (zu schützen)' },
+         fleet: { own: 'Fregatte oder Zerstörer, 1 Korvette · 2–4 Schleppleinen', foe: '2–9 bewaffnete Boote ohne Kennung · 1 Frachter (zu schützen)' },
          env: { time: 'day', weather: 'storm' }, type: 'ops', playableShips: ['Sachsen', 'Daring'], recommendedShip: 'Sachsen',
          arena: 12000, timeLimit: 10 * 60, stars: 2,
          setup(w, shipKey) {

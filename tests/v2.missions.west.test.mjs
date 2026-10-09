@@ -73,6 +73,7 @@ export function play(id, diff, seed, mode = 'bot', ship = null) {
 // ---------------------------------------------------------------- balance table
 if (process.env.BALANCE) {
    const RUNS = +process.env.BALANCE || 30;
+   if (process.env.TUNE) { const o = JSON.parse(process.env.TUNE); for (const m in o) for (const d in o[m]) Object.assign(WEST_TUNE[m][d], o[m][d]); }
    const only = process.env.ONLY ? process.env.ONLY.split(',') : IDS;
    const diffs = process.env.DIFFS ? process.env.DIFFS.split(',') : DIFFS;
    const modes = process.env.MODES ? process.env.MODES.split(',') : ['bot', 'passive'];

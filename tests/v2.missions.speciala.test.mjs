@@ -424,6 +424,7 @@ test('special A/rescue: the line is a spring - quarter speed pulls the merchant 
    for (const diff of DIFFS) {
       // quarter speed straight ahead: the load settles below the warning, the merchant follows
       let w = mk('rescue', { diff }), S = w._script, m = w.shipById(S.merchId), p = w.player;
+      p.takeDamage = () => 0;      // the boats that come for the tug are no part of this test (hard: nine of them sink a tug that does not fight)
       takeTow(w);
       assert.equal(S.tugId, p.id, diff);
       const r0 = S.rocks;
