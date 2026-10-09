@@ -52,6 +52,17 @@ export const SPECIAL_B_TUNE = {
       // Sachsen coopMsl 0.3 / 1.1 -> 64/36 | 38/18 %; Burke coopMsl 0.2 / 0.3 -> 65/38 | 43/7 % (hard 0.5 -> 41 | 9 %);
       // Daring coopDmg 1.01 / 1.02 -> 64/34 | 37/8 %; Braunschweig normal unchanged 59 | 64 %, hard with boats 9 and
       // coopDmg 1 -> 16 | 36 %, 0.97 -> 22 | 44 %, 0.94 -> 30 | 45 %, 0.92 -> 29 | 46 %
+      // Since guns hit the boats (proximity fuse) the pack dies sooner, but the losses here are the missiles of its
+      // first 20 s, so little moved: one captain, 240 runs, normal/hard, old values: Sachsen 54/25 %, Burke 63/28 %,
+      // Braunschweig 63/26 % (kept), Daring 66/35 %. Daring now boats 14 / 12 (hard msl 11) -> 54/28 % (easy 100 %);
+      // tougher boats do nothing for one captain (boatHp 1.3 and 1.6: 70/31 % and 66/28 %); Burke normal boats 13 -> 43 %.
+      // Two captains, old values, 120 runs, escorting | hunting: Sachsen 63/31 | 43/21 %, Burke 73/38 | 48/15 %, Daring
+      // 69/33 | 46/18 %, Braunschweig 68/34 | 68/42 %. Now (escorting on 240 runs, hunting on 120): Sachsen unchanged
+      // 64/35 | 43/21 %; Burke normal coopMsl 0 and coopDmg 1.03 -> 60/40 | 31/15 % (coopMsl 0 alone 70 %, coopWave 4
+      // 73 %); Daring with the larger pack and without coopDmg on normal -> 58/28 | 36/10 %; Braunschweig normal coopMsl
+      // 0 -> 62/34 | 60/42 % (0.2 -> 68 %)
+      // boatHp (optional, hijack and evac): hull factor of every boat, on top of the difficulty's own (hard 1.15). A boat
+      // has 450 HP and a 127 mm HE hit takes 307, a 76 mm hit 113: keep the product below 2
       easy: { ally: 0.6, kn: 12.5, boats: 4, msl: 1, guard: 1, wave: 2, waveAt: 300, boom: 0.45, board: 15, batN: 4, batAt: 6500, coopMsl: 1, coopWave: 2 },
       normal: { ally: 0.4, kn: 14, boats: 11, msl: 11, guard: 3, wave: 3, waveAt: 250, boom: 0.35, board: 45, batN: 8, batAt: 8500, coopMsl: 0.3, coopWave: 2,
          ship: { Daring: { boats: 14, msl: 14, coopMsl: 0 }, Burke: { boats: 12, msl: 12, coopMsl: 0, coopDmg: 1.03 }, Braunschweig: { msl: 5, coopMsl: 0 } } },
@@ -71,11 +82,22 @@ export const SPECIAL_B_TUNE = {
       // 61/29 % and Daring 57/33 % on the row's own 1.2/1.34; Braunschweig normal 1.2 -> 67 %, 1.17 -> 63 %, hard 1.34
       // -> 44 %, 1.29 -> 38 %, 1.2 -> 31 %; Burke normal 1.3 -> 67 %, 1.27 -> 57 %, hard 1.34 -> 57 %, 1.15 -> 34 %
       // One captain again on 240 runs (recommended ship, unchanged values): 100/62/33 %
+      // Since guns hit the boats (proximity fuse) the packs died before they reached the ferry: one captain, 240 runs,
+      // old values (waves 2/3/4, no boatHp): Sachsen 100/90/61 %, Burke 100/93/77 %, Daring 100/96/75 %, Braunschweig
+      // 100/93/45 %; two captains (120 runs) 95/72, 97/79, 94/78, 98/68 %. Now a third boat in the first pack and
+      // boatHp 1.3 / 1.13 (585 HP on both, hard has the difficulty's 1.15 on top: two 127 mm or six 76 mm hits). One
+      // captain, 240 runs (easy 120, row unchanged): Sachsen 100/52/26 %, Burke 100/55/29 % (normal without its ferry
+      // 0.85, with it 45 %; hard ferry 0.95 -> 33 %, 0.9 -> 21 %), Daring 100/56/30 %, Braunschweig 100/60/25 %.
+      // Sachsen, 120 runs, normal/hard, what else was tried: waves 3/3/4 alone 67/41 %, with boatHp 1.6 31/14 %, with
+      // fin 5 49/28 %, 3/4/4 56/29 %, 3/4/5 and fin 5 38/8 %; boatHp 1.5 alone 73/52 %, 2 -> 67/48 %; msl 2 -> 90/73 %.
+      // Two captains: the ferry's hull decides steeply (Sachsen normal coopFerry 1.2 -> 67 %, 1.1 -> 47 %, 1 -> 29 %;
+      // hard 1.34 -> 42 %, 1.2 -> 16 %; coopWave 2 -> 38/12 %). 240 runs, normal/hard, with the rows' values: Sachsen
+      // 61/37 %, Burke 61/35 %, Daring 58/28 %, Braunschweig 60/27 %
       easy: { ally: 0.6, lifts: 3, miss: 1, first: 70, win: 95, load: 35, gap: 25, waves: [1, 2, 2], fin: 2, msl: 0, batN: 4, batSalvo: 1, batInt: 40, batAt: 2, ferry: 1.3, coopWave: 1, coopFerry: 1 },
-      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [3, 3, 4], boatHp: 1.3, fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.2,
-         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.17 }, Burke: { coopFerry: 1.27 } } },
-      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [3, 3, 4], boatHp: 1.3, fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.34,
-         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.2 }, Daring: { ferry: 0.92 }, Burke: { ferry: 0.93, coopFerry: 1.15 } } },
+      normal: { ally: 0.4, lifts: 3, miss: 1, first: 65, win: 80, load: 45, gap: 25, waves: [3, 3, 4], boatHp: 1.3, fin: 4, msl: 1, batN: 8, batSalvo: 2, batInt: 32, batAt: 2, ferry: 0.89, coopWave: 1, coopFerry: 1.16,
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.03 }, Burke: { coopFerry: 1.15 }, Daring: { coopFerry: 1.11 } } },
+      hard: { ally: 0.3, lifts: 3, miss: 0, first: 65, win: 90, load: 45, gap: 20, waves: [3, 3, 4], boatHp: 1.13, fin: 4, msl: 1, batN: 12, batSalvo: 2, batInt: 26, batAt: 2, ferry: 0.95, coopWave: 1, coopFerry: 1.27,
+         ship: { Braunschweig: { ferry: 0.85, coopFerry: 1.11 }, Daring: { ferry: 0.92, coopFerry: 1.19 }, Burke: { ferry: 0.93, coopFerry: 1.03 } } },
    },
    bastion: {
       // trail: s to hold the trailing position · kn: speed of the missile boat · held / seen: % per s the meter rises while
@@ -187,7 +209,7 @@ export function specialMissionsB(H) {
             const hdg = tk.heading, c = Math.cos(hdg), s = Math.sin(hdg);
             for (let i = 0; i < T.boats + T.guard; i++) {
                const guard = i < T.guard, f = guard ? 250 - i * 350 : 900 - (i - T.guard) * 300, r = (i % 2 ? 1 : -1) * (guard ? 320 : 650 + i * 60);
-               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, hpMult: T.boatHp || 1, ai: { shy: true, escortId: tk.id } });
+               const b = add(w, 'Boghammar', 'enemy', P(start.x + f * c - r * s, start.y + f * s + r * c), hdg, { telegraph: 2, hpMult: (T.boatHp || 1) * w.difficulty.botHP, ai: { shy: true, escortId: tk.id } });
                if (guard || S.msl-- <= 0) b.mag.kowsar = 0;
                (guard ? S.guards : S.boats).push(b.id);
             }
@@ -208,7 +230,7 @@ export function specialMissionsB(H) {
                const t = live(w, S.tankId);
                if (!t || S.phase >= 2) return;
                const n = T.wave + extraCaptains(w) * T.coopWave, made = [];
-               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, hpMult: T.boatHp || 1, ai: { shy: true, huntId: S.own[i % S.own.length], press: true } })).id);
+               for (let i = 0; i < n; i++) made.push(noMsl(add(w, 'Boghammar', 'enemy', P(S.goal.x + 1500 + (i % 2) * 500, S.goal.y - 1200 + i * 450), Math.PI, { minDist: 5000, telegraph: 4, hpMult: (T.boatHp || 1) * w.difficulty.botHP, ai: { shy: true, huntId: S.own[i % S.own.length], press: true } })).id);
                if (S.coopDmg) for (const id of made) w.shipById(id).dmgMult *= S.coopDmg;
                S.boats.push(...made); S.total += n;
                objText(w, 'boats', `Versenken Sie alle Schnellboote (${S.sunk}/${S.total})`);
@@ -396,7 +418,7 @@ export function specialMissionsB(H) {
             const side = (S.waveN = (S.waveN || 0) + 1) % 2 ? 1 : -1;
             for (let i = 0; i < n; i++) {
                const b = add(w, 'Boghammar', 'enemy', P(S.zone.x - 1800 - i * 450, side * (10800 + (i % 2) * 500)), -side * Math.PI / 2,
-                  { minDist: 6500, telegraph: 4, hpMult: T.boatHp || 1, ai: { huntId: i % 2 ? S.own[0] : S.ferryId, press: true } });
+                  { minDist: 6500, telegraph: 4, hpMult: (T.boatHp || 1) * w.difficulty.botHP, ai: { huntId: i % 2 ? S.own[0] : S.ferryId, press: true } });
                if (i >= T.msl) b.mag.kowsar = 0;
                S.boats.push(b.id);
             }

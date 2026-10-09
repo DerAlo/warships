@@ -228,7 +228,7 @@ test('co-op special operations (second set): missile boats of the hijack pack, t
       for (const k of Object.keys(H.ship)) {
          assert.ok(['Daring', 'Burke', 'Braunschweig'].includes(k), k);
          assert.equal(n(k), H.ship[k].boats ?? H.boats);
-         assert.ok(Math.abs((H.ship[k].boats ?? H.boats) - H.boats) <= 2, `${difficulty} ${k}`);
+         assert.ok(Math.abs((H.ship[k].boats ?? H.boats) - H.boats) <= 3, `${difficulty} ${k}`);
       }
       // the corvette cannot stop a full salvo (two RAM channels): far fewer missile boats come for it
       assert.ok(H.ship.Braunschweig.msl <= H.msl / 2, difficulty);
