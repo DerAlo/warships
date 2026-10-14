@@ -193,6 +193,7 @@ body.touch .m3 { --tap:44px; }
 .m3-mis .n { font:600 14.5px/1.2 var(--font); display:flex; align-items:center; gap:6px; }
 .m3-mis .s { font:italic 12px/1.3 var(--font-serif); color:var(--ink-2); margin-top:1px; }
 .m3-mis .row { display:flex; align-items:center; gap:7px; margin-top:4px; font-size:11px; color:var(--ink-2); }
+.m3-mis .tag.free { color:var(--ink); background:var(--brass-hi); border-color:var(--brass-hi); }
 .m3-mis .tag { padding:0 5px; border:1px solid currentColor; font:600 9.5px/15px var(--font); letter-spacing:1.2px; text-transform:uppercase; color:var(--signal-lo); }
 .m3-mis .done { margin-left:auto; color:var(--seal); display:flex; align-items:center; gap:3px; font:700 10px var(--font); letter-spacing:1px; text-transform:uppercase; }
 .m3-sec { margin:12px 0 2px; padding:7px 2px 0; border-top:3px double var(--brass); font:600 10.5px var(--font); letter-spacing:2.5px; color:var(--brass-hi);
@@ -242,6 +243,7 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
 .m3-buy:hover:not(:disabled) { background:var(--ink); color:var(--paper); } .m3-buy:disabled { opacity:.4; cursor:not-allowed; }
 .m3-buy.big { width:100%; min-height:var(--tap); padding:9px; font-size:12.5px; letter-spacing:1.5px; color:var(--paper); border-color:var(--navy); background:var(--navy-2); }
 .m3-buy.big:hover:not(:disabled) { background:var(--navy); }
+.m3-trial { font:600 12px/1.4 var(--font); color:var(--ink); background:var(--paper-2); border-left:4px solid var(--brass); padding:5px 8px; margin:2px 0 8px; }
 .m3-prog .hint { font:italic 12px/1.4 var(--font-serif); color:var(--signal-lo); margin-top:6px; text-align:center; }
 
 /* ---- dock: navy tabs over the line-up of ship cards (one navy fits without scrolling) */
@@ -274,6 +276,8 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
 .m3-card.sel .hd .ty { color:var(--hud-dim); }
 .m3-card .rec { position:absolute; left:6px; top:-8px; z-index:1; padding:2px 5px; font:700 8px/1 var(--font); letter-spacing:1.2px; color:var(--flag-w); background:var(--signal); }
 .m3-card.sel .rec { background:var(--brass-hi); color:var(--navy); }
+.m3-card .tri { position:absolute; right:6px; top:-8px; z-index:1; padding:2px 5px; font:700 8px/1 var(--font); letter-spacing:1.2px; color:var(--navy); background:var(--brass-hi); }
+.m3-card.sel .tri { background:var(--paper); }
 .m3-card .lk { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--ink-2); }
 .m3-card.lock .m3-sil { opacity:.28; }
 .m3-card.lock .lk { inset:auto 0 3px 0; height:32px; display:grid; grid-template-columns:auto auto; justify-content:center; align-content:center; column-gap:6px;
@@ -568,6 +572,8 @@ export class Menu3D {
    _owned(k, mid = this.mission) { return isUnlocked(this.profile, k) || (() => { const m = getMission(mid); return !!m?.fixedShips && m.playableShips.includes(k); })(); }
    // the training battle is a test drive: every ship sails there, researched or not
    _unlocked(k, mid = this.mission) { return mid === 'training' || this._owned(k, mid); }
+   // a ship that sails here only as a training test drive (not in service, or training-only)
+   _trial(k, mid = this.mission) { return mid === 'training' && (!this._owned(k, mid) || !PLAYABLE.includes(k)); }
    // keep the selection valid: allowed in this mission and unlocked (op ships are never locked)
    _fixShip() {
       const allowed = this._allowed();
@@ -698,7 +704,7 @@ export class Menu3D {
          return `<div class="m3-mis ${op ? 'op' : ''} ${x.id === m.id ? 'sel' : ''}" data-mis="${esc(x.id)}">
             <div class="n">${esc(x.name)}</div>
             <div class="s">${esc(x.subtitle)}</div>
-            <div class="row"><span class="tag">${esc(TYPE_LABEL[x.type] || x.type)}</span>${icon(x.env.time, 15)}${x.env.weather !== 'clear' ? icon(x.env.weather, 15) : ''}
+            <div class="row"><span class="tag">${esc(TYPE_LABEL[x.type] || x.type)}</span>${x.id === 'training' ? '<span class="tag free" title="Im Übungsgefecht kann jedes Schiff probegefahren werden">Alle Schiffe</span>' : ''}${icon(x.env.time, 15)}${x.env.weather !== 'clear' ? icon(x.env.weather, 15) : ''}
                ${stars(x.stars)}${op ? medal(rec?.stars || 0) : done ? `<span class="done">${icon('check', 13)}Sieg</span>` : ''}</div>
          </div>`;
       };
@@ -723,6 +729,7 @@ export class Menu3D {
          <div class="nm">${classSvg(S.type, 18)}${esc(S.name)}</div>
          <div class="cl">${S.tier ? `<b>Stufe ${S.tier}</b> · ` : ''}${esc(S.typeName)} · ${esc(S.className)}${S.nationName ? ' · ' + esc(S.nationName) : ''}</div>
          ${S.desc ? `<p class="ds">${esc(S.desc)}</p>` : ''}
+         ${this._trial(k0) ? `<div class="m3-trial">${shipLocked ? 'Probefahrt: Im Übungsgefecht frei fahrbar. Für alle anderen Gefechte zuerst in Dienst stellen.' : 'Probefahrt: Dieses Schiff fährt nur im Übungsgefecht.'}</div>` : ''}
          <div class="bars">${RATING_LABEL.filter(([k]) => k !== 'torpedoes' || S.ratings[k] > 0).map(([k, l]) => `<div class="m3-bar"><div class="l"><span>${k === 'torpedoes' ? (S.torp || S.air ? l : 'U-Jagd') : k === 'antiAir' ? 'Luftabwehr' : l}</span><span>${S.ratings[k]}</span></div><div class="b"><i style="width:${S.ratings[k]}%"></i></div></div>`).join('')}</div>
          <div class="m3-cons">${S.consumables.map(c => `<span>${esc(c)}</span>`).join('')}</div>
          <button class="m3-guide" data-act="guide" title="Waffenkunde: wofür jede Waffe dieses Schiffs gut ist">WAFFENKUNDE · Was kann dieses Schiff?</button></div>
@@ -753,10 +760,10 @@ export class Menu3D {
          (CLASS_ORDER[SHIP_STATS[a].type] ?? 9) - (CLASS_ORDER[SHIP_STATS[c].type] ?? 9) || SHIP_STATS[a].tier - SHIP_STATS[c].tier);
       const tab = this.nation === 'all' || NATIONS.includes(this.nation) ? this.nation : natOf(k0);
       const card = (k, i, list) => {
-         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !this._owned(k), cr = UNLOCK_CREDITS[k] || 0;
+         const st = SHIP_STATS[k], ok = allowed.includes(k), tri = ok && this._trial(k), lk = ok && !tri && !this._owned(k), cr = UNLOCK_CREDITS[k] || 0;
          const gs = i > 0 && SHIP_STATS[list[i - 1]].type !== st.type;
-         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? (this._unlocked(k) ? 'Noch nicht in Dienst — mit EP und Budget in Dienst stellen · im Übungsgefecht schon jetzt fahrbar' : 'Noch nicht in Dienst — mit EP und Budget in Dienst stellen') : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
-            ${m.recommendedShip === k && ok ? '<span class="rec">VORGESCHLAGEN</span>' : ''}
+         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (tri ? 'Probefahrt — nur im Übungsgefecht frei fahrbar' : lk ? 'Noch nicht in Dienst — mit EP und Budget in Dienst stellen' : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
+            ${m.recommendedShip === k && ok ? '<span class="rec">VORGESCHLAGEN</span>' : ''}${tri ? '<span class="tri">PROBEFAHRT</span>' : ''}
             <div class="hd"><span class="tr">${st.tier}</span>${classSvg(st.type, 13)}<span class="nm2">${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
             ${silhouetteSvg(k)}
             ${ok ? (lk ? `<div class="lk">${icon('lock', 18)}<span>${fmtInt(UNLOCK_XP[k])} EP</span>${cr ? `<span class="kr">${fmtInt(cr)} Budget</span>` : ''}</div>` : '') : `<div class="lk">${icon('lock', 26)}</div>`}

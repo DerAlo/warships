@@ -20,11 +20,16 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0
 page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 await page.goto(URL, { waitUntil: 'load' });
 await page.waitForTimeout(800);
-// ---- fresh profile: two free ships, the others show a lock with their XP cost
+// ---- fresh profile: two free ships; in the training battle the others are test drives,
+// in any other battle they show a lock with their XP cost
 {
+   const tri = await page.evaluate(() => document.querySelectorAll('.m3-card .tri').length);
+   if (tri < 2 || await page.evaluate(() => document.querySelectorAll('.m3-card.lock').length)) { console.log('TRIAL FAIL', tri); errors.push('training test-drive cards'); }
+   await page.click('[data-mis="standard"]');
    const lk = await page.evaluate(() => [...document.querySelectorAll('.m3-card.lock')].map(e => e.dataset.ship + ':' + e.textContent.replace(/\s+/g, ' ').trim()));
    if (lk.length < 2 || !lk.every(s => /EP/.test(s))) { console.log('LOCK FAIL', lk); errors.push('locked ship cards'); }
    console.log('locked', JSON.stringify(lk));
+   await page.click('[data-mis="training"]');
 }
 // ---- historical operations through the real menu: section, briefing screen, Esc / Enter
 {

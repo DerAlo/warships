@@ -62,10 +62,15 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
    const all = await page.evaluate(() => {
       const car = document.querySelector('.m3-car');
       return { n: car.querySelectorAll('.m3-card').length, groups: car.querySelectorAll('.m3-nat').length, scroll: car.scrollWidth > car.clientWidth || car.scrollHeight > car.clientHeight,
-         page: document.documentElement.scrollWidth <= innerWidth, locked: car.querySelectorAll('.m3-card.lock').length };
+         page: document.documentElement.scrollWidth <= innerWidth, locked: car.querySelectorAll('.m3-card.lock').length, trial: car.querySelectorAll('.m3-card .tri').length };
    });
    check(`${tag} "Alle" lists the whole roster in a scrolling strip`, all.n === PLAYABLE.length && all.groups === NATIONS.length && all.scroll && all.page, all);
-   check(`${tag} fresh profile: everything but the two starters is locked`, all.locked === PLAYABLE.filter(k => UNLOCK_XP[k]).length, all);
+   check(`${tag} fresh profile, training battle: everything but the two starters is a test drive, nothing looks locked`,
+      all.locked === 0 && all.trial === PLAYABLE.filter(k => UNLOCK_XP[k]).length, all);
+   await page.click('[data-mis="standard"]');
+   const locked = await page.evaluate(() => document.querySelectorAll('.m3-car .m3-card.lock').length);
+   check(`${tag} fresh profile, other battles: everything but the two starters is locked`, locked === PLAYABLE.filter(k => UNLOCK_XP[k]).length, { locked });
+   await page.click('[data-mis="training"]');
    // a locked ship can be inspected: panel with tier, description and price; the training battle (default)
    // lets it sail as a test drive, any other battle keeps the battle button disabled
    await page.click('.m3-tabs [data-nat="jp"]');
