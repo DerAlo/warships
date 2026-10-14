@@ -248,10 +248,14 @@ const DEFS = [
                setObj(w, 'targets', 'done');
                S.phase = 2;
                later(S, w.time + 6, () => {
-                  w.message('Alarm! Zwei Flugkörperschnellboote laufen von Osten an. Korvette Magdeburg unterstützt Sie.', 'warn');
-                  add(w, 'Typ022', 'enemy', P(12500, -5200), Math.PI * 0.9, { minDist: 12000 });
-                  add(w, 'Typ022', 'enemy', P(12500, 4800), -Math.PI * 0.9, { minDist: 12000 });
-                  add(w, 'Braunschweig', 'player', P(-10500, 1800), 0, { name: 'Magdeburg' });
+                  // an eastern ship (training only) trains against western boats with an eastern escort
+                  const east = w.player?.cfg.bloc === 'east', foe = east ? 'Braunschweig' : 'Typ022';
+                  w.message(east ? 'Alarm! Zwei Korvetten laufen von Osten an. Korvette Serpuchow unterstützt Sie.'
+                     : 'Alarm! Zwei Flugkörperschnellboote laufen von Osten an. Korvette Magdeburg unterstützt Sie.', 'warn');
+                  add(w, foe, 'enemy', P(12500, -5200), Math.PI * 0.9, { minDist: 12000 });
+                  add(w, foe, 'enemy', P(12500, 4800), -Math.PI * 0.9, { minDist: 12000 });
+                  if (east) add(w, 'BuyanM', 'player', P(-10500, 1800), 0, { name: 'Serpuchow' });
+                  else add(w, 'Braunschweig', 'player', P(-10500, 1800), 0, { name: 'Magdeburg' });
                   objective(w, 'boats', 'Wehren Sie den Schnellbootangriff ab (0/2)');
                   w.score = { kind: 'count', player: 0, enemy: 0, target: 2 };
                });

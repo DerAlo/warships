@@ -5,7 +5,7 @@ import assert from 'node:assert';
 import { emptySea, put, island, run } from './v2.util.mjs';
 import { SHIPS, MISSILES, DEFENCE } from '../gamev2/config.js';
 import { launchSSM, ssmBlock, launchCruise, fireRockets, rocketState, setDoctrine, setPriorityTarget, deployDecoys,
-   inbound, threatsTo, samStatus, samInterval, selectSsm, ssmType } from '../gamev2/missile.js';
+   inbound, threatsTo, samStatus, samInterval, selectSsm, ssmType, launchAirSSM } from '../gamev2/missile.js';
 import { setRadar } from '../gamev2/sensors.js';
 import { execAction } from '../gamev2/net/command.js';
 import { launchSquadron } from '../gamev2/air.js';
@@ -96,6 +96,22 @@ test('bearing-only launch: the seeker takes what it finds in its cone, nothing o
    run(w2, 70, () => m2.alive);
    assert.strictEqual(ev(w2, 'missileHit').length, 0);
    assert.ok(['nolock', 'fuel'].includes(ev(w2, 'missileLost')[0].reason));
+});
+
+test('a jet-launched missile never takes a ship of its own side, a ship-launched one still may', () => {
+   const w = emptySea({ ship: 'Ford' });
+   const friend = put(w, 'Tanker', 'player', 12000, 600, Math.PI / 2, still);
+   const sq = { id: 77, side: 'player', pos: { x: 0, y: 0 }, alt: 150, heading: 0, ownerId: w.player.id };
+   const m = launchAirSSM(w, sq, { bearing: 0 }, 'harpoon');
+   assert.ok(m && m.sqId === 77);
+   run(w, 70, () => m.alive);
+   assert.strictEqual(ev(w, 'missileHit').length, 0, 'the friendly tanker in the cone is left alone');
+   assert.strictEqual(friend.hp, friend.maxHP);
+   const w2 = emptySea({ ship: 'Sachsen' });
+   const f2 = put(w2, 'Tanker', 'player', 12000, 600, Math.PI / 2, still);
+   const m2 = launchSSM(w2, w2.player, { bearing: 0 });
+   run(w2, 40, () => m2.alive);
+   assert.strictEqual(ev(w2, 'missileHit')[0]?.dstId, f2.id, DEFENCE.friendlySeek ? 'ship-launched: unchanged' : '');
 });
 
 test('the seeker prefers the designated target over a bigger neighbour', () => {

@@ -554,7 +554,9 @@ export class Menu3D {
    get selection() { return { mission: this.mission, ship: this.ship, difficulty: this.difficulty }; }
    _allowed(mid = this.mission) { return getMission(mid)?.playableShips || PLAYABLE; }
    // ships a mission prescribes (historical operations) are always available, researched or not
-   _unlocked(k, mid = this.mission) { return isUnlocked(this.profile, k) || (() => { const m = getMission(mid); return !!m?.fixedShips && m.playableShips.includes(k); })(); }
+   _owned(k, mid = this.mission) { return isUnlocked(this.profile, k) || (() => { const m = getMission(mid); return !!m?.fixedShips && m.playableShips.includes(k); })(); }
+   // the training battle is a test drive: every ship sails there, researched or not
+   _unlocked(k, mid = this.mission) { return mid === 'training' || this._owned(k, mid); }
    // keep the selection valid: allowed in this mission and unlocked (op ships are never locked)
    _fixShip() {
       const allowed = this._allowed();
@@ -664,7 +666,7 @@ export class Menu3D {
       const S = SHIPS[k0] ? shipStats(k0, applyLoadout(SHIPS[k0], loadoutFor(pf, k0))) : null;
       const allowed = this._allowed();
       const pr = this.progress;
-      const shipLocked = !this._unlocked(k0), cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
+      const shipLocked = !this._owned(k0), trial = shipLocked && this._unlocked(k0), cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
       const need = shipLocked ? unlockNeeds(pf, k0) : null, crCost = UNLOCK_CREDITS[k0] || 0;
       const needTxt = need ? [need.req ? `Erfordert ${SHIPS[need.req]?.name || need.req}` : '', need.xp ? `Noch ${fmtInt(need.xp)} EP benötigt` : '',
          need.credits ? `Noch ${fmtInt(need.credits)} Mark benötigt` : ''].filter(Boolean).join(' · ') : '';
@@ -737,9 +739,9 @@ export class Menu3D {
          (CLASS_ORDER[SHIP_STATS[a].type] ?? 9) - (CLASS_ORDER[SHIP_STATS[c].type] ?? 9) || SHIP_STATS[a].tier - SHIP_STATS[c].tier);
       const tab = this.nation === 'all' || NATIONS.includes(this.nation) ? this.nation : natOf(k0);
       const card = (k, i, list) => {
-         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !this._unlocked(k), cr = UNLOCK_CREDITS[k] || 0;
+         const st = SHIP_STATS[k], ok = allowed.includes(k), lk = ok && !this._owned(k), cr = UNLOCK_CREDITS[k] || 0;
          const gs = i > 0 && SHIP_STATS[list[i - 1]].type !== st.type;
-         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? 'Noch nicht in Dienst — mit EP und Mark in Dienst stellen' : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
+         return `<div class="m3-card ${k === this.ship ? 'sel' : ''} ${ok ? '' : 'off'} ${lk ? 'lock' : ''} ${gs ? 'gs' : ''}" data-ship="${esc(k)}" title="${ok ? (lk ? (this._unlocked(k) ? 'Noch nicht in Dienst — mit EP und Mark in Dienst stellen · im Übungsgefecht schon jetzt fahrbar' : 'Noch nicht in Dienst — mit EP und Mark in Dienst stellen') : esc(st.typeName + ' · Stufe ' + st.tier)) : 'In dieser Mission nicht verfügbar'}">
             ${m.recommendedShip === k && ok ? '<span class="rec">VORGESCHLAGEN</span>' : ''}
             <div class="hd"><span class="tr">${st.tier}</span>${classSvg(st.type, 13)}<span class="nm2">${esc(st.name)}</span><span class="ty">${esc(st.type)}</span></div>
             ${silhouetteSvg(k)}
@@ -768,7 +770,7 @@ export class Menu3D {
                <button class="m3-capt" data-act="captain" title="Kommandant &amp; Lehrgänge">${icon('capt', 17)}<span class="lb">KOMMANDANT</span><b>${cl.level}</b>${free > 0 ? `<i>${free}</i>` : ''}</button>
                <button class="m3-capt" data-act="mp" title="Mehrspieler: gemeinsam mit anderen Spielern über das Internet">${icon('mp', 17)}<span class="lb">MEHRSPIELER</span></button>
                <a class="m3-capt m3-era" data-act="era" href="index-v2.html" title="V2 (Test): moderne Schiffe, Raketen und heutige Szenarien – getrennt vom Hauptspiel"><span class="lb">MODERN</span><b>V2</b></a></div>
-            <div class="m3-go"><button class="m3-battle" data-act="battle" ${shipLocked ? 'disabled title="Schiff zuerst in Dienst stellen"' : 'title="Auslaufen (Enter)"'}>AUSLAUFEN</button></div>
+            <div class="m3-go"><button class="m3-battle" data-act="battle" ${trial ? 'title="Probefahrt im Übungsgefecht (Enter)"' : shipLocked ? 'disabled title="Schiff zuerst in Dienst stellen"' : 'title="Auslaufen (Enter)"'}>AUSLAUFEN</button></div>
             <div class="m3-mr">
                <div class="m3-foe"><span>Gegner</span><div>${DIFFS.map(([k, l]) => `<button data-diff="${k}" class="${k === this.difficulty ? 'sel' : ''}" title="Gegner: ${l}">${l}</button>`).join('')}</div></div>
                <div class="m3-acct"><div class="m3-purse"><span><b class="xp">${fmtInt(pf.xp)}</b>EP</span><span><b>${fmtInt(pf.credits)}</b>Mark</span></div>

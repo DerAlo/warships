@@ -141,3 +141,16 @@ test('training: sinking the three hulks calls the missile boats, sinking those w
    for (let i = 0; i < 60 && w.phase === 'playing'; i++) w.update(1 / 60);
    assert.strictEqual(w.phase, 'won');
 });
+
+test('training: every eastern ship sails there too and trains against western boats with an eastern escort', () => {
+   for (const ship of PLAYABLE_EAST) {
+      const w = new World('normal', { mission: 'training', ship, seed: 4 });
+      assert.strictEqual(w.player.cls, ship);
+      for (const h of w.ships.filter(s => s.side === 'enemy')) h.takeDamage(1e9, w.player, 'he');
+      for (let i = 0; i < 20 * 60; i++) w.update(1 / 60);
+      for (const s of w.ships) assert.ok(Number.isFinite(s.pos.x) && Number.isFinite(s.hp), ship + ': ' + s.name + ' finite');
+      const boats = w.ships.filter(s => s.side === 'enemy' && s.alive);
+      assert.deepStrictEqual(boats.map(s => s.cls), ['Braunschweig', 'Braunschweig'], ship);
+      assert.ok(w.ships.some(s => s.side === 'player' && s.cls === 'BuyanM' && s !== w.player), ship + ': eastern escort');
+   }
+});

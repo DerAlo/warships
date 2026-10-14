@@ -247,14 +247,16 @@ function seduceChance(c) {
    return c.passive ? DEFENCE.decoyPkPassive : c.supersonic ? DEFENCE.decoyPkSuper : DEFENCE.decoyPk;
 }
 // One sweep of the terminal seeker: ships and decoy clouds inside range and cone; the designated
-// target is preferred, a friendly ship in the cone is taken only if nothing else is there.
+// target is preferred, a friendly ship in the cone is taken only if nothing else is there (never by
+// an air-launched missile).
 function seek(world, m, c) {
    let best = null, bestS = Infinity, viaDecoy = null;
    const cone = c.cone || 0.4;
    for (const S of world.ships) {
       if (!S.alive || S.id === m.ownerId || S.depth > 0) continue;
       const friendly = S.side === m.side;
-      if (friendly && (!DEFENCE.friendlySeek || m.dist < DEFENCE.armDist)) continue;
+      // air-launched missiles (jets) never take a ship of their own side
+      if (friendly && (!DEFENCE.friendlySeek || m.sqId != null || m.dist < DEFENCE.armDist)) continue;
       const dx = S.pos.x - m.x, dy = S.pos.y - m.y, d2 = dx * dx + dy * dy;
       let r = c.seeker;
       if (d2 > r * r) continue;
