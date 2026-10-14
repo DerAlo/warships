@@ -66,16 +66,21 @@ for (const [vw, vh] of [[1440, 810], [1920, 1080]]) {
    });
    check(`${tag} "Alle" lists the whole roster in a scrolling strip`, all.n === PLAYABLE.length && all.groups === NATIONS.length && all.scroll && all.page, all);
    check(`${tag} fresh profile: everything but the two starters is locked`, all.locked === PLAYABLE.filter(k => UNLOCK_XP[k]).length, all);
-   // a locked ship can be inspected: panel with tier, description and price, battle button disabled
+   // a locked ship can be inspected: panel with tier, description and price; the training battle (default)
+   // lets it sail as a test drive, any other battle keeps the battle button disabled
    await page.click('.m3-tabs [data-nat="jp"]');
    await page.click('.m3-card[data-ship="Yamato"]');
    const pan = await page.evaluate(() => ({
       cl: document.querySelector('.m3-ship .cl')?.textContent || '', ds: document.querySelector('.m3-ship .ds')?.textContent || '',
       btn: document.querySelector('[data-act="unlock"]')?.textContent || '', hint: document.querySelector('.m3-prog .hint')?.textContent || '',
-      dis: document.querySelector('.m3-battle').disabled,
+      trial: !document.querySelector('.m3-battle').disabled && /Probefahrt/.test(document.querySelector('.m3-battle').title),
       over: (() => { const e = document.querySelector('.m3-ship'); return e.scrollWidth > e.clientWidth + 1; })(),
    }));
-   check(`${tag} locked ship panel`, /Stufe 10/.test(pan.cl) && pan.ds.length > 30 && /EP/.test(pan.btn) && /Mark/.test(pan.btn) && /Erfordert Kirishima/.test(pan.hint) && pan.dis && !pan.over, pan);
+   check(`${tag} locked ship panel`, /Stufe 10/.test(pan.cl) && pan.ds.length > 30 && /EP/.test(pan.btn) && /Mark/.test(pan.btn) && /Erfordert Kirishima/.test(pan.hint) && pan.trial && !pan.over, pan);
+   await page.click('[data-mis="standard"]'); await page.click('.m3-tabs [data-nat="jp"]'); await page.click('.m3-card[data-ship="Yamato"]');
+   const dis = await page.evaluate(() => document.querySelector('.m3-battle').disabled);
+   check(`${tag} locked ship: battle button disabled outside the training battle`, dis, { dis });
+   await page.click('[data-mis="training"]');
    await page.screenshot({ path: `${OUT}/fleet-port-${tag}-locked.png` });
    await page.click('.m3-tabs [data-nat="all"]');
    await page.screenshot({ path: `${OUT}/fleet-port-${tag}-all.png` });
