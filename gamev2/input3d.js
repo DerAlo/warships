@@ -84,18 +84,12 @@ export class Input3D {
       this._onWheel = (e) => {
          if (this.wheelGate && !this.wheelGate(e)) return;
          e.preventDefault();          // also stops Ctrl+wheel / pinch page zoom mid-battle
-         // Normalise the three deltaModes to "notches": a classic wheel click is ~100px or 3 lines.
+         // A mouse-wheel click is ONE step, whatever size the browser reports for it (100, 120, 200 px,
+         // 3 lines, a page: that depends on OS settings, display scaling and browser). Only the sign
+         // counts. Touchpads send many small deltas (< ~50 px) and keep the fractional glide.
          let d = e.deltaMode === 1 ? e.deltaY / 3 : e.deltaMode === 2 ? e.deltaY : e.deltaY / 100;
-         // A detented click reads 100-133 px depending on OS scaling (and Chrome coalesces clicks
-         // on slow frames): snap to whole clicks so one click is one zoom step. Touchpad deltas
-         // stay fractional.
-         if (Math.abs(d) >= 0.5) d = Math.sign(d) * Math.max(1, Math.round(Math.abs(d) - 0.1));
-         // The pixels of one click also grow with display scaling and browser zoom (200 px at 200 %:
-         // every click skipped a zoom step). The legacy wheelDelta counts real clicks, 120 each; a
-         // touchpad reports about 3 units per pixel there and keeps the fractional path.
-         const ticks = e.deltaMode === 0 && e.wheelDeltaY ? -e.wheelDeltaY / 120 : 0;
-         if (ticks && Number.isInteger(ticks) && e.deltaY / ticks >= 50) d = ticks;
-         this.mouse.wheel += Math.max(-4, Math.min(4, d));
+         if (e.deltaMode !== 0 || Math.abs(d) >= 0.5) d = Math.sign(d);   // line/page modes: always a wheel
+         this.mouse.wheel += d;
       };
    }
 

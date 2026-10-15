@@ -241,16 +241,14 @@ await shot('2x');
    await settled();
    rows = await recStop();
    check('burst out: FOV and distance monotonic', monotonic(rows.map(r => r.fov), 1e-6) && monotonic(rows.map(r => r.dist), 1e-6), { frames: rows.length, fovMono: monotonic(rows.map(r => r.fov), 1e-6), fov: rows.map(r => f3(r.fov)).join(' '), dist: rows.map(r => f1(r.dist)).join(' '), lv: rows.map(r => r.level).join(' ') });
-   // one coalesced 300 px event = 3 clicks; 125 px (OS scaling) = 1 click
-   await wheelEv(-300); await frames(2);
-   z = await Z(); check('coalesced 300 px = 3 rungs', z.level === 3, z.level);
-   await wheelEv(-125); await frames(2);
-   z = await Z(); check('125 px click = 1 rung', z.level === 4, z.level);
-   await wheelEv(-3, 1); await frames(2);
-   z = await Z(); check('deltaMode 1 (3 lines) = 1 rung', z.level === 5, z.level);
-   await wheelEv(-1, 2); await frames(2);
-   z = await Z(); check('deltaMode 2 (1 page) = 1 rung -> 2x', z.bino && z.zoom === 2, z.level);
-   await wheelEv(1, 2); await frames(2);
+   // a wheel click is one rung whatever size it reports (OS lines setting, display scaling, browser)
+   const seen = [];
+   for (const [dy, dm] of [[-300, 0], [-125, 0], [-1, 1], [-3, 1], [-240, 0], [-1, 2], [-300, 0], [-57, 0]]) {
+      await wheelEv(dy, dm); await frames(2); z = await Z(); seen.push(z.bino ? z.zoom + 'x' : z.level);
+   }
+   check('any wheel click = 1 rung (300/125/240/57 px, 1 or 3 lines, a page): tp 1..5, 2x, 4x, 8x',
+      JSON.stringify(seen) === JSON.stringify([1, 2, 3, 4, 5, '2x', '4x', '8x']), seen);
+   await wheelEv(57); await frames(2); await wheelEv(300); await frames(2); await wheelEv(1, 2); await frames(2);
 }
 
 // ------------------------------------------------------------------ touchpad deltas across the boundary
