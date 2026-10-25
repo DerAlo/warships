@@ -12,6 +12,7 @@ import { ATM_GLSL, bindAtm, clamp, lerp, mulberry32 } from './gfxcommon3d.js';
 import { WAVES_GLSL } from './water3d.js';
 import { T as THEME, FONT } from './theme.js';
 import { GFX } from './gfxquality.js';
+import { RAIL_CAL } from './config.js';
 
 const TAU = Math.PI * 2;
 const rnd = Math.random;   // cosmetic only
@@ -1028,6 +1029,43 @@ export class FX {
       this._muzzleNow(pos.x, pos.y, pos.z, dir.x, dir.y, dir.z, cal);
    }
 
+   // Railgun discharge: no powder flame, a white-cyan plasma flash, a long violet tongue, a spray of
+   // ionised sparks and a thin bluish haze (same pools as the gun flash, about as many particles).
+   _railMuzzle(x, y, z, dx, dy, dz) {
+      const G = this.glow, P = this.puff;
+      let p = G.t();
+      p.x = x + dx * 4; p.y = y + dy * 4; p.z = z + dz * 4;
+      p.life = 0.22; p.s0 = 9; p.s1 = 16; p.grow = 2;
+      p.r = 5; p.g = 9; p.b = 16; p.r1 = 1.6; p.g1 = 1.2; p.b1 = 5; p.a = 1; p.fin = 0; p.fout = 0.25; p.shape = 0;
+      G.emit();
+      p = G.t();
+      p.x = x + dx * 22; p.y = y + dy * 22; p.z = z + dz * 22;
+      p.axX = dx; p.axY = dy; p.axZ = dz; p.h = 44; p.life = 0.16; p.s0 = 3.2; p.s1 = 5.5;
+      p.r = 6; p.g = 7; p.b = 18; p.r1 = 3; p.g1 = 0.8; p.b1 = 9; p.a = 1; p.fin = 0; p.fout = 0.35; p.shape = 3;
+      G.emit();
+      const nS = GFX.effects >= 2 ? 10 : 6;
+      for (let i = 0; i < nS; i++) {
+         p = G.t();
+         const sp = rr(120, 320);
+         p.x = x; p.y = y; p.z = z;
+         p.vx = (dx + rr(-0.35, 0.35)) * sp; p.vy = (dy + rr(-0.15, 0.35)) * sp; p.vz = (dz + rr(-0.35, 0.35)) * sp;
+         p.drag = 3; p.grav = 4; p.life = rr(0.2, 0.5); p.s0 = 0.9; p.s1 = 0.3; p.stretch = 0.05;
+         p.r = 8; p.g = 10; p.b = 22; p.r1 = 4; p.g1 = 1; p.b1 = 8; p.fin = 0; p.fout = 0.5; p.shape = 3;
+         G.emit();
+      }
+      for (let i = 0; i < 3; i++) {
+         p = P.t();
+         const fwd = rr(0.2, 1.2), sp = rr(10, 30);
+         p.x = x + dx * 20 * fwd; p.y = y + dy * 20 * fwd; p.z = z + dz * 20 * fwd;
+         p.vx = dx * sp + rr(-4, 4); p.vy = rr(1, 4); p.vz = dz * sp + rr(-4, 4);
+         p.drag = 1.4; p.grav = -0.4; p.life = rr(1.5, 2.6); p.s0 = 3; p.s1 = 12; p.grow = 3;
+         p.r = 0.55; p.g = 0.6; p.b = 0.75; p.r1 = 0.7; p.g1 = 0.72; p.b1 = 0.8;
+         p.a = 0.35; p.fin = 0.03; p.fout = 0.4; p.shape = 1; p.lit = 1; p.wind = 0.9; p.rot = rr(0, TAU); p.spin = rr(-0.5, 0.5);
+         P.emit();
+      }
+      this._light(x + dx * 12, y + 6, z + dz * 12, 1.6e5, 0.3, 0.55, 0.7, 1);
+   }
+
    sinkBurst(x, z, L, B, heading) {
       const ch = Math.cos(heading), sh = Math.sin(heading);
       this._explosion(x, 8, z, 460, true, 2.2);
@@ -1088,6 +1126,7 @@ export class FX {
    }
 
    _muzzleNow(x, y, z, dx, dy, dz, cal) {
+      if (cal === RAIL_CAL) { this._railMuzzle(x, y, z, dx, dy, dz); return; }
       const G = this.glow, P = this.puff;
       const k = clamp(cal / 380, 0.25, 1.4);
       const len = 8 + cal * 0.11;
@@ -1440,8 +1479,9 @@ export class FX {
          const w = Math.max(0.7 + st.cal * 0.0045, dist * 0.0016 * Math.max(this._zk, 0.12));
          const spd = Math.hypot(st.vx, st.vy, st.vz);
          // AP burns blue-white, HE orange (as in WoWs); small calibres are dimmer
-         const ci = 0.55 + 0.45 * ck;
-         const cr = (ap ? 1.5 : 6.5) * ci, cg = (ap ? 2.6 : 2.1) * ci, cb = (ap ? 6 : 0.35) * ci;
+         const ci = 0.55 + 0.45 * ck, rail = st.cal === RAIL_CAL;
+         // railgun slug: a violet-cyan plasma streak, twice as long, with a lasting ion trail on every tier
+         const cr = rail ? 3.2 : (ap ? 1.5 : 6.5) * ci, cg = rail ? 5 : (ap ? 2.6 : 2.1) * ci, cb = rail ? 16 : (ap ? 6 : 0.35) * ci;
          const fade = clamp(dist / 120, 0.25, 1);   // don't blind a close camera
          if (spd > 1) {
             // long streaks from "high" up; below that the old length (less additive fill)
@@ -1449,9 +1489,10 @@ export class FX {
                : clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004 * this._zk;
             const ax = st.vx / spd, ay = st.vy / spd, az = st.vz / spd;
             // the bright core is ~1/7 of the quad; the rest is the soft halo
-            T.add(st.x, st.y, st.z, ax, ay, az, len, w * 7, cr, cg, cb, 0.95 * fade);
+            T.add(st.x, st.y, st.z, ax, ay, az, rail ? len * 2.2 : len, w * 7, cr, cg, cb, 0.95 * fade);
             // long faint afterglow hanging behind the shell
-            if (trail) T.add(st.x, st.y, st.z, ax, ay, az, len * 3.4, w * 4.5, cr, cg, cb, 0.2 * fade);
+            if (rail) T.add(st.x, st.y, st.z, ax, ay, az, len * 8, w * 5, 1.6, 1.2, 6, 0.3 * fade);
+            else if (trail) T.add(st.x, st.y, st.z, ax, ay, az, len * 3.4, w * 4.5, cr, cg, cb, 0.2 * fade);
          }
          T.add(st.x, st.y, st.z, 0, 1, 0, 0, w * (5.5 + 2 * ck), cr, cg, cb, 0.9 * fade);
       }

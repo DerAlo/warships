@@ -12,7 +12,7 @@ import { FIXTURES, MODEL_KEYS, WW2_REF, mkModernShip, mkWW2Ship, recStats } from
 const mk = () => new ShipModels(new THREE.Scene(), { heightAt: () => 0 }, null);
 const build = (ship, detail) => { GFX.detail = detail; const sm = mk(); const r = sm._build(ship); return { sm, r, st: recStats(r) }; };
 const ROSTER = ['k130', 'f124', 'burke', 'tico', 'type45', 'ford', 'u212', 'virginia', 'buyan', 'gorshkov', 'slava', 'kirovn', 'kuznetsov', 'kilo',
-   'type022', 'type054', 'type052d', 'type055', 'shandong', 'yuan', 'fac', 'moudge', 'ghadir', 'tanker', 'container', 'lng'];
+   'type022', 'type054', 'type052d', 'type055', 'shandong', 'yuan', 'fac', 'moudge', 'ghadir', 'tanker', 'container', 'lng', 'donar'];
 const SUBS = ['u212', 'virginia', 'kilo', 'yuan', 'ghadir'], CVS = ['ford', 'kuznetsov', 'shandong'], MERCH = ['tanker', 'container', 'lng'];
 
 test('every roster key has a model and a fixture', () => {

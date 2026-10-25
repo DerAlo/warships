@@ -162,6 +162,8 @@ export const GUN_STYLES = {
    pj26: { shape: 'facet', l: 4.2, w: 3.0, h: 2.4, cal: 76, bl: 4.6, br: 0.1 },
    ak630: { shape: 'dome', r: 0.95, h: 1.4, cal: 30, bl: 1.9, br: 0.12 },
    mg: { shape: 'mg', cal: 12.7, bl: 1.5, br: 0.05 },
+   // electromagnetic railgun (cal = RAIL_CAL, the plasma marker): low faceted house, long twin-rail barrel
+   rail: { shape: 'facet', l: 8.4, w: 5.2, h: 2.6, cal: 155, bl: 15, br: 0.42, rail: true },
 };
 // -> { house, barrel (BufferGeometry), pivot [x, y], tip, offs }
 export function buildGunGeo(styleKey, col) {
@@ -191,6 +193,14 @@ export function buildGunGeo(styleKey, col) {
       pivot = [st.l * (box ? 0.3 : 0.2), st.h * 0.56];
    }
    for (const z of offs) {
+      if (st.rail) {
+         // two square rails in a slim casing, open slot between them, bright coil rings near the house
+         bb.box(st.bl, st.br * 1.1, st.br * 2.4, st.bl / 2, st.br * 0.75, z, dark);
+         bb.box(st.bl, st.br * 1.1, st.br * 2.4, st.bl / 2, -st.br * 0.75, z, dark);
+         bb.box(st.bl * 0.55, st.br * 3.4, st.br * 3, st.bl * 0.27, 0, z, shade(col, 0.85));
+         for (const f of [0.12, 0.3, 0.48]) bb.box(0.35, st.br * 3.8, st.br * 3.4, st.bl * f, 0, z, lin(0x3a8fb0));
+         continue;
+      }
       bb.tubeX(st.br * 1.5, st.br, st.bl, 0, 0, z, dark, 6);
       if (st.shape !== 'mg') bb.box(st.br * 9, st.br * 5, st.br * 5, st.br * 4, 0, z, shade(col, 0.8));
    }
@@ -351,6 +361,15 @@ class Kit {
          b.cyl(0.45, 0.6, 1.0, x, y, z, c.sup, 6);
          b.put(new THREE.BoxGeometry(2.2, 1.5, type === 'ram' ? 1.5 : 2.2), x + dx * 0.2, y + 1.7, z + dz * 0.2, shade(c.sup, 0.92), 0, -dir, 0.35);
          this.anchor('pdms', { x, y: y + 1.9, z, dir, type });
+         return;
+      }
+      if (type === 'laser') {
+         // high-energy laser: pedestal, boxy director, large dark aperture with a blue rim
+         b.cyl(0.8, 1.0, 0.8, x, y, z, c.sup, 8);
+         b.put(new THREE.BoxGeometry(1.8, 1.6, 2.0), x, y + 1.5, z, shade(c.sup, 0.95), 0, -dir, 0);
+         b.put(new THREE.CylinderGeometry(0.62, 0.62, 0.3, 12), x + dx * 0.95, y + 1.55, z + dz * 0.95, lin(0x3a8fb0), 0, -dir, -Math.PI / 2);
+         b.put(new THREE.CylinderGeometry(0.48, 0.48, 0.34, 12), x + dx * 1.0, y + 1.55, z + dz * 1.0, c.black, 0, -dir, -Math.PI / 2);
+         this.anchor('ciws', { x, y: y + 1.5, z, dir, type });
          return;
       }
       if (type === 'phalanx') {

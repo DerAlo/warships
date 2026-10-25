@@ -120,7 +120,7 @@ export const CIWS = {
    type730: { name: 'Typ 730', range: 2000, kps: 0.19 },
    type1130: { name: 'Typ 1130', range: 2200, kps: 0.23 },
    gun40: { name: '40-mm-Flak', range: 1500, kps: 0.08 },
-   laser: { name: 'Hochenergielaser', range: 3000, kps: 0.42 },
+   laser: { name: 'Hochenergielaser', range: 3000, kps: 0.42, cheat: true },
 };
 export const CIWS_SUPER = 0.5;
 // Defence tuning shared by ships and SAM sites (missile.js).

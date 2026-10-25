@@ -362,7 +362,7 @@ export class MissileUi {
       this.toneT -= dt;
       if (u.nMine && u.minTti < 12 && this.toneT <= 0) { this.audio.vampire(u.minTti < 6); this.toneT = u.minTti < 6 ? 0.9 : 1.8; }
       this.ciwsT -= dt;
-      if (p.ciwsTgt?.length && this.ciwsT <= 0) { this.audio.ciws(0, p.pos); this.ciwsT = 0.24; }
+      if (p.ciwsTgt?.length && this.ciwsT <= 0 && p.cfg?.weapons?.ciws?.type !== 'laser') { this.audio.ciws(0, p.pos); this.ciwsT = 0.24; }
    }
    _scan(p, world) {
       const u = this.ui, list = world.missiles?.length ? inbound(world, p.side) : [];

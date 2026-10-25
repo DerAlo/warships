@@ -363,6 +363,13 @@ export class MissileFX {
          const ax = dx / d, ay = dy / d, az = dz / d;
          const cd = Math.hypot(s.x - cam.x, s.y - cam.y, s.z - cam.z);
          const wd = Math.max(0.5, cd * 0.0013 * Math.max(zk, 0.12));
+         if (s.laser) {
+            // high-energy laser: one steady, slightly flickering beam from the mount to the target
+            const fl = 0.75 + 0.25 * Math.sin(t * 60 + s.ph * 20);
+            T.add(s.tx, s.ty, s.tz, ax, ay, az, d, wd * 3, 3, 6, 16, 0.85 * fl);
+            T.add(s.tx, s.ty, s.tz, 0, 1, 0, 0, wd * 9, 4, 6, 14, 0.7 * fl);
+            continue;
+         }
          for (let i = 0; i < N; i++) {
             const u = (t * 2.6 + i / N + s.ph) % 1, k = u * d;
             // light spread of the burst
@@ -382,12 +389,19 @@ export class MissileFX {
          for (let i = 0; i < list.length; i++) {
             const st = this.state.get(list[i]);
             if (!st) continue;
-            const s = S[n] || (S[n] = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ph: 0 });
+            const s = S[n] || (S[n] = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, ph: 0, laser: false });
             n++;
             // alternate fore / aft mount
             const h = P.heading || 0, off = (i % 2 ? 1 : -1) * (P.cfg?.hull?.L || 0) * 0.2;
             s.x = x + Math.cos(h) * off; s.y = y; s.z = z + Math.sin(h) * off;
             s.tx = st.x; s.ty = st.y; s.tz = st.z; s.ph = ((P.id * 7 + i * 3) % 10) / 10;
+            s.laser = P.cfg?.weapons?.ciws?.type === 'laser';
+            if (s.laser) {
+               const G = this.fx.glow, p = G.t();
+               p.x = s.x; p.y = s.y; p.z = s.z; p.life = 0.05; p.s0 = 3; p.s1 = 3; p.r = 6; p.g = 10; p.b = 22; p.fin = 0; p.fout = 0; p.shape = 0;
+               G.emit(true);
+               continue;
+            }
             // muzzle: a flicker at the mount, on higher tiers a wisp of gun smoke
             const G = this.fx.glow, p = G.t();
             p.x = s.x; p.y = s.y; p.z = s.z; p.life = 0.05; p.s0 = rr(2.5, 4.5); p.s1 = p.s0; p.r = 22; p.g = 11; p.b = 3; p.fin = 0; p.fout = 0; p.shape = 0;
