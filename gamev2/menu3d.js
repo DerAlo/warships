@@ -5,10 +5,12 @@
 import { MISSIONS, getMission, opStars } from './missions.js';
 import { SHIPS, SHIP_STATS, PLAYABLE, PLAYABLE_EAST, shipStats, NATIONS, NATION_SHORT } from './config.js';
 import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, UNLOCK_CREDITS, unlockNeeds, MODULES, SKILLS, captainLevel, skillPointsFree, isUnlocked, canUnlock,
-   unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout } from './progress3d.js';
+   unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout, maxOutProfile } from './progress3d.js';
+import { exportSave, importSave, saveFileName } from './savegame.js';
 import { classSvg } from './hud.js';
 import { logoSvg } from './theme.js';
 import { openGuide } from './guide.js';
+import * as CONFIG from './config.js';
 
 const TYPE_LABEL = {
    training: 'Übung', annihilation: 'Vernichtung', domination: 'Seeraum', escort: 'Geleitschutz',
@@ -320,6 +322,11 @@ body.touch .m3-buy { min-height:44px; min-width:52px; }
 .m3-op .m3-skill:disabled { opacity:.45; cursor:not-allowed; }
 .m3-confirm { margin-top:12px; padding:10px 12px; border:2px solid var(--signal); background:rgba(179,53,42,.08); font:12.5px/1.45 var(--font); color:var(--signal-lo); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .m3-confirm span { flex:1; min-width:200px; }
+.m3-op .bt.sv { justify-content:flex-start; margin-top:10px; padding-top:10px; border-top:1px solid var(--rule, rgba(27,42,53,.25)); }
+.m3-op .bt.sv > span { flex:1; min-width:180px; font:italic 12px/1.4 var(--font-serif); color:var(--ink-2); }
+.m3-savemsg { margin-top:8px; font:600 12.5px/1.4 var(--font); color:var(--signal-lo); }
+.m3-toast { position:absolute; left:50%; top:78px; z-index:40; transform:translateX(-50%); max-width:min(560px, calc(100% - 32px)); padding:10px 18px; background:var(--navy); color:var(--paper);
+   border:1px solid var(--brass); box-shadow:0 8px 24px rgba(0,0,0,.45); font:600 13px/1.4 var(--font); text-align:center; pointer-events:none; }
 
 /* ---- sizes. Wide: three columns. The wordmark needs room; below ~1060 px the masthead buttons
    become icons (title = full name), the purse stacks. */
@@ -567,13 +574,17 @@ export class Menu3D {
 
    get selection() { return { mission: this.mission, ship: this.ship, difficulty: this.difficulty }; }
    // the training battle also lets the eastern ships (otherwise PvP only) sail
-   _allowed(mid = this.mission) { return mid === 'training' ? TRAINING_SHIPS : getMission(mid)?.playableShips || PLAYABLE; }
+   // the port cheat (p.cheat) adds the prototypes (config CHEAT_SHIPS) to every mission
+   _allowed(mid = this.mission) {
+      const base = mid === 'training' ? TRAINING_SHIPS : getMission(mid)?.playableShips || PLAYABLE, extra = this.profile?.cheat ? CONFIG.CHEAT_SHIPS || [] : [];
+      return extra.length ? [...base, ...extra.filter(k => SHIPS[k] && !base.includes(k))] : base;
+   }
    // ships a mission prescribes (historical operations) are always available, researched or not
    _owned(k, mid = this.mission) { return isUnlocked(this.profile, k) || (() => { const m = getMission(mid); return !!m?.fixedShips && m.playableShips.includes(k); })(); }
    // the training battle is a test drive: every ship sails there, researched or not
    _unlocked(k, mid = this.mission) { return mid === 'training' || this._owned(k, mid); }
    // a ship that sails here only as a training test drive (not in service, or training-only)
-   _trial(k, mid = this.mission) { return mid === 'training' && (!this._owned(k, mid) || !PLAYABLE.includes(k)); }
+   _trial(k, mid = this.mission) { return mid === 'training' && (!this._owned(k, mid) || !PLAYABLE.includes(k)) && !(this.profile?.cheat && (CONFIG.CHEAT_SHIPS || []).includes(k)); }
    // keep the selection valid: allowed in this mission and unlocked (op ships are never locked)
    _fixShip() {
       const allowed = this._allowed();
@@ -637,8 +648,58 @@ export class Menu3D {
 
    // ------------------------------------------------------------ captain (skills, respec, profile reset)
    _closeCaptain() { if (this._cap) { this._cap.remove(); this._cap = null; } this._capConfirm = false; }
+   // save file: download everything of both variants as one JSON file (savegame.js)
+   _exportSave() {
+      saveProfile(this.profile); saveProgress(this.progress);
+      const url = URL.createObjectURL(new Blob([exportSave()], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = saveFileName(); document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+   }
+   // load a save file: replaces the stored career, then the page reloads so every part reads it fresh
+   _importSave() {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.json,application/json';
+      inp.addEventListener('change', () => {
+         const file = inp.files?.[0];
+         if (!file) return;
+         file.text().then(t => {
+            const r = importSave(t);
+            if (r.ok) { location.reload(); return; }
+            this._saveMsg = r.error; if (this._cap) this._openCaptain(true);
+         }).catch(() => { this._saveMsg = 'Die Datei konnte nicht gelesen werden.'; if (this._cap) this._openCaptain(true); });
+      });
+      inp.click();
+   }
+   // cheat: ten clicks in a row on the logo (each within 1.5 s of the last) = a fully played career
+   _logoTap() {
+      const now = performance.now();
+      this._taps = now - (this._tapT || -1e9) < 1500 ? (this._taps || 0) + 1 : 1;
+      this._tapT = now;
+      if (this._taps < 10) return;
+      this._taps = 0;
+      maxOutProfile(this.profile, PLAYABLE); this._saveProfile();
+      const pr = this.progress;
+      pr.missions = pr.missions || {};
+      for (const x of MISSIONS) {
+         const rec = pr.missions[x.id] || { won: false, best: 0, plays: 0 };
+         rec.won = true; rec.plays = Math.max(rec.plays || 0, 1);
+         if (x.group === 'ops') rec.stars = 3;
+         pr.missions[x.id] = rec;
+      }
+      saveProgress(pr); this._fixShip(); this.render(); this.cb.onClick?.();
+      this._toast('Alles freigeschaltet: alle Schiffe, Umbauten, Lehrgänge und Einsätze mit voller Spange – dazu die Prototypen.');
+   }
+   _toast(text) {
+      this.root.querySelector('.m3-toast')?.remove();
+      const t = document.createElement('div');
+      t.className = 'm3-toast'; t.textContent = text;
+      this.root.appendChild(t);
+      setTimeout(() => t.remove(), 4500);
+   }
    _openCaptain(keepConfirm = false) {
       const confirm = keepConfirm && this._capConfirm;
+      if (!keepConfirm) this._saveMsg = '';            // an import error shows until the dialog is opened afresh
       this._closeCaptain();
       this._capConfirm = confirm;
       const pf = this.profile, cl = captainLevel(pf.totalXp), free = skillPointsFree(pf);
@@ -656,6 +717,9 @@ export class Menu3D {
             }).join('')}</div>
             <div class="bt"><button class="warn" data-cap="reset">PROFIL ZURÜCKSETZEN</button><span style="flex:1"></span>
                <button data-cap="respec" ${pf.skills.length ? '' : 'disabled'}>NEU VERTEILEN</button><button class="pri" data-cap="close">FERTIG</button></div>
+            <div class="bt sv"><span>Speicherstand: eine Datei mit dem ganzen Fortschritt aus WW2 und V2 – zum Sichern oder Mitnehmen auf ein anderes Gerät.</span>
+               <button data-cap="export">EXPORTIEREN</button><button data-cap="import">IMPORTIEREN</button></div>
+            ${this._saveMsg ? `<div class="m3-savemsg">${esc(this._saveMsg)}</div>` : ''}
             ${confirm ? `<div class="m3-confirm"><span>Wirklich zurücksetzen? EP, Budget, in Dienst gestellte Schiffe, Umbauten und Lehrgänge gehen verloren. Spangen und Einsatzsiege bleiben erhalten.</span>
                <button data-cap="no">ABBRECHEN</button><button class="warn" data-cap="yes">ZURÜCKSETZEN</button></div>` : ''}
          </div>`;
@@ -665,6 +729,8 @@ export class Menu3D {
       }));
       act('[data-cap="respec"]', () => { if (respecSkills(pf)) { this._saveProfile(); this.render(); } });
       act('[data-cap="close"]', () => this._closeCaptain());
+      act('[data-cap="export"]', () => this._exportSave());
+      act('[data-cap="import"]', () => this._importSave());
       act('[data-cap="reset"]', () => { this._capConfirm = true; this._openCaptain(true); });
       act('[data-cap="no"]', () => { this._capConfirm = false; this._openCaptain(); });
       act('[data-cap="yes"]', () => {
@@ -823,6 +889,7 @@ export class Menu3D {
       }));
       this.root.querySelector('[data-act="battle"]').addEventListener('click', () => this.start());
       this.root.querySelector('[data-act="help"]').addEventListener('click', () => this.cb.onHowTo?.());
+      this.root.querySelector('.m3-logo')?.addEventListener('click', () => this._logoTap());
       this.root.querySelector('[data-act="guide"]')?.addEventListener('click', () => { openGuide(this.ship); this.cb.onClick?.(); });
       this.root.querySelector('[data-act="captain"]').addEventListener('click', () => this._openCaptain());
       // the multiplayer screen (and everything network-related) is only loaded on demand

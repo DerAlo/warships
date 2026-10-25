@@ -88,6 +88,8 @@ export function sanitizeProfile(raw) {
    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return p;
    p.xp = num(raw.xp); p.credits = num(raw.credits); p.battles = num(raw.battles);
    p.totalXp = Math.max(num(raw.totalXp), p.xp);
+   if (num(raw.bonusPts)) p.bonusPts = num(raw.bonusPts);        // set by the port cheat (maxOutProfile)
+   if (raw.cheat === true) p.cheat = true;
    if (raw.unlocked && typeof raw.unlocked === 'object') for (const k in raw.unlocked) if (raw.unlocked[k] === true && k in UNLOCK_XP) p.unlocked[k] = true;
    if (raw.modules && typeof raw.modules === 'object') {
       for (const ship in raw.modules) {
@@ -99,7 +101,7 @@ export function sanitizeProfile(raw) {
       }
    }
    if (Array.isArray(raw.skills)) {
-      let pts = captainLevel(p.totalXp).level;
+      let pts = skillPointsTotal(p);
       for (const k of raw.skills) {
          const s = SKILLS.find(x => x.key === k);
          if (s && !p.skills.includes(k) && s.cost <= pts) { p.skills.push(k); pts -= s.cost; }
@@ -136,7 +138,24 @@ export function captainLevel(totalXp) {
    return { level, points: level, cur: CAPTAIN_XP[level], next: max ? null : CAPTAIN_XP[level + 1] };
 }
 export function skillPointsUsed(p) { return p.skills.reduce((a, k) => a + (SKILLS.find(s => s.key === k)?.cost || 0), 0); }
-export function skillPointsFree(p) { return captainLevel(p.totalXp).points - skillPointsUsed(p); }
+export function skillPointsTotal(p) { return captainLevel(p.totalXp).points + (p.bonusPts || 0); }
+export function skillPointsFree(p) { return skillPointsTotal(p) - skillPointsUsed(p); }
+
+// Port cheat (ten clicks on the logo): a fully played career. Every ship researched, every module
+// at the top tier (ships: the tech tree plus `ships`), captain at the top level with enough points
+// for every course. The courses are learned except the top-tier trade-off (manual secondaries),
+// which stays one click away. Sets p.cheat (the V2 menu then also offers its prototype ships).
+export function maxOutProfile(p, ships = []) {
+   p.totalXp = Math.max(p.totalXp, CAPTAIN_XP[CAPTAIN_XP.length - 1]);
+   p.xp = Math.max(p.xp, 1000000); p.credits = Math.max(p.credits, 50000000);
+   for (const r of TECH_TREE) if (r[1] || r[2]) p.unlocked[r[0]] = true;
+   const top = Object.fromEntries(MODULES.map(d => [d.key, d.tiers.length]));
+   for (const k of new Set([...TECH_TREE.map(r => r[0]), ...ships])) p.modules[k] = { ...top };
+   p.bonusPts = Math.max(0, SKILLS.reduce((a, s) => a + s.cost, 0) - captainLevel(p.totalXp).points);
+   for (const s of SKILLS) if (!s.top && !p.skills.includes(s.key)) p.skills.push(s.key);
+   p.cheat = true;
+   return p;
+}
 
 export function isUnlocked(p, ship) { return !UNLOCK_XP[ship] || !!p.unlocked[ship]; }
 // Why a locked ship cannot be researched yet: { req: missing predecessor | null, xp, credits: shortfall }.
