@@ -31,17 +31,26 @@ const goTo = (p, at) => { p.ai.route = [{ x: at.x, y: at.y }]; p.ai.routeIdx = 0
 // covers the raft with its missiles; else the ship goes alongside at a crawl.
 function maydayHelm(w, p) {
    const S = w._script, R = S.raft;
+   w.autoPlayer = true;
    if (S.crew !== 'raft') { delete p.ai.route; return () => p.setTelegraph(1); }
    const f = S.frigId != null ? w.shipById(S.frigId) : null;
    const frigNear = f && f.alive && hyp(f.pos, R) < 17000;
    const d = hyp(p.pos, R);
    if (p.cfg.helo && !heloOf(w, p) && d < 7500 && !frigNear && !S.heloTried) { S.heloTried = true; sendHelo(w, p, R); }
+   // a boat lying at the raft comes first: the captain takes the guns and lays them on it himself
+   let grab = null;
+   for (const id of S.grabbers) { const b = w.shipById(id); if (b && b.alive && hyp(b.pos, R) < 600 && hyp(b.pos, p.pos) < p.cfg.main.range * 0.95) { grab = b; break; } }
+   const helm = () => {
+      turn(p, Math.atan2(R.y - p.pos.y, R.x - p.pos.x));
+      p.setTelegraph(d > 2200 ? 4 : d > 1200 ? 3 : d > 600 ? 2 : d > MAYDAY.pickR * 0.8 ? 1 : 0);
+   };
+   if (grab) {
+      w.autoPlayer = false;
+      return () => { helm(); p.aimPoint = { x: grab.pos.x, y: grab.pos.y }; p.fireMain(w, p.aimPoint); };
+   }
    if (d > 2200) { goTo(p, R); return false; }
    delete p.ai.route;
-   return () => {
-      turn(p, Math.atan2(R.y - p.pos.y, R.x - p.pos.x));
-      p.setTelegraph(d > 1200 ? 3 : d > 600 ? 2 : d > MAYDAY.pickR * 0.8 ? 1 : 0);
-   };
+   return helm;
 }
 
 // gunline: wait off the middle of the coast; with a fire mission open run to a station off the target and shoot
@@ -49,12 +58,17 @@ function maydayHelm(w, p) {
 function gunlineHelm(w, p) {
    const S = w._script, isl = w.obstacles[0], R = p.cfg.main.range;
    const s = S.open ? siteOf(w, S.targets[S.k]) : null;
-   if (!s || !s.alive) { goTo(p, { x: 0, y: isl.c.y + 4200 + R * 0.7 }); return false; }
+   if (!s || !s.alive) { goTo(p, { x: 0, y: isl.c.y + 10000 }); return false; }
    const st = { x: s.x, y: s.y + R * 0.72 }, d = hyp(p.pos, s);
    goTo(p, st);
-   if (d > R * 0.97 || nearestFoe(w, p.pos) < 4500) return false;
+   w.autoPlayer = true;
+   if (d > R * 0.97 || (nearestFoe(w, p.pos) < 3000 && S.closeT - w.time > 35)) return false;
+   // shelling: the AI would turn the guns on the boats, so the captain takes ship and guns himself
+   w.autoPlayer = false;
    return () => {
-      if (hyp(p.pos, st) < 600) { turn(p, Math.atan2(s.y - p.pos.y, s.x - p.pos.x) + Math.PI / 2); p.setTelegraph(1); }
+      const ds = hyp(p.pos, st);
+      if (ds < 600) { turn(p, Math.atan2(s.y - p.pos.y, s.x - p.pos.x) + Math.PI / 2); p.setTelegraph(1); }
+      else { turn(p, Math.atan2(st.y - p.pos.y, st.x - p.pos.x)); p.setTelegraph(ds > 1500 ? 4 : 2); }
       p.aimPoint = { x: s.x, y: s.y };
       p.fireMain(w, p.aimPoint);
    };
@@ -64,7 +78,7 @@ function gunlineHelm(w, p) {
 // volley at the airfield every 20 s once the known SAM sites are down.
 function airbaseHelm(w, p) {
    const S = w._script;
-   goTo(p, { x: -15000, y: 2500 });
+   goTo(p, { x: -3000, y: 2500 });
    if (w.time < (S.capT || 0)) return false;
    S.capT = w.time + 20;
    const known = S.sams.map(id => siteOf(w, id)).filter(s => s.alive && s.detected);

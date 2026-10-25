@@ -19,17 +19,18 @@
 // measures them with the bot captain of tests/v2.missions.speciald.captain.mjs).
 import { addSite } from './sites.js';
 import { heloOf, recallHelo } from './helo.js';
+import { islandReliefAt } from './utils.js';
 
 export const SPECIAL_D_TUNE = {
    mayday: {
       // hoist: s the helicopter hovers over the raft · pick: s the ship lies alongside the raft · drift: m/s the raft
       // drifts towards the coast · boats / boatsAt: first pack from the coast and its time · grabbers: boats of each
       // pack that go for the raft (the others hunt the ship) · msl: boats per pack with Kowsar missiles · wave2 /
-      // wave2At: second pack · grab: s an enemy boat needs at the raft to take the crew · frig / frigAt / frigHp: the
-      // frigate (0 = none), its time and hull factor · fast: s for the optional quick rescue
-      easy: { hoist: 18, pick: 35, drift: 1.2, boats: 3, boatsAt: 70, grabbers: 1, msl: 0, wave2: 2, wave2At: 260, grab: 50, frig: 0, frigAt: 0, frigHp: 0.6, fast: 300 },
-      normal: { hoist: 25, pick: 50, drift: 1.5, boats: 5, boatsAt: 45, grabbers: 2, msl: 2, wave2: 4, wave2At: 200, grab: 35, frig: 1, frigAt: 120, frigHp: 0.6, fast: 240 },
-      hard: { hoist: 30, pick: 60, drift: 1.8, boats: 6, boatsAt: 35, grabbers: 2, msl: 3, wave2: 5, wave2At: 170, grab: 28, frig: 1, frigAt: 80, frigHp: 0.8, fast: 210 },
+      // wave2At: second pack · grab: s an enemy boat needs at the raft to take the crew · frig / frigAt / frigHp / frigSsm: the
+      // frigate (0 = none), its time, hull factor and anti-ship missiles · fast: s for the optional quick rescue
+      easy: { hoist: 18, pick: 35, drift: 1.2, boats: 3, boatsAt: 70, grabbers: 1, msl: 0, wave2: 2, wave2At: 260, grab: 50, frig: 0, frigAt: 0, frigHp: 0.6, frigSsm: 0, fast: 300 },
+      normal: { hoist: 25, pick: 50, drift: 1.5, boats: 4, boatsAt: 45, grabbers: 2, msl: 2, wave2: 3, wave2At: 230, grab: 28, frig: 1, frigAt: 150, frigHp: 0.6, frigSsm: 2, fast: 240 },
+      hard: { hoist: 30, pick: 60, drift: 1.8, boats: 4, boatsAt: 35, grabbers: 2, msl: 2, wave2: 5, wave2At: 170, grab: 26, frig: 1, frigAt: 100, frigHp: 0.8, frigSsm: 4, fast: 210 },
    },
    gunline: {
       // n: fire missions · miss: missions that may be missed · first: s until the first window · win: s a window stays
@@ -39,18 +40,18 @@ export const SPECIAL_D_TUNE = {
       // the s between its salvos · ship: knobs per flagship class (a 76 mm gun does a third of a 127 mm round)
       easy: { n: 4, miss: 2, first: 50, win: 120, gap: 20, hp: 1500, waves: [1, 2, 1, 2], msl: 0, batAt: 0, batN: 0, batInt: 40,
          ship: { Sachsen: { hp: 900 }, Braunschweig: { hp: 900 } } },
-      normal: { n: 5, miss: 1, first: 45, win: 95, gap: 15, hp: 2400, waves: [2, 3, 2, 3, 2], msl: 1, batAt: 3, batN: 6, batInt: 34,
+      normal: { n: 5, miss: 1, first: 45, win: 80, gap: 15, hp: 3000, waves: [2, 3, 2, 3, 2], msl: 1, batAt: 3, batN: 6, batInt: 34,
          ship: { Sachsen: { hp: 1300 }, Braunschweig: { hp: 1300 } } },
-      hard: { n: 5, miss: 0, first: 40, win: 85, gap: 12, hp: 2600, waves: [3, 3, 3, 4, 3], msl: 1, batAt: 2, batN: 10, batInt: 28,
+      hard: { n: 5, miss: 0, first: 40, win: 78, gap: 12, hp: 2600, waves: [3, 3, 3, 4, 3], msl: 1, batAt: 2, batN: 10, batInt: 28,
          ship: { Sachsen: { hp: 1400 }, Braunschweig: { hp: 1400 } } },
    },
    airbase: {
       // deadline: s until the mass raid takes off (the airfield must be down by then) · fieldHp: hull of the airfield ·
       // samN: missiles of each SAM site · sams: SAM sites · raid / raidAt: s between two raids of the airfield and the
-      // first one · tanker: hull factor of the replenishment ship
-      easy: { deadline: 480, fieldHp: 9000, sams: 1, samN: 8, raid: 80, raidAt: 90, tanker: 1.4 },
-      normal: { deadline: 400, fieldHp: 14000, sams: 2, samN: 14, raid: 55, raidAt: 60, tanker: 1 },
-      hard: { deadline: 360, fieldHp: 15000, sams: 2, samN: 18, raid: 45, raidAt: 45, tanker: 0.9 },
+      // first one · tanker: hull factor of the replenishment ship · tlam: cruise missiles aboard the player's ship (0 = full load)
+      easy: { deadline: 480, fieldHp: 9000, sams: 1, samN: 8, raid: 80, raidAt: 90, tanker: 1.4, tlam: 0 },
+      normal: { deadline: 400, fieldHp: 14000, sams: 2, samN: 20, raid: 55, raidAt: 60, tanker: 1, tlam: 10 },
+      hard: { deadline: 360, fieldHp: 17000, sams: 2, samN: 24, raid: 45, raidAt: 45, tanker: 0.9, tlam: 12 },
    },
 };
 // mayday: hoistR m the hovering helicopter may be off the raft · pickR / pickKn: the ship within that distance at no
@@ -87,6 +88,13 @@ export function specialMissionsD(H) {
       radio(w, from, text, level);
    }
    // the opposing side never sees a merchant: no AI aims at it, no missile is launched at it
+   // the last land point on the ray from the island's centre at angle a, `back` m inland of it (setup only)
+   const shore = (w, isl, a, back) => {
+      const c = Math.cos(a), s = Math.sin(a);
+      let r = 0;
+      for (let k = 0; k < isl.r * 4; k += 25) if (islandReliefAt(isl, { x: isl.c.x + c * k, y: isl.c.y + s * k }) > 0) r = k;
+      return P(isl.c.x + c * Math.max(0, r - back), isl.c.y + s * Math.max(0, r - back));
+   };
    const civilian = (ship) => {
       Object.defineProperty(ship, 'detected', { get: () => false, set() {}, configurable: true });
       Object.defineProperty(ship, 'targetable', { get: () => false, set() {}, configurable: true });
@@ -137,7 +145,7 @@ export function specialMissionsD(H) {
                { c: P(15200, -1500), r: 3600, height: 320, seed: 211, lobes: 6, elong: 2.2, rot: 1.45, rough: 0.6, name: 'Kap Korsk' },
                { c: P(-12500, -12500), r: 900, height: 120, seed: 213, lobes: 4, rough: 0.5 },
             ]);
-            const p = add(w, shipKey, 'player', P(-11500, 4500), -0.35, { isPlayer: true, telegraph: 3 });
+            const p = add(w, shipKey, 'player', P(-9500, 3000), -0.35, { isPlayer: true, telegraph: 3 });
             S.coast = zone(w, 15200, -1500, 8200, 'Küstengewässer Korsk', 'danger');
             S.raft = zone(w, 900 + (rnd(w, 1) - 0.5) * 1600, -3200 + (rnd(w, 2) - 0.5) * 1600, 400, 'Rettungsinsel', 'goal');
             const a = Math.atan2(S.coast.y - S.raft.y, S.coast.x - S.raft.x);
@@ -162,6 +170,7 @@ export function specialMissionsD(H) {
                if (S.over) return;
                const f = add(w, 'Typ054A', 'enemy', P(7500, -17500), Math.PI * 0.6,
                   { minDist: 11000, hpMult: T.frigHp * w.difficulty.botHP, telegraph: 3, ai: { route: [P(S.raft.x + 5200, S.raft.y - 2600)] } });
+               f.mag.yj83 = Math.min(f.mag.yj83 || 0, T.frigSsm);
                S.frigId = f.id;
                radio(w, 'Luftlage', 'Eine Fregatte läuft aus dem Norden auf die Unfallstelle zu – Flugabwehrraketen an Bord. Halten Sie den Hubschrauber aus ihrer Reichweite oder bergen Sie vorher.', 'warn');
             });
@@ -310,23 +319,27 @@ export function specialMissionsD(H) {
          setup(w, shipKey) {
             const S = w._script; S.shipKey = shipKey; S.acc = 0; const T = tune(w, 'gunline');
             islands(w, [
-               { c: P(0, -12600), r: 5000, height: 260, seed: 307, lobes: 7, elong: 3.0, rot: 0, rough: 0.55, name: 'Mereth' },
+               { c: P(0, -12600), r: 5000, height: 150, seed: 307, lobes: 7, elong: 3.0, rot: 0, rough: 0.55, name: 'Mereth' },
                { c: P(13000, 11500), r: 800, height: 90, seed: 311, lobes: 4, rough: 0.5 },
             ]);
             const isl = w.obstacles[0];
-            add(w, shipKey, 'player', P(-2000, 10500), -Math.PI / 2, { isPlayer: true, telegraph: 3 });
+            add(w, shipKey, 'player', P(-1500, 3500), -Math.PI / 2, { isPlayer: true, telegraph: 3 });
             // the targets along the south coast (addSite puts each on the coast on the ray from the island's centre)
-            const NAMES = ['Mörserstellung West', 'Panzerabwehr am Strand', 'Mörserstellung Ost', 'Beobachtungsbunker', 'Gefechtsstand'];
-            const X = [-7600, -2600, 2400, 6800, 300];
+            const NAMES = ['Panzerabwehr am Strand', 'Mörserstellung West', 'Mörserstellung Ost', 'Beobachtungsbunker', 'Gefechtsstand'];
+            const X = [-2400, -6000, 2200, 5600, 300];
             S.targets = [];
             for (let i = 0; i < T.n; i++) {
-               const s = addSite(w, 'bunker', 'enemy', P(X[i % X.length], isl.c.y + 1000), { name: NAMES[i % NAMES.length], hp: T.hp, r: 75, hidden: true });
+               // 120 m inland of the south coast straight north of x (the coast is ragged; the ray from the centre would scatter them)
+               const x = X[i % X.length];
+               let y = isl.c.y;
+               for (let yy = isl.c.y; yy < isl.c.y + isl.r * 2; yy += 25) if (islandReliefAt(isl, { x, y: yy }) > 0) y = yy;
+               const s = addSite(w, 'bunker', 'enemy', P(x, y - 120), { name: NAMES[i % NAMES.length], hp: T.hp, r: 90, hidden: true, inland: true });
                S.targets.push(s.id);
             }
             // the hidden battery on the western shoulder, the harbour of the boats beyond it
             S.batId = addSite(w, 'battery', 'enemy', P(-12000, isl.c.y + 400), { name: 'Küstenbatterie Mereth', hidden: true, radarOn: false, delay: 1e9, interval: T.batInt, ssm: { type: 'noor', n: Math.max(1, T.batN) } }).id;
             S.harbour = P(-15500, -6200);
-            const m = civilian(add(w, 'Container', 'player', P(3600, -3600), 0.15, { name: 'MS Seewind', telegraph: 0, ai: { passive: true, anchored: true } }));
+            const m = civilian(add(w, 'Container', 'player', P(8800, -3200), 0.15, { name: 'MS Seewind', telegraph: 0, ai: { passive: true, anchored: true } }));
             S.merch = [m.id];
             S.k = -1; S.open = false; S.closeT = 0; S.nextT = T.first; S.dead = 0; S.missed = 0;
             S.boats = []; S.total = 0; S.sunk = 0; S.shown = '';
@@ -434,13 +447,14 @@ export function specialMissionsD(H) {
                { c: P(2000, 17500), r: 900, height: 110, seed: 405, lobes: 4, rough: 0.5 },
             ]);
             const isl = w.obstacles[0];
-            const p = add(w, shipKey, 'player', P(-17000, 2500), 0, { isPlayer: true, telegraph: 3 });
-            const esc = add(w, 'Sachsen', 'player', P(-18500, 4400), 0, { telegraph: 3, dmgMult: 0.6, ai: { escortId: p.id } });
-            const tk = add(w, 'Tanker', 'player', P(-19500, 1200), 0, { name: 'Versorger Hiddensee', telegraph: 2, hpMult: T.tanker, ai: { passive: true, escortId: p.id } });
+            const p = add(w, shipKey, 'player', P(-4000, 2500), 0, { isPlayer: true, telegraph: 3 });
+            const esc = add(w, 'Sachsen', 'player', P(-5500, 4400), 0, { telegraph: 3, dmgMult: 0.6, ai: { escortId: p.id } });
+            const tk = add(w, 'Tanker', 'player', P(-6500, 1200), 0, { name: 'Versorger Hiddensee', telegraph: 2, hpMult: T.tanker, ai: { passive: true, escortId: p.id } });
             S.own = [p.id, esc.id]; S.tankId = tk.id;
+            if (T.tlam && p.mag.tomahawk != null) p.mag.tomahawk = Math.min(p.mag.tomahawk, T.tlam);
             // the neutral lane north to south, west of the island
             S.merch = [];
-            const lane = [[-2500, -21000, Math.PI / 2, 'MS Nordstern'], [1500, 19000, -Math.PI / 2, 'MS Lagune']];
+            const lane = [[3500, -21000, Math.PI / 2, 'MS Nordstern'], [6500, 19000, -Math.PI / 2, 'MS Lagune']];
             for (const [x, y, h, name] of lane) {
                const m = civilian(add(w, 'Container', 'player', P(x, y), h, { name, telegraph: 2, speedKn: 12, ai: { passive: true, route: [P(x + (h > 0 ? 1500 : -1500), -y)] } }));
                S.merch.push(m.id);
@@ -448,13 +462,13 @@ export function specialMissionsD(H) {
             // the island: the airfield in the middle, the radar on the west coast, the SAM sites hidden on the coast
             const field = addSite(w, 'airfield', 'enemy', P(isl.c.x + 600, isl.c.y), { name: 'Flugplatz Serin', inland: true, hp: T.fieldHp, interval: T.raid, delay: T.raidAt });
             S.fieldId = field.id;
-            S.radarId = addSite(w, 'radar', 'enemy', P(isl.c.x - 9000, isl.c.y + 600), { name: 'Radarstation Serin' }).id;
+            S.radarId = addSite(w, 'radar', 'enemy', shore(w, isl, Math.PI, 120), { name: 'Radarstation Serin', inland: true }).id;
             S.depotId = addSite(w, 'bunker', 'enemy', P(isl.c.x + 900, isl.c.y + 1400), { name: 'Treibstofflager Serin', inland: true, hp: 5000, r: 90 }).id;
             S.sams = []; S.samN = T.samN;
-            const SAMS = [[-6000, -3600, 'Flugabwehr Nordwest'], [-6000, 4200, 'Flugabwehr Südwest']];
+            const SAMS = [[Math.PI + 0.5, 'Flugabwehr Nordwest'], [Math.PI - 0.5, 'Flugabwehr Südwest']];
             for (let i = 0; i < T.sams; i++) {
-               const [dx, dy, name] = SAMS[i];
-               S.sams.push(addSite(w, 'sam', 'enemy', P(isl.c.x + dx, isl.c.y + dy), { name, hidden: true, sam: { type: 'hq16', n: T.samN, ch: 2 } }).id);
+               const [a, name] = SAMS[i];
+               S.sams.push(addSite(w, 'sam', 'enemy', shore(w, isl, a, 350), { name, hidden: true, inland: true, sam: { type: 'hq16', n: T.samN, ch: 2 } }).id);
             }
             S.shown = ''; S.said = 0; S.tankHit = false;
             w.score = { kind: 'count', player: 0, enemy: 0, target: 1 };
@@ -462,7 +476,7 @@ export function specialMissionsD(H) {
             objective(w, 'tank', 'Der Versorger Hiddensee darf nicht verloren gehen, kein neutraler Frachter getroffen werden');
             objective(w, 'sam', `Schalten Sie die Flugabwehrstellungen aus (0/${T.sams})`, { optional: true });
             objective(w, 'depot', 'Zerstören Sie das Treibstofflager', { optional: true });
-            later(S, 3, () => radio(w, 'Flottenkommando', `Der Großangriff auf Lessa startet in etwa ${Math.round(T.deadline / 60)} Minuten. Bis dahin muss die Startbahn von Serin zerstört sein. Marschflugkörper frei.`));
+            later(S, 3, () => radio(w, 'Flottenkommando', `Der Großangriff auf Lessa startet in etwa ${Math.round(T.deadline / 60)} Minuten. Bis dahin muss die Startbahn von Serin zerstört sein. Marschflugkörper frei.` + (T.tlam ? ` Sie haben nur ${p.mag.tomahawk} an Bord – kein Schuss ins Blaue.` : '')));
             later(S, 15, () => radio(w, 'Operationszentrale', 'Flugabwehr auf Serin ist nicht geortet. Rechnen Sie damit, dass die erste Welle abgefangen wird – jede Stellung, die schießt, verrät sich.'));
             later(S, Math.max(20, T.raidAt - 15), () => radio(w, 'Luftlage', 'Bewegung auf dem Flugplatz Serin – Jagdbomber rollen zum Start. Flugabwehr klar!', 'warn'));
             void esc;
