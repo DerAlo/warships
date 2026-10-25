@@ -816,13 +816,21 @@ function updateAimPoint() {
    aim.point = { x: ax, y: ay };
    aim.snapped = null;
    if (!cam3.freeLook) {
-      const hit = rayHitShip(ax, ay);
+      // land targets: the aim point at range R is the ground there and the camera looks at it
+      // (cam3.aimH), so the crosshair sits on a hill at that range -- not on the sea level inside it,
+      // which put every target above the horizon out of reach
+      const T = world.sites?.length ? renderer.terrain : null;
+      const hT = T?.heightAt ? Math.max(0, T.heightAt(ax, ay) || 0) : 0;
+      const now = performance.now(), k = 1 - Math.exp(-Math.min(100, Math.max(0, now - _aimHT)) / 90);
+      _aimHT = now;
+      cam3.aimH += (hT - cam3.aimH) * k;
+      if (Math.abs(cam3.aimH) < 0.05) cam3.aimH = 0;
+      const hit = rayHitShip(ax, ay, cam3.aimH);
       if (hit) { aim.point = { x: hit.x, y: hit.y }; aim.snapped = hit.id; }
-      else if (world.sites?.length) {
-         // coastal ops: the crosshair on land means the ground it covers (not the sea level far behind),
-         // and close to a known target position it means that position
-         const land = rayHitLand(ax, ay);
-         if (land) aim.point = land;
+      else if (T) {
+         // close to a known enemy position the crosshair means that position
+         const S = siteNear(ax, ay);
+         if (S) aim.point = { x: S.x, y: S.y };
       }
    }
    const d = Math.hypot(aim.point.x - p.pos.x, aim.point.y - p.pos.y);
@@ -830,47 +838,24 @@ function updateAimPoint() {
    aim.flight = flightTime(Math.min(d, aim.gunRange));
 }
 
-// Ray from the camera through the sea aim point vs. the terrain: the first ground it meets, snapped to
-// a live enemy site (sites.js) near it. Only runs in missions with land targets.
-const _land = { x: 0, y: 0 };
-function rayHitLand(ax, ay) {
-   const pose = renderer.cam?.pose, T = renderer.terrain;
-   if (!pose || !T?.heightAt) return null;
-   const ox = pose.pos.x, oy = pose.pos.y, oz = pose.pos.z;
-   const dx = ax - ox, dz = ay - oz;
-   const L = Math.hypot(dx, dz);
-   if (L < 50) return null;
-   // march in ~40 m steps from the near half outward, then bisect the crossing
-   const n = Math.min(500, Math.ceil(L / 40));
-   let prev = 0, hitT = -1;
-   for (let i = 1; i <= n; i++) {
-      const t = i / n;
-      const h = T.heightAt(ox + dx * t, oz + dz * t);
-      if (h > 0.5 && oy * (1 - t) <= h) { hitT = t; break; }
-      prev = t;
-   }
-   if (hitT < 0) return null;
-   let lo = prev, hi = hitT;
-   for (let k = 0; k < 8; k++) {
-      const m = (lo + hi) / 2;
-      if (oy * (1 - m) <= T.heightAt(ox + dx * m, oz + dz * m)) hi = m; else lo = m;
-   }
-   _land.x = ox + dx * hi; _land.y = oz + dz * hi;
+// A live, known enemy site (sites.js) near a point on the ground, or null.
+let _aimHT = 0;
+function siteNear(x, y) {
    let best = null, bd = Infinity;
    for (const S of world.sites) {
       if (!S.alive || S.hidden || S.side === P.side) continue;
-      const d = Math.hypot(S.x - _land.x, S.y - _land.y), lim = Math.max(140, S.r * 2);
+      const d = Math.hypot(S.x - x, S.y - y), lim = Math.max(140, S.r * 2);
       if (d < lim && d < bd) { bd = d; best = S; }
    }
-   return best ? { x: best.x, y: best.y } : { x: _land.x, y: _land.y };
+   return best;
 }
 
-// Ray from the camera through the sea aim point vs. oriented boxes of spotted enemies.
-function rayHitShip(ax, ay) {
+// Ray from the camera through the aim point (at height ah) vs. oriented boxes of spotted enemies.
+function rayHitShip(ax, ay, ah = 0) {
    const pose = renderer.cam?.pose;
    if (!pose || !world) return null;
    const ox = pose.pos.x, oy = pose.pos.y, oz = pose.pos.z;
-   let dx = ax - ox, dy = -oy, dz = ay - oz;
+   let dx = ax - ox, dy = ah - oy, dz = ay - oz;
    const tA = Math.hypot(dx, dy, dz);
    if (tA < 1) return null;
    dx /= tA; dy /= tA; dz /= tA;
