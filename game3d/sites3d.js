@@ -223,7 +223,8 @@ export class SiteModels {
 
    _events(world) {
       const ev = world.events;
-      if (!Array.isArray(ev) || !ev.length) return;
+      if (!Array.isArray(ev)) return;
+      // the first frame of a battle skips what happened before it (also when that is nothing yet)
       if (!this._evInit) {
          this._evInit = true;
          for (const e of ev) if (Number.isFinite(e?.seq) && e.seq > this.lastSeq) this.lastSeq = e.seq;
@@ -307,12 +308,12 @@ export class SiteModels {
             f.acc -= 1;
             let p = this.fx.glow.t();
             p.x = tx + sp * 2; p.y = ty - cp * 2; p.z = tz; p.vx = sp * 30; p.vy = -cp * 30; p.vz = 0; p.drag = 3; p.grav = 0;
-            p.life = 0.25; p.s0 = 4.5; p.s1 = 9; p.grow = 1.5; p.r = 30; p.g = 16; p.b = 5; p.r1 = 8; p.g1 = 2; p.b1 = 0.4; p.a = 1; p.fin = 0; p.fout = 0.5; p.shape = 0;
+            p.life = 0.35; p.s0 = 14; p.s1 = 24; p.grow = 1.5; p.r = 30; p.g = 16; p.b = 5; p.r1 = 8; p.g1 = 2; p.b1 = 0.4; p.a = 1; p.fin = 0; p.fout = 0.5; p.shape = 0;
             this.fx.glow.emit();
             p = this.fx.puff.t();
             p.x = tx + rr(-1, 1); p.y = ty + rr(-1, 1); p.z = tz + rr(-1, 1); p.vx = rr(-1, 1); p.vy = rr(-1, 1); p.vz = rr(-1, 1); p.drag = 0.4; p.grav = 0;
-            p.life = rr(6, 9); p.s0 = 5; p.s1 = rr(16, 24); p.grow = 1.6; p.r = 0.9; p.g = 0.9; p.b = 0.88; p.r1 = 0.78; p.g1 = 0.78; p.b1 = 0.76;
-            p.a = 0.6; p.fin = 0.02; p.fout = 0.6; p.shape = 1; p.lit = 0.8; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.2, 0.2);
+            p.life = rr(8, 11); p.s0 = 12; p.s1 = rr(40, 60); p.grow = 1.6; p.r = 0.95; p.g = 0.95; p.b = 0.93; p.r1 = 0.8; p.g1 = 0.8; p.b1 = 0.78;
+            p.a = 0.8; p.fin = 0.02; p.fout = 0.6; p.shape = 1; p.lit = 0.8; p.wind = 1; p.rot = rr(0, TAU); p.spin = rr(-0.2, 0.2);
             this.fx.puff.emit();
          }
       }

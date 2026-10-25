@@ -173,6 +173,7 @@ export function updateSites(world, dt) {
       else if (S.kind === 'ramp' && S.armed) {
          if ((S.countdown -= dt) > 0) continue;
          S.launches++;
+         S.launchT = world.time;
          world.pushEvent('rocket', { srcId: S.id, pos: { x: S.x, y: S.y }, alt: S.h, text: S.name + ': Rakete gestartet' });
          if (world._script && world._script.onRocket) world._script.onRocket(world, S);
          if (S.rearm > 0) S.countdown = S.rearm;

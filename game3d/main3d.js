@@ -168,6 +168,7 @@ let fired = { shots: 0, salvos: 0, torps: 0 };
 
 // ------------------------------------------------------------------ test hooks
 window.__world = () => world;
+window.__sites3d = () => renderer?.sites;
 window.__cam3 = cam3;
 window.__camY = () => renderer.camera.position.y;
 window.__shipHdg = () => P ? P.heading : null;
@@ -1122,9 +1123,6 @@ function processEvents(dt) {
             if (mine) { addRibbon('kill'); audio.alert('kill'); }
             hud.msg(e.text || 'Landziel zerstört', mine ? 'good' : 'info');
             break;
-         case 'rocket':
-            hud.msg(e.text || 'Rakete gestartet', 'warn');
-            break;
          case 'spotted': {
             if (mine) addRibbon('spotted');
             // night: an illumination round bursts over a freshly spotted enemy (visual only)
@@ -1475,6 +1473,7 @@ function buildUi(dt) {
    if (world.sites?.length) {
       for (const S of world.sites) {
          if (!S.alive || S.hidden || S.side === p.side) continue;
+         if (S.launchT != null && world.time - S.launchT < 12) continue;   // keep the lift-off in clear view
          const sp = project(S.x, S.h + 40, S.y);
          if (!sp.visible) continue;
          siteMarks.push({ x: sp.x, y: sp.y, name: S.name, hpFrac: clamp01(S.hp / (S.maxHp || 1)),
