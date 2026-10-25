@@ -13,6 +13,7 @@ import { westMissions } from './missions_west.js';
 import { eastMissions } from './missions_east.js';
 import { specialMissionsA } from './missions_special_a.js';
 import { specialMissionsB } from './missions_special_b.js';
+import { specialMissionsD } from './missions_special_d.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -326,6 +327,7 @@ export const missionHelpers = { P, add, objective, setObj, objText, later, radio
 DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
 DEFS.push(...specialMissionsA(missionHelpers));      // special operations, set A
 DEFS.push(...specialMissionsB(missionHelpers));
+DEFS.push(...specialMissionsD(missionHelpers));
 
 // ---------------------------------------------------------------- public API
 const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));
