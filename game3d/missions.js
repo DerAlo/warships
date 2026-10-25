@@ -6,6 +6,7 @@ import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
 import { pacificMissions } from './missions_pacific.js';
 import { westMissions } from './missions_west.js';
+import { coastMissions } from './missions_coast.js';
 import { canLaunch, launchSquadron } from './air.js';
 
 // ---------------------------------------------------------------- names
@@ -1071,7 +1072,7 @@ function rheinCheck(w) {
    DEFS.splice(firstOp < 0 ? DEFS.length : firstOp, 0, ...extra.filter(d => d.group !== 'ops'));
    DEFS.push(...extra.filter(d => d.group === 'ops'));
    // third batch (missions_west.js, missions_pacific.js): all historical operations
-   DEFS.push(...westMissions(H), ...pacificMissions(H));
+   DEFS.push(...westMissions(H), ...pacificMissions(H), ...coastMissions(H));
 }
 
 // ---------------------------------------------------------------- public API

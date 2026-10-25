@@ -14,6 +14,7 @@ import { ShipModels } from './ships3d.js';
 import { Post } from './post3d.js';
 import { FX } from './fx3d.js';
 import { AirModels } from './air3d.js';
+import { SiteModels } from './sites3d.js';
 import { TIERS, GFX, OPTION_KEYS, tierOptions, applyGfx, startTier, gfxCustom, lowerTier, rememberFallback, frameLooksBlank, PROBES, gpuInfo } from './gfxquality.js';
 
 const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
@@ -75,6 +76,7 @@ export class Renderer3D {
       this.fx =new FX(this.scene, this.ocean, this.terrain);
       this.ships = new ShipModels(this.scene, this.ocean, this.fx);
       this.air = new AirModels(this.scene, this.fx);
+      this.sites = new SiteModels(this.scene, this.fx, this.terrain);   // land targets (coastal ops)
       this.focus = null;   // {x, y}: shadow box centre while the camera follows a squadron (main3d)
       this.post = new Post(r, { samples: this._samples(tq), bloomLevels: tq.bloomLevels });
       this.post.setQuality({ bloom: tq.bloom });
@@ -155,6 +157,7 @@ export class Renderer3D {
       this.ships.clear();
       this.fx.clear();
       this.air.clear();
+      this.sites.clear();
       this.arena = arena;
    }
    buildObstacles(world) { this.buildWorld(world); }
@@ -184,6 +187,7 @@ export class Renderer3D {
       this._updateShadow(world);
       this.fx.update(world, dt, this.time, this.camera, this.ships);
       this.air.update(world, dt, this.time);
+      if (world.sites) this.sites.update(world, dt, this.time, this.camera.position);
 
       const env = this.env;
       this.post.render(this.scene, this.camera, {
@@ -340,7 +344,7 @@ export class Renderer3D {
 
    // Full teardown (page-level restarts may create a fresh renderer on the same canvas).
    dispose() {
-      this.fx.dispose(); this.ships.dispose(); this.terrain.dispose();
+      this.fx.dispose(); this.sites.dispose(); this.ships.dispose(); this.terrain.dispose();
       this.ocean.dispose(); this.sky.dispose(); this.post.dispose();
       this.scene.environment = null;
       this.renderer.dispose();

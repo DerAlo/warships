@@ -9,6 +9,7 @@ import { updateBots } from './ai.js';
 import { setupMission, updateMission } from './missions.js';
 import { updateSubs, hullContact, PERI_PROX, HYDRO_SUB } from './submarine.js';
 import { updateAir, airSpots, airSpotMask } from './air.js';
+import { updateSites } from './sites.js';
 
 const ENV_VIS = { clear: 1, overcast: 0.9, rain: 0.78, storm: 0.7 };
 const ENV_SEA = { clear: 0.3, overcast: 0.45, rain: 0.55, storm: 0.92 };
@@ -62,6 +63,7 @@ export class World {
       this.planes = [];         // legacy (unused)
       this.squadrons = [];      // airborne squadrons (air.js)
       this.bombs = [];          // falling bombs, pooled (alive flag), see air.js
+      this.sites = [];          // land targets of coastal operations (sites.js)
       this.events = [];
       this._eventSeq = 0;
       this.obstacles = [];
@@ -324,6 +326,7 @@ export class World {
       for (const s of this.ships) s.update(dt, this);
       updateSubs(this, dt);
       updateAir(this, dt);
+      if (this.sites.length) updateSites(this, dt);
       this._collideShips();
       resolveShells(this, dt);
       resolveTorpedoes(this, dt);

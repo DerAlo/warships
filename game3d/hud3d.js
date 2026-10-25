@@ -58,6 +58,7 @@ export class Overlay3D {
       if (ui.mapOpen) { this._tacticalMap(ui); return; }
       if (ui.sub) drawSubUnder(g, ui, this.W, this.H, this.t);
       this._markers(ui);
+      if (ui.siteMarks?.length) this._siteMarks(ui.siteMarks);
       if (ui.air) drawAir(g, ui, this.W, this.H, this.t);   // squadron markers, attack-run aim (airui.js)
       if (ui.air?.flying) return;                            // squadron view: no ship reticle
       if (ui.torpFan && ui.alive) this._torpFan(ui);
@@ -267,6 +268,33 @@ export class Overlay3D {
          g.beginPath(); g.arc(x, 0, 3.2, 0, TAU); g.fill();
          // barrel: t.rel is relative to the bow, positive = starboard (clockwise on screen)
          g.beginPath(); g.moveTo(x, 0); g.lineTo(x + Math.cos(t.rel) * 9, Math.sin(t.rel) * 9); g.stroke();
+      }
+      g.restore();
+   }
+
+   // ------------------------------------------------------------ land targets (coastal operations)
+   _siteMarks(list) {
+      const g = this.g;
+      g.save();
+      g.textAlign = 'center';
+      g.shadowColor = 'rgba(0,0,0,0.85)'; g.shadowBlur = 3;
+      for (const m of list) {
+         const x = m.x, y = m.y;
+         g.strokeStyle = COL.enemy; g.lineWidth = 1.5;
+         g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x + 8, y); g.lineTo(x, y + 8); g.lineTo(x - 8, y); g.closePath(); g.stroke();
+         g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x - 16, y + 11, 32, 3);
+         g.fillStyle = COL.enemy; g.fillRect(x - 16, y + 11, 32 * m.hpFrac, 3);
+         g.font = F_NAME; g.fillStyle = '#f0e6d6';
+         g.fillText(m.name, x, y - 12);
+         g.font = F_DIST;
+         if (m.countdown >= 0) {
+            const t = Math.max(0, Math.ceil(m.countdown));
+            g.fillStyle = t < 30 ? '#ff6a4a' : '#ffd27a';
+            g.fillText('Start ' + Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), x, y + 26);
+         } else {
+            g.fillStyle = 'rgba(240,230,214,0.8)';
+            g.fillText((m.dist / 1000).toFixed(1) + ' km', x, y + 26);
+         }
       }
       g.restore();
    }

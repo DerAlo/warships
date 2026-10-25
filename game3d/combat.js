@@ -3,6 +3,7 @@
 // torpedo floods). Pure functions over the World; no rendering.
 import { WORLD, TUNE } from './config.js';
 import { PERI_SHELL_MULT } from './submarine.js';
+import { shellOnSite } from './sites.js';
 import {
    DEG, clamp, clamp01, dist2, toLocal, insideHull, halfBeamAt, islandHeightAt, obstacleT, truncGauss,
 } from './utils.js';
@@ -166,6 +167,7 @@ export function resolveShells(world, dt) {
                if (o.kind !== 'island' || a > o.height) continue;
                if (a <= islandHeightAt(o, p)) {
                   world.addEffect('terrain', p, 1.2, 14 + s.caliber * 0.08);
+                  if (world.sites?.length) shellOnSite(world, s, p);
                   s.alive = false; break;
                }
             }
@@ -176,6 +178,7 @@ export function resolveShells(world, dt) {
       if (s.alive && u >= 1) {
          s.alive = false;
          world.addEffect('splash', s.target, 1.6, 8 + s.caliber * 0.09, { big: s.caliber >= 280 });
+         if (world.sites?.length) shellOnSite(world, s, s.target);
          noteNearMiss(world, s);
       }
    }
