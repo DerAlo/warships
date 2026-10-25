@@ -65,7 +65,7 @@ export function specialMissionsC(H) {
             // mobile ramps: three firing positions each on the coast (angle around the island); after it has been
             // located a ramp drives on to the next one and is hidden again (onLocated)
             const isl = w.obstacles[0];
-            S.spots = [[-2.05, -1.75, -1.45], [2.75, -2.95, 3.1], [1.45, 1.75, 2.05]].map(as => as.map(a => {
+            S.spots = [[-2.05, -1.8, -1.6], [2.75, -2.95, 3.1], [1.45, 1.75, 2.05]].map(as => as.map(a => {
                const r = obstacleRadiusAt(isl, a) * 0.95;
                return { x: isl.c.x + Math.cos(a) * r, y: isl.c.y + Math.sin(a) * r };
             }));
