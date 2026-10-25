@@ -15,6 +15,7 @@ const ROSTER = {
    Kusnezow: ['CV', 'ru', 'kuznetsov'], Kilo: ['SS', 'ru', 'kilo'], Typ022: ['FAC', 'cn', 'type022'], Typ054A: ['FF', 'cn', 'type054'],
    Typ052D: ['DD', 'cn', 'type052d'], Typ055: ['CG', 'cn', 'type055'], Shandong: ['CV', 'cn', 'shandong'], Yuan: ['SS', 'cn', 'yuan'],
    Boghammar: ['FAC', 'ir', 'fac'], Mowdsch: ['FF', 'ir', 'moudge'], Ghadir: ['SS', 'ir', 'ghadir'],
+   Donar: ['CG', 'de', 'donar'],
    Tanker: ['TR', 'nt', 'tanker'], Container: ['TR', 'nt', 'container'], LNG: ['TR', 'nt', 'lng'],
 };
 
@@ -59,8 +60,9 @@ test('roster: plausible hulls, sensors and weapons', () => {
 });
 
 test('roster: the range ladder  gun < point SAM < area SAM < SSM < cruise', () => {
-   const of = (f) => Object.values(MISSILES).filter(f).map(m => m.range);
-   const guns = Math.max(...Object.values(SHIPS).map(c => c.main.range));
+   // the experimental railgun ship and its hypersonic missile are deliberately off the ladder
+   const of = (f) => Object.values(MISSILES).filter(m => !m.cheat).filter(f).map(m => m.range);
+   const guns = Math.max(...Object.values(SHIPS).filter(c => !c.cheat).map(c => c.main.range));
    const point = of(m => m.cls === 'point'), area = of(m => m.cls === 'area');
    const ssm = of(m => m.kind === 'ssm' && m.range > 10000), cruise = of(m => m.kind === 'cruise');
    assert.ok(guns <= Math.max(...point));
@@ -68,7 +70,7 @@ test('roster: the range ladder  gun < point SAM < area SAM < SSM < cruise', () =
    assert.ok(Math.max(...area) <= Math.min(...ssm));
    assert.ok(Math.max(...ssm) < Math.min(...cruise));
    // flight time over a typical engagement distance is 20-45 s
-   for (const m of Object.values(MISSILES)) if (m.kind === 'ssm' && m.range > 10000) {
+   for (const m of Object.values(MISSILES)) if (m.kind === 'ssm' && m.range > 10000 && !m.cheat) {
       const t = 18000 / m.speed;
       assert.ok(t >= 17 && t <= 45, m.name + ' ' + t.toFixed(1));
    }

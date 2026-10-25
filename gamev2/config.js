@@ -86,6 +86,8 @@ export const MISSILES = {
    // --- land attack
    tomahawk: { kind: 'cruise', name: 'Tomahawk', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
    kalibrLA: { kind: 'cruise', name: 'Kalibr-NK', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
+   // --- the experimental railgun ship (CHEAT_SHIPS, `cheat`: kept out of the fleet's range ladder and guide spans)
+   blitz: { kind: 'ssm', name: 'Hyperschall-FK Blitz', speed: 1700, range: 60000, dmg: 12000, seeker: 8000, cone: 26 * DEG, evade: 0.3, skim: false, alt: 900, supersonic: true, cheat: true },
    cj10: { kind: 'cruise', name: 'CJ-10', speed: 500, range: 70000, dmg: 5000, alt: 60, evade: 1.1 },
    // --- surface to air, area
    sm2: { kind: 'sam', cls: 'area', name: 'SM-2', speed: 1400, range: 17000, air: 22000, pk: 0.68 },
@@ -118,6 +120,7 @@ export const CIWS = {
    type730: { name: 'Typ 730', range: 2000, kps: 0.19 },
    type1130: { name: 'Typ 1130', range: 2200, kps: 0.23 },
    gun40: { name: '40-mm-Flak', range: 1500, kps: 0.08 },
+   laser: { name: 'Hochenergielaser', range: 3000, kps: 0.42 },
 };
 export const CIWS_SUPER = 0.5;
 // Defence tuning shared by ships and SAM sites (missile.js).
@@ -183,6 +186,8 @@ const T = (x, guns, aft = false, arcW = 150) => ({ off: { x, y: 0 }, guns, arcC:
 const L = (x, side, tubes) => ({ off: { x, y: 0 }, side, tubes });
 const C = (key, o = {}) => ({ key, ...o });
 
+// Calibre marker of the railgun (no other gun uses it): fx3d draws a plasma flash and tracer for it.
+export const RAIL_CAL = 155;
 // Modern guns: fast, short-ranged, HE only. dispH = max horizontal dispersion (m) at max range;
 // tMax = shell flight time (s) at max range.
 const GUNS = {
@@ -604,6 +609,26 @@ export const SHIPS = {
       ai: { prefRange: [1500, 3500], role: 'ss', v2: 'ss', value: 14 },
    }),
 
+   // =================================================================== experimental (CHEAT_SHIPS: only in its own operation / with the cheat)
+   // Deliberately overpowered: an electromagnetic railgun fore and aft (42 km, flat and fast, one hit cripples a
+   // frigate), hypersonic missiles, the biggest SAM magazine afloat and a laser close-in layer.
+   Donar: ship({
+      key: 'Donar', name: 'Donar', className: 'Experimenteller Railgun-Träger', model: 'donar', tier: 10, cheat: true,
+      desc: 'Erprobungsträger mit zwei elektromagnetischen Schienenkanonen: 42 km Reichweite, Geschosse mit sechsfacher Schallgeschwindigkeit, flache Bahn, verheerende Treffer. Dazu NSM, Hyperschall-Flugkörper Blitz, Tomahawk, Aster 30, ESSM, RAM und Hochenergielaser.',
+      sisters: ['Donar'],
+      hull: { type: 'CG', L: 192, beam: 25, draft: 8, deckH: 9, nation: 'de', sup: { x: -2, len: 62, w: 18, h: 17 }, funnels: [] },
+      hp: 42000, speedKn: 34, accel: 12, turnR: 520, rudderShift: 5, stealth: 0.35,
+      detect: det(5200), radar: RADAR(36000, 14000), sonar: { hull: 3600, towed: 7000 },
+      main: { caliber: RAIL_CAL, rail: true, turrets: [T(64, 1), T(-72, 1, true)], traverse: 40, reload: 5, range: 42000, tMax: 12, fallMax: 3, dispH: 34, sigma: 2.2, vRatio: 0.4,
+         he: { dmg: 6500, pen: 90, fire: 0.15 } },
+      aa: { range: 3000, dps: 45 },
+      weapons: { cells: 160, ssm: [{ type: 'nsm', n: 16 }, { type: 'blitz', n: 8 }], cruise: { type: 'tomahawk', n: 32 },
+         sam: [{ type: 'aster30', n: 48, ch: 6 }, { type: 'essm', n: 32, ch: 4 }, { type: 'ram', n: 21, ch: 2 }], ciws: { type: 'laser', n: 3 }, asw: ASW({ n: 10 }) },
+      helo: { name: 'NH90' },
+      consumables: [DC(30), REP(4), DECOY(8, 18), JAM(4), HELO(2)],
+      ai: { prefRange: [14000, 24000], role: 'cl', v2: 'ad', value: 120 },
+   }),
+
    // =================================================================== neutral / mission ships
    Tanker: ship({
       key: 'Tanker', name: 'Tanker', className: 'Rohöltanker (Suezmax)', model: 'tanker', tier: 1,
@@ -640,6 +665,9 @@ export const PLAYABLE = ['Braunschweig', 'Sachsen', 'Burke', 'Ticonderoga', 'Dar
 export const PLAYABLE_EAST = ['BuyanM', 'Gorschkow', 'Slawa', 'PjotrWeliki', 'Kusnezow', 'Kilo', 'Typ022', 'Typ054A', 'Typ052D', 'Typ055', 'Shandong', 'Yuan', 'Mowdsch', 'Ghadir'];
 for (const k of PLAYABLE) SHIPS[k].playable = true;
 export const NEUTRAL_SHIPS = ['Tanker', 'Container', 'LNG'];
+// Experimental ships: never in PLAYABLE / bot pools; playable in their own operation, and in every mission while the
+// menu's cheat is on (missions.js pickShip accepts them anywhere).
+export const CHEAT_SHIPS = ['Donar'];
 // Skirmish line-ups (missions.js spawnTeam): [slot pool, x, y] relative to the team anchor, facing +x.
 // Every slot draws one class from its pool (seeded), the pools of both blocs are index-aligned by weight.
 export const BOT_POOLS = {
