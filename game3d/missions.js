@@ -1,7 +1,7 @@
 // game3d/missions.js — singleplayer missions: maps (islands), environment, teams, objectives,
 // scripted reinforcements and win/lose logic. MISSIONS is pure data for the menu; setupMission /
 // updateMission are called by World. Mission text is German (UI), code English.
-import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC } from './config.js';
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_MIRROR, BOT_SUBS, BOT_CVS, NATION_BLOC, CHEAT_SHIPS } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { extraMissions } from './missions_extra.js';
 import { pacificMissions } from './missions_pacific.js';
@@ -212,7 +212,10 @@ function spawnTeam(w, side, slots, anchor, heading, playerCls, aiFor = () => ({}
    });
    return out;
 }
+// The menu's port cheat offers CHEAT_SHIPS in every mission, fixed-ship operations included; only a
+// submarine operation (every allowed ship a boat) keeps its boat.
 function pickShip(def, shipKey) {
+   if (CHEAT_SHIPS.includes(shipKey) && !(def.playableShips && def.playableShips.every(k => SHIPS[k]?.hull.type === 'SS'))) return shipKey;
    const allowed = def.playableShips || PLAYABLE;
    return allowed.includes(shipKey) ? shipKey : (def.recommendedShip || allowed[0]);
 }
@@ -1103,7 +1106,11 @@ export function setupMission(w, id, shipKey) {
    w.mission = { id: def.id, name: def.name, subtitle: def.subtitle, briefing: def.briefing, type: def.type, group: def.group || 'battle', objectives: [], zones: [] };
    w.timeLeft = def.timeLimit;
    w._script = { def, timers: [], used: new Set(), dup: 0, onSink: (ww, ship, killer) => def.onSink && def.onSink(ww, ship, killer, ww._script) };
-   def.setup.call(def, w, pickShip(def, shipKey));
+   // a cheat ship (CHEAT_SHIPS) takes the slot of the mission's own ship: the script sets up that stand-in
+   // (its slot, its tuning) and World.spawn hands the player the cheat ship instead
+   const key = pickShip(def, shipKey);
+   w._playerCls = CHEAT_SHIPS.includes(key) ? key : null;
+   def.setup.call(def, w, w._playerCls ? (def.recommendedShip || (def.playableShips || PLAYABLE)[0]) : key);
    if (!w.player) throw new Error('mission ' + def.id + ' spawned no player');
 }
 

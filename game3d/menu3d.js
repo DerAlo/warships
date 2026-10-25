@@ -3,7 +3,7 @@
 // and hands the chosen { mission, ship, difficulty } to main3d via callbacks. Reads the menu
 // data the sim exports (MISSIONS, SHIP_STATS, SHIPS) and never touches the running world.
 import { MISSIONS, getMission, opStars } from './missions.js';
-import { SHIPS, SHIP_STATS, PLAYABLE, shipStats, NATIONS, NATION_SHORT } from './config.js';
+import { SHIPS, SHIP_STATS, PLAYABLE, CHEAT_SHIPS, shipStats, NATIONS, NATION_SHORT } from './config.js';
 import { loadProfile, saveProfile, defaultProfile, UNLOCK_XP, UNLOCK_CREDITS, unlockNeeds, MODULES, SKILLS, captainLevel, skillPointsFree, isUnlocked, canUnlock,
    unlockShip, moduleTier, moduleCost, buyModule, learnSkill, respecSkills, grantRewards, loadoutFor, applyLoadout, maxOutProfile } from './progress3d.js';
 import { exportSave, importSave, saveFileName } from './savegame.js';
@@ -562,13 +562,18 @@ export class Menu3D {
    }
 
    get selection() { return { mission: this.mission, ship: this.ship, difficulty: this.difficulty }; }
-   _allowed(mid = this.mission) { return getMission(mid)?.playableShips || PLAYABLE; }
+   // the port cheat (p.cheat) adds the prototypes (config CHEAT_SHIPS) to every mission but the submarine operations
+   _allowed(mid = this.mission) {
+      const base = getMission(mid)?.playableShips || PLAYABLE;
+      const extra = this.profile?.cheat && !base.every(k => SHIPS[k]?.hull.type === 'SS') ? CHEAT_SHIPS : [];
+      return extra.length ? [...base, ...extra.filter(k => SHIPS[k] && !base.includes(k))] : base;
+   }
    // ships a mission prescribes (historical operations) are always available, researched or not
    _owned(k, mid = this.mission) { return isUnlocked(this.profile, k) || (() => { const m = getMission(mid); return !!m?.fixedShips && m.playableShips.includes(k); })(); }
    // the training battle is a test drive: every ship sails there, researched or not
    _unlocked(k, mid = this.mission) { return mid === 'training' || this._owned(k, mid); }
    // a ship that sails here only as a training test drive (not in service, or training-only)
-   _trial(k, mid = this.mission) { return mid === 'training' && (!this._owned(k, mid) || !PLAYABLE.includes(k)); }
+   _trial(k, mid = this.mission) { return mid === 'training' && (!this._owned(k, mid) || !PLAYABLE.includes(k)) && !(this.profile?.cheat && CHEAT_SHIPS.includes(k)); }
    // keep the selection valid: allowed in this mission and unlocked (op ships are never locked)
    _fixShip() {
       const allowed = this._allowed();
@@ -662,7 +667,7 @@ export class Menu3D {
       this._tapT = now;
       if (this._taps < 10) return;
       this._taps = 0;
-      maxOutProfile(this.profile, PLAYABLE); this._saveProfile();
+      maxOutProfile(this.profile, [...PLAYABLE, ...CHEAT_SHIPS]); this._saveProfile();
       const pr = this.progress;
       pr.missions = pr.missions || {};
       for (const x of MISSIONS) {
@@ -672,7 +677,7 @@ export class Menu3D {
          pr.missions[x.id] = rec;
       }
       saveProgress(pr); this._fixShip(); this.render(); this.cb.onClick?.();
-      this._toast('Alles freigeschaltet: alle Schiffe, Umbauten, Lehrgänge und Einsätze mit voller Spange.');
+      this._toast('Alles freigeschaltet: alle Schiffe, Umbauten, Lehrgänge und Einsätze mit voller Spange – dazu das Versuchsschiff Donar.');
    }
    _toast(text) {
       this.root.querySelector('.m3-toast')?.remove();

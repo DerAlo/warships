@@ -1425,6 +1425,7 @@ export class FX {
             st.x = s.pos.x; st.y = h; st.z = s.pos.y; st.vx = 0; st.vy = 0; st.vz = 0; st.n = 0;
             st.cal = this._shellCal(s);
             st.ammo = s.ammo || s.type || s.shooter?.ammo || 'HE';
+            st.rail = !!s.gun?.rail;   // railgun dart (cheat ship Donar): cyan plasma streak
             this.shellState.set(s, st);
          } else if (dt > 0) {
             const ivx = (s.pos.x - st.x) / dt, ivy = (h - st.y) / dt, ivz = (s.pos.y - st.z) / dt;
@@ -1441,12 +1442,13 @@ export class FX {
          const spd = Math.hypot(st.vx, st.vy, st.vz);
          // AP burns blue-white, HE orange (as in WoWs); small calibres are dimmer
          const ci = 0.55 + 0.45 * ck;
-         const cr = (ap ? 1.5 : 6.5) * ci, cg = (ap ? 2.6 : 2.1) * ci, cb = (ap ? 6 : 0.35) * ci;
+         let cr = (ap ? 1.5 : 6.5) * ci, cg = (ap ? 2.6 : 2.1) * ci, cb = (ap ? 6 : 0.35) * ci;
+         if (st.rail) { cr = 3.4; cg = 6.5; cb = 9.5; }
          const fade = clamp(dist / 120, 0.25, 1);   // don't blind a close camera
          if (spd > 1) {
             // long streaks from "high" up; below that the old length (less additive fill)
-            const len = trail ? clamp(spd * 0.11, 16, 110) * (0.6 + 0.4 * ck) + dist * 0.006 * this._zk
-               : clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004 * this._zk;
+            const len = (st.rail ? 2.4 : 1) * (trail ? clamp(spd * 0.11, 16, 110) * (0.6 + 0.4 * ck) + dist * 0.006 * this._zk
+               : clamp(spd * 0.05, 8, 55) * (0.7 + 0.3 * ck) + dist * 0.004 * this._zk);
             const ax = st.vx / spd, ay = st.vy / spd, az = st.vz / spd;
             // the bright core is ~1/7 of the quad; the rest is the soft halo
             T.add(st.x, st.y, st.z, ax, ay, az, len, w * 7, cr, cg, cb, 0.95 * fade);
