@@ -92,7 +92,7 @@ export function coastMissions(H) {
             S.maxLaunch = key === 'easy' ? 3 : key === 'hard' ? 1 : 2;   // rockets the operation can afford
             S.launched = 0; S.tick = 0; S.down = 0;
             // ramps: staggered countdowns, refuelled after a launch; C and E are found later
-            const R = [[-7600, 900, 180, false], [-2600, 1100, 260, false], [1600, 1300, 380, true], [6000, 1000, 320, false], [9200, 1200, 470, true]];
+            const R = [[-7600, 550, 180, false], [-2600, 1100, 260, false], [1600, 1300, 380, true], [6000, 700, 320, false], [9200, 1200, 470, true]];
             const rearm = key === 'easy' ? 360 : key === 'hard' ? 260 : 300;
             S.ramps = R.map(([y, depth, t, hidden], i) => addSite(w, 'ramp', 'enemy', ashore(w, y, depth), { name: 'Rampe ' + RAMP_IDS[i], countdown: t * (key === 'easy' ? 1.15 : 1), rearm, hidden, heading: Math.PI }));
             for (const r of S.ramps) if (!r.hidden) markSite(w, r, r.name, 'goal');
