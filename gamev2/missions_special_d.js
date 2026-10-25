@@ -41,9 +41,9 @@ export const SPECIAL_D_TUNE = {
       easy: { n: 4, miss: 2, first: 50, win: 120, gap: 20, hp: 1500, waves: [1, 2, 1, 2], msl: 0, batAt: 0, batN: 0, batInt: 40,
          ship: { Sachsen: { hp: 900 }, Braunschweig: { hp: 900 } } },
       normal: { n: 5, miss: 1, first: 45, win: 80, gap: 15, hp: 3000, waves: [2, 3, 2, 3, 2], msl: 1, batAt: 3, batN: 6, batInt: 34,
-         ship: { Sachsen: { hp: 1300 }, Braunschweig: { hp: 1300 } } },
+         ship: { Sachsen: { hp: 3200 }, Braunschweig: { hp: 3250 } } },
       hard: { n: 5, miss: 0, first: 40, win: 78, gap: 12, hp: 2600, waves: [3, 3, 3, 4, 3], msl: 1, batAt: 2, batN: 10, batInt: 28,
-         ship: { Sachsen: { hp: 1400 }, Braunschweig: { hp: 1400 } } },
+         ship: { Sachsen: { hp: 1200 }, Braunschweig: { hp: 2050 } } },
    },
    airbase: {
       // deadline: s until the mass raid takes off (the airfield must be down by then) · fieldHp: hull of the airfield ·
@@ -87,7 +87,6 @@ export function specialMissionsD(H) {
       S[key] = w.time + gap;
       radio(w, from, text, level);
    }
-   // the opposing side never sees a merchant: no AI aims at it, no missile is launched at it
    // the last land point on the ray from the island's centre at angle a, `back` m inland of it (setup only)
    const shore = (w, isl, a, back) => {
       const c = Math.cos(a), s = Math.sin(a);
@@ -95,6 +94,7 @@ export function specialMissionsD(H) {
       for (let k = 0; k < isl.r * 4; k += 25) if (islandReliefAt(isl, { x: isl.c.x + c * k, y: isl.c.y + s * k }) > 0) r = k;
       return P(isl.c.x + c * Math.max(0, r - back), isl.c.y + s * Math.max(0, r - back));
    };
+   // the opposing side never sees a merchant: no AI aims at it, no missile is launched at it
    const civilian = (ship) => {
       Object.defineProperty(ship, 'detected', { get: () => false, set() {}, configurable: true });
       Object.defineProperty(ship, 'targetable', { get: () => false, set() {}, configurable: true });
