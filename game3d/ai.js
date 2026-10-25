@@ -12,6 +12,8 @@
 //   capId        preferred capture point (domination)
 //   retreatBelow HP fraction below which the ship breaks off for good towards retreatTo
 //   aggro        >1 closes range more eagerly
+//   shoreAim     a land site (sites.js) to shell with HE while no ship is in reach (shoreFirst:
+//                even before ships), kept up to date by the mission
 import { WORLD, DIFFICULTY } from './config.js';
 import { TAU, DEG, dist2, angleDelta, clamp, obstacleT, obstacleRadiusAt, interceptPoint, gaussR } from './utils.js';
 import { flightTime } from './combat.js';
@@ -753,9 +755,12 @@ function steer(b, dt) {
 // ---------------------------------------------------------------- weapons
 function gunnery(b, w, d, dt) {
    const ai = b.ai, tgt = ai.target;
+   const shore = ai.shoreAim && ai.shoreAim.alive ? ai.shoreAim : null;
+   if (shore && (ai.shoreFirst || !tgt || !tgt.alive || !w.canSee(b.side, tgt)) && shoreFire(b, w, d, shore)) return;
    if (!tgt || !tgt.alive || !w.canSee(b.side, tgt)) { b.aimPoint = null; return; }
    const m = b.cfg.main;
    const dd = Math.sqrt(dist2(b.pos, tgt.pos));
+   if (shore && dd > m.range && shoreFire(b, w, d, shore)) return;
    // DDs hold fire while hidden unless they duel another DD (gun bloom would reveal them)
    if (ai.role === 'dd' && !b.detected && tgt.type !== 'DD' && b.torps && b.torps.launchers.some(l => l.reload <= 2)) { b.aimPoint = tgtLead(b, tgt, d, dd); return; }
    const aim = tgtLead(b, tgt, d, dd);
@@ -783,6 +788,26 @@ function gunnery(b, w, d, dt) {
    }
    if (!ready || (ready < Math.ceil(bearers * 0.6) && !longWait)) return;
    if (b.fireMain(w, aim) > 0) { ai.salvoCount++; newAimError(b, w); }
+}
+// Shore bombardment: HE on a land site within range (salvos walk in like on a ship target).
+// Returns false when the site is out of reach, so the guns stay free for ships.
+function shoreFire(b, w, d, S) {
+   const ai = b.ai, m = b.cfg.main;
+   const dx = S.x - b.pos.x, dy = S.y - b.pos.y, dd = Math.hypot(dx, dy) || 1;
+   if (dd > m.range * 0.98) return false;
+   if (ai.shoreId !== S.id) { ai.shoreId = S.id; ai.salvoCount = 0; newAimError(b, w); }
+   const e = ai.aimErr, bx = dx / dd, by = dy / dd;
+   const aim = { x: S.x + bx * e.r * dd * 0.7 - by * e.l * dd * 0.7, y: S.y + by * e.r * dd * 0.7 + bx * e.l * dd * 0.7 };
+   b.aimPoint = aim;
+   if (m.he && b.ammo !== 'HE') b.setAmmo('HE');
+   let ready = 0, bearers = 0;
+   for (const t of b.turrets) {
+      if (!t.alive || !t.canBear) continue;
+      bearers++;
+      if (t.reload <= 0 && t.err <= WORLD.FIRE_TOL) ready++;
+   }
+   if (ready && ready >= Math.ceil(bearers * 0.6) && b.fireMain(w, aim) > 0) { ai.salvoCount++; newAimError(b, w); }
+   return true;
 }
 function tgtLead(b, tgt, d, dd) {
    const t = flightTime(b.cfg.main, Math.min(dd, b.cfg.main.range));

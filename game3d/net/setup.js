@@ -133,6 +133,8 @@ export const NO_COOP = {
    training: 'Schießübung für einen Kapitän, ohne verbündete Schiffe',
    laststand: 'Die Bismarck kämpft allein – kein verbündetes Schiff zu übernehmen',
    wahoo: 'Die Wahoo jagte allein – kein verbündetes Boot zu übernehmen',
+   vwaffe: 'Landziele (Rampen, Batterien) werden im Koop-Spiel nicht übertragen',
+   nachtdock: 'Landziele (Docktor, Batterien) werden im Koop-Spiel nicht übertragen',
 };
 const slotCache = new Map();
 export function missionSlots(missionId) {
