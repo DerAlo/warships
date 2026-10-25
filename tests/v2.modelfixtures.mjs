@@ -7,6 +7,7 @@ import { SHIPS as WW2 } from '../game3d/config.js';
 const F = (model, nation, type, L, beam, extra = {}) => ({ model, name: model, hull: { type, L, beam, draft: 6, deckH: extra.deckH ?? 10, nation, ...extra.hull }, ...extra.cfg });
 export const FIXTURES = {
    k130: F('k130', 'de', 'CO', 89.1, 13.3), f124: F('f124', 'de', 'FF', 143, 17.4), burke: F('burke', 'us', 'DD', 155, 20),
+   donar: F('donar', 'de', 'CG', 192, 25),
    tico: F('tico', 'us', 'CG', 173, 16.8), type45: F('type45', 'uk', 'DD', 152.4, 21.2), ford: F('ford', 'us', 'CV', 337, 41),
    u212: F('u212', 'de', 'SS', 56, 7, { deckH: 3, hull: { sup: { x: 5, len: 9, w: 2.5, h: 5 } } }),
    virginia: F('virginia', 'us', 'SS', 115, 10.4, { deckH: 3, hull: { sup: { x: 26, len: 9, w: 3, h: 5.5 } } }),

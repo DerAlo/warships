@@ -68,7 +68,8 @@ test('magazines: SAM loads are small enough to run dry, every class keeps its ro
    for (const k in SHIPS) {
       const w = SHIPS[k].weapons;
       const sam = w.sam.reduce((a, s) => a + s.n, 0);
-      assert.ok(sam <= 64, k + ' carries ' + sam + ' SAMs');
+      // the experimental railgun ship (cheat) is overpowered on purpose, but still finite
+      assert.ok(sam <= (SHIPS[k].cheat ? 128 : 64), k + ' carries ' + sam + ' SAMs');
       for (const s of w.sam) assert.ok(s.n >= 4 && s.ch >= 1, k + ' ' + s.type);
    }
    // the air-defence ships still out-range and out-number the others in channels

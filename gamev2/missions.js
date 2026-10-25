@@ -6,13 +6,15 @@
 // missile boats) and 'standard' (Begegnungsgefecht, west against east). The player always sails on
 // side 'player'; which bloc that is follows from the chosen ship (PLAYABLE = west, PLAYABLE_EAST for
 // PvP and tests). Further missions: build a definition with missionHelpers and pass it to addMissions().
-import { SHIPS, PLAYABLE, BOT_POOLS, BOT_SUBS, BOT_CVS } from './config.js';
+import { SHIPS, PLAYABLE, BOT_POOLS, BOT_SUBS, BOT_CVS, CHEAT_SHIPS } from './config.js';
 import { TAU, dist2, obstacleT, obstacleRadiusAt } from './utils.js';
 import { addSite } from './sites.js';
 import { westMissions } from './missions_west.js';
 import { eastMissions } from './missions_east.js';
 import { specialMissionsA } from './missions_special_a.js';
 import { specialMissionsB } from './missions_special_b.js';
+import { specialMissionsC } from './missions_special_c.js';
+import { specialMissionsD } from './missions_special_d.js';
 
 // ---------------------------------------------------------------- names
 function nextName(w, cls, side) {
@@ -164,7 +166,10 @@ function spawnTeam(w, side, bloc, anchor, heading, playerCls, aiFor = () => ({})
    return out;
 }
 // Any class may be sailed where the mission does not prescribe its ships (the menu offers PLAYABLE).
+// The menu's cheat offers CHEAT_SHIPS in every mission, fixed-ship operations included; only a
+// submarine operation (every allowed ship a boat) keeps its boat.
 function pickShip(def, shipKey) {
+   if (CHEAT_SHIPS.includes(shipKey) && !(def.playableShips && def.playableShips.every(k => SHIPS[k]?.hull.type === 'SS'))) return shipKey;
    if (def.playableShips) return def.playableShips.includes(shipKey) ? shipKey : (def.recommendedShip || def.playableShips[0]);
    return SHIPS[shipKey] && SHIPS[shipKey].hull.type !== 'TR' ? shipKey : (def.recommendedShip || PLAYABLE[0]);
 }
@@ -324,6 +329,8 @@ export const missionHelpers = { P, add, objective, setObj, objText, later, radio
 DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
 DEFS.push(...specialMissionsA(missionHelpers));      // special operations, set A
 DEFS.push(...specialMissionsB(missionHelpers));
+DEFS.push(...specialMissionsC(missionHelpers));
+DEFS.push(...specialMissionsD(missionHelpers));
 
 // ---------------------------------------------------------------- public API
 const BY_ID = Object.fromEntries(DEFS.map(d => [d.id, d]));

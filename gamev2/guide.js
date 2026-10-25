@@ -14,12 +14,13 @@ const km = (m) => kmN(m) + ' km';
 const pct = (x) => Math.round(x * 100) + ' %';
 // "18–30 km" over a list of metres
 const span = (list) => { const a = Math.min(...list), b = Math.max(...list); return a === b ? km(a) : kmN(a) + '–' + km(b); };
-const ofKind = (f) => Object.values(MISSILES).filter(f);
+// the experimental railgun ship and its weapons (cheat) stay out of the fleet-wide spans
+const ofKind = (f) => Object.values(MISSILES).filter(m => !m.cheat).filter(f);
 const R_SSM = span(ofKind(m => m.kind === 'ssm' && m.range > 10000).map(m => m.range));
 const R_CRUISE = span(ofKind(m => m.kind === 'cruise').map(m => m.range));
 const R_AREA = span(ofKind(m => m.cls === 'area').map(m => m.range));
 const R_POINT = span(ofKind(m => m.cls === 'point').map(m => m.range));
-const R_CIWS = span(Object.values(CIWS).map(c => c.range));
+const R_CIWS = span(Object.values(CIWS).filter(c => !c.cheat).map(c => c.range));
 const R_SEEKER = span(ofKind(m => m.kind === 'ssm' && m.range > 10000).map(m => m.seeker));
 
 const W = (c) => c?.weapons || {};
@@ -27,7 +28,7 @@ const ssmOf = (c) => W(c).ssm?.length ? MISSILES[W(c).ssm[0].type] : null;
 const cruiseOf = (c) => W(c).cruise ? MISSILES[W(c).cruise.type] : null;
 const cons = (c, k) => !!c?.consumables?.some(x => x.key === k);
 // values over the whole fleet (the sheet of one ship shows that ship's own value where it has one: own())
-const FLEET = Object.values(SHIPS);
+const FLEET = Object.values(SHIPS).filter(c => !c.cheat);
 const over = (get) => FLEET.map(get).filter(v => typeof v === 'number' && v > 0);
 const first = (get) => FLEET.map(get).find(v => v != null);
 const own = (c, get, all) => { const v = c ? get(c) : null; return typeof v === 'number' && v > 0 ? km(v) : all; };
@@ -46,7 +47,7 @@ const SUPERSONIC = ofKind(m => m.kind === 'ssm' && m.supersonic).map(m => m.name
 // names a control or a value of one ship is a function (t, c): t = touch device, c = ship of the sheet
 // (or null) - so a touch player reads no key and a desktop player no button.
 export const GUIDE = [
-   { id: 'gun', name: 'Geschütz', key: '1 · Leertaste / Linksklick', tap: 'Waffenleiste: Feld 1 · Knopf „Feuer“', has: c => c.main?.guns > 0,
+   { id: 'gun', name: 'Geschütz', key: '1 · Leertaste / Linksklick', tap: 'Waffenleiste: Feld 1 · Knopf „Feuer“', has: c => c.main?.guns > 0 && !c.main.rail,
       what: (t, c) => `Schnellfeuerkanone für alles in Sichtweite: Boote, Korvetten, beschädigte Schiffe, Landstellungen an der Küste. Kurze Reichweite (${own(c, gunR, R_GUN)}), wenig Schaden pro Treffer, aber unbegrenzt Munition.`,
       how: 'Wie im Hauptspiel über die Bildmitte zielen und vorhalten.',
       vs: 'Gegen große Schiffe nur die Notlösung, wenn die Flugkörper verschossen sind.' },
@@ -74,6 +75,10 @@ export const GUIDE = [
       what: `Schießen anfliegende Flugkörper, Jets und Hubschrauber ab. Bereichsabwehr (SM-2, Aster 30, S-300F, HQ-9; ${R_AREA}) schützt auch die Nachbarn, Nahbereichsabwehr (ESSM, RAM, CAMM, HQ-10; ${R_POINT}) nur das eigene Schiff und was dicht daneben fährt.`,
       how: 'Die Abwehr arbeitet von allein. Über der Waffenleiste stehen Magazine und Feuerleitkanäle: jeder Kanal bekämpft ein Ziel zur gleichen Zeit, jeder Schuss kostet einen Flugkörper.',
       vs: 'Ist das Magazin leer oder sind alle Kanäle belegt, kommt der Rest durch. Radar aus heißt: nur RAM und ähnliche Wärmesucher schießen noch.' },
+   { id: 'rail', name: 'Railgun', key: '1 · Leertaste / Linksklick', tap: 'Waffenleiste: Feld 1 · Knopf „Feuer“', has: c => !!c.main?.rail,
+      what: (t, c) => `Elektromagnetische Schienenkanone des Erprobungsträgers: Das Geschoss verlässt das Rohr mit vielfacher Schallgeschwindigkeit und fliegt fast gerade, ${km(c?.main?.range || 42000)} weit, in Sekunden statt in Minuten. Ein Treffer reißt eine Fregatte auf und zerlegt Landstellungen. Kein Sprengstoff an Bord – die Wucht des Aufpralls reicht.`,
+      how: 'Wie ein Geschütz zielen. Die flache Bahn verzeiht kaum Fehler in der Höhe, dafür ist das Vorhalten auch auf große Entfernung gering. Zwei Rohre, alle paar Sekunden ein Schuss.',
+      vs: 'Gegen alles, was schwimmt oder an der Küste steht. Den Nahbereich übernehmen Hochenergielaser statt Maschinenkanonen: Lichtgeschwindigkeit, keine Munition.' },
    { id: 'ciws', name: 'Nahbereichsschutz', key: 'schießt selbst', tap: 'schießt selbst', has: c => !!W(c).ciws,
       what: `Phalanx, Goalkeeper, AK-630, Kaschtan, Typ 730: Maschinenkanonen als letzte Schicht auf ${R_CIWS}. Sie brauchen keine Munition aus dem Magazin.`,
       how: 'Nichts zu tun. Jede Kanone bekämpft ein Ziel zur gleichen Zeit.',
@@ -147,7 +152,9 @@ export function slotTip(id, cfg) {
 function slotTipText(id, cfg, t) {
    const s = ssmOf(cfg), c = cruiseOf(cfg), n = (d) => t ? '' : ' (' + d + ')';
    switch (id) {
-      case 'gun': return `Geschütz${n(1)}: gegen alles in Sichtweite, kurze Reichweite, unbegrenzt Munition.\n${t ? 'Knopf „Feuer“' : 'Feuer: Leertaste / Linksklick'}`;
+      case 'gun': if (cfg?.main?.rail) return `Railgun${n(1)}: flache Bahn, ${km(cfg.main.range)} Reichweite, verheerende Treffer gegen Schiffe und Landstellungen.
+${t ? 'Knopf „Feuer“' : 'Feuer: Leertaste / Linksklick'}`;
+         return `Geschütz${n(1)}: gegen alles in Sichtweite, kurze Reichweite, unbegrenzt Munition.\n${t ? 'Knopf „Feuer“' : 'Feuer: Leertaste / Linksklick'}`;
       case 'ssm': return `${s?.name || 'Seezielflugkörper'}${n(2)}: Flugkörper gegen Schiffe jenseits der Geschützreichweite, bis ${km(s?.range || 20000)}.\nZiel erfassen (${t ? 'Knopf „Ziel“' : 'X'}) oder anvisieren und ${t ? 'mit „Start“ ' : ''}feuern; ohne Feuerleitlösung Peilungsschuss in Blickrichtung.\nDie Luftabwehr des Ziels kann ihn abschießen – Salven kommen eher durch.` + (W(cfg).ssm?.length > 1 ? (t ? '\nFeld erneut antippen: Typ wechseln' : '\n2 erneut: Typ wechseln') : '');
       case 'cruise': return `${c?.name || 'Marschflugkörper'}${n(3)}: gegen Landstellungen und Schiffe vor Anker, bis ${km(c?.range || 70000)}. Fahrende Schiffe trifft er nicht.\nÖffnet die Lagekarte: Landstellung oder Punkt ${t ? 'antippen' : 'anklicken'}.`;
       case 'rockets': return `Raketenwerfer${n(4)}: ungelenkte Salve auf kurze Entfernung, bis ${km(W(cfg).rockets?.range || 3200)}. Streut stark.\nSalve auf den Zielpunkt oder einen Punkt der Lagekarte.`;
