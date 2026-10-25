@@ -149,6 +149,8 @@ export class World {
    }
    spawn(cls, side, pos, heading, opts = {}) {
       const d = this.difficulty;
+      // cheat ship (missions.js setupMission): the mission script sets up its stand-in, the player sails this class
+      if (opts.isPlayer && this._playerCls) cls = this._playerCls;
       const bot = !opts.isPlayer;
       const ship = new Ship(this, cls, side, pos, heading, {
          hpMult: bot && side === 'enemy' ? d.botHP : 1,

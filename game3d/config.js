@@ -1102,6 +1102,40 @@ SHIPS.Hiryu.main.turrets = [[70, 1, 2], [65, -1, 2], [60, 1, 2], [-55, -1, 2], [
 SHIPS.Hiryu.main.guns = 12;
 // June 1942: the same plane types as Akagi (the Tenzan / Suisei of the Shōkaku came later)
 SHIPS.Hiryu.air = { ...SHIPS.Akagi.air, tb: { ...SHIPS.Akagi.air.tb, hangar: 9 }, db: { ...SHIPS.Akagi.air.db, hangar: 9 }, ft: { ...SHIPS.Akagi.air.ft, hangar: 7 } };
+
+// ---- experimental (CHEAT_SHIPS): the railgun ship of the modern mode, sailed back into 1942 ----
+// Deliberately absurd: two railguns that outrange every battleship, flat 5-km/s shots, battleship
+// hit points on a destroyer's silhouette, a laser flak curtain, rocket artillery (the secondary
+// battery) and supercavitating rocket torpedoes (the torpedo slot). Model: ships3d_modern.js 'donar'.
+SHIPS.Donar = ship({
+   key: 'Donar', name: 'Donar', className: 'Experimenteller Railgun-Kreuzer', model: 'donar', tier: 10, cheat: true,
+   desc: 'Versuchsschiff aus der Zukunft: zwei elektromagnetische Schienenkanonen mit 30 km Reichweite und flacher Bahn, ' +
+      'Raketenwerfer statt Mittelartillerie, Superkavitations-Raketentorpedos mit 150 Knoten, Laser-Flugabwehr und ein Tarnkappenrumpf. ' +
+      'Völlig übermächtig – nur mit dem Hafen-Cheat.',
+   sisters: ['Donar'],
+   hull: { type: 'CA', L: 192, beam: 25, draft: 8, deckH: 9, nation: 'de', sup: { x: -2, len: 62, w: 18, h: 17 }, funnels: [] },
+   hp: 150000, speedKn: 42, accel: 8, turnR: 560, rudderShift: 4.5,
+   detect: { surface: 6200, fire: 9000, smokeFire: 3000, torp: 900 },
+   armor: { belt: 330, deck: 160, ends: 60, sup: 40, cit: 0, citLen: 0.4, tds: 0.7, citH: 0.35 },
+   main: {
+      caliber: 155, rail: true, turrets: [T(64, 1, false, 165), T(-72, 1, true, 165)],
+      traverse: 30, reload: 6, range: 30000, tMax: 8, fallMax: 10, dispH: 45, vRatio: 0.4, sigma: 2.6,
+      // the dart is a kinetic penetrator: no ricochet, arms on anything
+      ap: { dmg: 26000, pen: 1400, ricochet: [80, 88], fuse: 4 }, he: { dmg: 12000, pen: 450, fire: 0.5 },   // the HE dart still punches battleship belts
+   },
+   sec: { caliber: 127, guns: 16, range: 11000, reload: 3, tMax: 4, dispH: 110, sigma: 1.2, he: { dmg: 2600, pen: 90, fire: 0.18 } },   // rocket artillery
+   aa: { range: 7000, dps: 400 },
+   torp: { launchers: [L(20, 'both', 4), L(-24, 'both', 4)], range: 16000, speedKn: 150, dmg: 24000, flood: 0.4, reload: 30, detect: 900 },
+   consumables: [
+      C('damageControl', { charges: Infinity, dur: 20, cd: 20 }),
+      C('repair', { charges: Infinity, dur: 30, cd: 45, heal: 0.012 }),
+      C('smoke', { charges: Infinity, dur: 20, cd: 60, radius: 450, life: 60 }),
+      C('boost', { charges: Infinity, dur: 60, cd: 60, mult: 1.15 }),
+      C('radar', { charges: Infinity, dur: 60, cd: 40, range: 16000 }),
+      C('hydro', { charges: Infinity, dur: 100, cd: 60, range: 8000, torpRange: 6000 }),
+   ],
+   ai: { prefRange: [14000, 24000], role: 'cl', value: 120 },
+});
 export const isCarrier = (cfgOrKey) => (typeof cfgOrKey === 'string' ? SHIPS[cfgOrKey] : cfgOrKey)?.hull?.type === 'CV';
 // Player-selectable classes, in port order (grouped by nation there). The four original ships
 // stay in front; op-only ships (Washington, Duke of York) are not listed.
@@ -1114,6 +1148,9 @@ export const PLAYABLE = ['Bismarck', 'Hipper', 'Nuernberg', 'Z23', 'Scharnhorst'
    'Kirov', 'Gnevny',
    'U96', 'U505', 'Triton', 'Gato', 'I19', 'S13',
    'GrafZeppelin', 'ArkRoyal', 'Illustrious', 'Enterprise', 'Essex', 'Akagi', 'Shokaku', 'Bearn'];
+// Experimental ships: never in PLAYABLE / bot pools / tech tree / co-op; with the menu's port cheat
+// they sail in every mission (missions.js pickShip accepts them anywhere except submarine operations).
+export const CHEAT_SHIPS = ['Donar'];
 // Submarines for random battles, by bloc (missions.js swaps at most one destroyer slot per side).
 export const BOT_SUBS = { axis: ['U96', 'U505', 'I19'], allies: ['Triton', 'Gato', 'S13'] };
 // Carriers for random battles, by bloc (missions.js swaps at most one light-cruiser slot per side,
