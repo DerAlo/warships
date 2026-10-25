@@ -13,6 +13,7 @@ import { westMissions } from './missions_west.js';
 import { eastMissions } from './missions_east.js';
 import { specialMissionsA } from './missions_special_a.js';
 import { specialMissionsB } from './missions_special_b.js';
+import { specialMissionsC } from './missions_special_c.js';
 import { specialMissionsD } from './missions_special_d.js';
 
 // ---------------------------------------------------------------- names
@@ -165,9 +166,10 @@ function spawnTeam(w, side, bloc, anchor, heading, playerCls, aiFor = () => ({})
    return out;
 }
 // Any class may be sailed where the mission does not prescribe its ships (the menu offers PLAYABLE).
-// The menu's cheat offers CHEAT_SHIPS in every mission, fixed-ship operations included.
+// The menu's cheat offers CHEAT_SHIPS in every mission, fixed-ship operations included; only a
+// submarine operation (every allowed ship a boat) keeps its boat.
 function pickShip(def, shipKey) {
-   if (CHEAT_SHIPS.includes(shipKey)) return shipKey;
+   if (CHEAT_SHIPS.includes(shipKey) && !(def.playableShips && def.playableShips.every(k => SHIPS[k]?.hull.type === 'SS'))) return shipKey;
    if (def.playableShips) return def.playableShips.includes(shipKey) ? shipKey : (def.recommendedShip || def.playableShips[0]);
    return SHIPS[shipKey] && SHIPS[shipKey].hull.type !== 'TR' ? shipKey : (def.recommendedShip || PLAYABLE[0]);
 }
@@ -327,6 +329,7 @@ export const missionHelpers = { P, add, objective, setObj, objText, later, radio
 DEFS.push(...westMissions(missionHelpers), ...eastMissions(missionHelpers));
 DEFS.push(...specialMissionsA(missionHelpers));      // special operations, set A
 DEFS.push(...specialMissionsB(missionHelpers));
+DEFS.push(...specialMissionsC(missionHelpers));
 DEFS.push(...specialMissionsD(missionHelpers));
 
 // ---------------------------------------------------------------- public API

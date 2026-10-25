@@ -803,11 +803,12 @@ function gunnery(b, w, d, dt) {
 }
 function tgtLead(b, tgt, d, dd) {
    const t = flightTime(b.cfg.main, Math.min(dd, b.cfg.main.range));
-   const k = d.lead * t;
-   const e = b.ai.aimErr, bx = (tgt.pos.x - b.pos.x) / (dd || 1), by = (tgt.pos.y - b.pos.y) / (dd || 1);
+   // a railgun's fire control (config.js main.rail) leads fully and its error stops growing past 2.5 km
+   const rail = b.cfg.main.rail, k = (rail ? 1 : d.lead) * t, s = rail && dd > 2500 ? 2500 / dd : 1;
+   const e = b.ai.aimErr, ex = e.r * s, el = e.l * s, bx = (tgt.pos.x - b.pos.x) / (dd || 1), by = (tgt.pos.y - b.pos.y) / (dd || 1);
    return {
-      x: tgt.pos.x + tgt.vel.x * k + bx * e.r * dd - by * e.l * dd,
-      y: tgt.pos.y + tgt.vel.y * k + by * e.r * dd + bx * e.l * dd,
+      x: tgt.pos.x + tgt.vel.x * k + bx * ex * dd - by * el * dd,
+      y: tgt.pos.y + tgt.vel.y * k + by * ex * dd + bx * el * dd,
    };
 }
 

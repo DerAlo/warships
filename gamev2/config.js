@@ -87,6 +87,8 @@ export const MISSILES = {
    tomahawk: { kind: 'cruise', name: 'Tomahawk', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
    kalibrLA: { kind: 'cruise', name: 'Kalibr-NK', speed: 520, range: 70000, dmg: 5200, alt: 60, evade: 1.1 },
    // --- the experimental railgun ship (CHEAT_SHIPS, `cheat`: kept out of the fleet's range ladder and guide spans)
+   // zirkon: only the island ramps of the railgun operation (missions_special_c.js) fire it; no ship carries it
+   zirkon: { kind: 'ssm', name: 'Hyperschall-FK Zirkon', speed: 1450, range: 48000, dmg: 6000, seeker: 7000, cone: 24 * DEG, evade: 0.45, skim: false, alt: 800, supersonic: true, cheat: true },
    blitz: { kind: 'ssm', name: 'Hyperschall-FK Blitz', speed: 1700, range: 60000, dmg: 12000, seeker: 8000, cone: 26 * DEG, evade: 0.3, skim: false, alt: 900, supersonic: true, cheat: true },
    cj10: { kind: 'cruise', name: 'CJ-10', speed: 500, range: 70000, dmg: 5000, alt: 60, evade: 1.1 },
    // --- surface to air, area
@@ -619,7 +621,7 @@ export const SHIPS = {
       hull: { type: 'CG', L: 192, beam: 25, draft: 8, deckH: 9, nation: 'de', sup: { x: -2, len: 62, w: 18, h: 17 }, funnels: [] },
       hp: 42000, speedKn: 34, accel: 12, turnR: 520, rudderShift: 5, stealth: 0.35,
       detect: det(5200), radar: RADAR(36000, 14000), sonar: { hull: 3600, towed: 7000 },
-      main: { caliber: RAIL_CAL, rail: true, turrets: [T(64, 1), T(-72, 1, true)], traverse: 40, reload: 5, range: 42000, tMax: 12, fallMax: 3, dispH: 34, sigma: 2.2, vRatio: 0.4,
+      main: { caliber: RAIL_CAL, rail: true, turrets: [T(64, 1), T(-72, 1, true)], traverse: 40, reload: 5, range: 42000, tMax: 12, fallMax: 28, dispH: 34, sigma: 2.2, vRatio: 0.4,
          he: { dmg: 6500, pen: 90, fire: 0.15 } },
       aa: { range: 3000, dps: 45 },
       weapons: { cells: 160, ssm: [{ type: 'nsm', n: 16 }, { type: 'blitz', n: 8 }], cruise: { type: 'tomahawk', n: 32 },

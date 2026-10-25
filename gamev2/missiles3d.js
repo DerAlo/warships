@@ -649,6 +649,21 @@ export class MissileFX {
       }
       return g;
    }
+   _placeSite(S, r) {
+      // stand on the highest ground under the footprint so nothing is buried in a slope
+      const T = this.terrain;
+      let h = 2;
+      if (T && T.heightAt) {
+         h = Math.max(h, T.heightAt(S.x, S.y));
+         const rr2 = S.r * 0.6;
+         let hi = h;
+         for (let k = 0; k < 4; k++) hi = Math.max(hi, T.heightAt(S.x + Math.cos(k * TAU / 4) * rr2, S.y + Math.sin(k * TAU / 4) * rr2));
+         h = Math.min(hi, h + 14) + 0.6;
+      }
+      r.group.position.set(S.x, h, S.y);
+      r.group.rotation.y = -(S.heading || 0);
+      r.x = S.x; r.y = S.y;
+   }
    _sites(world, dt, time, cam) {
       const sites = world.sites;
       if (!sites || !sites.length) return;
@@ -669,22 +684,12 @@ export class MissileFX {
                dish.userData.speed = g.dish.speed;
                group.add(dish);
             }
-            // stand on the highest ground under the footprint so nothing is buried in a slope
-            const T = this.terrain;
-            let h = 2;
-            if (T && T.heightAt) {
-               h = Math.max(h, T.heightAt(S.x, S.y));
-               const rr2 = S.r * 0.6;
-               let hi = h;
-               for (let k = 0; k < 4; k++) hi = Math.max(hi, T.heightAt(S.x + Math.cos(k * TAU / 4) * rr2, S.y + Math.sin(k * TAU / 4) * rr2));
-               h = Math.min(hi, h + 14) + 0.6;
-            }
-            group.position.set(S.x, h, S.y);
-            group.rotation.y = -(S.heading || 0);
             this.scene.add(group);
-            r = { group, mesh, dish, dead: false, acc: Math.random() };
+            r = { group, mesh, dish, dead: false, acc: Math.random(), x: NaN, y: NaN };
             this.sites.set(S, r);
          }
+         // placed on creation and again when a mission moves the position (mobile ramps, missions_special_c.js)
+         if (r.x !== S.x || r.y !== S.y) this._placeSite(S, r);
          const frac = S.alive ? S.hp / (S.maxHp || 1) : 0;
          if (!S.alive && !r.dead) {
             r.dead = true;
