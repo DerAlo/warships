@@ -67,11 +67,29 @@ test('a cruise missile flies over the island and destroys a site (command K)', (
    assert.strictEqual(launchCruise(w, w.player, { x: MISSILES.tomahawk.range + 5000, y: 0 }), null);
 });
 
+// The guns' fire control lays the arc onto the ground at the aim point: an airfield up on a 340 m
+// island is a gun target (the shells used to bury themselves in the slope short of it).
+test('guns destroy an inland airfield on a high island and a coastal battery', () => {
+   for (const [kind, ship, R, h, inland, secs] of [['airfield', 'Burke', 8000, 340, true, 200], ['battery', 'Sachsen', 6500, 200, false, 150]]) {
+      const w = emptySea({ ship, seed: 5 });
+      island(w, inland ? R + 400 : R + 2400, 0, 2500, h);
+      const s = addSite(w, kind, 'enemy', { x: R, y: 0 }, { inland, ssm: kind === 'battery' ? { type: 'noor', n: 0 } : undefined });
+      const p = w.player;
+      run(w, secs, () => { if (s.alive) p.fireMain(w, { x: s.x, y: s.y }); });
+      const hits = ev(w, 'siteHit').filter(e => e.by === 'shell').length;
+      assert.ok(!s.alive, `${ship} vs ${kind}: ${hits} hits, ${s.hp} hp left`);
+   }
+});
+
 test('shells, bombs and rockets that come down on a site damage it', () => {
    const w = emptySea({ ship: 'Boghammar', seed: 5 });
    const s = addSite(w, 'launcher', 'enemy', { x: 1800, y: 0 });
    assert.strictEqual(impactOnSites(w, { x: s.x + 20, y: s.y - 10 }, 'player', 400, w.player, 'shell'), s);
-   assert.strictEqual(impactOnSites(w, { x: s.x + s.r + 30, y: s.y }, 'player', 400, w.player, 'shell'), null, 'a miss');
+   let hp0 = s.hp;
+   assert.strictEqual(impactOnSites(w, { x: s.x + s.r + 30, y: s.y }, 'player', 400, w.player, 'shell'), s, 'a near miss');
+   assert.strictEqual(hp0 - s.hp, 160, 'a near miss tells 40 %');
+   assert.strictEqual(impactOnSites(w, { x: s.x + 2 * s.r + 30, y: s.y }, 'player', 400, w.player, 'shell'), null, 'a miss');
+   assert.strictEqual(impactOnSites(w, { x: s.x + s.r + 30, y: s.y }, 'player', 400, w.player, 'bomb'), null, 'bombs: no outer ring');
    assert.strictEqual(impactOnSites(w, s.pos, 'enemy', 400, null, 'shell'), null, 'own side');
    const hp = s.hp;
    assert.strictEqual(fireRockets(w, w.player, { x: s.x, y: s.y }), 12);

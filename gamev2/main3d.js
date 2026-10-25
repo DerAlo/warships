@@ -851,10 +851,51 @@ function updateAimPoint() {
    if (!cam3.freeLook) {
       const hit = rayHitShip(ax, ay);
       if (hit) { aim.point = { x: hit.x, y: hit.y }; aim.snapped = hit.id; }
+      else if (world.sites?.length) {
+         // land targets: the crosshair on land means the ground it covers (not the sea level far behind),
+         // and close to a known position it means that position
+         const land = rayHitLand(ax, ay);
+         if (land) aim.point = land;
+      }
    }
    const d = Math.hypot(aim.point.x - p.pos.x, aim.point.y - p.pos.y);
    aim.out = d > aim.gunRange;
    aim.flight = flightTime(Math.min(d, aim.gunRange));
+}
+
+// Ray from the camera through the sea aim point vs. the terrain: the first ground it meets, snapped to
+// a known live enemy site (sites.js) near it. Only runs in missions with land targets.
+const _land = { x: 0, y: 0 };
+function rayHitLand(ax, ay) {
+   const pose = renderer.cam?.pose, T = renderer.terrain;
+   if (!pose || !T?.heightAt) return null;
+   const ox = pose.pos.x, oy = pose.pos.y, oz = pose.pos.z;
+   const dx = ax - ox, dz = ay - oz;
+   const L = Math.hypot(dx, dz);
+   if (L < 50) return null;
+   // march in ~40 m steps outward, then bisect the crossing
+   const n = Math.min(500, Math.ceil(L / 40));
+   let prev = 0, hitT = -1;
+   for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const h = T.heightAt(ox + dx * t, oz + dz * t);
+      if (h > 0.5 && oy * (1 - t) <= h) { hitT = t; break; }
+      prev = t;
+   }
+   if (hitT < 0) return null;
+   let lo = prev, hi = hitT;
+   for (let k = 0; k < 8; k++) {
+      const m = (lo + hi) / 2;
+      if (oy * (1 - m) <= T.heightAt(ox + dx * m, oz + dz * m)) hi = m; else lo = m;
+   }
+   _land.x = ox + dx * hi; _land.y = oz + dz * hi;
+   let best = null, bd = Infinity;
+   for (const S of world.sites) {
+      if (!S.alive || !S.detected || S.side === P.side) continue;
+      const d = Math.hypot(S.x - _land.x, S.y - _land.y), lim = Math.max(140, S.r * 2);
+      if (d < lim && d < bd) { bd = d; best = S; }
+   }
+   return best ? { x: best.x, y: best.y } : { x: _land.x, y: _land.y };
 }
 
 // Ray from the camera through the sea aim point vs. oriented boxes of spotted enemies.

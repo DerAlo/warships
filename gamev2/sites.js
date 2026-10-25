@@ -71,7 +71,7 @@ export function addSite(world, kind, side, pos, opts = {}) {
       cfg: { name: opts.name || K.name, radar, stealth: 1, weapons, air: wing, hull: { L: 2 * (opts.r ?? K.r), type: 'SITE' } },
       mag, samDoctrine: opts.samDoctrine || 'free', samPriority: null, ssmSel: 0, lastSsmFire: -999, dmgMult: side === 'enemy' ? world.difficulty?.botDmg || 1 : 1,
       salvo: opts.salvo ?? K.salvo ?? 0, interval: opts.interval ?? K.interval ?? 0, nextT: opts.delay ?? 8, salvoLeft: 0, salvoTgt: null,
-      air: null, stats: null, kills: 0, hits: 0, dmgDealt: 0,
+      air: null, stats: null, kills: 0, hits: 0, dmgDealt: 0, ring: opts.ring ?? true,
    };
    if (wing) {
       s.air = { deckT: 0, sel: 'tb', strikeT: 4 };
@@ -102,15 +102,18 @@ export function damageSite(world, site, amount, shooter, by = 'shell') {
 
 // A shell (or bomb) came down at p: the first opposing site whose radius covers the point takes
 // `dmg`. Returns the site or null.
+// Shells also tell in a ring out to twice the radius (40 %): splinters and blast on an area target
+// (not for a site made with ring: false, e.g. a platform that only a real hit may touch).
 export function impactOnSites(world, p, side, dmg, shooter, by) {
+   let best = null, bd = Infinity;
    for (const s of world.sites) {
       if (!s.alive || s.side === side) continue;
-      const dx = s.x - p.x, dy = s.y - p.y;
-      if (dx * dx + dy * dy > s.r * s.r) continue;
-      damageSite(world, s, dmg, shooter, by);
-      return s;
+      const d2 = (s.x - p.x) ** 2 + (s.y - p.y) ** 2, R = by === 'shell' && s.ring ? 2 * s.r : s.r;
+      if (d2 <= R * R && d2 < bd) { bd = d2; best = s; }
    }
-   return null;
+   if (!best) return null;
+   damageSite(world, best, bd <= best.r * best.r ? dmg : dmg * 0.4, shooter, by);
+   return best;
 }
 
 // The ship of the other side a battery / airfield goes for: fire-control track, in range, nearest.

@@ -367,7 +367,7 @@ export function specialMissionsA(H) {
             islands(w, [{ c: P(-1700, 4700), r: 520, height: 26, seed: 163, lobes: 4, elong: 1.5, rot: 0.4, rough: 0.5, name: 'Doggerriff' }]);
             const p = add(w, shipKey, 'player', P(-9300, -700), 0, { isPlayer: true });
             S.allyId = add(w, 'Braunschweig', 'player', P(-10400, 900), 0, { name: 'Oldenburg', dmgMult: 0.6, ai: { escortId: p.id } }).id;
-            const plat = addSite(w, 'bunker', 'enemy', P(RIG.x, RIG.y), { inland: true, hidden: true, radar: null, hp: 60000, r: RIG.r, heading: 0.5, name: 'Dogger Alpha' });
+            const plat = addSite(w, 'bunker', 'enemy', P(RIG.x, RIG.y), { inland: true, hidden: true, ring: false, radar: null, hp: 60000, r: RIG.r, heading: 0.5, name: 'Dogger Alpha' });
             plat.model = 'platform';                  // missiles3d.js draws the platform instead of a bunker
             S.platId = plat.id;
             S.postId = addSite(w, 'battery', 'enemy', P(-2200, 4400), { name: 'Flugkörperstarter Doggerriff', hp: 2400, ssm: { type: 'kowsar', n: T.post }, salvo: T.salvo, interval: T.every, delay: 20 }).id;

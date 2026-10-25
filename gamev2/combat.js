@@ -73,12 +73,15 @@ export function makeShell(world, shooter, muzzle, aim, gun, kind, ammo) {
    const shot = ammo === 'AP' ? (gun.ap || gun.he) : (gun.he || gun.ap);
    const isAP = shot === gun.ap;
    const h0 = (shooter.cfg.hull.deckH || 10) + 3;
+   // fire control allows for the height of a target on land: the arc ends on the ground there, not at
+   // sea level inside the hill (shells at a position inland used to bury themselves in the slope short of it)
+   const hT = groundHeightAt(world, ix, iy);
    const dmgMult = shooter.dmgMult || 1;
    return {
       id: world._nextId++,
       pos: { x: muzzle.x, y: muzzle.y }, alt: h0,
       start: { x: muzzle.x, y: muzzle.y }, target: { x: ix, y: iy }, aimPoint: { x: aim.x, y: aim.y },
-      dirX, dirY, range: R, dur, H: apexHeight(gun, R), h0, fall: fallAngle(gun, R), u: 0,
+      dirX, dirY, range: R, dur, H: apexHeight(gun, R), h0, hT, fall: fallAngle(gun, R), u: 0,
       side: shooter.side, ownerId: shooter.id, shooter,
       caliber: gun.caliber, ammo: isAP ? 'AP' : 'HE', kind,
       dmg: shot.dmg * dmgMult, hePen: isAP ? 0 : shot.pen, fire: isAP ? 0 : (shot.fire || 0),
@@ -87,6 +90,14 @@ export function makeShell(world, shooter, muzzle, aim, gun, kind, ammo) {
       owner: shooter.side, gun, arc: 0, arcDur: dur,
       vel: { x: dirX * gun.vShell, y: dirY * gun.vShell }, dir: Math.atan2(dirY, dirX),
    };
+}
+
+// Ground height at a point (0 at sea); a hair below the surface so the last sample counts as a hit.
+function groundHeightAt(world, x, y) {
+   let h = 0;
+   const p = { x, y };
+   for (const o of world.obstacles) if (o.kind === 'island') h = Math.max(h, islandHeightAt(o, p));
+   return h > 1 ? h - 0.5 : 0;
 }
 
 const _near = [];   // reused: callers iterate it before the next call
@@ -155,7 +166,7 @@ export function resolveShells(world, dt) {
       s.arc = Math.min(1, s.age / s.dur);
       s.pos.x = s.start.x + s.dirX * x;
       s.pos.y = s.start.y + s.dirY * x;
-      s.alt = arcAlt(s.H, s.h0, u);
+      s.alt = arcAlt(s.H, s.h0, u) + (s.hT || 0) * u;
       // only the low part of the flight can hit anything (ships ~<45 m, islands by height)
       if (Math.min(pa, s.alt) < world._maxTerrainH + 5) {
          const segLen = Math.sqrt((s.pos.x - px) ** 2 + (s.pos.y - py) ** 2);
@@ -170,7 +181,7 @@ export function resolveShells(world, dt) {
             const f = k / n;
             const p = _sp[k & 1];
             p.x = px + (s.pos.x - px) * f; p.y = py + (s.pos.y - py) * f;
-            const a = arcAlt(s.H, s.h0, pu + (u - pu) * f);
+            const uf = pu + (u - pu) * f, a = arcAlt(s.H, s.h0, uf) + (s.hT || 0) * uf;
             if (cand) {
                let near = null;
                for (const ship of cand) {
