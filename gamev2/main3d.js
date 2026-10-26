@@ -861,8 +861,8 @@ function updateAimPoint() {
       const hit = rayHitShip(ax, ay, cam3.aimH);
       if (hit) { aim.point = { x: hit.x, y: hit.y }; aim.snapped = hit.id; }
       else if (T) {
-         // close to a known enemy position the crosshair means that position
-         const S = siteNear(ax, ay);
+         // a position the crosshair covers, else close to a known enemy position the crosshair means that position
+         const S = rayHitSite(ax, ay, cam3.aimH) || siteNear(ax, ay);
          if (S) aim.point = { x: S.x, y: S.y };
       }
    }
@@ -871,8 +871,40 @@ function updateAimPoint() {
    aim.flight = flightTime(Math.min(d, aim.gunRange));
 }
 
-// A live, known enemy site (sites.js) near a point on the ground, or null.
 let _aimHT = 0;
+
+// Ray from the camera through the aim point vs. the models of enemy land positions (a cylinder from the
+// ground up): on a slope seen from the sea the ground under the crosshair lies far behind a position that
+// the crosshair covers, so the shells went long although the sight sat right on it.
+function rayHitSite(ax, ay, ah) {
+   const pose = renderer.cam?.pose, T = renderer.terrain;
+   if (!pose || !world?.sites?.length) return null;
+   const ox = pose.pos.x, oy = pose.pos.y, oz = pose.pos.z;
+   let dx = ax - ox, dy = ah - oy, dz = ay - oz;
+   const tA = Math.hypot(dx, dy, dz);
+   if (tA < 1) return null;
+   dx /= tA; dy /= tA; dz /= tA;
+   const hz = Math.hypot(dx, dz);
+   if (hz < 1e-6) return null;
+   let best = null, bestT = tA * 1.001;
+   for (const S of world.sites) {
+      if (!S.alive || S.side === P.side) continue;
+      // the model stands on the highest ground of its footprint (up to 14 m above the centre)
+      const base = (T?.heightAt ? Math.max(0, T.heightAt(S.x, S.y) || 0) : 0) - 4, top = base + 18 + Math.max(18, S.r * 0.4);
+      // the ray in the ground plane vs. the footprint circle
+      const ex = ox - S.x, ez = oz - S.y, R = S.r * 0.85;
+      const b = ex * dx + ez * dz, c = ex * ex + ez * ez - R * R, a = hz * hz, disc = b * b - a * c;
+      if (disc < 0) continue;
+      const q = Math.sqrt(disc), t1 = Math.max(0, (-b - q) / a), t2 = Math.min(bestT, (-b + q) / a);
+      if (t1 > t2) continue;
+      const y1 = oy + dy * t1, y2 = oy + dy * t2;
+      if (Math.min(y1, y2) > top || Math.max(y1, y2) < base) continue;
+      bestT = t1; best = S;
+   }
+   return best;
+}
+
+// A live, known enemy site (sites.js) near a point on the ground, or null.
 function siteNear(x, y) {
    let best = null, bd = Infinity;
    for (const S of world.sites) {

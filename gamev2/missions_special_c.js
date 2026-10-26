@@ -14,7 +14,7 @@ import { obstacleRadiusAt } from './utils.js';
 export const RAIL_TUNE = {
    railgun: {
       // gap: s between two waves of the ramps · per: missiles per living ramp and wave (+1 from wave `more`) ·
-      // rampHp: hit points of a ramp (a railgun hit does about 2200) · dwell: s a located ramp stays before it
+      // rampHp: hit points of a ramp (a railgun hit does about 4400) · dwell: s a located ramp stays before it
       // drives to its next firing position and is hidden again · tfAt: s until the task force sorties ·
       // fac: fast attack craft · facAt: s until they come · batN: missiles per coastal battery
       easy: { gap: 65, per: 1, more: 5, rampHp: 7000, dwell: 35, tfAt: 200, fac: 2, facAt: 320, batN: 6 },

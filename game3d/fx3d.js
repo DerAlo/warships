@@ -1426,6 +1426,7 @@ export class FX {
             st.cal = this._shellCal(s);
             st.ammo = s.ammo || s.type || s.shooter?.ammo || 'HE';
             st.rail = !!s.gun?.rail;   // railgun dart (cheat ship Donar): cyan plasma streak
+            st.rocket = !!s.gun?.rocket; st.smokeT = 0;   // Donar rocket artillery: flame + smoke trail
             this.shellState.set(s, st);
          } else if (dt > 0) {
             const ivx = (s.pos.x - st.x) / dt, ivy = (h - st.y) / dt, ivz = (s.pos.y - st.z) / dt;
@@ -1444,6 +1445,18 @@ export class FX {
          const ci = 0.55 + 0.45 * ck;
          let cr = (ap ? 1.5 : 6.5) * ci, cg = (ap ? 2.6 : 2.1) * ci, cb = (ap ? 6 : 0.35) * ci;
          if (st.rail) { cr = 3.4; cg = 6.5; cb = 9.5; }
+         else if (st.rocket) { cr = 7.5; cg = 4.2; cb = 1.2; }
+         // rocket: a puff of exhaust every 0.08 s that hangs in the air (only with full effects)
+         if (st.rocket && trail && dt > 0 && st.n > 1 && (st.smokeT -= dt) <= 0) {
+            st.smokeT = 0.08;
+            const p = this.puff.t();
+            p.x = st.x - st.vx * 0.02; p.y = st.y - st.vy * 0.02; p.z = st.z - st.vz * 0.02;
+            p.vx = rr(-1.5, 1.5); p.vy = rr(0, 1.5); p.vz = rr(-1.5, 1.5); p.drag = 0.6;
+            p.life = rr(2.2, 3.2); p.s0 = 4; p.s1 = rr(16, 22); p.grow = 1.5;
+            p.r = 0.8; p.g = 0.78; p.b = 0.75; p.r1 = 0.62; p.g1 = 0.62; p.b1 = 0.62;
+            p.a = 0.55; p.fin = 0.02; p.fout = 0.7; p.shape = 1; p.lit = 0.8; p.wind = 0.6; p.rot = rr(0, TAU); p.spin = rr(-0.3, 0.3);
+            this.puff.emit();
+         }
          const fade = clamp(dist / 120, 0.25, 1);   // don't blind a close camera
          if (spd > 1) {
             // long streaks from "high" up; below that the old length (less additive fill)
