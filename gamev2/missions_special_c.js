@@ -7,14 +7,14 @@
 // Convention of the mission files: merchant ships are protected, never targets (there are none here).
 // Balance: RAIL_TUNE holds the knobs per difficulty (tests/v2.missions.railgun.test.mjs measures them with the
 // bot captain of tests/v2.missions.railgun.captain.mjs).
-import { addSite, SITE_KINDS } from './sites.js';
+import { addSite } from './sites.js';
 import { launchSSM } from './missile.js';
 import { obstacleRadiusAt } from './utils.js';
 
 export const RAIL_TUNE = {
    railgun: {
       // gap: s between two waves of the ramps · per: missiles per living ramp and wave (+1 from wave `more`) ·
-      // rampHp: hit points of a ramp (x ARMOUR; a railgun hit does about 4400) · dwell: s a located ramp stays before it
+      // rampHp: hit points of a ramp (a railgun hit does about 2200) · dwell: s a located ramp stays before it
       // drives to its next firing position and is hidden again · tfAt: s until the task force sorties ·
       // fac: fast attack craft · facAt: s until they come · batN: missiles per coastal battery
       easy: { gap: 65, per: 1, more: 5, rampHp: 7000, dwell: 35, tfAt: 200, fac: 2, facAt: 320, batN: 6 },
@@ -22,9 +22,6 @@ export const RAIL_TUNE = {
       hard: { gap: 46, per: 1, more: 2, rampHp: 9000, dwell: 27, tfAt: 120, fac: 5, facAt: 220, batN: 10 },
    },
 };
-// The Donar's railgun hits twice as hard as it used to (one shell ~4400 on a site): the fortress and the task
-// force carry twice the hit points so the operation keeps its length and its odds.
-const ARMOUR = 2;
 const tune = (w, id) => RAIL_TUNE[id][w.difficultyKey] || RAIL_TUNE[id].normal;
 
 export function specialMissionsC(H) {
@@ -53,7 +50,7 @@ export function specialMissionsC(H) {
             const p = add(w, shipKey, 'player', P(-21000, 2500), 0, { isPlayer: true, telegraph: 2 });
             S.pid = p.id;
             S.ally = add(w, 'Sachsen', 'player', P(-22800, 4300), 0, { name: 'Hessen', ai: { escortId: p.id } }).id;
-            const site = (kind, x, y, opts) => addSite(w, kind, 'enemy', P(x, y), { ...opts, hp: (opts.hp ?? SITE_KINDS[kind].hp) * ARMOUR });
+            const site = (kind, x, y, opts) => addSite(w, kind, 'enemy', P(x, y), opts);
             S.fort = [
                site('battery', 11000, -3600, { name: 'Küstenbatterie Nord', ssm: { type: 'vulkan', n: T.batN }, salvo: 2, interval: 26 }),
                site('battery', 11000, 3600, { name: 'Küstenbatterie Süd', ssm: { type: 'vulkan', n: T.batN }, salvo: 2, interval: 26 }),
@@ -101,9 +98,9 @@ export function specialMissionsC(H) {
             if (w.phase !== 'playing') return;
             const hunt = { huntId: S.pid, press: true };
             S.tf = [
-               add(w, 'Typ052D', 'enemy', P(1500, -19500), 2.3, { name: 'Zerstörer Sturmvogel', hpMult: ARMOUR, ai: hunt }),
-               add(w, 'Typ054A', 'enemy', P(3500, -18000), 2.3, { name: 'Fregatte Brandung', hpMult: ARMOUR, ai: hunt }),
-               add(w, 'Typ054A', 'enemy', P(-500, -21000), 2.3, { name: 'Fregatte Gischt', hpMult: ARMOUR, ai: hunt }),
+               add(w, 'Typ052D', 'enemy', P(1500, -19500), 2.3, { name: 'Zerstörer Sturmvogel', ai: hunt }),
+               add(w, 'Typ054A', 'enemy', P(3500, -18000), 2.3, { name: 'Fregatte Brandung', ai: hunt }),
+               add(w, 'Typ054A', 'enemy', P(-500, -21000), 2.3, { name: 'Fregatte Gischt', ai: hunt }),
             ].map(s => s.id);
             radio(w, 'Operationszentrale', 'Ein Zerstörer und zwei Fregatten lösen sich aus dem Schatten der Nordklippe und nehmen Kurs auf Sie. Ihre Seezielflugkörper reichen 26 Kilometer.', 'warn');
          },
