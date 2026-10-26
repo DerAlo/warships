@@ -1121,7 +1121,7 @@ SHIPS.Donar = ship({
       caliber: 155, rail: true, turrets: [T(64, 1, false, 165), T(-72, 1, true, 165)],
       traverse: 30, reload: 6, range: 30000, tMax: 8, fallMax: 10, dispH: 45, vRatio: 0.4, sigma: 2.6,
       // the dart is a kinetic penetrator: no ricochet, arms on anything
-      ap: { dmg: 26000, pen: 1400, ricochet: [80, 88], fuse: 4 }, he: { dmg: 12000, pen: 450, fire: 0.5 },   // the HE dart still punches battleship belts
+      ap: { dmg: 52000, pen: 1400, ricochet: [80, 88], fuse: 4 }, he: { dmg: 24000, pen: 450, fire: 0.5 },   // the HE dart still punches battleship belts
    },
    sec: { caliber: 127, guns: 16, range: 11000, reload: 3, tMax: 4, dispH: 110, sigma: 1.2, he: { dmg: 2600, pen: 90, fire: 0.18 } },   // rocket artillery
    aa: { range: 7000, dps: 400 },

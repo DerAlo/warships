@@ -622,7 +622,7 @@ export const SHIPS = {
       hp: 42000, speedKn: 34, accel: 12, turnR: 520, rudderShift: 5, stealth: 0.35,
       detect: det(5200), radar: RADAR(36000, 14000), sonar: { hull: 3600, towed: 7000 },
       main: { caliber: RAIL_CAL, rail: true, turrets: [T(64, 1), T(-72, 1, true)], traverse: 40, reload: 5, range: 42000, tMax: 12, fallMax: 28, dispH: 34, sigma: 2.2, vRatio: 0.4,
-         he: { dmg: 6500, pen: 90, fire: 0.15 } },
+         he: { dmg: 13000, pen: 90, fire: 0.15 } },
       aa: { range: 3000, dps: 45 },
       weapons: { cells: 160, ssm: [{ type: 'nsm', n: 16 }, { type: 'blitz', n: 8 }], cruise: { type: 'tomahawk', n: 32 },
          sam: [{ type: 'aster30', n: 48, ch: 6 }, { type: 'essm', n: 32, ch: 4 }, { type: 'ram', n: 21, ch: 2 }], ciws: { type: 'laser', n: 3 }, asw: ASW({ n: 10 }) },
