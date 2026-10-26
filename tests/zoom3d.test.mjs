@@ -132,3 +132,18 @@ test('reset returns to the default view', () => {
    assert.equal(z.bino, false); assert.equal(z.tp, tp0); assert.equal(z.dist, d0); assert.equal(z.zoom, 4); assert.equal(z.acc, 0);
    assert.equal(MAGS.length, 4);
 });
+
+test('long-range sight (scopeMax 32): one more rung to 32x, a new match drops it again', () => {
+   const z = new ZoomLadder(L);
+   z.reset(192, 32);
+   assert.equal(z.len, TP_STEPS + 1 + MAGS.length + 1);
+   for (let i = 0; i < 20; i++) z.wheel(IN);
+   assert.equal(z.zoom, 32);
+   assert.equal(z.level, z.len - 1);
+   z.wheel(OUT);
+   assert.equal(z.zoom, 16);
+   z.reset(L);
+   for (let i = 0; i < 20; i++) z.wheel(IN);
+   assert.equal(z.zoom, 16);
+   assert.equal(z.len, TP_STEPS + 1 + MAGS.length);
+});

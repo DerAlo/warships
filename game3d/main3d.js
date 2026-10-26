@@ -21,7 +21,7 @@ import * as ai from './ai.js';
 import * as combat from './combat.js';
 import { getMission } from './missions.js';
 import { Menu3D } from './menu3d.js';
-import { ZoomLadder, TP_STEPS, LADDER_LEN } from './zoom3d.js';
+import { ZoomLadder, TP_STEPS } from './zoom3d.js';
 import { ShellCam } from './shellcam.js';
 import { solveLead, solveIntercept, leadState, edgeClamp, pickTarget } from './lead3d.js';
 import { SubUi } from './subui.js';
@@ -524,7 +524,7 @@ function beginMatch() {
    cam3.rangeMax = Math.min(aim.gunRange * 1.12, Math.max(20000, aim.gunRange * 1.02));
    const R0 = clamp(aim.gunRange * 0.6, cam3.rangeMin, cam3.rangeMax);
    view.yaw = P.heading; view.logR = Math.log(R0);
-   cam3.yaw = view.yaw; cam3.range = R0; zoom.reset(L); cam3.dist = zoom.dist; cam3.bino = false; cam3.zoom = zoom.zoom;
+   cam3.yaw = view.yaw; cam3.range = R0; zoom.reset(L, P.cfg.main?.scopeMax); cam3.dist = zoom.dist; cam3.bino = false; cam3.zoom = zoom.zoom;
    // the last match may have ended in the scope: snap the lens back instead of blending out
    if (renderer.cam) { renderer.cam.scopeT = 0; renderer.cam._zoomS = 1; renderer.cam._zoomV = 0; }
    cam3.freeLook = false; cam3.spectate = false;
@@ -1414,7 +1414,7 @@ function buildUi(dt) {
    ui.scopeT = renderer.cam?.scopeT || 0;
    ui.bino = cam3.bino; ui.zoom = cam3.zoom; ui.freeLook = cam3.freeLook;
    // brief ladder cue after a zoom change (hud3d fades it out)
-   ui.zoomLevel = zoom.level; ui.zoomLadder = LADDER_LEN; ui.zoomTP = TP_STEPS;
+   ui.zoomLevel = zoom.level; ui.zoomLadder = zoom.len; ui.zoomTP = TP_STEPS;
    ui.zoomCueA = clamp01(1.6 - zoom.sinceChange * 1.25);
    if (!p) return ui;
 

@@ -9,6 +9,7 @@
 // The aim (bearing + range) is not touched here at all: zooming never moves the gun solution.
 
 export const MAGS = [2, 4, 8, 16];
+const MAGS_XL = [...MAGS, 32];         // ships with a long-range sight (cfg.main.scopeMax 32: the Donar)
 export const TP_STEPS = 5;               // 6 third-person distances
 export const LADDER_LEN = TP_STEPS + 1 + MAGS.length;
 const DETENT = 0.6;                      // notches to cross a discrete step (a wheel click = 1)
@@ -26,7 +27,9 @@ export class ZoomLadder {
    constructor(L = 200) { this.reset(L); }
 
    // New match: default third-person distance (the ladder step nearest two hull lengths), no scope.
-   reset(L = 200) {
+   // maxMag: the strongest scope power of the ship (16, or 32 for a long-range sight).
+   reset(L = 200, maxMag = 16) {
+      this.mags = maxMag >= 32 ? MAGS_XL : MAGS;
       const r = distRange(L);
       this.dMin = r.min; this.dMax = r.max;
       this.tp = Math.round(clamp(this._levelOf(Math.max(150, L * 2)), 0, TP_STEPS));
@@ -42,7 +45,8 @@ export class ZoomLadder {
    distAt(level) { return this.dMax * Math.pow(this.dMin / this.dMax, level / TP_STEPS); }
    _levelOf(d) { return Math.log(this.dMax / d) / Math.log(this.dMax / this.dMin) * TP_STEPS; }
    get distTarget() { return this.distAt(this.tp); }
-   get zoom() { return MAGS[this.magIdx]; }
+   get zoom() { return this.mags[this.magIdx]; }
+   get len() { return TP_STEPS + 1 + this.mags.length; }
    // Unified ladder position: 0..TP_STEPS third person, TP_STEPS+1.. scope (2x, 4x, 8x, 16x).
    get level() { return this.bino ? TP_STEPS + 1 + this.magIdx : this.tp; }
 
@@ -71,7 +75,7 @@ export class ZoomLadder {
          if (!this.bino) {                 // (acc < 0 cannot occur in third person)
             this.bino = true; this.magIdx = 0;
          } else if (dir > 0) {
-            if (this.magIdx >= MAGS.length - 1) { this.acc = 0; break; }
+            if (this.magIdx >= this.mags.length - 1) { this.acc = 0; break; }
             this.magIdx++;
          } else if (this.magIdx > 0) this.magIdx--;
          else {                            // out of the scope: back to the closest view, then glide
